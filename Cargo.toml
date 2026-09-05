@@ -6,6 +6,9 @@ rust-version = "1.98.1"
 description = "Local Codex agent orchestration"
 publish = false
 
+[lints.rust]
+unsafe_code = "forbid"
+
 [lib]
 path = "src/lib.rs"
 

@@ -61,8 +61,8 @@ Measured on 2026-09-05 at commit `b9fb561` plus this documentation task:
 | Module graph | eleven flat, public top-level library modules; the observed top-level dependency graph is acyclic |
 | Boundary leaks | coordinator imports RPC envelopes/handler; CLI imports a Codex adapter DTO merely to discover the shared endpoint |
 | Public surface | 78 top-level `pub` declarations, in addition to public methods; much is package-internal rather than an intentional library API |
-| Test shape | 44 passing tests, all inside library modules; the real daemon/App Server proof is currently a manual process smoke test |
-| Automation | GitHub Actions builds the static docs, but there is no committed Rust CI workflow |
+| Test shape | 44 library tests plus one Unix process integration test that drives the built daemon and CLI against a fake App Server |
+| Automation | GitHub Actions runs pinned format, Clippy, all-target tests, unused-dependency, and Flake checks; the static docs retain their separate workflow |
 | Dependencies | 18 normal direct dependencies, one dev dependency, and 172 package entries in `Cargo.lock` |
 | Dependency use | `cargo machete 0.9.2` reports no unused dependency |
 | Duplicate versions | `cargo tree --duplicates` reports two digest stacks through SHA-1/WebSocket and SHA-2, two `syn` majors, and two `getrandom` lines; these require review, not a blanket failure rule |
@@ -205,6 +205,10 @@ for convenience.
 ## Refactor sequence
 
 ### Phase 0 — safety net and repeatable gates
+
+Completed on 2026-09-05. The process test uses the built `cocod` and `coco`
+binaries with isolated temporary state and a fake authenticated App Server; it
+does not invoke a model.
 
 1. Add a Rust GitHub Actions workflow for format, Clippy, and all tests using
    the pinned toolchain.

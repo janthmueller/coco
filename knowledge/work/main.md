@@ -68,7 +68,7 @@ architectural baseline for CoCo.
   and missing CI coverage.
 - [x] Record the staged target and tool policy in
   `knowledge/engineering/rust-architecture.md` and route future agents to it.
-- [ ] Implement Phase 0 of the Rust architecture plan as a behavior-preserving
+- [x] Implement Phase 0 of the Rust architecture plan as a behavior-preserving
   safety-net commit before moving modules.
 - [ ] Implement the typed daemon seam and remove coordinator-to-RPC and
   CLI-to-Codex dependency leaks.
@@ -77,6 +77,19 @@ architectural baseline for CoCo.
   feature. Decide typed versus free-form values, mutation/audit semantics,
   privacy and display rules, fork/handoff inheritance, and explicit projection
   into Codex before adding any CLI or RPC field.
+- [ ] Design user-configurable lifecycle hooks as a separate future feature.
+  Before defining CoCo hooks, inventory the pinned Codex CLI and App Server's
+  native hooks, notifications, and lifecycle events so CoCo can expose or
+  extend existing signals instead of duplicating them. Cover task creation,
+  thread/turn start, agent state transitions and terminal outcomes, then decide
+  execution context, filtering, ordering, retries, timeouts, failure policy,
+  secret handling, auditability, and platform behavior.
+- [ ] Revisit `coco jump` detach semantics. Verify with the pinned Codex TUI
+  whether closing a remote-attached UI cancels an active turn, and whether
+  Codex already exposes a detach action or configurable keybinding. If CoCo
+  needs its own UX, define an explicit shortcut or command that disconnects
+  the TUI while the daemon-owned turn continues, together with clear cancel,
+  reattach, signal, and accidental-exit behavior.
 
 ## Decisions
 
@@ -214,6 +227,10 @@ architectural baseline for CoCo.
   `cargo-modules --acyclic` currently produces a false self-cycle for an
   inherent method, so its graph is diagnostic rather than a CI architecture
   gate.
+- The Phase 0 process harness can fake the Codex executable without mocking
+  CoCo internals: the fake executable exposes the daemon-selected WebSocket
+  address, while the test owns the authenticated App Server peer and controls
+  exactly when a turn completes.
 
 ## Verification
 
@@ -225,21 +242,24 @@ architectural baseline for CoCo.
 - The MCP and Rust architecture documents are linked from the engineering
   index and routed from `AGENTS.md`; targeted trailing-whitespace checks are
   clean.
-- `cargo test --locked --offline --all-targets` passes all 44 tests, including
+- `cargo test --locked --all-targets` passes all 44 library tests plus the
+  process integration test, including
   native Git worktrees, legacy-goal retirement, task preparation without a
   turn, externally started TUI turns, authenticated WebSocket bridging,
   private capability files, daemon singleton locking, exact `jump` invocation,
   SQLite recovery, RPC sockets, MCP delegation, event normalization, and
   failure retention.
-- `cargo clippy --locked --all-targets --all-features -- -D warnings` and
-  `cargo fmt --all -- --check` pass.
-- `nix flake check path:. --no-write-lock-file` passes.
-- A process-level smoke test with isolated temporary state started `cocod`,
-  initialized the installed Codex App Server over an authenticated IPv4-
-  loopback WebSocket, verified `0600` runtime/state files, registered this
-  checkout via `coco repo add .`, returned a versioned empty task list over the
-  real Unix socket, and removed endpoint/token/socket files on shutdown. No
-  model turn was started.
+- `cargo clippy --locked --all-targets --all-features -- -D warnings`,
+  `cargo fmt --all -- --check`, `cargo machete`, Nix formatting, and
+  `actionlint` pass in the pinned development environment.
+- `nix flake check . --no-write-lock-file` passes and validates every app plus
+  the Rust workflow. Git and the Unix signal utility are explicit test-app
+  runtime inputs.
+- The automated process test starts the built `cocod`, authenticates it to a
+  fake IPv4-loopback App Server, verifies private runtime/state files, runs the
+  built CLI through `repo add`, `new`, `ls`, `send`, and `status`, observes
+  `idle -> active -> idle`, validates the emitted Codex requests, and confirms
+  endpoint/token/socket cleanup after SIGINT. It performs no model call.
 - The documentation TypeScript, Oxlint, and Prettier checks pass. Both the
   root and `/coco` builds export 88 static files across eight pages with static
   search, valid local links, no server artifact, and no internal knowledge.
@@ -255,8 +275,14 @@ architectural baseline for CoCo.
   calling v0 generally usable.
 - Add daemon recovery through `thread/resume`; the first slice conservatively
   marks in-flight work interrupted after daemon loss.
+- Research Codex's native lifecycle extensibility before designing CoCo hooks.
+  Keep the distinction between internal normalized events and executable user
+  automation explicit; hooks must not silently inherit credentials or block
+  coordinator state transitions without a deliberate policy.
+- Investigate detached `jump` behavior with the pinned Codex TUI before
+  changing its process handling. A detached UI must not imply a cancelled
+  worker turn, and an ordinary cancel must remain unambiguous and observable.
 - When the public site is scheduled, validate its production export under the
   GitHub Pages project subpath before enabling deployment from `main`.
-- Implement Phase 0 from `knowledge/engineering/rust-architecture.md`: add the
-  Rust CI and process-level fake-App-Server safety net before moving source
-  modules.
+- Begin Phase 1 from `knowledge/engineering/rust-architecture.md`: introduce
+  the typed daemon protocol and handler seam before moving source modules.

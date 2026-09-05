@@ -10,6 +10,10 @@ status: stable
 
 ## 2026-09-05
 
+- **Architecture refactor safety net**: Added pinned Rust CI, forbade unsafe
+  application code, made unused-dependency checks reproducible, and added a
+  binary-level daemon/CLI test that exercises task preparation and a complete
+  fake App Server turn before any source modules are moved.
 - **Rust architecture and hygiene plan**: Audited the first vertical slice,
   kept one Cargo package, selected nested modules plus a typed daemon seam as
   the next refactor, defined objective crate-split triggers, and classified

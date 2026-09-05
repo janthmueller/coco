@@ -43,6 +43,9 @@
 
         cargoRuntimeInputs = [
           rustToolchain
+          pkgs.cargo-machete
+          pkgs.git
+          pkgs.procps
           pkgs.stdenv.cc
           pkgs.pkg-config
         ];
@@ -98,6 +101,10 @@
           exec cargo clippy --locked --all-targets --all-features -- -D warnings
         '';
 
+        deps = cargoCommand "deps" ''
+          exec cargo machete "$@"
+        '';
+
         run-coco = cargoCommand "run-coco" ''
           exec cargo run --locked --bin coco -- "$@"
         '';
@@ -138,6 +145,7 @@
             check
             fmt
             clippy
+            deps
             run-coco
             run-cocod
             mcp
@@ -154,6 +162,8 @@
             {
               nativeBuildInputs = [
                 rustToolchain
+                pkgs.actionlint
+                pkgs.cargo-machete
                 pkgs.git
                 pkgs.jq
                 pkgs.nodejs_24
@@ -165,6 +175,7 @@
               cargoLock = ./Cargo.lock;
               toolchainManifest = ./rust-toolchain.toml;
               docsManifest = ./docs/package.json;
+              rustWorkflow = ./.github/workflows/rust.yml;
             }
             ''
               metadata_project="$TMPDIR/coco-metadata"
@@ -208,6 +219,8 @@
               cargo --version >/dev/null
               rustfmt --version >/dev/null
               cargo clippy --version >/dev/null
+              cargo machete --version >/dev/null
+              actionlint "$rustWorkflow"
               rust-analyzer --version >/dev/null
               pkg-config --version >/dev/null
               sqlite3 --version >/dev/null
@@ -228,6 +241,7 @@
           check = app check "Check all CoCo Rust targets";
           fmt = app fmt "Check CoCo Rust formatting";
           clippy = app clippy "Lint all CoCo Rust targets";
+          deps = app deps "Check CoCo for unused direct Rust dependencies";
           run-coco = app run-coco "Run the CoCo CLI";
           run-cocod = app run-cocod "Run the CoCo daemon";
           mcp = app mcp "Run the CoCo MCP stdio server";
@@ -250,6 +264,7 @@
           packages = [
             rustToolchain
             pkgs.actionlint
+            pkgs.cargo-machete
             pkgs.git
             pkgs.jq
             pkgs.nixfmt
