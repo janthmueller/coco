@@ -72,6 +72,13 @@ files now combine policy, transport, parsing, lifecycle, persistence, and test
 fixtures, while accidental public visibility makes dead-code detection less
 effective.
 
+Phase 1 completed on 2026-09-05. `protocol.rs` now owns the closed daemon
+method set and typed request/result contracts, the RPC client derives method
+and result types from those requests, and `daemon/handler.rs` is the only
+RPC-to-coordinator translation boundary. The coordinator no longer imports
+RPC, and the CLI no longer imports the Codex adapter. The measured boundary
+leaks above remain as the historical pre-refactor baseline.
+
 ## Target dependency direction
 
 ```text
@@ -225,6 +232,9 @@ movement is required yet.
 
 ### Phase 1 — typed daemon seam
 
+Completed on 2026-09-05 without changing the versioned wire envelope or
+user-facing command behavior.
+
 1. Create the closed method enum and typed parameter/result DTOs.
 2. Make RPC serialization generic over those types while retaining the
    versioned envelope.
@@ -235,7 +245,9 @@ movement is required yet.
    longer imports `codex`.
 
 Exit: no coordinator import of `rpc`, no CLI import of `codex`, and contract
-tests cover every method name and wire field.
+tests cover every method name and wire field. Achieved: CLI and MCP construct
+the same request types, while daemon dispatch and stable error mapping live in
+the dedicated handler.
 
 ### Phase 2 — split the hot modules
 

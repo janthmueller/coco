@@ -39,5 +39,9 @@
 - Treat implemented behavior, automated tests, generated schemas, and command
   help as authoritative. Update affected public docs and internal concepts
   when behavior changes; a roadmap item is not evidence that a feature exists.
+- Use the Git flake reference `.` for local Nix commands, never `path:.`:
+  `path:.` includes ignored build output such as `target/` and can create
+  multi-gigabyte source copies. Run resource-intensive Nix and Cargo gates
+  sequentially rather than launching them in parallel.
 - Before handing work over, update the branch working document so another
   session can continue without reconstructing context from chat history.

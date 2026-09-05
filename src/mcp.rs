@@ -9,10 +9,15 @@ use rmcp::{
     schemars, tool, tool_handler, tool_router,
 };
 use serde::Deserialize;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use tracing::warn;
 use uuid::Uuid;
 
+use crate::domain::AuditOutcome;
+use crate::protocol::{
+    AuditRecordParams, DaemonRequest, TaskDiffParams, TaskGetParams, TaskListParams,
+    TurnStartParams,
+};
 use crate::rpc::{RpcClient, RpcClientError};
 
 const TASKS_LIST: &str = "tasks.list";
@@ -169,30 +174,45 @@ where
     }
 
     async fn tasks_list(&self, input: TasksListInput) -> CallToolResult {
-        let mut params = self.repository_params();
-        if let Some(phases) = input.phases {
-            params.insert("phases".into(), json!(phases));
-        }
-        self.call(TASKS_LIST, "task.list", params, None, None).await
+        self.call(
+            TASKS_LIST,
+            TaskListParams {
+                repository_path: self.repository.clone(),
+                phases: input.phases,
+            },
+            None,
+            None,
+        )
+        .await
     }
 
     async fn agents_status(&self, input: AgentStatusInput) -> CallToolResult {
         let task = input.task;
-        let mut params = self.repository_params();
-        params.insert("task".into(), Value::String(task.clone()));
-        self.call(AGENTS_STATUS, "task.get", params, Some(task), None)
-            .await
+        self.call(
+            AGENTS_STATUS,
+            TaskGetParams {
+                repository_path: self.repository.clone(),
+                task: task.clone(),
+            },
+            Some(task),
+            None,
+        )
+        .await
     }
 
     async fn changes_diff(&self, input: ChangesDiffInput) -> CallToolResult {
         let task = input.task;
-        let mut params = self.repository_params();
-        params.insert("task".into(), Value::String(task.clone()));
-        if let Some(max_bytes) = input.max_bytes {
-            params.insert("maxBytes".into(), Value::from(max_bytes));
-        }
-        self.call(CHANGES_DIFF, "task.diff", params, Some(task), None)
-            .await
+        self.call(
+            CHANGES_DIFF,
+            TaskDiffParams {
+                repository_path: self.repository.clone(),
+                task: task.clone(),
+                max_bytes: input.max_bytes,
+            },
+            Some(task),
+            None,
+        )
+        .await
     }
 
     async fn agents_send(&self, input: AgentSendInput) -> CallToolResult {
@@ -200,29 +220,35 @@ where
             .operation_id
             .unwrap_or_else(|| Uuid::new_v4().to_string());
         let task = input.task;
-        let mut params = self.repository_params();
-        params.insert("task".into(), Value::String(task.clone()));
-        params.insert("message".into(), Value::String(input.message));
-        params.insert("operationId".into(), Value::String(operation_id.clone()));
         self.call(
             AGENTS_SEND,
-            "turn.start",
-            params,
+            TurnStartParams {
+                repository_path: self.repository.clone(),
+                task: task.clone(),
+                message: input.message,
+                operation_id: operation_id.clone(),
+            },
             Some(task),
             Some(operation_id),
         )
         .await
     }
 
-    async fn call(
+    async fn call<R>(
         &self,
         action: &'static str,
-        method: &'static str,
-        params: Map<String, Value>,
+        request: R,
         task_id: Option<String>,
         operation_id: Option<String>,
-    ) -> CallToolResult {
-        let response = self.client.request(method, Value::Object(params)).await;
+    ) -> CallToolResult
+    where
+        R: DaemonRequest + Send,
+        R::Response: Send,
+    {
+        let response = self.client.request(request).await.and_then(|result| {
+            serde_json::to_value(result)
+                .map_err(|_| DaemonFailure::new("INTERNAL", "could not encode the daemon response"))
+        });
         self.audit(
             action,
             task_id.as_deref(),
@@ -244,34 +270,25 @@ where
         operation_id: Option<&str>,
         response: &Result<Value, DaemonFailure>,
     ) {
-        let mut details = Map::new();
-        details.insert("repositoryPath".into(), json!(&self.repository));
+        let mut details = json!({"repositoryPath": self.repository});
         if let Err(error) = response {
-            details.insert("error".into(), Value::String(error.code.clone()));
+            details["error"] = Value::String(error.code.clone());
         }
-
-        let mut audit = Map::new();
-        audit.insert("source".into(), Value::String("mcp".into()));
-        audit.insert("action".into(), Value::String(action.into()));
-        if let Some(task_id) = task_id {
-            audit.insert("taskId".into(), Value::String(task_id.into()));
-        }
-        if let Some(operation_id) = operation_id {
-            audit.insert("operationId".into(), Value::String(operation_id.into()));
-        }
-        audit.insert(
-            "outcome".into(),
-            Value::String(if response.is_ok() {
-                "succeeded".into()
-            } else {
-                "failed".into()
-            }),
-        );
-        audit.insert("details".into(), Value::Object(details));
 
         if let Err(error) = self
             .client
-            .request("audit.record", Value::Object(audit))
+            .request(AuditRecordParams {
+                source: "mcp".to_owned(),
+                action: action.to_owned(),
+                task_id: task_id.map(ToOwned::to_owned),
+                operation_id: operation_id.map(ToOwned::to_owned),
+                outcome: if response.is_ok() {
+                    AuditOutcome::Succeeded
+                } else {
+                    AuditOutcome::Failed
+                },
+                details,
+            })
             .await
         {
             warn!(
@@ -281,23 +298,24 @@ where
             );
         }
     }
-
-    fn repository_params(&self) -> Map<String, Value> {
-        let mut params = Map::new();
-        params.insert("repositoryPath".into(), json!(&self.repository));
-        params
-    }
 }
 
 #[async_trait]
 trait DaemonRpc: Clone + Send + Sync + 'static {
-    async fn request(&self, method: &str, params: Value) -> Result<Value, DaemonFailure>;
+    async fn request<R>(&self, request: R) -> Result<R::Response, DaemonFailure>
+    where
+        R: DaemonRequest + Send,
+        R::Response: Send;
 }
 
 #[async_trait]
 impl DaemonRpc for RpcClient {
-    async fn request(&self, method: &str, params: Value) -> Result<Value, DaemonFailure> {
-        RpcClient::request(self, method.to_owned(), params)
+    async fn request<R>(&self, request: R) -> Result<R::Response, DaemonFailure>
+    where
+        R: DaemonRequest + Send,
+        R::Response: Send,
+    {
+        RpcClient::request(self, request)
             .await
             .map_err(DaemonFailure::from)
     }
@@ -378,6 +396,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
+    use crate::protocol::DaemonMethod;
 
     #[derive(Clone, Default)]
     struct RecordingDaemon {
@@ -400,14 +419,99 @@ mod tests {
 
     #[async_trait]
     impl DaemonRpc for RecordingDaemon {
-        async fn request(&self, method: &str, params: Value) -> Result<Value, DaemonFailure> {
+        async fn request<R>(&self, request: R) -> Result<R::Response, DaemonFailure>
+        where
+            R: DaemonRequest + Send,
+            R::Response: Send,
+        {
+            let method = R::METHOD.as_str();
+            let params = serde_json::to_value(request).unwrap();
             self.calls.lock().unwrap().push((method.to_owned(), params));
             if let Some(error) = self.failures.lock().unwrap().get(method).cloned() {
                 Err(error)
             } else {
-                Ok(json!({ "wireMethod": method }))
+                serde_json::from_value(fake_response(R::METHOD)).map_err(|error| {
+                    DaemonFailure::new("TEST_RESPONSE", format!("invalid fake response: {error}"))
+                })
             }
         }
+    }
+
+    fn fake_response(method: DaemonMethod) -> Value {
+        match method {
+            DaemonMethod::Health => json!({"status": "ok"}),
+            DaemonMethod::RepositoryRegister => json!({
+                "id": "repo-test",
+                "rootPath": "/repo",
+                "gitCommonDir": "/repo/.git",
+                "displayName": "repo",
+                "isLinkedWorktree": false,
+                "createdAtMs": 1,
+                "updatedAtMs": 1,
+            }),
+            DaemonMethod::TaskCreate => json!({"task": fake_task()}),
+            DaemonMethod::TaskList => json!([]),
+            DaemonMethod::TaskGet => json!({
+                "task": fake_task(),
+                "git": {"observed": false, "reason": "test fixture"},
+                "nextSequence": 0,
+            }),
+            DaemonMethod::TurnStart => json!({
+                "task": fake_task(),
+                "turnId": "turn-test",
+                "codexTurnId": "codex-turn-test",
+            }),
+            DaemonMethod::EventList => json!({
+                "task": fake_task(),
+                "events": [],
+                "nextSequence": 0,
+            }),
+            DaemonMethod::TaskDiff => json!({
+                "patch": "",
+                "patchTruncated": false,
+                "untrackedPaths": [],
+            }),
+            DaemonMethod::AuditRecord => json!({
+                "sequence": 1,
+                "id": "audit-test",
+                "source": "mcp",
+                "action": "test",
+                "taskId": null,
+                "operationId": null,
+                "outcome": "succeeded",
+                "details": {},
+                "occurredAtMs": 1,
+            }),
+        }
+    }
+
+    fn fake_task() -> Value {
+        json!({
+            "id": "task-test",
+            "createOperationId": "create-test",
+            "repositoryId": "repo-test",
+            "name": "task",
+            "contextMode": "fresh",
+            "context": {},
+            "profile": {
+                "name": "default",
+                "sourcePath": null,
+                "sourceHash": "test",
+                "effectiveSettings": {},
+            },
+            "phase": "idle",
+            "branchName": "coco/task",
+            "baseSha": "base-test",
+            "worktreePath": "/worktree",
+            "codexThreadId": "thread-test",
+            "parentThreadId": null,
+            "activeTurnId": null,
+            "lastErrorCode": null,
+            "lastErrorMessage": null,
+            "createdAtMs": 1,
+            "updatedAtMs": 1,
+            "completedAtMs": null,
+        })
     }
 
     #[test]
@@ -589,9 +693,6 @@ mod tests {
         let result = dispatcher.tasks_list(TasksListInput::default()).await;
 
         assert_eq!(result.is_error, Some(false));
-        assert_eq!(
-            result.structured_content,
-            Some(json!({ "wireMethod": "task.list" }))
-        );
+        assert_eq!(result.structured_content, Some(json!([])));
     }
 }

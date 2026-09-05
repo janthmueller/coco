@@ -70,7 +70,7 @@ architectural baseline for CoCo.
   `knowledge/engineering/rust-architecture.md` and route future agents to it.
 - [x] Implement Phase 0 of the Rust architecture plan as a behavior-preserving
   safety-net commit before moving modules.
-- [ ] Implement the typed daemon seam and remove coordinator-to-RPC and
+- [x] Implement the typed daemon seam and remove coordinator-to-RPC and
   CLI-to-Codex dependency leaks.
 - [ ] Split the measured hot modules without mixing in product behavior.
 - [ ] Design task annotations and external references as a deliberate future
@@ -178,6 +178,14 @@ architectural baseline for CoCo.
   `status` and `status --follow`. `jump` launches the official Codex TUI in the
   recorded worktree and resumes the recorded thread through the daemon-owned
   App Server rather than creating a parallel conversation.
+- 2026-09-05 — Make `protocol.rs` authoritative for the closed daemon method
+  set and typed request/result pairs. Keep serialization and stable RPC error
+  mapping in `daemon/handler.rs`; coordinator use cases receive and return
+  domain-aware values, while CLI and MCP share the same protocol DTOs.
+- 2026-09-05 — Use the Git-aware Nix reference `.` for repository commands and
+  run heavy Nix/Cargo checks sequentially. `path:.` copied the ignored
+  multi-gigabyte `target/` tree and parallel invocations created avoidable CPU
+  and I/O pressure.
 
 ## Findings
 
@@ -231,6 +239,9 @@ architectural baseline for CoCo.
   CoCo internals: the fake executable exposes the daemon-selected WebSocket
   address, while the test owns the authenticated App Server peer and controls
   exactly when a turn completes.
+- The Phase 1 seam removes both measured dependency leaks: Coordinator has no
+  RPC imports, CLI has no Codex imports, daemon method strings are centralized,
+  and MCP/CLI calls receive typed results instead of traversing arbitrary JSON.
 
 ## Verification
 
@@ -260,6 +271,9 @@ architectural baseline for CoCo.
   built CLI through `repo add`, `new`, `ls`, `send`, and `status`, observes
   `idle -> active -> idle`, validates the emitted Codex requests, and confirms
   endpoint/token/socket cleanup after SIGINT. It performs no model call.
+- After the typed daemon refactor, a resource-limited sequential run passes 48
+  library tests and the process test; Clippy with warnings denied and
+  `cargo machete` are also clean.
 - The documentation TypeScript, Oxlint, and Prettier checks pass. Both the
   root and `/coco` builds export 88 static files across eight pages with static
   search, valid local links, no server artifact, and no internal knowledge.
@@ -284,5 +298,6 @@ architectural baseline for CoCo.
   worker turn, and an ordinary cancel must remain unambiguous and observable.
 - When the public site is scheduled, validate its production export under the
   GitHub Pages project subpath before enabling deployment from `main`.
-- Begin Phase 1 from `knowledge/engineering/rust-architecture.md`: introduce
-  the typed daemon protocol and handler seam before moving source modules.
+- Begin Phase 2 from `knowledge/engineering/rust-architecture.md`: extract
+  coherent coordinator command and Codex-event modules first, preserving the
+  now-typed daemon boundary and avoiding product behavior changes.

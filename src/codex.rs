@@ -10,7 +10,6 @@ use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use thiserror::Error;
 use tokio::io::{
@@ -25,6 +24,8 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
 use tokio_tungstenite::tungstenite::{Message, http};
 use tokio_tungstenite::{WebSocketStream, client_async};
+
+use crate::protocol::AppServerEndpoint;
 
 pub const DEFAULT_MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
 pub const DEFAULT_EVENT_BUFFER: usize = 256;
@@ -41,13 +42,6 @@ pub struct SharedAppServerOptions {
     pub endpoint_path: PathBuf,
     /// Private runtime file containing the high-entropy capability token.
     pub token_path: PathBuf,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AppServerEndpoint {
-    pub schema_version: u32,
-    pub url: String,
 }
 
 #[derive(Debug, Clone)]

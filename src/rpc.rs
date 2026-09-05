@@ -14,6 +14,8 @@ use tokio::sync::watch;
 use tokio::task::JoinSet;
 use uuid::Uuid;
 
+use crate::protocol::DaemonRequest;
+
 const MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -146,16 +148,30 @@ impl RpcClient {
         }
     }
 
-    pub async fn request(
-        &self,
-        method: impl Into<String>,
-        params: Value,
-    ) -> Result<Value, RpcClientError> {
-        self.request_with_id(Uuid::new_v4().to_string(), method, params)
+    pub async fn request<R>(&self, request: R) -> Result<R::Response, RpcClientError>
+    where
+        R: DaemonRequest,
+    {
+        self.request_with_id(Uuid::new_v4().to_string(), request)
             .await
     }
 
-    pub async fn request_with_id(
+    pub async fn request_with_id<R>(
+        &self,
+        id: impl Into<String>,
+        request: R,
+    ) -> Result<R::Response, RpcClientError>
+    where
+        R: DaemonRequest,
+    {
+        let params = serde_json::to_value(request)?;
+        let result = self
+            .request_raw_with_id(id, R::METHOD.as_str(), params)
+            .await?;
+        serde_json::from_value(result).map_err(RpcClientError::from)
+    }
+
+    async fn request_raw_with_id(
         &self,
         id: impl Into<String>,
         method: impl Into<String>,
@@ -363,7 +379,7 @@ mod tests {
 
         let client = RpcClient::new(&socket);
         let value = client
-            .request_with_id("request-1", "echo", serde_json::json!({"ok": true}))
+            .request_raw_with_id("request-1", "echo", serde_json::json!({"ok": true}))
             .await
             .unwrap();
         assert_eq!(value, serde_json::json!({"ok": true}));

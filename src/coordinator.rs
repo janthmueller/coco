@@ -4,8 +4,6 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use async_trait::async_trait;
 use chrono::Utc;
-use serde::Deserialize;
-use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -14,11 +12,15 @@ use tracing::{debug, error, warn};
 
 use crate::codex::{CodexClient, CodexError, CodexEvent};
 use crate::domain::{
-    AuditOutcome, ContextMode, EventKind, EventSource, Repository, Task, TaskPhase, Turn, TurnPhase,
+    ContextMode, EventKind, EventSource, Repository, Task, TaskPhase, Turn, TurnPhase,
 };
 use crate::git::{Git, GitError, GitRepository};
 use crate::profile::{ProfileError, load_profile, with_effective_thread_settings};
-use crate::rpc::{RpcErrorPayload, RpcHandler};
+use crate::protocol::{
+    AuditRecordParams, EventListParams, EventListResult, GitIncomplete, GitObservationError,
+    GitUnavailable, RepositoryRegisterParams, TaskCreateParams, TaskDiffParams, TaskDiffResult,
+    TaskGetParams, TaskGitStatus, TaskListParams, TaskResult, TaskStatusResult, TurnStartParams,
+};
 use crate::store::{AuditDraft, EventDraft, NewTask, NewTurn, Store, StoreError, TurnCompletion};
 
 const DEFAULT_DIFF_BYTES: usize = 4 * 1024 * 1024;
@@ -194,25 +196,10 @@ impl Coordinator {
         &self.store
     }
 
-    async fn dispatch(&self, method: &str, params: Value) -> Result<Value, CoordinatorError> {
-        match method {
-            "health" => Ok(json!({"status": "ok"})),
-            "repository.register" => self.register_repository(parse_params(params)?),
-            "task.create" => self.create_task(parse_params(params)?).await,
-            "task.list" => self.list_tasks(parse_params(params)?),
-            "task.get" => self.get_task(parse_params(params)?),
-            "turn.start" => self.start_turn(parse_params(params)?).await,
-            "event.list" => self.list_events(parse_params(params)?),
-            "task.diff" => self.task_diff(parse_params(params)?),
-            "audit.record" => self.record_audit(parse_params(params)?),
-            _ => Err(CoordinatorError::MethodNotFound(method.to_owned())),
-        }
-    }
-
-    fn register_repository(
+    pub(crate) fn register_repository(
         &self,
         params: RepositoryRegisterParams,
-    ) -> Result<Value, CoordinatorError> {
+    ) -> Result<Repository, CoordinatorError> {
         let discovered = self.git.discover(params.path)?;
         let now = Utc::now().timestamp_millis();
         let repository = self.store.register_repository(&Repository {
@@ -224,17 +211,20 @@ impl Coordinator {
             created_at_ms: now,
             updated_at_ms: now,
         })?;
-        json_value(repository)
+        Ok(repository)
     }
 
-    async fn create_task(&self, params: TaskCreateParams) -> Result<Value, CoordinatorError> {
+    pub(crate) async fn create_task(
+        &self,
+        params: TaskCreateParams,
+    ) -> Result<TaskResult, CoordinatorError> {
         validate_non_empty("baseRef", &params.base_ref)?;
         validate_operation_id(&params.operation_id)?;
-        let context_mode = ContextMode::parse(&params.context_mode).ok_or_else(|| {
-            CoordinatorError::InvalidParams("contextMode must be `fresh` in v0".to_owned())
-        })?;
+        let context_mode = params.context_mode;
         if context_mode != ContextMode::Fresh {
-            return Err(CoordinatorError::UnsupportedContext(params.context_mode));
+            return Err(CoordinatorError::UnsupportedContext(
+                context_mode.as_str().to_owned(),
+            ));
         }
 
         let (repository, git_repository) =
@@ -349,7 +339,7 @@ impl Coordinator {
         self.task_response(task)
     }
 
-    fn list_tasks(&self, params: TaskListParams) -> Result<Value, CoordinatorError> {
+    pub(crate) fn list_tasks(&self, params: TaskListParams) -> Result<Vec<Task>, CoordinatorError> {
         let (repository, _) = self.registered_repository_for_path(&params.repository_path)?;
         let mut tasks = self.store.list_tasks(Some(&repository.id))?;
         if let Some(phases) = params.phases {
@@ -363,41 +353,50 @@ impl Coordinator {
                 .collect::<Result<Vec<_>, _>>()?;
             tasks.retain(|task| phases.contains(&task.phase));
         }
-        json_value(tasks)
+        Ok(tasks)
     }
 
-    fn get_task(&self, params: TaskReferenceParams) -> Result<Value, CoordinatorError> {
+    pub(crate) fn get_task(
+        &self,
+        params: TaskGetParams,
+    ) -> Result<TaskStatusResult, CoordinatorError> {
         let (repository, git_repository) =
             self.registered_repository_for_path(&params.repository_path)?;
         let task = self.resolve_task(&repository, &params.task)?;
         let git = match task_git_binding(&task) {
             Some((worktree, branch, base)) => {
                 match self.git.observe(&git_repository, worktree, branch, base) {
-                    Ok(observation) => json_value(observation)?,
+                    Ok(observation) => TaskGitStatus::Observed(observation),
                     Err(source) => {
                         warn!(task_id = %task.id, %source, "could not refresh task Git state");
-                        json!({
-                            "observed": false,
-                            "error": {
-                                "code": "GIT_OBSERVATION_FAILED",
-                                "message": "Git state could not be refreshed",
+                        TaskGitStatus::Unavailable(GitUnavailable {
+                            observed: false,
+                            error: GitObservationError {
+                                code: "GIT_OBSERVATION_FAILED".to_owned(),
+                                message: "Git state could not be refreshed".to_owned(),
                             },
                         })
                     }
                 }
             }
-            None => json!({"observed": false, "reason": "task has no complete Git binding"}),
+            None => TaskGitStatus::Incomplete(GitIncomplete {
+                observed: false,
+                reason: "task has no complete Git binding".to_owned(),
+            }),
         };
         let events = self.store.events_after(Some(&task.id), 0)?;
         let next_sequence = events.last().map_or(0, |event| event.sequence);
-        Ok(json!({
-            "task": task,
-            "git": git,
-            "nextSequence": next_sequence,
-        }))
+        Ok(TaskStatusResult {
+            task,
+            git,
+            next_sequence,
+        })
     }
 
-    async fn start_turn(&self, params: TurnStartParams) -> Result<Value, CoordinatorError> {
+    pub(crate) async fn start_turn(
+        &self,
+        params: TurnStartParams,
+    ) -> Result<TaskResult, CoordinatorError> {
         validate_non_empty("message", &params.message)?;
         validate_operation_id(&params.operation_id)?;
         let (repository, _) = self.registered_repository_for_path(&params.repository_path)?;
@@ -410,7 +409,7 @@ impl Coordinator {
             if existing.task_id != task.id || existing.client_message_id != client_message_id {
                 return Err(CoordinatorError::IdempotencyConflict);
             }
-            return task_and_turn_response(task, &existing);
+            return Ok(task_and_turn_response(task, &existing));
         }
         if task.phase != TaskPhase::Idle {
             return Err(CoordinatorError::InvalidTaskState {
@@ -459,10 +458,13 @@ impl Coordinator {
                 json!({"codexTurnId": started.id}),
             ),
         )?;
-        task_and_turn_response(task, &turn)
+        Ok(task_and_turn_response(task, &turn))
     }
 
-    fn list_events(&self, params: EventListParams) -> Result<Value, CoordinatorError> {
+    pub(crate) fn list_events(
+        &self,
+        params: EventListParams,
+    ) -> Result<EventListResult, CoordinatorError> {
         let (repository, _) = self.registered_repository_for_path(&params.repository_path)?;
         let task = self.resolve_task(&repository, &params.task)?;
         let events = self
@@ -471,14 +473,17 @@ impl Coordinator {
         let next_sequence = events
             .last()
             .map_or(params.after_sequence, |event| event.sequence);
-        Ok(json!({
-            "task": task,
-            "events": events,
-            "nextSequence": next_sequence,
-        }))
+        Ok(EventListResult {
+            task,
+            events,
+            next_sequence,
+        })
     }
 
-    fn task_diff(&self, params: TaskDiffParams) -> Result<Value, CoordinatorError> {
+    pub(crate) fn task_diff(
+        &self,
+        params: TaskDiffParams,
+    ) -> Result<TaskDiffResult, CoordinatorError> {
         let (repository, _) = self.registered_repository_for_path(&params.repository_path)?;
         let task = self.resolve_task(&repository, &params.task)?;
         let worktree = task
@@ -497,17 +502,17 @@ impl Coordinator {
             .min(MAX_DIFF_BYTES);
         let retained = diff.tracked_patch.len().min(requested);
         let patch = String::from_utf8_lossy(&diff.tracked_patch[..retained]);
-        Ok(json!({
-            "patch": patch,
-            "patchTruncated": diff.tracked_patch_truncated || retained < diff.tracked_patch.len(),
-            "untrackedPaths": diff.untracked_paths,
-        }))
+        Ok(TaskDiffResult {
+            patch: patch.into_owned(),
+            patch_truncated: diff.tracked_patch_truncated || retained < diff.tracked_patch.len(),
+            untracked_paths: diff.untracked_paths,
+        })
     }
 
-    fn record_audit(&self, params: AuditRecordParams) -> Result<Value, CoordinatorError> {
-        let outcome = AuditOutcome::parse(&params.outcome).ok_or_else(|| {
-            CoordinatorError::InvalidParams("outcome must be `succeeded` or `failed`".to_owned())
-        })?;
+    pub(crate) fn record_audit(
+        &self,
+        params: AuditRecordParams,
+    ) -> Result<crate::domain::Audit, CoordinatorError> {
         let task_id = params.task_id.as_deref().and_then(|candidate| {
             if let Ok(Some(task)) = self.store.task_by_id(candidate) {
                 return Some(task.id);
@@ -526,11 +531,11 @@ impl Coordinator {
             action: params.action,
             task_id,
             operation_id: params.operation_id,
-            outcome,
+            outcome: params.outcome,
             details: params.details,
             occurred_at_ms: None,
         })?;
-        json_value(audit)
+        Ok(audit)
     }
 
     pub fn record_codex_event(&self, event: CodexEvent) -> Result<(), StoreError> {
@@ -868,7 +873,7 @@ impl Coordinator {
         )
     }
 
-    fn task_response(&self, task: Task) -> Result<Value, CoordinatorError> {
+    fn task_response(&self, task: Task) -> Result<TaskResult, CoordinatorError> {
         let turn = task
             .active_turn_id
             .as_deref()
@@ -876,8 +881,8 @@ impl Coordinator {
             .transpose()?
             .flatten();
         match turn {
-            Some(turn) => task_and_turn_response(task, &turn),
-            None => Ok(json!({"task": task})),
+            Some(turn) => Ok(task_and_turn_response(task, &turn)),
+            None => Ok(TaskResult::prepared(task)),
         }
     }
 
@@ -906,17 +911,8 @@ impl Coordinator {
     }
 }
 
-#[async_trait]
-impl RpcHandler for Coordinator {
-    async fn handle(&self, method: &str, params: Value) -> Result<Value, RpcErrorPayload> {
-        self.dispatch(method, params)
-            .await
-            .map_err(CoordinatorError::into_rpc)
-    }
-}
-
 #[derive(Debug, Error)]
-enum CoordinatorError {
+pub(crate) enum CoordinatorError {
     #[error("invalid request parameters: {0}")]
     InvalidParams(String),
     #[error("unsupported context mode {0:?}")]
@@ -936,8 +932,6 @@ enum CoordinatorError {
     },
     #[error("task has no bound {0}")]
     IncompleteTask(&'static str),
-    #[error("unknown daemon method {0:?}")]
-    MethodNotFound(String),
     #[error(transparent)]
     Git(#[from] GitError),
     #[error(transparent)]
@@ -946,12 +940,10 @@ enum CoordinatorError {
     Profile(#[from] ProfileError),
     #[error(transparent)]
     Worker(#[from] WorkerError),
-    #[error(transparent)]
-    Json(#[from] serde_json::Error),
 }
 
 impl CoordinatorError {
-    fn code(&self) -> &'static str {
+    pub(crate) fn code(&self) -> &'static str {
         match self {
             Self::InvalidParams(_) => "INVALID_PARAMS",
             Self::UnsupportedContext(_) => "UNSUPPORTED_CONTEXT",
@@ -961,7 +953,6 @@ impl CoordinatorError {
             Self::IdempotencyConflict => "IDEMPOTENCY_CONFLICT",
             Self::InvalidTaskState { .. } => "INVALID_TASK_STATE",
             Self::IncompleteTask(_) => "INCOMPLETE_TASK",
-            Self::MethodNotFound(_) => "METHOD_NOT_FOUND",
             Self::Git(GitError::DirtyRepository(_)) => "DIRTY_SOURCE",
             Self::Git(GitError::InvalidTaskName(_)) => "INVALID_TASK_NAME",
             Self::Git(GitError::BranchExists(_) | GitError::DestinationExists(_)) => {
@@ -971,119 +962,12 @@ impl CoordinatorError {
             Self::Git(_) => "GIT_ERROR",
             Self::Store(StoreError::NotFound { .. }) => "NOT_FOUND",
             Self::Store(StoreError::InvalidTaskTransition { .. }) => "INVALID_TASK_STATE",
-            Self::Store(_) | Self::Json(_) => "INTERNAL",
+            Self::Store(_) => "INTERNAL",
             Self::Profile(ProfileError::NotFound { .. }) => "PROFILE_NOT_FOUND",
             Self::Profile(_) => "INVALID_PROFILE",
             Self::Worker(_) => "CODEX_ERROR",
         }
     }
-
-    fn into_rpc(self) -> RpcErrorPayload {
-        let code = self.code();
-        let message = match self {
-            Self::Worker(ref source) => {
-                error!(%source, "Codex operation failed");
-                "Codex could not accept the operation".to_owned()
-            }
-            Self::Store(ref source) => {
-                error!(%source, "persistence operation failed");
-                if code == "INTERNAL" {
-                    "CoCo could not persist the operation".to_owned()
-                } else {
-                    source.to_string()
-                }
-            }
-            Self::Json(ref source) => {
-                error!(%source, "serialization failed");
-                "CoCo could not encode the result".to_owned()
-            }
-            _ => self.to_string(),
-        };
-        RpcErrorPayload::new(code, message)
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RepositoryRegisterParams {
-    path: PathBuf,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct TaskCreateParams {
-    repository_path: PathBuf,
-    name: String,
-    base_ref: String,
-    context_mode: String,
-    #[serde(default = "default_profile")]
-    profile: String,
-    operation_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct TaskListParams {
-    repository_path: PathBuf,
-    #[serde(default)]
-    phases: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct TaskReferenceParams {
-    repository_path: PathBuf,
-    task: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct TurnStartParams {
-    repository_path: PathBuf,
-    task: String,
-    message: String,
-    operation_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct EventListParams {
-    repository_path: PathBuf,
-    task: String,
-    #[serde(default)]
-    after_sequence: i64,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct TaskDiffParams {
-    repository_path: PathBuf,
-    task: String,
-    #[serde(default)]
-    max_bytes: Option<u64>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct AuditRecordParams {
-    source: String,
-    action: String,
-    #[serde(default)]
-    task_id: Option<String>,
-    #[serde(default)]
-    operation_id: Option<String>,
-    outcome: String,
-    #[serde(default)]
-    details: Value,
-}
-
-fn default_profile() -> String {
-    "default".to_owned()
-}
-
-fn parse_params<T: DeserializeOwned>(params: Value) -> Result<T, CoordinatorError> {
-    serde_json::from_value(params)
-        .map_err(|error| CoordinatorError::InvalidParams(error.to_string()))
 }
 
 fn validate_non_empty(field: &str, value: &str) -> Result<(), CoordinatorError> {
@@ -1141,12 +1025,8 @@ fn task_git_binding(task: &Task) -> Option<(&Path, &str, &str)> {
     ))
 }
 
-fn task_and_turn_response(task: Task, turn: &Turn) -> Result<Value, CoordinatorError> {
-    Ok(json!({
-        "task": task,
-        "turnId": turn.id,
-        "codexTurnId": turn.codex_turn_id,
-    }))
+fn task_and_turn_response(task: Task, turn: &Turn) -> TaskResult {
+    TaskResult::with_turn(task, turn)
 }
 
 fn codex_event_draft(
@@ -1165,10 +1045,6 @@ fn codex_event_draft(
         occurred_at_ms: None,
         payload,
     }
-}
-
-fn json_value<T: serde::Serialize>(value: T) -> Result<Value, CoordinatorError> {
-    serde_json::to_value(value).map_err(CoordinatorError::from)
 }
 
 #[cfg(test)]
@@ -1317,23 +1193,22 @@ mod tests {
         }
 
         async fn register(&self) -> Repository {
-            let value = self
-                .coordinator
-                .dispatch("repository.register", json!({"path": self.source}))
-                .await
-                .unwrap();
-            serde_json::from_value(value).unwrap()
+            self.coordinator
+                .register_repository(RepositoryRegisterParams {
+                    path: self.source.clone(),
+                })
+                .unwrap()
         }
 
-        fn create_params(&self) -> Value {
-            json!({
-                "repositoryPath": self.source,
-                "name": "first-task",
-                "baseRef": "HEAD",
-                "contextMode": "fresh",
-                "profile": "default",
-                "operationId": "create-operation-1",
-            })
+        fn create_params(&self) -> TaskCreateParams {
+            TaskCreateParams {
+                repository_path: self.source.clone(),
+                name: "first-task".to_owned(),
+                base_ref: "HEAD".to_owned(),
+                context_mode: ContextMode::Fresh,
+                profile: "default".to_owned(),
+                operation_id: "create-operation-1".to_owned(),
+            }
         }
     }
 
@@ -1344,13 +1219,13 @@ mod tests {
 
         let created = fixture
             .coordinator
-            .dispatch("task.create", fixture.create_params())
+            .create_task(fixture.create_params())
             .await
             .unwrap();
-        let task: Task = serde_json::from_value(created["task"].clone()).unwrap();
+        let task = created.task.clone();
         assert_eq!(task.phase, TaskPhase::Idle);
         assert_eq!(task.codex_thread_id.as_deref(), Some("thread-1"));
-        assert!(created.get("turnId").is_none());
+        assert!(created.turn_id.is_none());
         assert_eq!(task.profile.effective_settings["model"], "gpt-test");
         let worktree = task.worktree_path.as_deref().unwrap();
         assert!(worktree.starts_with(fixture.worktrees.join(&repository.id)));
@@ -1365,27 +1240,17 @@ mod tests {
         ));
         let replay = fixture
             .coordinator
-            .dispatch("task.create", fixture.create_params())
+            .create_task(fixture.create_params())
             .await
             .unwrap();
-        assert_eq!(replay["task"]["id"], task.id);
+        assert_eq!(replay.task.id, task.id);
         assert_eq!(fixture.worker.calls().len(), 1);
 
         let mut conflict = fixture.create_params();
-        conflict["baseRef"] = Value::String("different-base".to_owned());
+        conflict.base_ref = "different-base".to_owned();
         assert!(matches!(
-            fixture.coordinator.dispatch("task.create", conflict).await,
+            fixture.coordinator.create_task(conflict).await,
             Err(CoordinatorError::IdempotencyConflict)
-        ));
-
-        let mut unsupported_metadata = fixture.create_params();
-        unsupported_metadata["goal"] = Value::String("legacy metadata".to_owned());
-        assert!(matches!(
-            fixture
-                .coordinator
-                .dispatch("task.create", unsupported_metadata)
-                .await,
-            Err(CoordinatorError::InvalidParams(_))
         ));
 
         let events = fixture.store.events_after(Some(&task.id), 0).unwrap();
@@ -1405,23 +1270,19 @@ mod tests {
         fixture.register().await;
         let created = fixture
             .coordinator
-            .dispatch("task.create", fixture.create_params())
+            .create_task(fixture.create_params())
             .await
             .unwrap();
-        let task: Task = serde_json::from_value(created["task"].clone()).unwrap();
+        let task = created.task;
 
-        let first_send = json!({
-            "repositoryPath": fixture.source,
-            "task": task.name,
-            "message": "Implement the requested behavior",
-            "operationId": "send-operation-initial",
-        });
-        let first_started = fixture
-            .coordinator
-            .dispatch("turn.start", first_send)
-            .await
-            .unwrap();
-        assert_eq!(first_started["codexTurnId"], "turn-1");
+        let first_send = TurnStartParams {
+            repository_path: fixture.source.clone(),
+            task: task.name.clone(),
+            message: "Implement the requested behavior".to_owned(),
+            operation_id: "send-operation-initial".to_owned(),
+        };
+        let first_started = fixture.coordinator.start_turn(first_send).await.unwrap();
+        assert_eq!(first_started.codex_turn_id.as_deref(), Some("turn-1"));
 
         fixture
             .coordinator
@@ -1476,32 +1337,24 @@ mod tests {
             TaskPhase::Idle
         );
 
-        let send = json!({
-            "repositoryPath": fixture.source,
-            "task": task.name,
-            "message": "Run the final checks",
-            "operationId": "send-operation-1",
-        });
-        let started = fixture
-            .coordinator
-            .dispatch("turn.start", send.clone())
-            .await
-            .unwrap();
-        assert_eq!(started["codexTurnId"], "turn-2");
+        let send = TurnStartParams {
+            repository_path: fixture.source.clone(),
+            task: task.name.clone(),
+            message: "Run the final checks".to_owned(),
+            operation_id: "send-operation-1".to_owned(),
+        };
+        let started = fixture.coordinator.start_turn(send.clone()).await.unwrap();
+        assert_eq!(started.codex_turn_id.as_deref(), Some("turn-2"));
         assert_eq!(fixture.worker.calls().len(), 3);
 
-        let replay = fixture
-            .coordinator
-            .dispatch("turn.start", send.clone())
-            .await
-            .unwrap();
-        assert_eq!(replay["turnId"], started["turnId"]);
+        let replay = fixture.coordinator.start_turn(send.clone()).await.unwrap();
+        assert_eq!(replay.turn_id, started.turn_id);
         assert_eq!(fixture.worker.calls().len(), 3);
 
         let mut conflict = send;
-        conflict["message"] = json!("A different retry");
+        conflict.message = "A different retry".to_owned();
         assert!(matches!(
-            fixture.coordinator.dispatch("turn.start", conflict).await,
+            fixture.coordinator.start_turn(conflict).await,
             Err(CoordinatorError::IdempotencyConflict)
         ));
     }
@@ -1512,10 +1365,10 @@ mod tests {
         fixture.register().await;
         let created = fixture
             .coordinator
-            .dispatch("task.create", fixture.create_params())
+            .create_task(fixture.create_params())
             .await
             .unwrap();
-        let task: Task = serde_json::from_value(created["task"].clone()).unwrap();
+        let task = created.task;
         let started = CodexEvent::Notification {
             method: "turn/started".to_owned(),
             params: json!({
@@ -1618,7 +1471,7 @@ mod tests {
         assert!(matches!(
             fixture
                 .coordinator
-                .dispatch("task.create", fixture.create_params())
+                .create_task(fixture.create_params())
                 .await,
             Err(CoordinatorError::Worker(WorkerError::Unavailable(_)))
         ));
@@ -1639,61 +1492,53 @@ mod tests {
         fixture.register().await;
         let created = fixture
             .coordinator
-            .dispatch("task.create", fixture.create_params())
+            .create_task(fixture.create_params())
             .await
             .unwrap();
-        let task: Task = serde_json::from_value(created["task"].clone()).unwrap();
+        let task = created.task;
         let worktree = task.worktree_path.as_deref().unwrap();
         fs::write(worktree.join("new.txt"), "new content\n").unwrap();
 
         let listed = fixture
             .coordinator
-            .dispatch(
-                "task.list",
-                json!({"repositoryPath": fixture.source, "phases": ["idle"]}),
-            )
-            .await
+            .list_tasks(TaskListParams {
+                repository_path: fixture.source.clone(),
+                phases: Some(vec!["idle".to_owned()]),
+            })
             .unwrap();
-        assert_eq!(listed.as_array().unwrap().len(), 1);
+        assert_eq!(listed.len(), 1);
 
         let shown = fixture
             .coordinator
-            .dispatch(
-                "task.get",
-                json!({"repositoryPath": fixture.source, "task": task.id}),
-            )
-            .await
+            .get_task(TaskGetParams {
+                repository_path: fixture.source.clone(),
+                task: task.id.clone(),
+            })
             .unwrap();
-        assert_eq!(shown["git"]["observed"], true);
-        assert_eq!(shown["git"]["dirty"], true);
+        assert!(matches!(
+            shown.git,
+            TaskGitStatus::Observed(ref observation) if observation.observed && observation.dirty
+        ));
 
         let events = fixture
             .coordinator
-            .dispatch(
-                "event.list",
-                json!({
-                    "repositoryPath": fixture.source,
-                    "task": "first-task",
-                    "afterSequence": 0,
-                }),
-            )
-            .await
+            .list_events(EventListParams {
+                repository_path: fixture.source.clone(),
+                task: "first-task".to_owned(),
+                after_sequence: 0,
+            })
             .unwrap();
-        assert_eq!(events["events"].as_array().unwrap().len(), 3);
+        assert_eq!(events.events.len(), 3);
 
         let diff = fixture
             .coordinator
-            .dispatch(
-                "task.diff",
-                json!({
-                    "repositoryPath": fixture.source,
-                    "task": "first-task",
-                    "maxBytes": 16,
-                }),
-            )
-            .await
+            .task_diff(TaskDiffParams {
+                repository_path: fixture.source.clone(),
+                task: "first-task".to_owned(),
+                max_bytes: Some(16),
+            })
             .unwrap();
-        assert_eq!(diff["untrackedPaths"], json!(["new.txt"]));
+        assert_eq!(diff.untracked_paths, [PathBuf::from("new.txt")]);
     }
 
     fn run_git(cwd: &Path, args: &[&str]) {

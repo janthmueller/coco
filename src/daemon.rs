@@ -16,6 +16,10 @@ use crate::paths::CocoPaths;
 use crate::rpc::{RpcHandler, RpcServer};
 use crate::store::Store;
 
+mod handler;
+
+use handler::DaemonHandler;
+
 pub async fn run_from_env() -> Result<()> {
     let paths = CocoPaths::from_env()?;
     let codex_options = CodexClientOptions {
@@ -60,7 +64,7 @@ pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<
     ));
     let event_task = tokio::spawn(pump_codex_events(Arc::clone(&coordinator), events));
 
-    let handler: Arc<dyn RpcHandler> = coordinator;
+    let handler: Arc<dyn RpcHandler> = Arc::new(DaemonHandler::new(Arc::clone(&coordinator)));
     let server = match RpcServer::bind(&paths.socket_path, handler).await {
         Ok(server) => server,
         Err(source) => {

@@ -10,6 +10,11 @@ status: stable
 
 ## 2026-09-05
 
+- **Typed daemon seam**: Centralized the closed daemon method set and typed
+  request/result contracts, made the RPC client infer wire methods and response
+  types, moved dispatch/error translation into a daemon handler, and removed
+  coordinator-to-RPC plus CLI-to-Codex dependency leaks before splitting hot
+  modules.
 - **Architecture refactor safety net**: Added pinned Rust CI, forbade unsafe
   application code, made unused-dependency checks reproducible, and added a
   binary-level daemon/CLI test that exercises task preparation and a complete

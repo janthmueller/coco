@@ -8,8 +8,12 @@ use clap::{Args, Parser, Subcommand};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::codex::AppServerEndpoint;
+use crate::domain::EventKind;
 use crate::paths::CocoPaths;
+use crate::protocol::{
+    AppServerEndpoint, EventListParams, RepositoryRegisterParams, TaskCreateParams, TaskDiffParams,
+    TaskGetParams, TaskListParams, TurnStartParams,
+};
 use crate::rpc::RpcClient;
 
 #[derive(Debug, Parser)]
@@ -124,33 +128,32 @@ async fn run(cli: Cli) -> Result<()> {
             } else {
                 repository_path.join(path)
             };
-            let result = client
-                .request("repository.register", json!({ "path": path }))
-                .await?;
-            print_human(&result);
+            let result = client.request(RepositoryRegisterParams { path }).await?;
+            print_human(&serde_json::to_value(result)?);
         }
         Command::New(args) => {
             let client = RpcClient::new(paths.socket_path);
             let result = client
-                .request(
-                    "task.create",
-                    json!({
-                        "repositoryPath": repository_path,
-                        "name": args.name,
-                        "baseRef": args.base,
-                        "contextMode": "fresh",
-                        "profile": args.profile,
-                        "operationId": Uuid::new_v4(),
-                    }),
-                )
+                .request(TaskCreateParams {
+                    repository_path,
+                    name: args.name,
+                    base_ref: args.base,
+                    context_mode: crate::domain::ContextMode::Fresh,
+                    profile: args.profile,
+                    operation_id: Uuid::new_v4().to_string(),
+                })
                 .await?;
-            print_human(&result);
+            print_human(&serde_json::to_value(result)?);
         }
         Command::Ls { json: json_output } => {
             let client = RpcClient::new(paths.socket_path);
             let result = client
-                .request("task.list", json!({ "repositoryPath": repository_path }))
+                .request(TaskListParams {
+                    repository_path,
+                    phases: None,
+                })
                 .await?;
+            let result = serde_json::to_value(result)?;
             if json_output {
                 print_json(versioned_array("tasks", result))?;
             } else {
@@ -167,11 +170,12 @@ async fn run(cli: Cli) -> Result<()> {
                 follow_status(&client, &repository_path, &task).await?;
             } else {
                 let result = client
-                    .request(
-                        "task.get",
-                        json!({ "repositoryPath": repository_path, "task": task }),
-                    )
+                    .request(TaskGetParams {
+                        repository_path,
+                        task,
+                    })
                     .await?;
+                let result = serde_json::to_value(result)?;
                 if json_output {
                     print_json(versioned(result))?;
                 } else {
@@ -185,37 +189,35 @@ async fn run(cli: Cli) -> Result<()> {
                 bail!("message must not be empty");
             }
             let result = client
-                .request(
-                    "turn.start",
-                    json!({
-                        "repositoryPath": repository_path,
-                        "task": task,
-                        "message": message,
-                        "operationId": Uuid::new_v4(),
-                    }),
-                )
+                .request(TurnStartParams {
+                    repository_path,
+                    task,
+                    message,
+                    operation_id: Uuid::new_v4().to_string(),
+                })
                 .await?;
-            print_human(&result);
+            print_human(&serde_json::to_value(result)?);
         }
         Command::Jump { task } => {
             let client = RpcClient::new(paths.socket_path.clone());
             let result = client
-                .request(
-                    "task.get",
-                    json!({ "repositoryPath": repository_path, "task": task }),
-                )
+                .request(TaskGetParams {
+                    repository_path,
+                    task,
+                })
                 .await?;
-            jump(&paths, &result).await?;
+            jump(&paths, &serde_json::to_value(result)?).await?;
         }
         Command::Diff { task } => {
             let client = RpcClient::new(paths.socket_path);
             let result = client
-                .request(
-                    "task.diff",
-                    json!({ "repositoryPath": repository_path, "task": task }),
-                )
+                .request(TaskDiffParams {
+                    repository_path,
+                    task,
+                    max_bytes: None,
+                })
                 .await?;
-            print_diff(&result);
+            print_diff(&serde_json::to_value(result)?);
         }
     }
     Ok(())
@@ -230,41 +232,24 @@ async fn follow_status(client: &RpcClient, repository: &Path, task: &str) -> Res
     let mut spinner_index = 0_usize;
     loop {
         let response = client
-            .request(
-                "event.list",
-                json!({
-                    "repositoryPath": repository,
-                    "task": task,
-                    "afterSequence": after_sequence,
-                }),
-            )
+            .request(EventListParams {
+                repository_path: repository.to_path_buf(),
+                task: task.to_owned(),
+                after_sequence,
+            })
             .await?;
-        let events = response
-            .get("events")
-            .and_then(Value::as_array)
-            .context("cocod returned event.list without an events array")?;
-        for event in events {
-            let kind = event.get("kind").and_then(Value::as_str);
-            if kind == Some("turn.started") {
+        for event in &response.events {
+            if event.kind == EventKind::TurnStarted {
                 last_message = None;
-            } else if kind == Some("agent.message.completed")
-                && let Some(message) = event.pointer("/payload/text").and_then(Value::as_str)
+            } else if event.kind == EventKind::AgentMessageCompleted
+                && let Some(message) = event.payload.get("text").and_then(Value::as_str)
             {
                 last_message = Some(message.to_owned());
             }
         }
-        after_sequence = response
-            .get("nextSequence")
-            .and_then(Value::as_i64)
-            .unwrap_or(after_sequence);
-        let phase = response
-            .pointer("/task/phase")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown");
-        let name = response
-            .pointer("/task/name")
-            .and_then(Value::as_str)
-            .unwrap_or(task);
+        after_sequence = response.next_sequence;
+        let phase = response.task.phase.as_str();
+        let name = response.task.name.as_str();
         if !interactive && last_phase.as_deref() != Some(phase) {
             println!("{name}: {}", phase_label(phase));
         }
