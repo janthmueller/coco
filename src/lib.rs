@@ -1,0 +1,11 @@
+pub mod cli;
+pub mod codex;
+pub mod coordinator;
+pub mod daemon;
+pub mod domain;
+pub mod git;
+pub mod mcp;
+pub mod paths;
+pub mod profile;
+pub mod rpc;
+pub mod store;

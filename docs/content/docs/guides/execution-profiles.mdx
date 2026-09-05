@@ -1,0 +1,34 @@
+---
+title: Codex profiles
+description: Start a task with a named set of Codex settings.
+---
+
+Use a profile when one task needs different Codex settings, such as a different
+reasoning effort, sandbox, or approval policy.
+
+## Define a profile
+
+Add it to your Codex configuration file, normally `~/.codex/config.toml`:
+
+```toml title="~/.codex/config.toml"
+[profiles.dev]
+model_reasoning_effort = "high"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+```
+
+Use keys supported by your installed Codex version.
+
+## Use it for a task
+
+```bash
+coco new refactor-cache \
+  --base main \
+  --context fresh \
+  --goal "Refactor the cache and run its tests" \
+  --profile dev
+```
+
+Without `--profile`, CoCo uses Codex's default configuration. The chosen
+profile applies when the task is created; changing the profile file later does
+not reconfigure an existing task.

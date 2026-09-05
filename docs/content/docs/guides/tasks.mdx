@@ -1,0 +1,56 @@
+---
+title: Working with tasks
+description: Start, follow, continue, and review isolated Codex work.
+---
+
+A task is one piece of work assigned to Codex. CoCo gives it a separate Git
+checkout, so it can change files without touching the branch open in your main
+working directory.
+
+## Start a task
+
+Run this inside a repository already added to CoCo:
+
+```bash
+coco new fix-login \
+  --base main \
+  --context fresh \
+  --goal "Fix the login redirect and run the relevant tests"
+```
+
+The repository must be clean when the task starts. CoCo creates the branch
+`coco/fix-login` and begins the first Codex turn in its own worktree.
+
+## Follow the work
+
+```bash
+coco ls
+coco show fix-login
+coco watch fix-login
+```
+
+`ls` gives you the overview. `show` displays one task and the location of its
+worktree. `watch` follows the current turn until it becomes idle or stops.
+
+## Continue the same task
+
+When the task is idle, send another message without losing its Codex context:
+
+```bash
+coco send fix-login "Now add a regression test"
+```
+
+CoCo does not queue messages while a turn is still active.
+
+## Review the result
+
+```bash
+coco diff fix-login
+```
+
+This shows the task's changes relative to the commit selected with `--base`.
+Use `coco show fix-login` when you need the worktree path for your editor or
+normal Git commands.
+
+CoCo currently leaves created branches and worktrees in place. It does not
+merge, delete, or clean them up automatically.

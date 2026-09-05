@@ -1,0 +1,16 @@
+{
+  "title": "Documentation",
+  "root": true,
+  "pages": [
+    "---Getting started---",
+    "[Overview](/docs)",
+    "getting-started",
+    "---Guides---",
+    "guides/tasks",
+    "guides/execution-profiles",
+    "guides/mcp",
+    "---Reference---",
+    "reference/cli",
+    "reference/current-limitations"
+  ]
+}

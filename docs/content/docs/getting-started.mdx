@@ -1,0 +1,71 @@
+---
+title: Quickstart
+description: Install CoCo and run one Codex task in a separate worktree.
+---
+
+## Before you begin
+
+You need:
+
+- Linux or macOS;
+- Git and Nix with flakes enabled;
+- a configured `codex` command on `PATH`;
+- a Git repository with at least one commit.
+
+CoCo does not publish release binaries yet, so this guide installs it from a
+source checkout.
+
+## Install CoCo
+
+From the CoCo checkout:
+
+```bash
+nix develop
+cargo install --path . --locked
+```
+
+## Start CoCo
+
+Keep CoCo running in its own terminal:
+
+```bash
+cocod
+```
+
+Stop it later with <kbd>Ctrl</kbd>+<kbd>C</kbd>.
+
+## Add a repository
+
+Open another terminal in the repository where Codex should work:
+
+```bash
+coco repo add .
+```
+
+Adding a repository is safe to repeat. It does not create a commit, branch, or
+worktree.
+
+## Start your first task
+
+The repository must be clean before starting a task.
+
+```bash
+coco new first-task \
+  --base HEAD \
+  --context fresh \
+  --goal "Inspect this project and suggest one focused improvement"
+```
+
+CoCo creates a separate worktree and branch, then starts Codex with your goal.
+Your current checkout remains unchanged.
+
+## Follow and review it
+
+```bash
+coco watch first-task
+coco show first-task
+coco diff first-task
+```
+
+Continue with [Working with tasks](../guides/tasks/) or see the complete
+[command reference](../reference/cli/).

@@ -1,0 +1,41 @@
+---
+title: Use CoCo through MCP
+description: Let an MCP-capable application inspect or continue tasks in one repository.
+---
+
+CoCo includes an MCP server for applications that should work with the same
+tasks as the CLI. Start `cocod`, then configure your MCP host to launch:
+
+```bash
+coco-mcp --repository /absolute/path/to/project
+```
+
+The equivalent command is:
+
+```bash
+coco mcp serve --repository /absolute/path/to/project
+```
+
+The repository is fixed when the server starts. By default it offers only
+read-only tools:
+
+| Tool            | What it does                       |
+| --------------- | ---------------------------------- |
+| `tasks.list`    | List tasks in the repository       |
+| `agents.status` | Show the current state of one task |
+| `changes.diff`  | Show the changes made by one task  |
+
+## Allow follow-up messages
+
+Add `--allow-send` only when the MCP host should be allowed to start another
+Codex turn:
+
+```bash
+coco-mcp --repository /absolute/path/to/project --allow-send
+```
+
+This adds `agents.send`. Any connected MCP host can then request more work for
+a task, so keep the option disabled unless you need it.
+
+This MCP server controls CoCo tasks. Selecting which MCP servers are available
+inside an individual Codex task is not supported yet.

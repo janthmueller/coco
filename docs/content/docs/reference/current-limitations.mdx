@@ -1,0 +1,21 @@
+---
+title: Current limitations
+description: What to expect from the early preview before using it on important work.
+---
+
+CoCo is ready for supervised local experiments, not unattended production use.
+
+- Installation is currently from source on Linux or macOS.
+- Keep the `cocod` command running while tasks are active.
+- CoCo can show approval and user-input requests but cannot answer them yet. A
+  task that asks for either may remain blocked.
+- Active work is not automatically resumed after restarting `cocod`.
+- There are no commands to cancel, complete, remove, merge, or clean up a task.
+  Created branches and worktrees remain on disk.
+- New tasks always use a fresh Codex conversation and immediately create a
+  `coco/<name>` branch.
+- CoCo's MCP server can inspect or continue existing tasks, but CoCo cannot yet
+  choose external MCP tools separately for each Codex task.
+
+Keep task worktrees available until you have reviewed their changes, and do not
+depend on automatic recovery or cleanup.

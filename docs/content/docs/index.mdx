@@ -1,0 +1,55 @@
+---
+title: CoCo
+description: Run several Codex tasks without mixing their files or losing track of their results.
+---
+
+CoCo stands for **Codex Coordinator**. It gives every Codex task a separate Git
+worktree and keeps the task, conversation, and resulting changes together.
+
+Use it when you want Codex to investigate or change several things in the same
+repository while your own checkout stays untouched.
+
+## A typical workflow
+
+```bash
+coco repo add .
+
+coco new fix-login \
+  --base main \
+  --context fresh \
+  --goal "Fix the login redirect and run the relevant tests"
+
+coco watch fix-login
+coco diff fix-login
+```
+
+CoCo creates `coco/fix-login` in a separate checkout, starts Codex there, and
+lets you follow the work or send another message later.
+
+<Callout type="warn" title="Early preview">
+  CoCo currently installs from source and is intended for supervised local use.
+  Read the current limitations before relying on it for unattended work.
+</Callout>
+
+<Cards>
+  <Card
+    title="Get started"
+    description="Build CoCo and run your first isolated task."
+    href="/docs/getting-started"
+  />
+  <Card
+    title="Work with tasks"
+    description="Start, follow, continue, and review Codex work."
+    href="/docs/guides/tasks"
+  />
+  <Card
+    title="Choose a Codex profile"
+    description="Apply different Codex settings when a task starts."
+    href="/docs/guides/execution-profiles"
+  />
+  <Card
+    title="Current limitations"
+    description="Know what the early preview does not handle yet."
+    href="/docs/reference/current-limitations"
+  />
+</Cards>

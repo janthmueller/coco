@@ -1,0 +1,188 @@
+---
+type: Documentation Policy
+title: Documentation boundaries and presentation
+description: Defines the audiences, responsibilities, workflow, and public documentation direction for this repository.
+tags: [documentation, maintenance, design, static, github-pages]
+status: stable
+---
+
+# Documentation boundaries and presentation
+
+## Purpose
+
+The repository separates product documentation from project memory. Someone
+learning the product should not have to read implementation history, agent
+notes, or unfinished design discussion, while maintainers should not have to
+reconstruct important decisions from commits or chat transcripts.
+
+## Surfaces
+
+| Surface | Audience | Responsibility |
+| --- | --- | --- |
+| `README.md` | First-time visitors | Product purpose, installation, smallest useful example, project status, and links onward |
+| `docs/` | Product users | Task-oriented setup, guides, command reference, limitations, and troubleshooting |
+| `knowledge/` | Maintainers and coding agents | Durable product semantics, architecture, constraints, rationale, roadmaps, and documentation policy |
+| `knowledge/work/` | The current task owner and future maintainers | Branch-scoped work in progress, findings, decisions, checks, open questions, and handoff state |
+| `AGENTS.md` | Coding agents | Short operational rules and pointers into this bundle |
+
+“Internal” means maintainer-facing, not confidential. The repository may
+become public; no documentation surface may contain secrets or private user
+data.
+
+## Public documentation rules
+
+- Lead with what a reader can accomplish and provide a concrete next step.
+- Prefer focused examples and task-oriented pages over implementation tours.
+- State limitations when they affect correctness, safety, privacy, cost, or a
+  successful workflow.
+- Keep public claims aligned with implemented and verified behavior. Describe
+  unavailable behavior only when a user needs the limitation to avoid
+  surprise; do not turn the public site into a roadmap.
+- Avoid duplicating exhaustive reference material across the README and site.
+  Choose one authoritative surface and link to it.
+- Update nearby public documentation in the same change as user-visible
+  behavior.
+- Keep design rationale, speculative alternatives, and agent bookkeeping out
+  of public pages.
+
+## Strict public/internal boundary
+
+`README.md` and the rendered site below `docs/` are exclusively user-facing.
+Their purpose is to help a person decide whether CoCo is useful and then
+install, use, and safely troubleshoot the behavior that exists. Public pages
+may contain only:
+
+- the concise product promise and intended user;
+- prerequisites, installation, and a smallest successful workflow;
+- user-visible commands, configuration, output, and operational concepts;
+- safety notes, current limitations, and actionable troubleshooting.
+
+The following belong exclusively under `knowledge/` and must never be copied
+or linked into the public site:
+
+- component architecture, daemon/RPC/database internals, schemas, and adapter
+  design;
+- decision records, trade-off analysis, implementation sequencing, and test
+  strategy;
+- agent coordination, branch work logs, handoff state, and maintenance notes;
+- speculative integrations, future protocol design, and roadmap material.
+
+A technical term is appropriate publicly only when the user must see or act on
+it, such as a CLI command, worktree, profile, or MCP tool. Define it in plain
+language at first use and omit the underlying implementation discussion. If a
+topic matters to both audiences, write two audience-specific explanations;
+never expose the internal document as the user explanation.
+
+Before accepting a public documentation change, verify each page against this
+gate:
+
+1. It answers a concrete user question or enables a concrete user action.
+2. A first-time user can understand it without reading architecture material.
+3. It describes shipped behavior; unavailable behavior appears only as a
+   concise limitation, not as a roadmap.
+4. It contains no internal rationale, design exploration, work tracking, or
+   links into `knowledge/`.
+5. Removing any paragraph that does not help the user would make the page less
+   useful; otherwise remove that paragraph.
+
+## Internal knowledge rules
+
+- Use index pages for progressive disclosure; link concepts rather than
+  duplicating them.
+- Give every non-index knowledge document YAML frontmatter with a non-empty
+  `type`, a descriptive title, a short description, tags, and a status.
+- Record meaningful structural or semantic changes in `knowledge/log.md`;
+  ordinary typo fixes do not need log entries.
+- Promote decisions that outlive a branch from its working document into a
+  canonical product or engineering concept. Keep the working document as the
+  historical account of the task.
+- A roadmap describes candidates and sequencing, not shipped behavior.
+
+## User-facing site direction
+
+The public site will use **Next.js + Fumadocs + MDX**, with theme-level styling
+through Tailwind CSS. Astro Starlight is intentionally excluded. Choose and pin
+exact package versions when the site is first scaffolded.
+
+The primary visual reference is the public
+[nuqs documentation](https://nuqs.dev/docs/limits) and its
+[open-source documentation package](https://github.com/47ng/nuqs/tree/next/packages/docs).
+It also uses Next.js, Fumadocs, MDX, and Tailwind, so its layout decisions map
+cleanly onto this site. The earlier Orca reference established the same broad
+stack but is superseded for visual direction. Treat nuqs as an inspiration,
+not as permission to copy its branding, logo, prose, sponsors, or product-
+specific components.
+
+Preserve these qualities:
+
+- a monochrome, light-first neutral palette with an equally complete dark
+  theme, restrained borders, and almost no decorative accent color;
+- the Fumadocs notebook layout: a 64-pixel top navigation, prominent centered
+  search, flat grouped left navigation, a narrow readable content column, and
+  a quiet right-side table of contents;
+- concise page introductions, clear “when to use” guidance, and obvious next
+  steps;
+- generous whitespace, large muted page descriptions, simple dividers, an
+  active-navigation pill, and uncluttered prose and code blocks;
+- responsive navigation, visible focus states, semantic markup, sufficient
+  contrast, and reduced-motion support.
+
+Use Fumadocs as a composable base rather than accepting an untouched starter
+theme. Keep CoCo's own mark and product language, and omit nuqs-specific AI
+actions, sponsor placements, registry links, and other controls that do not
+serve a CoCo user.
+
+## Static GitHub Pages deployment contract
+
+The user-facing documentation must build to static HTML, CSS, JavaScript, and
+assets and deploy to **GitHub Pages** without a long-running Node.js server.
+This is a product requirement, not an optional deployment optimization.
+
+The site scaffold must therefore:
+
+- configure Next.js with `output: "export"`; `next build` produces the complete
+  deployable `out/` directory;
+- use Fumadocs' static search setup so the search index is generated at build
+  time and queried in the browser;
+- pre-render every documentation route and provide static parameters for all
+  dynamic paths;
+- avoid request-time API routes, Server Actions, request-time authentication,
+  middleware, rewrites, response-header logic, ISR, and any other feature that
+  requires a Next.js runtime server; a route whose output is completely
+  generated during static export, such as the Fumadocs search index, is valid;
+- use static assets and either unoptimized images or a build-time/custom image
+  loader rather than the default runtime image optimizer;
+- set `trailingSlash: true` unless a verified Pages deployment demonstrates a
+  better host-independent routing choice;
+- support both a repository project path such as `/coco/` and a later custom
+  domain. The build-time `basePath` must come from deployment context rather
+  than being scattered through content or components;
+- treat every emitted file as public. Internal `knowledge/`, working documents,
+  credentials, local paths, and private operational metadata must never be
+  copied into the Pages artifact.
+
+Deployment uses a GitHub Actions Pages workflow rather than committing build
+output to a `gh-pages` branch. The workflow builds the pinned documentation
+dependencies, verifies the static export, uploads only `out/` with
+`actions/upload-pages-artifact`, and deploys it with `actions/deploy-pages`
+from the protected default branch. Pull requests build and validate the same
+artifact but do not deploy it.
+
+The initial site milestone is not complete until CI proves all of the
+following:
+
+1. a clean checkout can produce `out/index.html` and the complete route set;
+2. the export contains no server bundle requirement;
+3. navigation, assets, and search work when served below the repository
+   subpath, not only at `/`;
+4. internal-only documentation is absent from the artifact;
+5. a simple local static file server can render the production export.
+
+Primary implementation references:
+
+- [Fumadocs static build](https://www.fumadocs.dev/docs/deploying/static)
+- [Next.js static exports](https://nextjs.org/docs/pages/guides/static-exports)
+- [Next.js `basePath`](https://nextjs.org/docs/pages/api-reference/config/next-config-js/basePath)
+- [GitHub Pages publishing sources](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)
+- [GitHub Pages custom workflows](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)
+- [GitHub's Next.js Pages workflow template](https://github.com/actions/starter-workflows/blob/main/pages/nextjs.yml)

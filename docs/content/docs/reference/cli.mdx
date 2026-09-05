@@ -1,0 +1,50 @@
+---
+title: Command reference
+description: The CoCo commands available in the current preview.
+---
+
+Run `coco --help` or `coco COMMAND --help` for the exact options in your build.
+
+| Command                      | Purpose                                |
+| ---------------------------- | -------------------------------------- |
+| `coco repo add [path]`       | Add a Git repository to CoCo           |
+| `coco new <name> …`          | Start an isolated Codex task           |
+| `coco ls`                    | List tasks in the current repository   |
+| `coco show <task>`           | Show one task and its worktree path    |
+| `coco watch <task>`          | Follow the current turn until it stops |
+| `coco send <task> <message>` | Continue an idle task                  |
+| `coco diff <task>`           | Show changes made by a task            |
+| `coco mcp serve …`           | Expose CoCo to an MCP host             |
+
+## Create a task
+
+```bash
+coco new <name> \
+  --base <git-ref> \
+  --context fresh \
+  --goal <text> \
+  [--profile <name>]
+```
+
+Names contain lowercase letters, numbers, and hyphens. `--base` accepts a Git
+reference such as `HEAD`, `main`, or a commit hash. The repository must be
+clean.
+
+## Machine-readable output
+
+Use `--json` with task listing and inspection:
+
+```bash
+coco ls --json
+coco show first-task --json
+coco watch first-task --json
+```
+
+## MCP
+
+```bash
+coco mcp serve --repository /absolute/path/to/project
+coco mcp serve --repository /absolute/path/to/project --allow-send
+```
+
+See [Use CoCo through MCP](../../guides/mcp/) before enabling `--allow-send`.
