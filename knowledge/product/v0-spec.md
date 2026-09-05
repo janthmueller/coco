@@ -42,7 +42,9 @@ that the behavior is already implemented.
 - The product is named **CoCo** (Codex Coordinator), with commands `coco` and
   `cocod`.
 - It is implemented in Rust with Tokio.
-- Codex integration uses the Codex App Server over local `stdio` in v0.
+- `cocod` owns one Codex App Server child and connects through an authenticated
+  IPv4-loopback WebSocket. This same endpoint lets `coco jump` attach the
+  official Codex TUI without creating a second App Server process.
 - Git isolation uses native Git worktrees and persistence uses SQLite.
 - The CLI and a local CoCo MCP server are v0 client adapters. Later TUI and
   local web clients are equal peers and must use the same headless
@@ -56,7 +58,8 @@ that the behavior is already implemented.
   not silently copy, stash, reset, or snapshot uncommitted changes.
 - Worktrees live outside the registered repository by default.
 - CoCo does not automatically perform destructive branch or worktree cleanup.
-- v0 has no publicly reachable network listener.
+- v0 has no publicly reachable network listener. Its App Server endpoint is
+  capability-token protected and bound only to `127.0.0.1`.
 - v0 task worktrees are branch-backed. A detached task-worktree mode is a
   planned post-v0 capability, not current behavior.
 
@@ -66,9 +69,9 @@ These choices make the contract implementable but were not explicitly fixed
 by the handoff. They are reversible and require confirmation before a stable
 release:
 
-- v0 supports a single local operator on Linux and macOS. The local daemon
-  protocol uses a Unix domain socket; a Windows named-pipe adapter can be added
-  behind the same protocol later.
+- The current executable supports a single local operator on Linux and macOS.
+  Its daemon protocol uses a Unix domain socket; native Windows support will
+  use the same protocol and coordinator behind a named-pipe transport.
 - `fresh` is the only context mode accepted by `coco new` in v0. `fork` and
   `handoff` remain reserved domain values and return a clear unsupported-mode
   error until their transfer contracts are implemented.
@@ -101,12 +104,12 @@ release:
 
 ## v0 outcome
 
-An operator can register a Git checkout, create a task from an exact commit,
-observe the created worktree and Codex thread binding, send additional turns,
-follow normalized events, and inspect all task changes relative to the fixed
-base commit. A local MCP host can inspect the same task projections and, when
-the operator explicitly enables the capability, send a turn through the same
-daemon use case.
+An operator can register a Git checkout, prepare a task and Codex thread from
+an exact commit without starting work, send the first or a later turn, inspect
+or follow its current state, enter the same thread with the official Codex TUI,
+and inspect all task changes relative to the fixed base commit. A local MCP
+host can inspect the same task projections and, when the operator explicitly
+enables the capability, send a turn through the same daemon use case.
 
 The smallest proof slice is successful when it demonstrates, end to end:
 
@@ -115,8 +118,9 @@ The smallest proof slice is successful when it demonstrates, end to end:
 3. The App Server creates a non-ephemeral thread with that worktree as `cwd`.
 4. SQLite atomically records the task-to-thread-to-worktree binding and the
    selected profile/context metadata.
-5. CoCo starts a text turn in that thread.
-6. At least thread-started, turn-started, agent-message, and turn-completed or
+5. Creation returns the prepared task in `idle` without starting a turn.
+6. A separate `send` starts a text turn in that thread.
+7. At least thread-started, turn-started, agent-message, and turn-completed or
    failure events reach a CLI client and durable state can be shown afterward.
 
 The MCP adapter is required for the complete v0 but does not need to be in this
@@ -148,7 +152,8 @@ repository.
 
 A stable CoCo work unit identified independently of the Codex thread. A task
 owns exactly one repository binding, branch, base SHA, worktree path, context
-descriptor, and profile snapshot. In v0 it acquires at most one Codex thread.
+descriptor, and profile snapshot. In v0 a task acquires at most one Codex
+thread. Its first instruction belongs to a turn, not to task creation.
 
 ### Thread and turn
 
@@ -186,11 +191,12 @@ sharing conversation history.
 
 ```text
 coco repo add [path]
-coco new <name> --base <ref> --context fresh --goal <goal> [--profile <name>]
+coco new <name> [--base <ref>] [--profile <name>]
 coco ls [--json]
-coco show <task> [--json]
+coco status <task> [--json]
+coco status <task> --follow
 coco send <task> <message>
-coco watch <task> [--json]
+coco jump <task>
 coco diff <task>
 coco mcp serve --repository <path> [--allow-send]
 ```
@@ -199,8 +205,10 @@ coco mcp serve --repository <path> [--allow-send]
 registered repository containing the CLI's current directory; ambiguity or a
 missing repository context is an error rather than a guess.
 
-All commands must use the daemon contract. The CLI must not open SQLite,
-operate worktrees, or call the App Server directly.
+All orchestration commands must use the daemon contract. The CLI must not open
+SQLite or operate worktrees. `jump` first resolves the task through the daemon,
+then launches the official Codex TUI against the daemon-owned App Server; it
+does not duplicate thread or turn orchestration.
 
 ### `coco repo add [path]`
 
@@ -215,10 +223,11 @@ operate worktrees, or call the App Server directly.
 
 ### `coco new`
 
-`--base`, `--context`, and a non-empty `--goal` are required in v0. Optional
-`--profile <name>` applies the matching Codex profile table to only this new
-thread; omitting it keeps the App Server's base configuration. Creation must
-execute as a recoverable saga:
+`--base` defaults to `HEAD`. Optional `--profile <name>` applies the matching
+Codex profile table to only this new thread; omitting it keeps the App Server's
+base configuration. Task creation accepts no instruction or open-ended
+metadata field. The only executable context mode remains `fresh` and is
+selected internally. Creation must execute as a recoverable saga:
 
 1. Resolve the registered source checkout from CLI context.
 2. Under a repository-scoped lock, reject a dirty source checkout.
@@ -231,11 +240,9 @@ execute as a recoverable saga:
 6. Create `coco/<name>` and its worktree at the exact base SHA.
 7. Start a non-ephemeral Codex thread with canonical `cwd` equal to the task
    worktree and with the snapshotted worker profile.
-8. Persist the returned thread ID before starting work.
-9. Start a structured first turn containing the goal, repository/worktree
-   identity, branch, base SHA, constraints, and requested verification.
-10. Return after the App Server accepts the turn; execution continues in the
-    daemon and is observed with `watch` or `show`.
+8. Atomically persist the returned thread ID and move the task to `idle`.
+9. Return the prepared task without starting a turn. Work begins only after an
+   explicit `send` or an operator starts a turn through `jump`.
 
 If a post-worktree step fails, CoCo must mark the task `failed`, record the
 stage and discovered artifacts, and leave the branch/worktree intact. It must
@@ -251,23 +258,26 @@ must not create duplicate artifacts.
 - Sort deterministically by most recent update, then task ID.
 - `--json` emits one versioned JSON document and no decorative stdout text.
 
-### `coco show`
+### `coco status`
 
-- Return the complete CoCo task projection: goal, immutable Git binding,
-  context mode, non-secret profile summary, Codex thread and active/latest
-  turn IDs, runtime phase and wait reasons, Git facets, timestamps, last error,
-  and recent event cursor.
-- Refresh cheap Git observations before responding; stale persisted Git state
-  must be labelled if refresh fails.
+- Return the complete CoCo task projection: immutable Git binding, context
+  mode, non-secret profile summary, Codex thread and active/latest turn IDs,
+  runtime phase and wait reasons, Git facets, timestamps, last error, and
+  recent event cursor.
 - `--json` uses the same field meanings as the daemon protocol and includes a
   top-level schema version.
+- `--follow` polls durable events and renders the current phase until the task
+  becomes ready, waits for approval/input, completes, fails, is interrupted,
+  or the operator detaches with Ctrl-C. It does not cancel the turn.
+- `--follow` and `--json` are intentionally mutually exclusive in the current
+  CLI; machine clients can poll `status --json`.
 
 ### `coco send`
 
 - Accept a non-empty text message and return after `turn/start` is accepted,
   not after the turn completes.
-- Start a new turn in the existing thread with the stored worktree as `cwd` and
-  the stored sandbox/profile policy.
+- Start the first or a later turn in the existing thread with the stored
+  worktree as `cwd` and the stored sandbox/profile policy.
 - Reject tasks that are provisioning, already active, waiting, completed, or
   unreconciled after daemon failure. v0 does not silently queue messages.
 - Use a unique client message/operation ID so an uncertain CLI retry is
@@ -275,16 +285,15 @@ must not create duplicate artifacts.
 - A successful completed turn returns the task to `idle`, permitting another
   `send`.
 
-### `coco watch`
+### `coco jump`
 
-- Replay durable events after an optional internal cursor, then stream new
-  events until interrupted by the operator.
-- Human output may render agent text deltas, plans, approvals, tool summaries,
-  diffs, completion, and errors. Ctrl-C detaches the watcher; it must not
-  interrupt the task.
-- `--json` emits newline-delimited, versioned event envelopes because the
-  stream is unbounded.
-- Multiple watchers may observe one task without changing its lifecycle.
+- Require the task's managed worktree and existing Codex thread binding.
+- Resolve the task through `cocod`, then run `codex resume` in that worktree
+  against the daemon-owned authenticated loopback App Server.
+- Pass the capability token through a child-process environment variable, not
+  an argument or persisted task metadata.
+- Turns started in the TUI must update the same durable CoCo task state as turns
+  started with `coco send`; exiting the TUI does not delete the task.
 
 ### `coco diff`
 
@@ -308,9 +317,9 @@ coco mcp serve --repository <path> [--allow-send]
 The command is a thin MCP-to-daemon adapter. It speaks MCP over its own
 stdin/stdout, sends diagnostics only to stderr, and calls the same daemon
 methods as other clients. It must not open SQLite, invoke Git, start Codex, or
-duplicate validation and transition rules. This outward-facing MCP transport
-is separate from the daemon's inward-facing Codex App Server `stdio`
-connection.
+duplicate validation and transition rules. This outward-facing MCP `stdio`
+transport is separate from the daemon's authenticated loopback-WebSocket
+connection to the Codex App Server.
 
 The repository is fixed when the MCP process starts. Task names resolve only
 within that repository; full task IDs remain accepted. v0 exposes no MCP tool
@@ -321,7 +330,7 @@ that registers arbitrary paths or expands filesystem authority at runtime.
 | Tool | Mutability | Input and result |
 | --- | --- | --- |
 | `tasks.list` | read-only | Optional phase filters; returns the same task summaries and status/Git field meanings as `coco ls --json`. |
-| `agents.status` | read-only | Task name/ID; returns the same projection as `coco show --json`. “Agent” is presentation language for the task's Codex binding, not a second domain entity. |
+| `agents.status` | read-only | Task name/ID; returns the same projection as `coco status --json`. “Agent” is presentation language for the task's Codex binding, not a second domain entity. |
 | `changes.diff` | read-only | Task name/ID and optional output bound; returns base/head, tracked patch, untracked paths, and truncation metadata from the same use case as `coco diff`. |
 | `agents.send` | mutating, opt-in | Task name/ID, non-empty text, and operation ID; starts the same turn as `coco send` and returns task/thread/turn correlation. Advertised only with `--allow-send`. |
 
@@ -351,7 +360,7 @@ The public task projection contains a runtime `phase`, zero or more
 | Phase | Meaning |
 | --- | --- |
 | `provisioning` | CoCo has recorded intent and is creating/verifying external resources. |
-| `starting` | The worktree exists and CoCo is creating/resuming the thread or first turn. |
+| `starting` | The worktree exists and CoCo is creating or resuming its thread. |
 | `active` | A turn is in progress with no known wait flag. |
 | `waiting_for_approval` | The App Server has an unresolved approval request. |
 | `waiting_for_input` | The App Server has an unresolved user-input request. |
@@ -366,7 +375,7 @@ remaining reason rather than incorrectly returning to `active`.
 
 ### Git facets
 
-At minimum `show` and `ls` expose:
+At minimum `status` and `ls` expose:
 
 - current `headSha`, recorded `baseSha`, and whether they were observed;
 - `dirty`, based on tracked, staged, and untracked status;
@@ -415,7 +424,8 @@ inventing a normalized meaning.
   thread start/resume and turn start.
 - Worker writes must be constrained to the worktree and explicitly justified
   supporting roots. Network access is off by default in the draft profile.
-- The daemon must not bind a TCP/WebSocket listener in v0.
+- The daemon-owned App Server may bind only an authenticated IPv4-loopback
+  WebSocket; CoCo must not expose it on a LAN or public interface.
 - The CoCo MCP server uses local stdio, is read-only unless the operator starts
   it with the send capability, and never bypasses daemon authorization or
   validation.
@@ -444,6 +454,7 @@ The following are intentionally outside v0:
   Agentgateway is not currently planned;
 - a custom CoCo MCP proxy or gateway;
 - fully implemented `fork` and `handoff` context modes;
+- user-defined task annotations or external ticket/PR references;
 - a monorepo/package split for hypothetical future clients.
 
 ## Acceptance criteria
@@ -457,20 +468,22 @@ The following are intentionally outside v0:
   all fail before an unintended second worktree or thread is created.
 - Injected failures after each saga stage leave a diagnosable `failed` task and
   never delete the external artifacts automatically.
-- Restarting the daemon preserves list/show output and either resumes an idle
+- Restarting the daemon preserves list/status output and either resumes an idle
   thread or truthfully marks an in-flight turn interrupted.
 
 ### Interaction and observation
 
 - A fake App Server contract test and an opt-in real Codex smoke test both
-  exercise initialization, thread start, turn start, event correlation, and
-  completion/failure.
+  exercise initialization, thread preparation, explicit turn start, event
+  correlation, and completion/failure.
 - Two sequential `send` operations use the same thread and different turn IDs;
   concurrent sends yield one accepted turn and one deterministic conflict.
-- A watcher can attach before or during a turn, receives ordered events, and
-  can detach without affecting the turn.
-- `ls --json` and `show --json` parse as JSON with stable version and status
-  fields; `watch --json` parses one envelope per line.
+- `status --follow` can attach during a turn, reflects durable phase changes,
+  and can detach without affecting the turn.
+- `ls --json` and `status --json` parse as JSON with stable version and status
+  fields.
+- `jump` resumes the stored thread in the stored worktree through the shared
+  authenticated App Server and keeps daemon event projection active.
 - `diff` reflects changes across all turns and does not change Git status.
 
 ### MCP adapter
@@ -491,8 +504,9 @@ The following are intentionally outside v0:
   denied by the selected App Server/sandbox version.
 - Pending approval requests are persisted before presentation and resolutions
   are correlated to the original App Server request.
-- The daemon socket and SQLite file are user-only, and no network port is
-  opened.
+- The daemon socket, SQLite file, App Server endpoint descriptor, and
+  capability token are user-only. The sole network port is authenticated and
+  bound to IPv4 loopback.
 
 ## Open decisions and blockers
 

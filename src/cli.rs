@@ -1,4 +1,6 @@
-use std::path::PathBuf;
+use std::io::{self, IsTerminal, Write};
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -6,6 +8,7 @@ use clap::{Args, Parser, Subcommand};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
+use crate::codex::AppServerEndpoint;
 use crate::paths::CocoPaths;
 use crate::rpc::RpcClient;
 
@@ -23,26 +26,36 @@ enum Command {
         #[command(subcommand)]
         command: RepoCommand,
     },
-    /// Create a fresh Codex task in an isolated worktree.
+    /// Prepare a fresh Codex task in an isolated worktree.
     New(NewArgs),
     /// List tasks in the current repository.
     Ls {
+        /// Emit stable, machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
-    /// Show one task by repository-local name or global ID.
-    Show {
+    /// Show a task's current state, optionally following it until it pauses.
+    Status {
+        /// Task name or ID.
         task: String,
+        /// Keep updating until the task becomes ready, pauses, or finishes.
+        #[arg(long, conflicts_with = "json")]
+        follow: bool,
+        /// Emit stable, machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
-    /// Start another turn for an idle task.
-    Send { task: String, message: String },
-    /// Follow normalized task events until the current turn stops.
-    Watch {
+    /// Start the first or next turn for a ready task.
+    Send {
+        /// Task name or ID.
         task: String,
-        #[arg(long)]
-        json: bool,
+        /// Instruction to send to Codex.
+        message: String,
+    },
+    /// Open the task's existing Codex thread in its managed worktree.
+    Jump {
+        /// Task name or ID.
+        task: String,
     },
     /// Show all tracked and untracked changes from the immutable base.
     Diff { task: String },
@@ -64,13 +77,11 @@ enum RepoCommand {
 
 #[derive(Debug, Args)]
 struct NewArgs {
+    /// Short task name, also used to derive its branch and worktree.
     name: String,
-    #[arg(long)]
+    /// Git revision from which to prepare the task.
+    #[arg(long, default_value = "HEAD")]
     base: String,
-    #[arg(long, value_parser = ["fresh"])]
-    context: String,
-    #[arg(long)]
-    goal: String,
     /// Apply `[profiles.<PROFILE>]` from `$CODEX_HOME/config.toml` to the thread.
     #[arg(long, default_value = "default")]
     profile: String,
@@ -120,9 +131,6 @@ async fn run(cli: Cli) -> Result<()> {
         }
         Command::New(args) => {
             let client = RpcClient::new(paths.socket_path);
-            if args.goal.trim().is_empty() {
-                bail!("--goal must not be empty");
-            }
             let result = client
                 .request(
                     "task.create",
@@ -130,8 +138,7 @@ async fn run(cli: Cli) -> Result<()> {
                         "repositoryPath": repository_path,
                         "name": args.name,
                         "baseRef": args.base,
-                        "contextMode": args.context,
-                        "goal": args.goal,
+                        "contextMode": "fresh",
                         "profile": args.profile,
                         "operationId": Uuid::new_v4(),
                     }),
@@ -150,21 +157,26 @@ async fn run(cli: Cli) -> Result<()> {
                 print_task_list(&result);
             }
         }
-        Command::Show {
+        Command::Status {
             task,
+            follow,
             json: json_output,
         } => {
             let client = RpcClient::new(paths.socket_path);
-            let result = client
-                .request(
-                    "task.get",
-                    json!({ "repositoryPath": repository_path, "task": task }),
-                )
-                .await?;
-            if json_output {
-                print_json(versioned(result))?;
+            if follow {
+                follow_status(&client, &repository_path, &task).await?;
             } else {
-                print_human(&result);
+                let result = client
+                    .request(
+                        "task.get",
+                        json!({ "repositoryPath": repository_path, "task": task }),
+                    )
+                    .await?;
+                if json_output {
+                    print_json(versioned(result))?;
+                } else {
+                    print_status(&result);
+                }
             }
         }
         Command::Send { task, message } => {
@@ -185,9 +197,15 @@ async fn run(cli: Cli) -> Result<()> {
                 .await?;
             print_human(&result);
         }
-        Command::Watch { task, json } => {
-            let client = RpcClient::new(paths.socket_path);
-            watch(&client, &repository_path, &task, json).await?;
+        Command::Jump { task } => {
+            let client = RpcClient::new(paths.socket_path.clone());
+            let result = client
+                .request(
+                    "task.get",
+                    json!({ "repositoryPath": repository_path, "task": task }),
+                )
+                .await?;
+            jump(&paths, &result).await?;
         }
         Command::Diff { task } => {
             let client = RpcClient::new(paths.socket_path);
@@ -203,13 +221,13 @@ async fn run(cli: Cli) -> Result<()> {
     Ok(())
 }
 
-async fn watch(
-    client: &RpcClient,
-    repository: &std::path::Path,
-    task: &str,
-    json: bool,
-) -> Result<()> {
+async fn follow_status(client: &RpcClient, repository: &Path, task: &str) -> Result<()> {
     let mut after_sequence = 0_i64;
+    let mut last_phase: Option<String> = None;
+    let mut last_message: Option<String> = None;
+    let interactive = io::stdout().is_terminal();
+    let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    let mut spinner_index = 0_usize;
     loop {
         let response = client
             .request(
@@ -226,10 +244,13 @@ async fn watch(
             .and_then(Value::as_array)
             .context("cocod returned event.list without an events array")?;
         for event in events {
-            if json {
-                print_json(versioned(event.clone()))?;
-            } else {
-                println!("{}", format_event(event));
+            let kind = event.get("kind").and_then(Value::as_str);
+            if kind == Some("turn.started") {
+                last_message = None;
+            } else if kind == Some("agent.message.completed")
+                && let Some(message) = event.pointer("/payload/text").and_then(Value::as_str)
+            {
+                last_message = Some(message.to_owned());
             }
         }
         after_sequence = response
@@ -240,14 +261,172 @@ async fn watch(
             .pointer("/task/phase")
             .and_then(Value::as_str)
             .unwrap_or("unknown");
-        if matches!(phase, "idle" | "failed" | "interrupted" | "completed") {
+        let name = response
+            .pointer("/task/name")
+            .and_then(Value::as_str)
+            .unwrap_or(task);
+        if !interactive && last_phase.as_deref() != Some(phase) {
+            println!("{name}: {}", phase_label(phase));
+        }
+        last_phase = Some(phase.to_owned());
+        if follow_stops_at(phase) {
+            if interactive {
+                clear_status_line()?;
+                println!("{name}: {}", phase_label(phase));
+            }
+            if let Some(message) = last_message {
+                println!("\n{message}");
+            }
             return Ok(());
         }
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => return Ok(()),
-            _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+        for _ in 0..4 {
+            if interactive {
+                print!(
+                    "\r\x1b[2K{} {name}: {}",
+                    spinner[spinner_index % spinner.len()],
+                    phase_label(phase)
+                );
+                io::stdout().flush()?;
+                spinner_index += 1;
+            }
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    if interactive {
+                        clear_status_line()?;
+                    }
+                    return Ok(());
+                },
+                _ = tokio::time::sleep(Duration::from_millis(125)) => {}
+            }
         }
     }
+}
+
+async fn jump(paths: &CocoPaths, result: &Value) -> Result<()> {
+    let target = load_jump_target(paths, result).await?;
+    let codex_binary = std::env::var_os("COCO_CODEX_BINARY")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("codex"));
+    let status = jump_command(&target, codex_binary)
+        .status()
+        .await
+        .context("could not start the Codex terminal UI")?;
+    if !status.success() {
+        bail!("Codex terminal UI exited with {status}");
+    }
+    Ok(())
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct JumpTarget {
+    worktree: PathBuf,
+    thread_id: String,
+    endpoint_url: String,
+    capability_token: String,
+}
+
+async fn load_jump_target(paths: &CocoPaths, result: &Value) -> Result<JumpTarget> {
+    let task = result
+        .get("task")
+        .context("cocod returned task.get without a task")?;
+    let worktree = task
+        .get("worktreePath")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .context("task has no managed worktree yet")?;
+    let thread_id = task
+        .get("codexThreadId")
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .context("task has no Codex thread yet")?;
+    let descriptor_bytes = tokio::fs::read(&paths.codex_endpoint_path)
+        .await
+        .with_context(|| {
+            format!(
+                "could not read {}; is cocod running?",
+                paths.codex_endpoint_path.display()
+            )
+        })?;
+    let descriptor: AppServerEndpoint = serde_json::from_slice(&descriptor_bytes)
+        .context("cocod published an invalid App Server endpoint")?;
+    let port = descriptor.url.strip_prefix("ws://127.0.0.1:");
+    if descriptor.schema_version != 1
+        || port
+            .and_then(|port| port.parse::<u16>().ok())
+            .is_none_or(|port| port == 0)
+    {
+        bail!("cocod published an unsupported App Server endpoint");
+    }
+    let token = tokio::fs::read_to_string(&paths.codex_token_path)
+        .await
+        .with_context(|| format!("could not read {}", paths.codex_token_path.display()))?;
+    let capability_token = token.trim().to_owned();
+    if capability_token.is_empty() {
+        bail!("cocod published an empty App Server capability token");
+    }
+
+    Ok(JumpTarget {
+        worktree,
+        thread_id,
+        endpoint_url: descriptor.url,
+        capability_token,
+    })
+}
+
+fn jump_command(target: &JumpTarget, codex_binary: PathBuf) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new(codex_binary);
+    command
+        .arg("resume")
+        .arg(&target.thread_id)
+        .args(["--remote", &target.endpoint_url])
+        .args([
+            "--remote-auth-token-env",
+            "COCO_CODEX_REMOTE_CAPABILITY_TOKEN",
+        ])
+        .arg("-C")
+        .arg(&target.worktree)
+        .current_dir(&target.worktree)
+        .env(
+            "COCO_CODEX_REMOTE_CAPABILITY_TOKEN",
+            &target.capability_token,
+        )
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    command
+}
+
+fn clear_status_line() -> Result<()> {
+    print!("\r\x1b[2K");
+    io::stdout().flush()?;
+    Ok(())
+}
+
+fn phase_label(phase: &str) -> &'static str {
+    match phase {
+        "provisioning" => "Preparing worktree",
+        "starting" => "Starting Codex",
+        "active" => "Working",
+        "waiting_for_approval" => "Waiting for approval",
+        "waiting_for_input" => "Waiting for input",
+        "idle" => "Ready",
+        "completed" => "Completed",
+        "failed" => "Failed",
+        "interrupted" => "Interrupted",
+        _ => "Unknown",
+    }
+}
+
+fn follow_stops_at(phase: &str) -> bool {
+    matches!(
+        phase,
+        "waiting_for_approval"
+            | "waiting_for_input"
+            | "idle"
+            | "completed"
+            | "failed"
+            | "interrupted"
+    )
 }
 
 fn versioned(value: Value) -> Value {
@@ -322,6 +501,22 @@ fn print_task_list(value: &Value) {
     }
 }
 
+fn print_status(value: &Value) {
+    let task = value.get("task").unwrap_or(value);
+    let name = task.get("name").and_then(Value::as_str).unwrap_or("task");
+    let phase = task
+        .get("phase")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    println!("{name}: {}", phase_label(phase));
+    if let Some(worktree) = task.get("worktreePath").and_then(Value::as_str) {
+        println!("worktree: {worktree}");
+    }
+    if let Some(message) = task.get("lastErrorMessage").and_then(Value::as_str) {
+        println!("error: {message}");
+    }
+}
+
 fn print_diff(value: &Value) {
     let patch = value.get("patch").and_then(Value::as_str).unwrap_or("");
     if !patch.is_empty() {
@@ -343,21 +538,6 @@ fn print_diff(value: &Value) {
     }
     if patch.is_empty() && untracked.is_empty() {
         println!("No changes.");
-    }
-}
-
-fn format_event(event: &Value) -> String {
-    let sequence = event.get("sequence").and_then(Value::as_i64).unwrap_or(0);
-    let kind = event.get("kind").and_then(Value::as_str).unwrap_or("event");
-    let detail = event
-        .pointer("/payload/text")
-        .or_else(|| event.pointer("/payload/message"))
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    if detail.is_empty() {
-        format!("[{sequence}] {kind}")
-    } else {
-        format!("[{sequence}] {kind}: {detail}")
     }
 }
 
@@ -385,39 +565,23 @@ fn human_key(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsStr;
+
     use clap::Parser;
 
     use super::*;
 
     #[test]
-    fn parses_named_profile_and_rejects_non_fresh_context() {
-        let cli = Cli::try_parse_from([
-            "coco",
-            "new",
-            "auth",
-            "--base",
-            "main",
-            "--context",
-            "fresh",
-            "--goal",
-            "Implement auth",
-            "--profile",
-            "dev",
-        ]);
-        assert!(cli.is_ok());
+    fn parses_task_preparation_with_an_optional_profile() {
+        let minimal = Cli::try_parse_from(["coco", "new", "auth"]);
+        assert!(minimal.is_ok());
 
-        let invalid = Cli::try_parse_from([
-            "coco",
-            "new",
-            "auth",
-            "--base",
-            "main",
-            "--context",
-            "fork",
-            "--goal",
-            "Implement auth",
-        ]);
-        assert!(invalid.is_err());
+        let configured =
+            Cli::try_parse_from(["coco", "new", "auth", "--base", "main", "--profile", "dev"]);
+        assert!(configured.is_ok());
+
+        assert!(Cli::try_parse_from(["coco", "new", "auth", "--goal", "work"]).is_err());
+        assert!(Cli::try_parse_from(["coco", "new", "auth", "--context", "fresh"]).is_err());
     }
 
     #[test]
@@ -425,5 +589,82 @@ mod tests {
         assert!(Cli::try_parse_from(["coco", "repo", "add"]).is_ok());
         assert!(Cli::try_parse_from(["coco", "repo", "add", "../source"]).is_ok());
         assert!(Cli::try_parse_from(["coco", "init"]).is_err());
+    }
+
+    #[test]
+    fn exposes_status_follow_and_jump_without_the_old_overlapping_commands() {
+        assert!(Cli::try_parse_from(["coco", "status", "auth"]).is_ok());
+        assert!(Cli::try_parse_from(["coco", "status", "auth", "--follow"]).is_ok());
+        assert!(Cli::try_parse_from(["coco", "status", "auth", "--json"]).is_ok());
+        assert!(Cli::try_parse_from(["coco", "status", "auth", "--follow", "--json"]).is_err());
+        assert!(Cli::try_parse_from(["coco", "jump", "auth"]).is_ok());
+        assert!(Cli::try_parse_from(["coco", "show", "auth"]).is_err());
+        assert!(Cli::try_parse_from(["coco", "watch", "auth"]).is_err());
+    }
+
+    #[test]
+    fn presents_stable_user_facing_task_states() {
+        assert_eq!(phase_label("provisioning"), "Preparing worktree");
+        assert_eq!(phase_label("active"), "Working");
+        assert_eq!(phase_label("waiting_for_approval"), "Waiting for approval");
+        assert_eq!(phase_label("idle"), "Ready");
+        assert!(follow_stops_at("waiting_for_input"));
+        assert!(!follow_stops_at("active"));
+    }
+
+    #[tokio::test]
+    async fn builds_an_authenticated_jump_into_the_managed_worktree() {
+        let directory = tempfile::tempdir().unwrap();
+        let worktree = directory.path().join("worktree");
+        std::fs::create_dir(&worktree).unwrap();
+        let paths = CocoPaths {
+            data_dir: directory.path().join("data"),
+            database_path: directory.path().join("coco.db"),
+            socket_path: directory.path().join("cocod.sock"),
+            codex_endpoint_path: directory.path().join("codex-app-server.json"),
+            codex_token_path: directory.path().join("codex-app-server.token"),
+            worktrees_dir: directory.path().join("worktrees"),
+            codex_home: directory.path().join("codex-home"),
+        };
+        std::fs::write(
+            &paths.codex_endpoint_path,
+            r#"{"schemaVersion":1,"url":"ws://127.0.0.1:45123"}"#,
+        )
+        .unwrap();
+        std::fs::write(&paths.codex_token_path, "test-capability\n").unwrap();
+        let response = json!({
+            "task": {
+                "worktreePath": worktree,
+                "codexThreadId": "thread-123"
+            }
+        });
+
+        let target = load_jump_target(&paths, &response).await.unwrap();
+        let command = jump_command(&target, PathBuf::from("/opt/codex"));
+        let command = command.as_std();
+        let arguments = command
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(command.get_program(), OsStr::new("/opt/codex"));
+        assert_eq!(
+            arguments,
+            [
+                "resume",
+                "thread-123",
+                "--remote",
+                "ws://127.0.0.1:45123",
+                "--remote-auth-token-env",
+                "COCO_CODEX_REMOTE_CAPABILITY_TOKEN",
+                "-C",
+                target.worktree.to_str().unwrap(),
+            ]
+        );
+        assert_eq!(command.get_current_dir(), Some(target.worktree.as_path()));
+        assert!(command.get_envs().any(|(name, value)| {
+            name == OsStr::new("COCO_CODEX_REMOTE_CAPABILITY_TOKEN")
+                && value == Some(OsStr::new("test-capability"))
+        }));
     }
 }

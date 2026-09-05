@@ -13,8 +13,10 @@ worktree, while your current checkout stays untouched.
 
 ## What you can do
 
-- start Codex tasks in separate branches and worktrees;
-- follow a task, continue its conversation, and inspect its changes;
+- prepare Codex tasks in separate branches and worktrees without starting
+  them immediately;
+- send work, follow its state, or enter the same conversation in the Codex
+  terminal UI;
 - choose a named Codex profile when a task starts;
 - let MCP-capable applications inspect tasks, with sending disabled by
   default.
@@ -41,12 +43,10 @@ Then, from a clean Git repository with at least one commit:
 
 ```bash
 coco repo add .
-coco new first-task \
-  --base HEAD \
-  --context fresh \
-  --goal "Inspect the project and propose one focused improvement"
-coco watch first-task
-coco diff first-task
+coco new first-task --base HEAD
+coco send first-task "Inspect the project and propose one focused improvement"
+coco status first-task --follow
+coco jump first-task
 ```
 
 Continue with the

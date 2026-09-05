@@ -1,6 +1,6 @@
 ---
 title: Quickstart
-description: Install CoCo and run one Codex task in a separate worktree.
+description: Install CoCo, prepare a separate worktree, and start your first Codex turn.
 ---
 
 ## Before you begin
@@ -45,26 +45,29 @@ coco repo add .
 Adding a repository is safe to repeat. It does not create a commit, branch, or
 worktree.
 
-## Start your first task
+## Prepare your first task
 
 The repository must be clean before starting a task.
 
 ```bash
-coco new first-task \
-  --base HEAD \
-  --context fresh \
-  --goal "Inspect this project and suggest one focused improvement"
+coco new first-task --base HEAD
 ```
 
-CoCo creates a separate worktree and branch, then starts Codex with your goal.
-Your current checkout remains unchanged.
+CoCo creates a separate worktree, branch, and Codex conversation. Your current
+checkout remains unchanged, and no work starts yet.
 
-## Follow and review it
+## Send work and follow it
 
 ```bash
-coco watch first-task
-coco show first-task
-coco diff first-task
+coco send first-task "Inspect this project and suggest one focused improvement"
+coco status first-task --follow
+```
+
+When the task is ready again, enter its worktree and existing conversation in
+the Codex terminal UI:
+
+```bash
+coco jump first-task
 ```
 
 Continue with [Working with tasks](../guides/tasks/) or see the complete

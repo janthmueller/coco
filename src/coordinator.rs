@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use async_trait::async_trait;
 use chrono::Utc;
@@ -141,6 +141,34 @@ pub struct Coordinator {
     worktrees_dir: PathBuf,
     codex_home: PathBuf,
     repository_locks: AsyncMutex<HashMap<String, Arc<AsyncMutex<()>>>>,
+    pending_turn_threads: StdMutex<HashSet<String>>,
+}
+
+struct PendingTurnGuard<'a> {
+    pending: &'a StdMutex<HashSet<String>>,
+    thread_id: String,
+}
+
+impl<'a> PendingTurnGuard<'a> {
+    fn new(pending: &'a StdMutex<HashSet<String>>, thread_id: &str) -> Self {
+        pending
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(thread_id.to_owned());
+        Self {
+            pending,
+            thread_id: thread_id.to_owned(),
+        }
+    }
+}
+
+impl Drop for PendingTurnGuard<'_> {
+    fn drop(&mut self) {
+        self.pending
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&self.thread_id);
+    }
 }
 
 impl Coordinator {
@@ -158,6 +186,7 @@ impl Coordinator {
             worktrees_dir,
             codex_home,
             repository_locks: AsyncMutex::new(HashMap::new()),
+            pending_turn_threads: StdMutex::new(HashSet::new()),
         }
     }
 
@@ -199,7 +228,6 @@ impl Coordinator {
     }
 
     async fn create_task(&self, params: TaskCreateParams) -> Result<Value, CoordinatorError> {
-        validate_non_empty("goal", &params.goal)?;
         validate_non_empty("baseRef", &params.base_ref)?;
         validate_operation_id(&params.operation_id)?;
         let context_mode = ContextMode::parse(&params.context_mode).ok_or_else(|| {
@@ -244,7 +272,6 @@ impl Coordinator {
                 create_operation_id: Some(params.operation_id.clone()),
                 repository_id: repository.id.clone(),
                 name: params.name.clone(),
-                goal: params.goal.trim().to_owned(),
                 context_mode,
                 context: json!({
                     "version": 1,
@@ -307,9 +334,10 @@ impl Coordinator {
             with_effective_thread_settings(loaded_profile.snapshot, &started_thread.response);
         self.store
             .update_task_profile(&task.id, &effective_profile)?;
-        self.store.bind_thread_with_event(
+        let (task, _) = self.store.bind_thread_with_event(
             &task.id,
             TaskPhase::Starting,
+            TaskPhase::Idle,
             &started_thread.id,
             None,
             EventDraft::task(
@@ -318,55 +346,7 @@ impl Coordinator {
                 json!({"threadId": started_thread.id}),
             ),
         )?;
-
-        let initial_operation_id = format!("{}:initial", params.operation_id);
-        let client_message_id = message_fingerprint(&initial_operation_id, &task.id, &params.goal);
-        self.store.append_event(EventDraft {
-            task_id: Some(task.id.clone()),
-            turn_id: None,
-            kind: EventKind::MessageReceived,
-            source: EventSource::Coco,
-            source_method: Some("task.create".to_owned()),
-            occurred_at_ms: None,
-            payload: json!({
-                "clientMessageId": client_message_id,
-                "text": params.goal,
-            }),
-        })?;
-        let prompt = initial_prompt(&task, &repository, &binding.path);
-        let started_turn = match self
-            .worker
-            .start_turn(
-                &started_thread.id,
-                &binding.path,
-                &client_message_id,
-                &prompt,
-            )
-            .await
-        {
-            Ok(turn) => turn,
-            Err(source) => {
-                let error = CoordinatorError::Worker(source);
-                self.mark_task_failed(&task.id, "turn.start", &error, EventSource::Codex);
-                return Err(error);
-            }
-        };
-        let (task, turn, _) = self.store.start_turn_with_event(
-            &task.id,
-            &[TaskPhase::Starting],
-            NewTurn {
-                operation_id: Some(initial_operation_id),
-                client_message_id,
-                codex_turn_id: Some(started_turn.id.clone()),
-                started_at_ms: None,
-            },
-            EventDraft::task(
-                EventKind::TurnStarted,
-                EventSource::Codex,
-                json!({"codexTurnId": started_turn.id}),
-            ),
-        )?;
-        task_and_turn_response(task, &turn)
+        self.task_response(task)
     }
 
     fn list_tasks(&self, params: TaskListParams) -> Result<Value, CoordinatorError> {
@@ -459,6 +439,7 @@ impl Coordinator {
                 "text": params.message,
             }),
         })?;
+        let _pending_turn = PendingTurnGuard::new(&self.pending_turn_threads, thread_id);
         let started = self
             .worker
             .start_turn(thread_id, worktree, &client_message_id, &params.message)
@@ -568,6 +549,12 @@ impl Coordinator {
             debug!(method, "ignoring uncorrelated Codex notification");
             return Ok(());
         };
+        if method == "turn/started" {
+            return self.record_external_turn_started(&task, &params);
+        }
+        if method == "thread/status/changed" {
+            return self.record_thread_status_changed(&task, &params);
+        }
         let turn = self.turn_for_codex_params(&task, &params)?;
         match method {
             "turn/completed" => {
@@ -663,6 +650,105 @@ impl Coordinator {
             }
             _ => {}
         }
+        Ok(())
+    }
+
+    fn record_external_turn_started(&self, task: &Task, params: &Value) -> Result<(), StoreError> {
+        let Some(codex_turn_id) = params.pointer("/turn/id").and_then(Value::as_str) else {
+            warn!(task_id = %task.id, "ignoring turn/started without a turn id");
+            return Ok(());
+        };
+        let pending = task.codex_thread_id.as_deref().is_some_and(|thread_id| {
+            self.pending_turn_threads
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .contains(thread_id)
+        });
+        if self.store.turn_by_codex_id(codex_turn_id)?.is_some() || pending {
+            return Ok(());
+        }
+        if task.phase != TaskPhase::Idle {
+            warn!(
+                task_id = %task.id,
+                phase = task.phase.as_str(),
+                "ignoring an external turn for a task that is not idle"
+            );
+            return Ok(());
+        }
+        self.store.start_turn_with_event(
+            &task.id,
+            &[TaskPhase::Idle],
+            NewTurn {
+                operation_id: None,
+                client_message_id: format!("codex-external:{codex_turn_id}"),
+                codex_turn_id: Some(codex_turn_id.to_owned()),
+                started_at_ms: None,
+            },
+            EventDraft::task(
+                EventKind::TurnStarted,
+                EventSource::Codex,
+                json!({"codexTurnId": codex_turn_id, "origin": "external_client"}),
+            ),
+        )?;
+        Ok(())
+    }
+
+    fn record_thread_status_changed(&self, task: &Task, params: &Value) -> Result<(), StoreError> {
+        let status = params.pointer("/status/type").and_then(Value::as_str);
+        if status != Some("active") {
+            return Ok(());
+        }
+        let flags = params
+            .pointer("/status/activeFlags")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let next = if flags
+            .iter()
+            .any(|flag| flag.as_str() == Some("waitingOnUserInput"))
+        {
+            TaskPhase::WaitingForInput
+        } else if flags
+            .iter()
+            .any(|flag| flag.as_str() == Some("waitingOnApproval"))
+        {
+            TaskPhase::WaitingForApproval
+        } else {
+            TaskPhase::Active
+        };
+        if task.phase == next {
+            return Ok(());
+        }
+        let active_or_waiting = |phase| {
+            matches!(
+                phase,
+                TaskPhase::Active | TaskPhase::WaitingForApproval | TaskPhase::WaitingForInput
+            )
+        };
+        let allowed = active_or_waiting(task.phase) && active_or_waiting(next);
+        if !allowed {
+            return Ok(());
+        }
+        let kind = if next == TaskPhase::Active {
+            EventKind::ApprovalResolved
+        } else {
+            EventKind::ApprovalRequested
+        };
+        self.store.transition_task_with_event(
+            &task.id,
+            task.phase,
+            next,
+            None,
+            EventDraft {
+                task_id: Some(task.id.clone()),
+                turn_id: task.active_turn_id.clone(),
+                kind,
+                source: EventSource::Codex,
+                source_method: Some("thread/status/changed".to_owned()),
+                occurred_at_ms: None,
+                payload: json!({"status": params.get("status")}),
+            },
+        )?;
         Ok(())
     }
 
@@ -930,7 +1016,6 @@ struct TaskCreateParams {
     name: String,
     base_ref: String,
     context_mode: String,
-    goal: String,
     #[serde(default = "default_profile")]
     profile: String,
     operation_id: String,
@@ -1027,7 +1112,6 @@ fn ensure_create_replay_matches(
 ) -> Result<(), CoordinatorError> {
     let matches = existing.repository_id == repository_id
         && existing.name == params.name
-        && existing.goal == params.goal.trim()
         && existing.context_mode == ContextMode::Fresh
         && existing.context.get("baseRef").and_then(Value::as_str)
             == Some(params.base_ref.as_str())
@@ -1037,18 +1121,6 @@ fn ensure_create_replay_matches(
     } else {
         Err(CoordinatorError::IdempotencyConflict)
     }
-}
-
-fn initial_prompt(task: &Task, repository: &Repository, worktree: &Path) -> String {
-    format!(
-        "{}\n\nCoCo task context:\n- task: {}\n- repository: {}\n- worktree: {}\n- branch: {}\n- immutable base: {}\n\nWork only inside the assigned worktree. Preserve unrelated user changes and verify your result before reporting completion.",
-        task.goal,
-        task.name,
-        repository.root_path.display(),
-        worktree.display(),
-        task.branch_name.as_deref().unwrap_or("unknown"),
-        task.base_sha.as_deref().unwrap_or("unknown"),
-    )
 }
 
 fn message_fingerprint(operation_id: &str, task_id: &str, message: &str) -> String {
@@ -1259,7 +1331,6 @@ mod tests {
                 "name": "first-task",
                 "baseRef": "HEAD",
                 "contextMode": "fresh",
-                "goal": "Implement the requested behavior",
                 "profile": "default",
                 "operationId": "create-operation-1",
             })
@@ -1267,7 +1338,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn runs_the_first_vertical_slice_and_replays_operation_ids() {
+    async fn prepares_an_idle_task_without_starting_a_turn_and_replays_operation_ids() {
         let fixture = Fixture::new(FakeWorker::default());
         let repository = fixture.register().await;
 
@@ -1277,43 +1348,44 @@ mod tests {
             .await
             .unwrap();
         let task: Task = serde_json::from_value(created["task"].clone()).unwrap();
-        assert_eq!(task.phase, TaskPhase::Active);
+        assert_eq!(task.phase, TaskPhase::Idle);
         assert_eq!(task.codex_thread_id.as_deref(), Some("thread-1"));
-        assert_eq!(created["codexTurnId"], "turn-1");
+        assert!(created.get("turnId").is_none());
         assert_eq!(task.profile.effective_settings["model"], "gpt-test");
         let worktree = task.worktree_path.as_deref().unwrap();
         assert!(worktree.starts_with(fixture.worktrees.join(&repository.id)));
         assert!(worktree.join("README.md").is_file());
 
         let calls = fixture.worker.calls();
-        assert_eq!(calls.len(), 2);
+        assert_eq!(calls.len(), 1);
         assert!(matches!(
             &calls[0],
             WorkerCall::Thread { cwd, config }
                 if cwd == worktree && config == &json!({})
         ));
-        assert!(matches!(
-            &calls[1],
-            WorkerCall::Turn { thread_id, cwd, message, .. }
-                if thread_id == "thread-1"
-                    && cwd == worktree
-                    && message.contains("Implement the requested behavior")
-                    && message.contains("immutable base")
-        ));
-
         let replay = fixture
             .coordinator
             .dispatch("task.create", fixture.create_params())
             .await
             .unwrap();
         assert_eq!(replay["task"]["id"], task.id);
-        assert_eq!(fixture.worker.calls().len(), 2);
+        assert_eq!(fixture.worker.calls().len(), 1);
 
         let mut conflict = fixture.create_params();
-        conflict["goal"] = Value::String("Different work".to_owned());
+        conflict["baseRef"] = Value::String("different-base".to_owned());
         assert!(matches!(
             fixture.coordinator.dispatch("task.create", conflict).await,
             Err(CoordinatorError::IdempotencyConflict)
+        ));
+
+        let mut unsupported_metadata = fixture.create_params();
+        unsupported_metadata["goal"] = Value::String("legacy metadata".to_owned());
+        assert!(matches!(
+            fixture
+                .coordinator
+                .dispatch("task.create", unsupported_metadata)
+                .await,
+            Err(CoordinatorError::InvalidParams(_))
         ));
 
         let events = fixture.store.events_after(Some(&task.id), 0).unwrap();
@@ -1323,8 +1395,6 @@ mod tests {
                 EventKind::TaskCreated,
                 EventKind::WorktreeCreated,
                 EventKind::AgentStarted,
-                EventKind::MessageReceived,
-                EventKind::TurnStarted,
             ]
         );
     }
@@ -1339,6 +1409,19 @@ mod tests {
             .await
             .unwrap();
         let task: Task = serde_json::from_value(created["task"].clone()).unwrap();
+
+        let first_send = json!({
+            "repositoryPath": fixture.source,
+            "task": task.name,
+            "message": "Implement the requested behavior",
+            "operationId": "send-operation-initial",
+        });
+        let first_started = fixture
+            .coordinator
+            .dispatch("turn.start", first_send)
+            .await
+            .unwrap();
+        assert_eq!(first_started["codexTurnId"], "turn-1");
 
         fixture
             .coordinator
@@ -1424,6 +1507,110 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tracks_turns_started_by_an_external_tui_and_runtime_waiting_states() {
+        let fixture = Fixture::new(FakeWorker::default());
+        fixture.register().await;
+        let created = fixture
+            .coordinator
+            .dispatch("task.create", fixture.create_params())
+            .await
+            .unwrap();
+        let task: Task = serde_json::from_value(created["task"].clone()).unwrap();
+        let started = CodexEvent::Notification {
+            method: "turn/started".to_owned(),
+            params: json!({
+                "threadId": "thread-1",
+                "turn": {"id": "external-turn-1", "status": "inProgress"},
+            }),
+        };
+
+        {
+            let _pending =
+                PendingTurnGuard::new(&fixture.coordinator.pending_turn_threads, "thread-1");
+            fixture
+                .coordinator
+                .record_codex_event(started.clone())
+                .unwrap();
+            assert_eq!(
+                fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
+                TaskPhase::Idle
+            );
+        }
+
+        fixture.coordinator.record_codex_event(started).unwrap();
+        let active = fixture.store.task_by_id(&task.id).unwrap().unwrap();
+        assert_eq!(active.phase, TaskPhase::Active);
+        assert!(active.active_turn_id.is_some());
+        assert!(
+            fixture
+                .store
+                .turn_by_codex_id("external-turn-1")
+                .unwrap()
+                .is_some()
+        );
+
+        fixture
+            .coordinator
+            .record_codex_event(CodexEvent::Notification {
+                method: "thread/status/changed".to_owned(),
+                params: json!({
+                    "threadId": "thread-1",
+                    "status": {"type": "active", "activeFlags": ["waitingOnUserInput"]},
+                }),
+            })
+            .unwrap();
+        assert_eq!(
+            fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
+            TaskPhase::WaitingForInput
+        );
+
+        fixture
+            .coordinator
+            .record_codex_event(CodexEvent::Notification {
+                method: "thread/status/changed".to_owned(),
+                params: json!({
+                    "threadId": "thread-1",
+                    "status": {"type": "active", "activeFlags": ["waitingOnApproval"]},
+                }),
+            })
+            .unwrap();
+        assert_eq!(
+            fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
+            TaskPhase::WaitingForApproval
+        );
+
+        fixture
+            .coordinator
+            .record_codex_event(CodexEvent::Notification {
+                method: "thread/status/changed".to_owned(),
+                params: json!({
+                    "threadId": "thread-1",
+                    "status": {"type": "active", "activeFlags": []},
+                }),
+            })
+            .unwrap();
+        assert_eq!(
+            fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
+            TaskPhase::Active
+        );
+
+        fixture
+            .coordinator
+            .record_codex_event(CodexEvent::Notification {
+                method: "turn/completed".to_owned(),
+                params: json!({
+                    "threadId": "thread-1",
+                    "turn": {"id": "external-turn-1", "status": "completed"},
+                }),
+            })
+            .unwrap();
+        assert_eq!(
+            fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
+            TaskPhase::Idle
+        );
+    }
+
+    #[tokio::test]
     async fn preserves_the_worktree_and_marks_the_task_failed_after_worker_failure() {
         let fixture = Fixture::new(FakeWorker::failing_thread_start());
         let repository = fixture.register().await;
@@ -1463,7 +1650,7 @@ mod tests {
             .coordinator
             .dispatch(
                 "task.list",
-                json!({"repositoryPath": fixture.source, "phases": ["active"]}),
+                json!({"repositoryPath": fixture.source, "phases": ["idle"]}),
             )
             .await
             .unwrap();
@@ -1492,7 +1679,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(events["events"].as_array().unwrap().len(), 5);
+        assert_eq!(events["events"].as_array().unwrap().len(), 3);
 
         let diff = fixture
             .coordinator

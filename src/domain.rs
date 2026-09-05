@@ -148,7 +148,6 @@ pub struct Task {
     pub create_operation_id: Option<String>,
     pub repository_id: String,
     pub name: String,
-    pub goal: String,
     pub context_mode: ContextMode,
     pub context: Value,
     pub profile: ProfileSnapshot,

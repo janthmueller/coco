@@ -5,30 +5,30 @@ description: The CoCo commands available in the current preview.
 
 Run `coco --help` or `coco COMMAND --help` for the exact options in your build.
 
-| Command                      | Purpose                                |
-| ---------------------------- | -------------------------------------- |
-| `coco repo add [path]`       | Add a Git repository to CoCo           |
-| `coco new <name> …`          | Start an isolated Codex task           |
-| `coco ls`                    | List tasks in the current repository   |
-| `coco show <task>`           | Show one task and its worktree path    |
-| `coco watch <task>`          | Follow the current turn until it stops |
-| `coco send <task> <message>` | Continue an idle task                  |
-| `coco diff <task>`           | Show changes made by a task            |
-| `coco mcp serve …`           | Expose CoCo to an MCP host             |
+| Command                       | Purpose                                       |
+| ----------------------------- | --------------------------------------------- |
+| `coco repo add [path]`        | Add a Git repository to CoCo                  |
+| `coco new <name> …`           | Prepare an isolated worktree and conversation |
+| `coco ls`                     | List tasks in the current repository          |
+| `coco status <task>`          | Show one task's current state                 |
+| `coco status <task> --follow` | Follow a task until it pauses or finishes     |
+| `coco send <task> <message>`  | Start the first or next turn                  |
+| `coco jump <task>`            | Open the task in the Codex terminal UI        |
+| `coco diff <task>`            | Show changes made by a task                   |
+| `coco mcp serve …`            | Expose CoCo to an MCP host                    |
 
 ## Create a task
 
 ```bash
 coco new <name> \
-  --base <git-ref> \
-  --context fresh \
-  --goal <text> \
+  [--base <git-ref>] \
   [--profile <name>]
 ```
 
 Names contain lowercase letters, numbers, and hyphens. `--base` accepts a Git
-reference such as `HEAD`, `main`, or a commit hash. The repository must be
-clean.
+reference such as `HEAD`, `main`, or a commit hash and defaults to `HEAD`. The
+repository must be clean. Preparing the task does not send a message or start a
+turn.
 
 ## Machine-readable output
 
@@ -36,9 +36,10 @@ Use `--json` with task listing and inspection:
 
 ```bash
 coco ls --json
-coco show first-task --json
-coco watch first-task --json
+coco status first-task --json
 ```
+
+`status --follow` is human-oriented and cannot be combined with `--json`.
 
 ## MCP
 

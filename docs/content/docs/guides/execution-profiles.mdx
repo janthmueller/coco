@@ -1,6 +1,6 @@
 ---
 title: Codex profiles
-description: Start a task with a named set of Codex settings.
+description: Prepare a task with a named set of Codex settings.
 ---
 
 Use a profile when one task needs different Codex settings, such as a different
@@ -24,9 +24,9 @@ Use keys supported by your installed Codex version.
 ```bash
 coco new refactor-cache \
   --base main \
-  --context fresh \
-  --goal "Refactor the cache and run its tests" \
   --profile dev
+
+coco send refactor-cache "Refactor the cache and run its tests"
 ```
 
 Without `--profile`, CoCo uses Codex's default configuration. The chosen

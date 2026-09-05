@@ -14,17 +14,15 @@ repository while your own checkout stays untouched.
 ```bash
 coco repo add .
 
-coco new fix-login \
-  --base main \
-  --context fresh \
-  --goal "Fix the login redirect and run the relevant tests"
+coco new fix-login --base main
+coco send fix-login "Fix the login redirect and run the relevant tests"
 
-coco watch fix-login
-coco diff fix-login
+coco status fix-login --follow
 ```
 
-CoCo creates `coco/fix-login` in a separate checkout, starts Codex there, and
-lets you follow the work or send another message later.
+`new` prepares `coco/fix-login`, its separate checkout, and its Codex
+conversation. Nothing runs until `send`. You can later use `jump` to open that
+same conversation in the Codex terminal UI.
 
 <Callout type="warn" title="Early preview">
   CoCo currently installs from source and is intended for supervised local use.
@@ -39,12 +37,12 @@ lets you follow the work or send another message later.
   />
   <Card
     title="Work with tasks"
-    description="Start, follow, continue, and review Codex work."
+    description="Prepare, start, follow, and enter Codex work."
     href="/docs/guides/tasks"
   />
   <Card
     title="Choose a Codex profile"
-    description="Apply different Codex settings when a task starts."
+    description="Apply different Codex settings when a task is prepared."
     href="/docs/guides/execution-profiles"
   />
   <Card

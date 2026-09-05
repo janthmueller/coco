@@ -21,8 +21,9 @@ status: draft
 
 ### Confirmed
 
-- Rust, Tokio, SQLite, native Git worktrees, and the Codex App Server over
-  `stdio` are fixed v0 choices.
+- Rust, Tokio, SQLite, native Git worktrees, and one daemon-owned Codex App
+  Server are fixed v0 choices. The daemon and interactive Codex TUI share its
+  capability-token-protected IPv4-loopback WebSocket.
 - `cocod` owns orchestration and policy. CLI, CoCo's local MCP server, and later
   TUI/web clients are equal presentation/control adapters only.
 - CoCo's v0 MCP server uses local `stdio` and delegates every tool to `cocod`;
@@ -32,9 +33,12 @@ status: draft
 
 ### Assumed for this draft
 
-- One OS user runs one daemon and one App Server child on Linux/macOS.
-- Client adapters use a versioned request/event protocol over a Unix domain
-  socket. The MCP adapter separately speaks MCP over stdio to its host.
+- One OS user runs one daemon and one App Server child. The current build runs
+  on Linux/macOS; Windows support requires the named-pipe backend described
+  below.
+- Client adapters use one request/event protocol over OS-local IPC: a Unix
+  domain socket on Linux/macOS and, once implemented, a Windows named pipe.
+  The MCP adapter separately speaks MCP over stdio to its host.
 - The default Codex configuration or a named `[profiles.<name>]` overlay is
   snapshotted per task; only `fresh` context is executable in v0.
 
@@ -54,33 +58,32 @@ status: draft
 
 ```text
  human / scripts --> coco CLI -------------------------+
- TUI (later) ------------------------------------------|
- Web (later) ------------------------------------------+-- local RPC --> cocod
+ Web/TUI adapters (later) -----------------------------+-- local RPC --> cocod
  MCP host <-- stdio --> coco mcp adapter --------------+                  |
                                                                           |
                               +------------------+-------------------------+
                               |                  |                         |
                               v                  v                         v
                          SQLite store       Git adapter              Codex adapter
-                                                                    | stdio
-                                                                    v
-                                                              codex app-server
-                                                                    |
-                                                                    v
-                                                       native worker MCP clients
-                                                (catalog/bindings are post-v0)
+                                                                         |
+                                      authenticated ws://127.0.0.1:<port>
+                                              +--------------------------+
+                                              |                          |
+                                              v                          v
+                                      codex app-server          official Codex TUI
+                                                                  (`coco jump`)
 ```
 
 Only `cocod` may mutate managed state, create worktrees, or own the App Server
-connection. CLI, TUI, Web, and MCP are equal in that none may bypass daemon use
-cases. SQLite is the durable source of CoCo metadata and normalized events;
-Git is authoritative for files, refs, and worktree condition; the App Server
-is authoritative for Codex conversation and runtime objects. The daemon builds
-a projection without pretending one source replaces another.
+process. CLI, Web, and MCP do not bypass daemon use cases. `coco jump` is the
+narrow exception at the presentation edge: it resolves the task through local
+RPC, then attaches the official Codex TUI directly to the existing App Server
+and thread. SQLite is the durable source of CoCo metadata and normalized
+events; Git is authoritative for files, refs, and worktree condition; the App
+Server is authoritative for Codex conversation and runtime objects.
 
-The two `stdio` links serve different roles: CoCo is an MCP server toward an
-external MCP host, while CoCo is an App Server client toward Codex. No payload
-is blindly proxied between those protocols.
+CoCo's MCP `stdio` surface and its authenticated Codex WebSocket serve
+different roles. No payload is blindly proxied between those protocols.
 
 Worker-facing MCP selection is a third, separate concern. CoCo will own its
 future catalog and immutable per-thread bindings while initially projecting
@@ -138,8 +141,8 @@ Clock / IdGenerator
   injectable sources for deterministic tests and idempotency
 ```
 
-Core use cases are `RegisterRepository`, `CreateTask`, `ListTasks`, `ShowTask`,
-`SendTurn`, `WatchTask`, `DiffTask`, `AuditControlCall`, and the required
+Core use cases are `RegisterRepository`, `CreateTask`, `ListTasks`, `StatusTask`,
+`SendTurn`, `FollowTask`, `DiffTask`, `AuditControlCall`, and the required
 approval-resolution use case once its CLI spelling is confirmed. MCP tools call
 these same use cases through daemon RPC rather than importing them directly.
 
@@ -148,30 +151,37 @@ these same use cases through daemon RPC rather than importing them directly.
 Use XDG locations on Unix, with standard fallbacks:
 
 ```text
-${XDG_DATA_HOME:-~/.local/share}/coco/worktrees/<repository-id>/<task-id>/
-${XDG_STATE_HOME:-~/.local/state}/coco/coco.sqlite3
-${XDG_STATE_HOME:-~/.local/state}/coco/logs/
+${XDG_DATA_HOME:-~/.local/share}/coco/worktrees/<repository-id>/<task-name>/
+${XDG_DATA_HOME:-~/.local/share}/coco/coco.db
+${XDG_DATA_HOME:-~/.local/share}/coco/cocod.lock
 ${XDG_RUNTIME_DIR}/coco/cocod.sock
+${XDG_RUNTIME_DIR}/coco/codex-app-server.json
+${XDG_RUNTIME_DIR}/coco/codex-app-server.token
 ```
 
-Create state/data directories as `0700`, the database as `0600`, and the
-socket with user-only access. If `XDG_RUNTIME_DIR` is unavailable, a fallback
+Create state/data directories as `0700`; create the daemon lock, database,
+socket, App Server endpoint descriptor, and capability token with user-only
+access. The daemon acquires the lock before opening SQLite or starting Codex so
+a second process cannot replace shared runtime files. If
+`XDG_RUNTIME_DIR` is unavailable, a fallback
 must be explicitly owned, mode-checked, short enough for Unix socket path
 limits, and must not accept other users. Do not put the socket in a broadly
 writable directory without an owned `0700` parent.
 
 Canonicalize registered repository and generated worktree paths with
-filesystem real paths after creation. Never derive a filesystem path directly
-from an unvalidated task name; stable opaque repository/task IDs form the
-directory components.
+filesystem real paths after creation. Never derive a filesystem path from an
+unvalidated task name; the opaque repository ID and strictly validated task
+name form the directory components.
 
 ## Client-to-daemon protocol
 
 ### Transport
 
-CLI and MCP adapter connect to a user-scoped Unix domain socket. The daemon
-accepts a newline-delimited envelope protocol; transport framing is independent
-of both MCP and the Codex App Server protocol.
+CLI and MCP adapter currently connect to a user-scoped Unix domain socket. The
+transport boundary must gain a Windows named-pipe implementation without
+changing request methods or coordinator behavior. The daemon accepts a
+newline-delimited envelope protocol; transport framing is independent of both
+MCP and the Codex App Server protocol.
 
 Request:
 
@@ -234,9 +244,9 @@ Methods for the handed-off commands are:
 | `repository.register` | `coco repo add` | not exposed |
 | `task.create` | `coco new` | not exposed in v0 |
 | `task.list` | `coco ls` | `tasks.list` |
-| `task.get` | `coco show` | `agents.status` |
+| `task.get` | `coco status` and task resolution for `coco jump` | `agents.status` |
 | `turn.start` | `coco send` | `agents.send` when explicitly enabled |
-| `event.list` | `coco watch` polling | not exposed in v0 |
+| `event.list` | `coco status --follow` polling | not exposed in v0 |
 | `task.diff` | `coco diff` | `changes.diff` |
 | `approval.respond` | Required by safety contract; CLI spelling open | not exposed in v0 |
 
@@ -363,7 +373,7 @@ its operation ID for a different root is detected.
 | `create_operation_id` | unique foreign key to the creation operation |
 | `repository_id` | required foreign key |
 | `name` | required; unique with `repository_id` |
-| `goal` | required non-empty text |
+| `legacy_goal` | compatibility-only copy from the prerelease v1 schema; omitted from the domain/API and never written for new tasks |
 | `context_mode` | `fresh`, with `fork` and `handoff` reserved |
 | `context_json` | versioned context provenance, not conversation history |
 | `profile_json` | versioned immutable effective profile snapshot |
@@ -434,6 +444,24 @@ Enforce uniqueness across App Server instance and request ID. On connection
 loss unresolved callbacks become `orphaned`; a response must never be sent to
 a new process generation under a recycled wire ID.
 
+### Deferred task annotations and external references
+
+Do not expose a generic `goal` or `metadata` field merely to hold unrelated
+values. A later task-annotation design may cover human notes and structured
+references such as tickets, pull requests, or URLs, but it first needs explicit
+contracts for:
+
+- typed versus user-defined keys and validation of links or identifiers;
+- mutation, history, audit, and conflict behavior;
+- privacy, redaction, search, and presentation across CLI and future clients;
+- copy/inheritance behavior for fork, handoff, and detached-worktree promotion;
+- whether a value is ever projected into Codex context (default: never).
+
+Until that design exists, task creation accepts only operational fields. A
+prerelease v1 `goal` column is migrated to a hidden `legacy_goal` compatibility
+column so existing local data is not destroyed, but it is not part of the task
+model or a foundation for the future schema.
+
 ### Schema additions to avoid initially
 
 Do not add profile CRUD, A2A messages, task dependencies, merge requests,
@@ -463,7 +491,7 @@ event ID/cursor; it must never observe a committed state without its event.
 | --- | --- | --- | --- |
 | absent | accepted `task.create` | `provisioning` | `task.created` |
 | `provisioning` | worktree verified | `starting` | `worktree.created` |
-| `starting` | first turn accepted/started | `active` | `agent.started`, `turn.started` |
+| `starting` | thread bound and task prepared | `idle` | `agent.started` |
 | `active` | approval flag/request | `waiting_for_approval` | `approval.requested` |
 | `active` | user-input flag/request | `waiting_for_input` | pending request event |
 | waiting | one request resolved, other waits remain | waiting | `approval.resolved` or input response |
@@ -471,7 +499,7 @@ event ID/cursor; it must never observe a committed state without its event.
 | `active` or waiting | successful turn completion | `idle` | `turn.completed` |
 | `active` or waiting | failed turn/system error | `failed` | `agent.failed` |
 | `active` or waiting | interruption/connection loss after reconciliation | `interrupted` | `turn.completed` with interrupted status |
-| `idle` or `interrupted` | accepted `turn.start` | `active` | `message.received`, then `turn.started` |
+| `idle` | accepted `turn.start` from CLI, MCP, or attached TUI | `active` | `message.received` when available, then `turn.started` |
 | any creation stage | unrecoverable saga error | `failed` | `agent.failed` with stage/artifacts |
 
 `completed` has no incoming v0 transition. Do not treat `turn/completed` as
@@ -558,18 +586,30 @@ update does not leak method-specific payloads into core or CLI types.
 
 The local 0.147.0 observation supports this minimal sequence:
 
-1. Spawn `codex app-server --listen stdio://` with stdin/stdout reserved for
-   protocol and stderr captured as bounded diagnostics.
-2. Send `initialize` with CoCo client identity/capabilities; await its response.
-3. Send the `initialized` client notification before other operations.
-4. Send `thread/start` with `cwd`, model/profile values, approval policy,
+1. Generate a high-entropy capability token in a user-only runtime file.
+2. Reserve an IPv4-loopback port and spawn `codex app-server --listen
+   ws://127.0.0.1:<port> --ws-auth capability-token --ws-token-file <path>`,
+   with stdout closed and stderr captured as bounded diagnostics.
+3. Connect with `Authorization: Bearer <token>`, send `initialize`, await its
+   response, and send the `initialized` notification.
+4. Publish the selected loopback URL in a separate user-only descriptor only
+   after initialization succeeds. Never persist the token in SQLite or task
+   metadata.
+5. Send `thread/start` with `cwd`, model/profile values, approval policy,
    sandbox mode, instructions, and `ephemeral: false`.
-5. Verify the returned thread ID and canonical returned `cwd`, then persist the
-   binding.
-6. Send `turn/start` with thread ID, text input, client message ID, the same
-   canonical `cwd`, and effective turn sandbox/profile overrides.
-7. Correlate responses, notifications, and server-initiated requests by the
+6. Verify the returned thread ID and canonical returned `cwd`, then persist the
+   binding and mark the prepared task `idle`.
+7. On an explicit `send`, issue `turn/start` with thread ID, text input, client
+   message ID, the same canonical `cwd`, and effective turn overrides.
+8. Correlate responses, notifications, and server-initiated requests by the
    generated protocol fields; map only understood semantics into CoCo events.
+
+`coco jump` reads the endpoint descriptor and token after resolving the task
+through local RPC, then launches `codex resume <thread-id> --remote <url>
+--remote-auth-token-env <name> -C <worktree>`. The token is supplied only in
+the child environment. Because Codex currently documents WebSocket App Server
+transport as experimental, releases must pin or compatibility-test the CLI
+surface.
 
 On daemon recovery use `thread/resume` by stored thread ID, supplying and then
 verifying the stored `cwd` and profile overrides. Never accept a resumed thread
@@ -584,18 +624,20 @@ whose ID or canonical cwd conflicts with the task record.
 | `turn/started` | bind turn ID; `turn.started` |
 | `turn/plan/updated` | `plan.updated` |
 | `turn/diff/updated` | `diff.updated`; Git remains authoritative for `coco diff` |
-| `item/agentMessage/delta` | transient watcher output |
+| `item/agentMessage/delta` | optional transient follow output |
 | completed agent `item/completed` | durable `agent.message.completed` |
 | `turn/completed` | update turn/task phase; `turn.completed` or `agent.failed` |
 | `error` / system-error status | sanitized `agent.failed` when terminal |
 | approval server requests | persist pending request, then `approval.requested` |
 | user-input server request | persist pending input and wait reason |
 
-App Server notification emission can race a request response. The adapter must
-buffer a small bounded set of unmapped thread/turn notifications until the
-request establishes their CoCo binding, then drain them in source order. A
-buffer overflow or uncorrelatable state is a protocol error, not a reason to
-attach events to the most recent task.
+App Server notification emission can race a request response. For turns
+started through CoCo, an in-memory pending-thread marker prevents the
+`turn/started` notification from being mistaken for an external TUI turn until
+the response is persisted. A `turn/started` received outside such an operation
+creates the local turn binding for an idle task, allowing `status` to project
+work initiated in `jump`. Uncorrelated notifications are ignored and logged;
+they are never attached to the most recent task by guesswork.
 
 ### Sandbox and approvals
 
@@ -617,8 +659,9 @@ fabricating a denial response to a dead callback.
 
 ## Event routing
 
-The first executable slice exposes cursor-based `event.list`; `coco watch`
-polls it and therefore loses no durable event across reconnects. A later live
+The first executable slice exposes cursor-based `event.list`; `coco status
+--follow` polls it and therefore loses no durable lifecycle event across
+reconnects. A later live
 subscription transport may add an in-memory publisher, but must perform a
 race-free handoff:
 
@@ -645,10 +688,8 @@ CLI             cocod              SQLite             Git          App Server
  |               | bind worktree --->|                 |                |
  |               |------------------------------------ thread/start --->|
  |               |<----------------------------------- thread id --------|
- |               | bind thread ----->|                 |                |
- |               |-------------------------------------- turn/start ---->|
- |               |<----------------------------------- turn accepted ----|
- |<--------------| result             |                 |                |
+ |               | bind idle task --->|                 |                |
+ |<--------------| prepared result     |                 |                |
 ```
 
 The diagram's Git arrow ends at Git, not the App Server; visual alignment is
@@ -660,7 +701,7 @@ Compensation is stateful, not destructive:
 - before a worktree exists, mark the task failed with stage/error;
 - after worktree creation, preserve branch/path and record them;
 - after thread creation, persist the thread ID whenever known and mark the
-  task failed if turn start fails;
+  task failed if binding the prepared idle state fails;
 - on an uncertain App Server response, reconcile by operation/thread metadata
   where supported; never blindly issue a second thread start.
 
@@ -670,13 +711,14 @@ Daemon startup order:
 
 1. Acquire a user-scoped singleton lock.
 2. Secure and open SQLite; run migrations.
-3. Start/initialize the App Server and begin draining all streams.
+3. Start/initialize the authenticated loopback App Server, publish its private
+   endpoint/token runtime files, and begin draining all events.
 4. Mark old process-generation pending requests orphaned.
 5. Reconcile nonterminal tasks against worktree bindings and App Server thread
    state before accepting mutating RPCs for those tasks.
 6. Bind the local CLI socket and report ready.
 
-Idle threads can be resumed lazily before `send`, provided `show` labels Codex
+Idle threads can be resumed lazily before `send`, provided `status` labels Codex
 connectivity truthfully. Tasks with a previously active turn become
 `interrupted` unless `thread/resume` proves a more precise terminal status.
 Recovery never translates absence of evidence into completion.
@@ -693,7 +735,7 @@ process owned by this daemon. It does not delete worktrees or branches.
 - A task-scoped mutex and compare-and-set phase update permit only one active
   turn.
 - The App Server adapter multiplexes RPC requests with unique wire IDs and has
-  one continuous stdout reader; callers never read the child stream directly.
+  one continuous WebSocket reader; callers never read the transport directly.
 - SQLite event sequence defines durable order. Codex source timestamps are
   metadata and do not override receipt/commit ordering.
 
@@ -730,13 +772,13 @@ Each step remains runnable and testable:
 3. **Git registration:** implement `coco repo add`, repository resolution, dirty and
    base checks, temporary-repository integration tests.
 4. **First vertical proof:** implement `coco new` through worktree creation,
-   App Server initialization, thread/turn start, binding persistence, event
-   display, and failure injection. This is the handoff's smallest required
-   executable slice.
-5. **Observation:** implement `ls`, `show`, JSON projections, durable event
-   replay/live `watch`, recovery reconciliation, and slow-subscriber behavior.
-6. **Continued interaction:** implement idempotent `send`, task concurrency,
-   App Server resume, sequential-turn and restart tests.
+   App Server initialization, thread preparation, idle binding persistence,
+   status display, and failure injection.
+5. **Observation:** implement `ls`, one-shot/JSON `status`, durable event
+   polling with `status --follow`, and recovery reconciliation.
+6. **Continued interaction:** implement idempotent first/later `send`, shared
+   App Server `jump`, externally started turn projection, task concurrency,
+   sequential-turn tests, and later App Server resume after restart.
 7. **Git inspection:** implement full status facets and `diff`, including
    untracked reporting and bounded output.
 8. **MCP adapter:** implement local stdio serving, repository-scoped read-only
@@ -763,7 +805,7 @@ v0 rather than the initial proof slice:
    and the minimum sandbox roots if so.
 3. Exact Codex CLI version and compatibility range to pin in the
    development/release toolchain.
-4. Whether Unix-only v0 is acceptable or a Windows named-pipe adapter is a v0
-   release requirement.
+4. When the selected Windows named-pipe local-IPC backend and Windows CI become
+   release requirements; the cross-platform transport shape itself is settled.
 5. Whether operator prompt text is duplicated in CoCo's audit DB or retained
    only in Codex conversation history; the draft defaults to metadata only.

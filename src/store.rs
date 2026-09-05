@@ -64,7 +64,6 @@ pub struct NewTask {
     pub create_operation_id: Option<String>,
     pub repository_id: String,
     pub name: String,
-    pub goal: String,
     pub context_mode: ContextMode,
     pub context: Value,
     pub profile: ProfileSnapshot,
@@ -236,20 +235,19 @@ impl Store {
             .map(str::to_owned);
         transaction.execute(
             "INSERT INTO tasks (
-                id, create_operation_id, repository_id, name, goal, context_mode,
+                id, create_operation_id, repository_id, name, context_mode,
                 context_json, profile_json, phase, branch_name, base_sha, worktree_path,
                 codex_thread_id, parent_thread_id, active_turn_id, last_error_code,
                 last_error_message, created_at_ms, updated_at_ms, completed_at_ms
              ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'provisioning', ?9, ?10, ?11,
-                NULL, NULL, NULL, NULL, NULL, ?12, ?12, NULL
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, 'provisioning', ?8, ?9, ?10,
+                NULL, NULL, NULL, NULL, NULL, ?11, ?11, NULL
              )",
             params![
                 task_id,
                 input.create_operation_id,
                 input.repository_id,
                 input.name,
-                input.goal,
                 input.context_mode.as_str(),
                 context_json,
                 profile_json,
@@ -319,6 +317,7 @@ impl Store {
         &self,
         task_id: &str,
         expected: TaskPhase,
+        next: TaskPhase,
         thread_id: &str,
         parent_thread_id: Option<&str>,
         mut event: EventDraft,
@@ -327,9 +326,15 @@ impl Store {
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         assert_task_phase(&transaction, task_id, &[expected])?;
         transaction.execute(
-            "UPDATE tasks SET codex_thread_id = ?1, parent_thread_id = ?2,
-                updated_at_ms = ?3 WHERE id = ?4",
-            params![thread_id, parent_thread_id, now_ms(), task_id],
+            "UPDATE tasks SET codex_thread_id = ?1, parent_thread_id = ?2, phase = ?3,
+                updated_at_ms = ?4 WHERE id = ?5",
+            params![
+                thread_id,
+                parent_thread_id,
+                next.as_str(),
+                now_ms(),
+                task_id
+            ],
         )?;
         event.task_id = Some(task_id.to_owned());
         let event = insert_event(&transaction, event)?;
@@ -728,7 +733,7 @@ impl Store {
     }
 }
 
-const TASK_SELECT: &str = "SELECT id, create_operation_id, repository_id, name, goal,
+const TASK_SELECT: &str = "SELECT id, create_operation_id, repository_id, name,
     context_mode, context_json, profile_json, phase, branch_name, base_sha, worktree_path,
     codex_thread_id, parent_thread_id, active_turn_id, last_error_code, last_error_message,
     created_at_ms, updated_at_ms, completed_at_ms FROM tasks";
@@ -744,11 +749,14 @@ const AUDIT_SELECT: &str = "SELECT sequence, id, source, action, task_id, operat
 
 fn migrate(connection: &Connection) -> Result<(), StoreError> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if version > 1 {
+    if version > 2 {
         return Err(StoreError::UnsupportedSchema(version));
     }
-    if version == 1 {
+    if version == 2 {
         return Ok(());
+    }
+    if version == 1 {
+        return migrate_retired_task_goal(connection);
     }
     connection.execute_batch(
         "BEGIN IMMEDIATE;
@@ -766,7 +774,7 @@ fn migrate(connection: &Connection) -> Result<(), StoreError> {
             create_operation_id TEXT UNIQUE,
             repository_id TEXT NOT NULL REFERENCES repositories(id),
             name TEXT NOT NULL,
-            goal TEXT NOT NULL CHECK (length(trim(goal)) > 0),
+            legacy_goal TEXT,
             context_mode TEXT NOT NULL CHECK (context_mode IN ('fresh', 'fork', 'handoff')),
             context_json TEXT NOT NULL CHECK (json_valid(context_json)),
             profile_json TEXT NOT NULL CHECK (json_valid(profile_json)),
@@ -829,9 +837,65 @@ fn migrate(connection: &Connection) -> Result<(), StoreError> {
          );
          CREATE INDEX IF NOT EXISTS audit_task_sequence_idx
             ON audit_events(task_id, sequence);
-         PRAGMA user_version = 1;
+         PRAGMA user_version = 2;
          COMMIT;",
     )?;
+    Ok(())
+}
+
+fn migrate_retired_task_goal(connection: &Connection) -> Result<(), StoreError> {
+    connection.pragma_update(None, "foreign_keys", false)?;
+    let migration = connection.execute_batch(
+        "BEGIN IMMEDIATE;
+         CREATE TABLE tasks_v2 (
+            id TEXT PRIMARY KEY,
+            create_operation_id TEXT UNIQUE,
+            repository_id TEXT NOT NULL REFERENCES repositories(id),
+            name TEXT NOT NULL,
+            legacy_goal TEXT,
+            context_mode TEXT NOT NULL CHECK (context_mode IN ('fresh', 'fork', 'handoff')),
+            context_json TEXT NOT NULL CHECK (json_valid(context_json)),
+            profile_json TEXT NOT NULL CHECK (json_valid(profile_json)),
+            phase TEXT NOT NULL CHECK (phase IN (
+                'provisioning', 'starting', 'active', 'waiting_for_approval',
+                'waiting_for_input', 'idle', 'completed', 'failed', 'interrupted'
+            )),
+            branch_name TEXT,
+            base_sha TEXT,
+            worktree_path TEXT UNIQUE,
+            codex_thread_id TEXT UNIQUE,
+            parent_thread_id TEXT,
+            active_turn_id TEXT,
+            last_error_code TEXT,
+            last_error_message TEXT,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL,
+            completed_at_ms INTEGER,
+            UNIQUE(repository_id, name),
+            UNIQUE(repository_id, branch_name)
+         );
+         INSERT INTO tasks_v2 (
+            id, create_operation_id, repository_id, name, legacy_goal, context_mode,
+            context_json, profile_json, phase, branch_name, base_sha, worktree_path,
+            codex_thread_id, parent_thread_id, active_turn_id, last_error_code,
+            last_error_message, created_at_ms, updated_at_ms, completed_at_ms
+         ) SELECT
+            id, create_operation_id, repository_id, name, goal, context_mode,
+            context_json, profile_json, phase, branch_name, base_sha, worktree_path,
+            codex_thread_id, parent_thread_id, active_turn_id, last_error_code,
+            last_error_message, created_at_ms, updated_at_ms, completed_at_ms
+         FROM tasks;
+         DROP TABLE tasks;
+         ALTER TABLE tasks_v2 RENAME TO tasks;
+         PRAGMA user_version = 2;
+         COMMIT;",
+    );
+    if migration.is_err() {
+        let _ = connection.execute_batch("ROLLBACK;");
+    }
+    let foreign_keys = connection.pragma_update(None, "foreign_keys", true);
+    migration?;
+    foreign_keys?;
     Ok(())
 }
 
@@ -1025,30 +1089,29 @@ fn map_repository(row: &Row<'_>) -> rusqlite::Result<Repository> {
 }
 
 fn map_task(row: &Row<'_>) -> rusqlite::Result<Task> {
-    let context_mode: String = row.get(5)?;
-    let phase: String = row.get(8)?;
+    let context_mode: String = row.get(4)?;
+    let phase: String = row.get(7)?;
     Ok(Task {
         id: row.get(0)?,
         create_operation_id: row.get(1)?,
         repository_id: row.get(2)?,
         name: row.get(3)?,
-        goal: row.get(4)?,
         context_mode: ContextMode::parse(&context_mode)
-            .ok_or_else(|| invalid_value(5, "context_mode", &context_mode))?,
-        context: json_from_column(row, 6)?,
-        profile: json_from_column(row, 7)?,
-        phase: TaskPhase::parse(&phase).ok_or_else(|| invalid_value(8, "phase", &phase))?,
-        branch_name: row.get(9)?,
-        base_sha: row.get(10)?,
-        worktree_path: row.get::<_, Option<String>>(11)?.map(PathBuf::from),
-        codex_thread_id: row.get(12)?,
-        parent_thread_id: row.get(13)?,
-        active_turn_id: row.get(14)?,
-        last_error_code: row.get(15)?,
-        last_error_message: row.get(16)?,
-        created_at_ms: row.get(17)?,
-        updated_at_ms: row.get(18)?,
-        completed_at_ms: row.get(19)?,
+            .ok_or_else(|| invalid_value(4, "context_mode", &context_mode))?,
+        context: json_from_column(row, 5)?,
+        profile: json_from_column(row, 6)?,
+        phase: TaskPhase::parse(&phase).ok_or_else(|| invalid_value(7, "phase", &phase))?,
+        branch_name: row.get(8)?,
+        base_sha: row.get(9)?,
+        worktree_path: row.get::<_, Option<String>>(10)?.map(PathBuf::from),
+        codex_thread_id: row.get(11)?,
+        parent_thread_id: row.get(12)?,
+        active_turn_id: row.get(13)?,
+        last_error_code: row.get(14)?,
+        last_error_message: row.get(15)?,
+        created_at_ms: row.get(16)?,
+        updated_at_ms: row.get(17)?,
+        completed_at_ms: row.get(18)?,
     })
 }
 
@@ -1240,7 +1303,6 @@ mod tests {
             create_operation_id: Some(format!("create-{name}")),
             repository_id: repository_id.to_owned(),
             name: name.to_owned(),
-            goal: "exercise atomic persistence".to_owned(),
             context_mode: ContextMode::Fresh,
             context: json!({"version": 1, "mode": "fresh"}),
             profile: ProfileSnapshot {
@@ -1253,6 +1315,96 @@ mod tests {
             base_sha: Some("0123456789abcdef".to_owned()),
             worktree_path: Some(PathBuf::from(format!("/tmp/worktrees/{name}"))),
         }
+    }
+
+    #[test]
+    fn retires_v1_goal_from_task_projection_without_losing_legacy_data() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                r#"PRAGMA foreign_keys = ON;
+                 CREATE TABLE repositories (
+                    id TEXT PRIMARY KEY,
+                    root_path TEXT NOT NULL UNIQUE,
+                    git_common_dir TEXT NOT NULL UNIQUE,
+                    display_name TEXT NOT NULL,
+                    is_linked_worktree INTEGER NOT NULL,
+                    created_at_ms INTEGER NOT NULL,
+                    updated_at_ms INTEGER NOT NULL
+                 );
+                 CREATE TABLE tasks (
+                    id TEXT PRIMARY KEY,
+                    create_operation_id TEXT UNIQUE,
+                    repository_id TEXT NOT NULL REFERENCES repositories(id),
+                    name TEXT NOT NULL,
+                    goal TEXT NOT NULL CHECK (length(trim(goal)) > 0),
+                    context_mode TEXT NOT NULL,
+                    context_json TEXT NOT NULL,
+                    profile_json TEXT NOT NULL,
+                    phase TEXT NOT NULL,
+                    branch_name TEXT,
+                    base_sha TEXT,
+                    worktree_path TEXT UNIQUE,
+                    codex_thread_id TEXT UNIQUE,
+                    parent_thread_id TEXT,
+                    active_turn_id TEXT,
+                    last_error_code TEXT,
+                    last_error_message TEXT,
+                    created_at_ms INTEGER NOT NULL,
+                    updated_at_ms INTEGER NOT NULL,
+                    completed_at_ms INTEGER,
+                    UNIQUE(repository_id, name),
+                    UNIQUE(repository_id, branch_name)
+                 );
+                 CREATE TABLE child_reference (
+                    id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL REFERENCES tasks(id)
+                 );
+                 INSERT INTO repositories VALUES (
+                    'repo-v1', '/tmp/source', '/tmp/source/.git', 'source', 0, 1, 1
+                 );
+                 INSERT INTO tasks (
+                    id, repository_id, name, goal, context_mode, context_json,
+                    profile_json, phase, created_at_ms, updated_at_ms
+                 ) VALUES (
+                    'task-v1', 'repo-v1', 'legacy', 'legacy goal', 'fresh', '{}',
+                    '{"name":"default","sourcePath":null,"sourceHash":"sha256:test","effectiveSettings":{}}',
+                    'idle', 1, 1
+                 );
+                 INSERT INTO child_reference VALUES ('child-v1', 'task-v1');
+                 PRAGMA user_version = 1;"#,
+            )
+            .unwrap();
+
+        let store = Store::from_connection(connection).unwrap();
+        let task = store.task_by_id("task-v1").unwrap().unwrap();
+        assert_eq!(task.name, "legacy");
+        assert!(serde_json::to_value(task).unwrap().get("goal").is_none());
+        let connection = store.lock().unwrap();
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 2);
+        let legacy_goal: Option<String> = connection
+            .query_row(
+                "SELECT legacy_goal FROM tasks WHERE id = 'task-v1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy_goal.as_deref(), Some("legacy goal"));
+        connection
+            .execute(
+                "UPDATE tasks SET legacy_goal = NULL WHERE id = 'task-v1'",
+                [],
+            )
+            .unwrap();
+        let violations: i64 = connection
+            .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(violations, 0);
     }
 
     #[test]
@@ -1282,21 +1434,6 @@ mod tests {
                 EventDraft::task(EventKind::WorktreeCreated, EventSource::Git, json!({})),
             )
             .unwrap();
-        let (task, _) = store
-            .bind_thread_with_event(
-                &task.id,
-                TaskPhase::Starting,
-                "thread-1",
-                None,
-                EventDraft::task(EventKind::AgentStarted, EventSource::Codex, json!({})),
-            )
-            .unwrap();
-        assert_eq!(task.codex_thread_id.as_deref(), Some("thread-1"));
-        assert_eq!(
-            store.task_by_thread_id("thread-1").unwrap().unwrap().id,
-            task.id
-        );
-
         let effective_profile = ProfileSnapshot {
             name: "effective".to_owned(),
             source_path: Some(PathBuf::from("/tmp/profile.toml")),
@@ -1308,10 +1445,27 @@ mod tests {
             .unwrap();
         assert_eq!(task.profile, effective_profile);
 
+        let (task, _) = store
+            .bind_thread_with_event(
+                &task.id,
+                TaskPhase::Starting,
+                TaskPhase::Idle,
+                "thread-1",
+                None,
+                EventDraft::task(EventKind::AgentStarted, EventSource::Codex, json!({})),
+            )
+            .unwrap();
+        assert_eq!(task.codex_thread_id.as_deref(), Some("thread-1"));
+        assert_eq!(task.phase, TaskPhase::Idle);
+        assert_eq!(
+            store.task_by_thread_id("thread-1").unwrap().unwrap().id,
+            task.id
+        );
+
         let (task, turn, _) = store
             .start_turn_with_event(
                 &task.id,
-                &[TaskPhase::Starting],
+                &[TaskPhase::Idle],
                 NewTurn {
                     operation_id: Some("turn-operation".to_owned()),
                     client_message_id: "client-message".to_owned(),

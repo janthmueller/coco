@@ -61,6 +61,6 @@ export async function generateMetadata({
 
   return {
     description: page.data.description,
-    title: page.data.title,
+    title: page.url === "/docs" ? { absolute: "coco" } : page.data.title,
   };
 }

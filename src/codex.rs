@@ -1,24 +1,29 @@
 use std::collections::HashMap;
-use std::io;
-use std::os::unix::fs::{FileTypeExt, PermissionsExt};
-use std::path::PathBuf;
+use std::io::Write;
+use std::net::{Ipv4Addr, SocketAddr};
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, Weak};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use thiserror::Error;
 use tokio::io::{
     AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, DuplexStream,
 };
-use tokio::net::UnixStream;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
+use tokio_tungstenite::tungstenite::{Message, http};
 use tokio_tungstenite::{WebSocketStream, client_async};
 
 pub const DEFAULT_MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
@@ -30,13 +35,28 @@ const APP_SERVER_CONNECT_RETRY: Duration = Duration::from_millis(25);
 
 pub type RequestId = Value;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SharedAppServerOptions {
+    /// Private runtime file containing the active loopback WebSocket URL.
+    pub endpoint_path: PathBuf,
+    /// Private runtime file containing the high-entropy capability token.
+    pub token_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppServerEndpoint {
+    pub schema_version: u32,
+    pub url: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct CodexClientOptions {
     pub codex_binary: PathBuf,
-    /// When set, spawn one shared App Server on this private Unix socket and
-    /// connect this client to it. Other trusted local clients, such as the
-    /// Codex TUI opened by `coco jump`, can subscribe to the same threads.
-    pub app_server_socket: Option<PathBuf>,
+    /// When set, spawn one shared App Server on an authenticated loopback
+    /// WebSocket. Other trusted local clients, such as the Codex TUI opened by
+    /// `coco jump`, can subscribe to the same threads.
+    pub shared_app_server: Option<SharedAppServerOptions>,
     /// Explicit Codex home for the spawned server. `None` inherits the current
     /// process environment.
     pub codex_home: Option<PathBuf>,
@@ -50,7 +70,7 @@ impl Default for CodexClientOptions {
     fn default() -> Self {
         Self {
             codex_binary: PathBuf::from("codex"),
-            app_server_socket: None,
+            shared_app_server: None,
             codex_home: None,
             max_message_bytes: DEFAULT_MAX_MESSAGE_BYTES,
             event_buffer: DEFAULT_EVENT_BUFFER,
@@ -128,6 +148,7 @@ struct Inner {
     next_id: AtomicU64,
     shutdown: watch::Sender<bool>,
     tasks: Mutex<TaskHandles>,
+    runtime_files: Mutex<Vec<PathBuf>>,
 }
 
 struct ConnectionState {
@@ -188,16 +209,17 @@ impl CodexClient {
     /// Starts the configured Codex App Server and completes the mandatory
     /// `initialize` / `initialized` handshake before returning.
     ///
-    /// Without `app_server_socket` the child uses its private stdio transport.
-    /// With a socket configured, the child listens on that Unix socket and the
-    /// client bridges its JSONL codec to one WebSocket connection.
+    /// Without `shared_app_server` the child uses its private stdio transport.
+    /// With shared runtime files configured, the child listens on an
+    /// authenticated loopback WebSocket and publishes its URL for trusted
+    /// local clients such as `coco jump`.
     pub async fn spawn(
         options: CodexClientOptions,
     ) -> Result<(Self, mpsc::Receiver<CodexEvent>), CodexError> {
         validate_options(&options)?;
 
-        if let Some(socket_path) = options.app_server_socket.clone() {
-            return Self::spawn_shared_unix(options, socket_path).await;
+        if let Some(shared) = options.shared_app_server.clone() {
+            return Self::spawn_shared(options, shared).await;
         }
 
         Self::spawn_stdio(options).await
@@ -250,16 +272,19 @@ impl CodexClient {
             tasks.process = Some(process_task);
         }
 
-        initialize_client(&client, &options).await?;
+        if let Err(error) = initialize_client(&client, &options).await {
+            let _ = client.close().await;
+            return Err(error);
+        }
 
         Ok((client, events))
     }
 
-    async fn spawn_shared_unix(
+    async fn spawn_shared(
         options: CodexClientOptions,
-        socket_path: PathBuf,
+        shared: SharedAppServerOptions,
     ) -> Result<(Self, mpsc::Receiver<CodexEvent>), CodexError> {
-        prepare_app_server_socket(&socket_path).await?;
+        prepare_shared_runtime(&shared).await?;
         if let Some(codex_home) = options.codex_home.as_ref() {
             tokio::fs::create_dir_all(codex_home)
                 .await
@@ -271,36 +296,62 @@ impl CodexClient {
                 })?;
         }
 
-        let listen = format!("unix://{}", socket_path.display());
+        let address = reserve_loopback_address().await?;
+        let token = new_capability_token();
+        write_private_file(&shared.token_path, token.as_bytes()).map_err(|error| {
+            CodexError::Spawn {
+                message: format!(
+                    "could not write App Server capability token {}: {error}",
+                    shared.token_path.display()
+                ),
+            }
+        })?;
+        let endpoint = format!("ws://{address}");
         let mut command = Command::new(&options.codex_binary);
         command
             .args(["app-server", "--listen"])
-            .arg(&listen)
+            .arg(&endpoint)
+            .args(["--ws-auth", "capability-token", "--ws-token-file"])
+            .arg(&shared.token_path)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
         apply_codex_home(&mut command, options.codex_home.as_ref());
 
-        let mut child = command.spawn().map_err(|error| CodexError::Spawn {
-            message: error.to_string(),
-        })?;
-        let stderr = child.stderr.take().ok_or_else(|| CodexError::Spawn {
-            message: "spawned App Server did not expose stderr".to_owned(),
-        })?;
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                remove_runtime_file(&shared.token_path).await;
+                return Err(CodexError::Spawn {
+                    message: error.to_string(),
+                });
+            }
+        };
+        let stderr = match child.stderr.take() {
+            Some(stderr) => stderr,
+            None => {
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+                remove_runtime_file(&shared.token_path).await;
+                return Err(CodexError::Spawn {
+                    message: "spawned App Server did not expose stderr".to_owned(),
+                });
+            }
+        };
         let stderr_tail = Arc::new(Mutex::new(StderrTail::new(STDERR_TAIL_BYTES)));
         let stderr_task = tokio::spawn(collect_stderr(stderr, Arc::clone(&stderr_tail)));
 
-        let websocket = match connect_app_server(&socket_path).await {
+        let websocket = match connect_app_server(address, &endpoint, &token, &mut child).await {
             Ok(websocket) => websocket,
             Err(error) => {
                 let _ = child.start_kill();
                 let _ = child.wait().await;
                 let _ = stderr_task.await;
+                remove_runtime_file(&shared.token_path).await;
                 return Err(CodexError::Spawn {
                     message: format!(
-                        "could not connect to App Server socket {}: {error}; stderr: {}",
-                        socket_path.display(),
+                        "could not connect to App Server at {endpoint}: {error}; stderr: {}",
                         stderr_tail.lock().await.display()
                     ),
                 });
@@ -317,6 +368,8 @@ impl CodexClient {
             Arc::clone(&stderr_tail),
         )
         .await;
+        *client.inner.runtime_files.lock().await =
+            vec![shared.endpoint_path.clone(), shared.token_path.clone()];
         let bridge_task = tokio::spawn(bridge_jsonl_websocket(
             bridge_io,
             websocket,
@@ -334,7 +387,32 @@ impl CodexClient {
             tasks.bridge = Some(bridge_task);
         }
 
-        initialize_client(&client, &options).await?;
+        if let Err(error) = initialize_client(&client, &options).await {
+            let _ = client.close().await;
+            return Err(error);
+        }
+        let descriptor = match serde_json::to_vec(&AppServerEndpoint {
+            schema_version: 1,
+            url: endpoint,
+        }) {
+            Ok(descriptor) => descriptor,
+            Err(error) => {
+                let failure = CodexError::Protocol {
+                    message: format!("could not encode App Server endpoint: {error}"),
+                    stderr: client.inner.stderr_context().await,
+                };
+                let _ = client.close().await;
+                return Err(failure);
+            }
+        };
+        if let Err(error) = write_private_file(&shared.endpoint_path, &descriptor) {
+            let message = format!(
+                "could not publish App Server endpoint {}: {error}",
+                shared.endpoint_path.display()
+            );
+            let _ = client.close().await;
+            return Err(CodexError::Spawn { message });
+        }
 
         Ok((client, events))
     }
@@ -462,6 +540,7 @@ impl CodexClient {
         if let Some(stderr) = tasks.stderr.take() {
             let _ = stderr.await;
         }
+        self.inner.cleanup_runtime_files().await;
         Ok(())
     }
 
@@ -489,6 +568,7 @@ impl CodexClient {
             next_id: AtomicU64::new(1),
             shutdown,
             tasks: Mutex::new(TaskHandles::default()),
+            runtime_files: Mutex::new(Vec::new()),
         });
         let reader_task = tokio::spawn(read_stdout(
             reader,
@@ -516,93 +596,142 @@ fn apply_codex_home(command: &mut Command, codex_home: Option<&PathBuf>) {
     }
 }
 
-async fn prepare_app_server_socket(socket_path: &PathBuf) -> Result<(), CodexError> {
-    if !socket_path.is_absolute() {
+async fn prepare_shared_runtime(shared: &SharedAppServerOptions) -> Result<(), CodexError> {
+    if shared.endpoint_path == shared.token_path {
         return Err(CodexError::InvalidOptions(
-            "app_server_socket must be absolute".to_owned(),
+            "shared App Server endpoint and token paths must be different".to_owned(),
         ));
     }
-    let parent = socket_path.parent().ok_or_else(|| {
-        CodexError::InvalidOptions("app_server_socket has no parent directory".to_owned())
-    })?;
-    let parent_exists = tokio::fs::metadata(parent).await.is_ok();
-    tokio::fs::create_dir_all(parent)
-        .await
-        .map_err(|error| CodexError::Spawn {
-            message: format!(
-                "could not create App Server socket directory {}: {error}",
-                parent.display()
-            ),
+    for (label, path) in [
+        ("endpoint_path", &shared.endpoint_path),
+        ("token_path", &shared.token_path),
+    ] {
+        if !path.is_absolute() {
+            return Err(CodexError::InvalidOptions(format!(
+                "shared_app_server.{label} must be absolute"
+            )));
+        }
+        let parent = path.parent().ok_or_else(|| {
+            CodexError::InvalidOptions(format!("shared_app_server.{label} has no parent directory"))
         })?;
-    if !parent_exists {
-        tokio::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
+        let parent_exists = tokio::fs::metadata(parent).await.is_ok();
+        tokio::fs::create_dir_all(parent)
             .await
             .map_err(|error| CodexError::Spawn {
                 message: format!(
-                    "could not secure App Server socket directory {}: {error}",
+                    "could not create App Server runtime directory {}: {error}",
                     parent.display()
                 ),
             })?;
-    }
-
-    let metadata = match tokio::fs::symlink_metadata(socket_path).await {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => {
-            return Err(CodexError::Spawn {
-                message: format!(
-                    "could not inspect App Server socket {}: {error}",
-                    socket_path.display()
-                ),
-            });
-        }
-    };
-    if !metadata.file_type().is_socket() {
-        return Err(CodexError::Spawn {
-            message: format!(
-                "refusing to replace non-socket App Server path {}",
-                socket_path.display()
-            ),
-        });
-    }
-    match UnixStream::connect(socket_path).await {
-        Ok(_) => Err(CodexError::Spawn {
-            message: format!(
-                "an App Server is already listening at {}",
-                socket_path.display()
-            ),
-        }),
-        Err(error)
-            if matches!(
-                error.kind(),
-                io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
-            ) =>
-        {
-            tokio::fs::remove_file(socket_path)
+        #[cfg(unix)]
+        if !parent_exists {
+            tokio::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
                 .await
                 .map_err(|error| CodexError::Spawn {
                     message: format!(
-                        "could not remove stale App Server socket {}: {error}",
-                        socket_path.display()
+                        "could not secure App Server runtime directory {}: {error}",
+                        parent.display()
                     ),
-                })
+                })?;
         }
+        reject_unsafe_runtime_path(path)?;
+        remove_runtime_file(path).await;
+    }
+    Ok(())
+}
+
+fn reject_unsafe_runtime_path(path: &Path) -> Result<(), CodexError> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            Err(CodexError::Spawn {
+                message: format!("refusing unsafe App Server runtime path {}", path.display()),
+            })
+        }
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(CodexError::Spawn {
             message: format!(
-                "could not validate App Server socket {}: {error}",
-                socket_path.display()
+                "could not inspect App Server runtime path {}: {error}",
+                path.display()
             ),
         }),
     }
 }
 
-async fn connect_app_server(socket_path: &PathBuf) -> Result<WebSocketStream<UnixStream>, String> {
+fn write_private_file(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no parent")
+    })?;
+    let temporary = parent.join(format!(".coco-runtime-{}.tmp", uuid::Uuid::new_v4()));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options.open(&temporary)?;
+    let result = (|| {
+        file.write_all(contents)?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
+async fn remove_runtime_file(path: &Path) {
+    match tokio::fs::remove_file(path).await {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => {}
+    }
+}
+
+fn new_capability_token() -> String {
+    format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    )
+}
+
+async fn reserve_loopback_address() -> Result<SocketAddr, CodexError> {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .map_err(|error| CodexError::Spawn {
+            message: format!("could not reserve an App Server loopback port: {error}"),
+        })?;
+    let address = listener.local_addr().map_err(|error| CodexError::Spawn {
+        message: format!("could not inspect the reserved loopback port: {error}"),
+    })?;
+    drop(listener);
+    Ok(address)
+}
+
+async fn connect_app_server(
+    address: SocketAddr,
+    endpoint: &str,
+    token: &str,
+    child: &mut Child,
+) -> Result<WebSocketStream<TcpStream>, String> {
     let deadline = Instant::now() + APP_SERVER_STARTUP_TIMEOUT;
     loop {
-        let error = match UnixStream::connect(socket_path).await {
-            Ok(stream) => match client_async("ws://localhost/", stream).await {
-                Ok((websocket, _)) => return Ok(websocket),
-                Err(error) => format!("WebSocket handshake failed: {error}"),
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("could not inspect App Server process: {error}"))?
+        {
+            return Err(format!(
+                "App Server exited before accepting clients ({status})"
+            ));
+        }
+        let error = match TcpStream::connect(address).await {
+            Ok(stream) => match authenticated_request(endpoint, token) {
+                Ok(request) => match client_async(request, stream).await {
+                    Ok((websocket, _)) => return Ok(websocket),
+                    Err(error) => format!("WebSocket handshake failed: {error}"),
+                },
+                Err(error) => return Err(error),
             },
             Err(error) => error.to_string(),
         };
@@ -613,11 +742,24 @@ async fn connect_app_server(socket_path: &PathBuf) -> Result<WebSocketStream<Uni
     }
 }
 
-async fn bridge_jsonl_websocket(
+fn authenticated_request(endpoint: &str, token: &str) -> Result<http::Request<()>, String> {
+    let mut request = endpoint
+        .into_client_request()
+        .map_err(|error| format!("invalid App Server endpoint: {error}"))?;
+    let authorization = format!("Bearer {token}")
+        .parse()
+        .map_err(|_| "could not encode App Server authorization header".to_owned())?;
+    request.headers_mut().insert(AUTHORIZATION, authorization);
+    Ok(request)
+}
+
+async fn bridge_jsonl_websocket<S>(
     io: DuplexStream,
-    websocket: WebSocketStream<UnixStream>,
+    websocket: WebSocketStream<S>,
     stderr_tail: Arc<Mutex<StderrTail>>,
-) {
+) where
+    S: AsyncRead + AsyncWrite + Send + Unpin + 'static,
+{
     let (json_reader, mut json_writer) = tokio::io::split(io);
     let mut json_reader = BufReader::new(json_reader);
     let (mut websocket_writer, mut websocket_reader) = websocket.split();
@@ -857,6 +999,13 @@ impl Inner {
     async fn stderr_context(&self) -> String {
         self.stderr_tail.lock().await.display()
     }
+
+    async fn cleanup_runtime_files(&self) {
+        let paths = std::mem::take(&mut *self.runtime_files.lock().await);
+        for path in paths {
+            remove_runtime_file(&path).await;
+        }
+    }
 }
 
 fn validate_options(options: &CodexClientOptions) -> Result<(), CodexError> {
@@ -1077,6 +1226,7 @@ async fn monitor_child(mut child: Child, mut shutdown: watch::Receiver<bool>, in
                         stderr: inner.stderr_context().await,
                     };
                     inner.fail(failure, false).await;
+                    inner.cleanup_runtime_files().await;
                 }
                 return;
             }
@@ -1093,14 +1243,25 @@ async fn monitor_child(mut child: Child, mut shutdown: watch::Receiver<bool>, in
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::sync::Arc;
     use std::time::Duration;
 
+    use futures_util::{SinkExt, StreamExt};
     use serde_json::{Value, json};
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, DuplexStream};
     use tokio::time::timeout;
+    use tokio_tungstenite::accept_hdr_async;
+    use tokio_tungstenite::tungstenite::Message;
+    use tokio_tungstenite::tungstenite::handshake::server::{
+        Callback, ErrorResponse, Request, Response,
+    };
 
-    use super::{CodexClient, CodexError, CodexEvent, STDERR_TAIL_BYTES, StderrTail};
+    use super::{
+        CodexClient, CodexError, CodexEvent, STDERR_TAIL_BYTES, SharedAppServerOptions, StderrTail,
+        authenticated_request, bridge_jsonl_websocket, prepare_shared_runtime, write_private_file,
+    };
 
     async fn client_pair(
         max_message_bytes: usize,
@@ -1115,6 +1276,97 @@ mod tests {
         let (client, events, _shutdown) =
             CodexClient::from_io(reader, writer, max_message_bytes, 8, stderr).await;
         (client, events, server_stream)
+    }
+
+    struct AssertAuthorization;
+
+    impl Callback for AssertAuthorization {
+        fn on_request(
+            self,
+            request: &Request,
+            response: Response,
+        ) -> Result<Response, ErrorResponse> {
+            assert_eq!(
+                request
+                    .headers()
+                    .get("authorization")
+                    .and_then(|value| value.to_str().ok()),
+                Some("Bearer test-capability")
+            );
+            Ok(response)
+        }
+    }
+
+    #[tokio::test]
+    async fn bridges_jsonl_over_an_authenticated_websocket() {
+        let (client_transport, server_transport) = tokio::io::duplex(64 * 1024);
+        let server = tokio::spawn(async move {
+            let mut websocket = accept_hdr_async(server_transport, AssertAuthorization)
+                .await
+                .unwrap();
+            assert_eq!(
+                websocket.next().await.unwrap().unwrap(),
+                Message::Text(r#"{"method":"health","params":{}}"#.into())
+            );
+            websocket
+                .send(Message::Text(
+                    r#"{"id":"coco-1","result":{"status":"ok"}}"#.into(),
+                ))
+                .await
+                .unwrap();
+        });
+        let request = authenticated_request("ws://127.0.0.1:40123", "test-capability").unwrap();
+        let (websocket, _) = tokio_tungstenite::client_async(request, client_transport)
+            .await
+            .unwrap();
+        let (mut json_client, bridge_io) = tokio::io::duplex(64 * 1024);
+        let stderr = Arc::new(tokio::sync::Mutex::new(StderrTail::new(STDERR_TAIL_BYTES)));
+        let bridge = tokio::spawn(bridge_jsonl_websocket(bridge_io, websocket, stderr));
+
+        json_client
+            .write_all(b"{\"method\":\"health\",\"params\":{}}\n")
+            .await
+            .unwrap();
+        let mut response = String::new();
+        BufReader::new(&mut json_client)
+            .read_line(&mut response)
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&response).unwrap(),
+            json!({"id": "coco-1", "result": {"status": "ok"}})
+        );
+        server.await.unwrap();
+        bridge.abort();
+        let _ = bridge.await;
+    }
+
+    #[tokio::test]
+    async fn rejects_overlapping_shared_runtime_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("shared");
+        let error = prepare_shared_runtime(&SharedAppServerOptions {
+            endpoint_path: path.clone(),
+            token_path: path,
+        })
+        .await
+        .unwrap_err();
+
+        assert!(matches!(error, CodexError::InvalidOptions(_)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn writes_capability_files_with_owner_only_permissions() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("token");
+        write_private_file(&path, b"secret").unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "secret");
+        assert_eq!(
+            std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 
     #[tokio::test]

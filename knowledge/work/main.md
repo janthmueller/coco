@@ -36,28 +36,37 @@ architectural baseline for CoCo.
   worktree creation, and Codex thread/turn startup.
 - [x] Scaffold the public Next.js/Fumadocs site and its initial user-facing
   guides, concepts, reference, and integration pages.
-- [ ] Verify the complete static export at both `/` and the GitHub Pages
+- [x] Verify the complete static export at both `/` and the GitHub Pages
   project subpath, including browser-side search and the public-only boundary.
-- [ ] Add Nix apps and development-shell tooling for installing, checking,
+- [x] Add Nix apps and development-shell tooling for installing, checking,
   building, serving, and developing the documentation site.
-- [ ] Record the planned detached-worktree creation mode without presenting it
+- [x] Record the planned detached-worktree creation mode without presenting it
   as current behavior.
-- [ ] Replace the first public site draft: it exposed internal architecture and
+- [x] Replace the first public site draft: it exposed internal architecture and
   roadmap material and did not meet the strict user-facing boundary.
-- [ ] Separate task preparation from execution: `coco new` must not require or
-  start a goal, while `coco send` starts the first and later turns.
-- [ ] Replace the overlapping `show`/`watch` UX with a concise one-shot
+- [x] Separate task preparation from execution: `coco new` must not require or
+  send an instruction, while `coco send` starts the first and later turns.
+- [x] Replace the overlapping `show`/`watch` UX with a concise one-shot
   `coco status` and an explicit live `coco status --follow` mode.
-- [ ] Add `coco jump` so an operator can open the existing Codex thread in its
+- [x] Add `coco jump` so an operator can open the existing Codex thread in its
   managed worktree through the same App Server observed by `cocod`.
-- [ ] Replace the temporary Unix-only shared App Server listener with an
+- [x] Replace the temporary Unix-only shared App Server listener with an
   authenticated loopback-WebSocket endpoint that `coco jump` can use on Linux,
   macOS, and Windows.
 - [ ] Keep CoCo's CLI-to-daemon transport behind a local-IPC boundary: Unix
   sockets on Linux/macOS and a Windows named-pipe backend, without duplicating
   protocol or coordinator logic.
-- [ ] Create safe checkpoint commits as the foundation and subsequent vertical
+- [x] Create safe checkpoint commits as the foundation and subsequent vertical
   slices become independently buildable.
+- [ ] After the current App Server and CLI UX slice, research and propose a
+  maintainable Rust module/workspace architecture. Evaluate when large modules
+  should become submodules or separate crates, and select enforceable hygiene
+  checks for code complexity, dependency health, layering, and dead code before
+  performing any structural refactor.
+- [ ] Design task annotations and external references as a deliberate future
+  feature. Decide typed versus free-form values, mutation/audit semantics,
+  privacy and display rules, fork/handoff inheritance, and explicit projection
+  into Codex before adding any CLI or RPC field.
 
 ## Decisions
 
@@ -123,6 +132,18 @@ architectural baseline for CoCo.
   interface (Unix sockets or Windows named pipes); the shared Codex App Server
   uses its cross-platform loopback-WebSocket surface because Codex TUI must
   connect to it directly.
+- 2026-09-05 — Make preparation explicit: `new` creates the worktree and Codex
+  thread and returns it `idle`; it accepts no instruction or open-ended
+  metadata field. `send` is the only non-interactive command that starts the
+  first or a later turn.
+- 2026-09-05 — Remove the prerelease `goal` field instead of renaming it to a
+  generic `metadata` bag. Preserve old local values only in hidden
+  compatibility storage and design annotations/references separately before
+  exposing them through CLI, RPC, or prompts.
+- 2026-09-05 — Replace the overlapping `show` and `watch` commands with
+  `status` and `status --follow`. `jump` launches the official Codex TUI in the
+  recorded worktree and resumes the recorded thread through the daemon-owned
+  App Server rather than creating a parallel conversation.
 
 ## Findings
 
@@ -153,6 +174,9 @@ architectural baseline for CoCo.
 - Native Codex CLI now supports Windows directly. The present CoCo executable
   remains Unix-only because its RPC listener is implemented with Tokio Unix
   sockets; the daemon concept itself is not platform-specific.
+- The installed Codex CLI accepts a capability-token-protected loopback
+  WebSocket and can initialize successfully with an isolated temporary Codex
+  home. This proves the shared transport without consuming a model turn.
 - The executable coordinator now serializes creation and turn-start operations
   per repository, resolves client paths back to a registered Git common
   directory, and treats Git/Codex effects as persisted saga steps.
@@ -168,15 +192,24 @@ architectural baseline for CoCo.
   non-empty `type`.
 - The new MCP architecture document is linked from the engineering index and
   `AGENTS.md`; targeted trailing-whitespace checks are clean.
-- `cargo test --locked --all-targets` passes all 35 tests, including native Git
-  worktrees, SQLite recovery, Codex framing, RPC sockets, MCP delegation, task
-  creation/retry, event normalization, and post-worktree failure retention.
+- `cargo test --locked --offline --all-targets` passes all 44 tests, including
+  native Git worktrees, legacy-goal retirement, task preparation without a
+  turn, externally started TUI turns, authenticated WebSocket bridging,
+  private capability files, daemon singleton locking, exact `jump` invocation,
+  SQLite recovery, RPC sockets, MCP delegation, event normalization, and
+  failure retention.
 - `cargo clippy --locked --all-targets --all-features -- -D warnings` and
   `cargo fmt --all -- --check` pass.
 - `nix flake check path:. --no-write-lock-file` passes.
 - A process-level smoke test with isolated temporary state started `cocod`,
-  initialized the installed Codex App Server, and registered this checkout via
-  `coco repo add .` over the real Unix socket. No model turn was started.
+  initialized the installed Codex App Server over an authenticated IPv4-
+  loopback WebSocket, verified `0600` runtime/state files, registered this
+  checkout via `coco repo add .`, returned a versioned empty task list over the
+  real Unix socket, and removed endpoint/token/socket files on shutdown. No
+  model turn was started.
+- The documentation TypeScript, Oxlint, and Prettier checks pass. Both the
+  root and `/coco` builds export 88 static files across eight pages with static
+  search, valid local links, no server artifact, and no internal knowledge.
 
 ## Open questions and handoff
 
@@ -191,3 +224,7 @@ architectural baseline for CoCo.
   marks in-flight work interrupted after daemon loss.
 - When the public site is scheduled, validate its production export under the
   GitHub Pages project subpath before enabling deployment from `main`.
+- Revisit source layout after the current vertical slice. The review should
+  distinguish ordinary Rust module directories from true Cargo package/crate
+  boundaries and avoid a premature multi-crate workspace without measurable
+  coupling or build-time benefits.

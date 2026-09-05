@@ -10,6 +10,18 @@ status: stable
 
 ## 2026-09-05
 
+- **Prepared-task and interactive CLI flow**: Split task preparation from
+  execution so `coco new` creates an idle worktree/thread without an implicit
+  instruction, `coco send` starts the first or later turn, `coco status`
+  replaces the overlapping show/watch commands, and `coco jump` opens the same
+  thread and worktree in the official Codex TUI. The daemon-owned App Server is
+  now shared through a capability-token-protected IPv4-loopback WebSocket;
+  CoCo's own Windows client transport remains a named-pipe follow-up.
+- **Task metadata boundary**: Removed the prerelease `goal` field from the CLI,
+  daemon contract, and task projection rather than treating one vague string as
+  both intent and metadata. A future annotation/reference model is tracked for
+  deliberate design; retained legacy database values stay internal and are not
+  sent to Codex.
 - **Public documentation boundary and presentation**: Made README and rendered
   docs strictly user-only, removed architecture and roadmap pages from the
   public tree, and selected the nuqs notebook-style Fumadocs layout as the
@@ -36,7 +48,9 @@ status: stable
   not a current dependency or planned delivery item.
 - **Rust migration**: Replaced the initial TypeScript/Node implementation
   direction with a single Rust crate using Tokio while retaining SQLite,
-  native Git worktrees, and the Codex App Server over `stdio`.
+  native Git worktrees, and the Codex App Server boundary. The later shared-TUI
+  slice moved that boundary from private `stdio` to authenticated loopback
+  WebSocket.
 - **CoCo v0 contract**: Added the concrete product specification, including
   task/thread/worktree invariants, CLI and MCP contracts, lifecycle states,
   normalized events, safety requirements, acceptance tests, and explicit

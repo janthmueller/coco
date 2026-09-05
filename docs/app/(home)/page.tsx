@@ -12,7 +12,7 @@ const features = [
   },
   {
     description:
-      "List active tasks, follow Codex, send a follow-up, and inspect the resulting diff from the terminal.",
+      "Prepare a task, send work when you are ready, and see its current state from the terminal.",
     icon: Terminal,
     title: "Stay in control",
   },
@@ -67,18 +67,21 @@ export default function HomePage() {
               {"\n\n"}
               <span className="coco-terminal-prompt">$ </span>
               <span className="coco-terminal-command">
-                coco new fix-login --base main \
+                coco new fix-login --base main
               </span>
-              {"\n"} --context fresh \{"\n"} --goal &quot;Fix the login
-              redirect&quot;
               {"\n\n"}
               <span className="coco-terminal-prompt">$ </span>
               <span className="coco-terminal-command">
-                coco watch fix-login
+                coco send fix-login &quot;Fix the login redirect&quot;
               </span>
               {"\n"}
               <span className="coco-terminal-prompt">$ </span>
-              <span className="coco-terminal-command">coco diff fix-login</span>
+              <span className="coco-terminal-command">
+                coco status fix-login --follow
+              </span>
+              {"\n"}
+              <span className="coco-terminal-prompt">$ </span>
+              <span className="coco-terminal-command">coco jump fix-login</span>
             </code>
           </pre>
         </div>

@@ -1,10 +1,15 @@
+use std::env;
+use std::fs::{File, OpenOptions, TryLockError};
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use tokio::sync::watch;
 use tracing::{error, info, warn};
 
-use crate::codex::{CodexClient, CodexClientOptions, CodexEvent};
+use crate::codex::{CodexClient, CodexClientOptions, CodexEvent, SharedAppServerOptions};
 use crate::coordinator::{CodexWorker, Coordinator};
 use crate::git::Git;
 use crate::paths::CocoPaths;
@@ -14,7 +19,13 @@ use crate::store::Store;
 pub async fn run_from_env() -> Result<()> {
     let paths = CocoPaths::from_env()?;
     let codex_options = CodexClientOptions {
-        app_server_socket: Some(paths.codex_socket_path.clone()),
+        codex_binary: env::var_os("COCO_CODEX_BINARY")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("codex")),
+        shared_app_server: Some(SharedAppServerOptions {
+            endpoint_path: paths.codex_endpoint_path.clone(),
+            token_path: paths.codex_token_path.clone(),
+        }),
         codex_home: Some(paths.codex_home.clone()),
         ..CodexClientOptions::default()
     };
@@ -22,6 +33,7 @@ pub async fn run_from_env() -> Result<()> {
 }
 
 pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<()> {
+    let _daemon_lock = acquire_daemon_lock(&paths.data_dir)?;
     let store = Arc::new(
         Store::open(&paths.database_path)
             .with_context(|| format!("could not open {}", paths.database_path.display()))?,
@@ -80,6 +92,45 @@ pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<
     server_result.context("daemon RPC server stopped with an error")
 }
 
+fn acquire_daemon_lock(data_dir: &Path) -> Result<File> {
+    std::fs::create_dir_all(data_dir)
+        .with_context(|| format!("could not create {}", data_dir.display()))?;
+    let metadata = std::fs::symlink_metadata(data_dir)
+        .with_context(|| format!("could not inspect {}", data_dir.display()))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        bail!("refusing unsafe CoCo data directory {}", data_dir.display());
+    }
+    #[cfg(unix)]
+    std::fs::set_permissions(data_dir, std::fs::Permissions::from_mode(0o700))
+        .with_context(|| format!("could not secure {}", data_dir.display()))?;
+
+    let lock_path = data_dir.join("cocod.lock");
+    if let Ok(metadata) = std::fs::symlink_metadata(&lock_path)
+        && (metadata.file_type().is_symlink() || !metadata.is_file())
+    {
+        bail!("refusing unsafe daemon lock path {}", lock_path.display());
+    }
+    let mut options = OpenOptions::new();
+    options.create(true).read(true).write(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let file = options
+        .open(&lock_path)
+        .with_context(|| format!("could not open {}", lock_path.display()))?;
+    #[cfg(unix)]
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("could not secure {}", lock_path.display()))?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(TryLockError::WouldBlock) => {
+            bail!("another cocod process already owns {}", lock_path.display())
+        }
+        Err(TryLockError::Error(error)) => {
+            Err(error).with_context(|| format!("could not lock {}", lock_path.display()))
+        }
+    }
+}
+
 async fn pump_codex_events(
     coordinator: Arc<Coordinator>,
     mut events: tokio::sync::mpsc::Receiver<CodexEvent>,
@@ -87,6 +138,33 @@ async fn pump_codex_events(
     while let Some(event) = events.recv().await {
         if let Err(source) = coordinator.record_codex_event(event) {
             error!(%source, "could not persist a Codex event");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::acquire_daemon_lock;
+
+    #[test]
+    fn daemon_lock_excludes_a_second_owner_and_survives_a_stale_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = acquire_daemon_lock(directory.path()).unwrap();
+        let error = acquire_daemon_lock(directory.path()).unwrap_err();
+        assert!(error.to_string().contains("another cocod process"));
+
+        drop(first);
+        acquire_daemon_lock(directory.path()).unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(directory.path().join("cocod.lock"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600);
         }
     }
 }
