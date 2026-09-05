@@ -10,6 +10,11 @@ status: stable
 
 ## 2026-09-05
 
+- **Rust architecture and hygiene plan**: Audited the first vertical slice,
+  kept one Cargo package, selected nested modules plus a typed daemon seam as
+  the next refactor, defined objective crate-split triggers, and classified
+  Clippy, dependency, coverage, mutation, and structural-analysis tools by
+  whether they should gate changes or remain diagnostic.
 - **Prepared-task and interactive CLI flow**: Split task preparation from
   execution so `coco new` creates an idle worktree/thread without an implicit
   instruction, `coco send` starts the first or later turn, `coco status`

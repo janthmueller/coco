@@ -13,6 +13,9 @@ agents.
   subsystem ports, CLI and local MCP protocols, SQLite schema, Git and Codex
   adapters, event normalization, transitions, recovery, and incremental
   delivery.
+- [Rust source architecture and code health](rust-architecture.md) - Records
+  the measured module/coupling baseline, target source layout, crate-split
+  criteria, refactor phases, and enforceable hygiene tooling.
 - [MCP catalog and worker runtime boundary](mcp-runtime.md) - Separates CoCo's
   control MCP server from worker-facing MCP tools and records native Codex as
   the initial runtime with Agentgateway as a deferred optional adapter.

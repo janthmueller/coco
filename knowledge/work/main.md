@@ -58,11 +58,21 @@ architectural baseline for CoCo.
   protocol or coordinator logic.
 - [x] Create safe checkpoint commits as the foundation and subsequent vertical
   slices become independently buildable.
-- [ ] After the current App Server and CLI UX slice, research and propose a
+- [x] After the current App Server and CLI UX slice, research and propose a
   maintainable Rust module/workspace architecture. Evaluate when large modules
   should become submodules or separate crates, and select enforceable hygiene
   checks for code complexity, dependency health, layering, and dead code before
   performing any structural refactor.
+- [x] Measure the current Rust baseline: module and function size, public
+  surface, top-level dependencies, test placement, dependency use/duplication,
+  and missing CI coverage.
+- [x] Record the staged target and tool policy in
+  `knowledge/engineering/rust-architecture.md` and route future agents to it.
+- [ ] Implement Phase 0 of the Rust architecture plan as a behavior-preserving
+  safety-net commit before moving modules.
+- [ ] Implement the typed daemon seam and remove coordinator-to-RPC and
+  CLI-to-Codex dependency leaks.
+- [ ] Split the measured hot modules without mixing in product behavior.
 - [ ] Design task annotations and external references as a deliberate future
   feature. Decide typed versus free-form values, mutation/audit semantics,
   privacy and display rules, fork/handoff inheritance, and explicit projection
@@ -140,6 +150,17 @@ architectural baseline for CoCo.
   generic `metadata` bag. Preserve old local values only in hidden
   compatibility storage and design annotations/references separately before
   exposing them through CLI, RPC, or prompts.
+- 2026-09-05 — Keep one Cargo package through the next refactor. Rust child
+  modules provide package-like source organization without premature crate
+  APIs; reconsider a workspace only for independent consumers, releases,
+  dependency isolation, or recurring boundaries that visibility cannot enforce.
+- 2026-09-05 — Make a typed local daemon protocol the first structural seam.
+  Coordinator use cases must stop parsing RPC JSON, CLI must stop importing a
+  Codex adapter DTO, and file splitting follows those dependency corrections.
+- 2026-09-05 — Use concrete lint/dependency gates rather than aggregate
+  complexity scores. `cargo machete` currently passes; Clippy identifies four
+  functions over 100 lines and no findings for the separately enabled nesting,
+  argument-count, or type-complexity lints.
 - 2026-09-05 — Replace the overlapping `show` and `watch` commands with
   `status` and `status --follow`. `jump` launches the official Codex TUI in the
   recorded worktree and resumes the recorded thread through the daemon-owned
@@ -182,6 +203,17 @@ architectural baseline for CoCo.
   directory, and treats Git/Codex effects as persisted saga steps.
 - App Server requests are surfaced as redacted durable events and are never
   auto-approved. The approval response workflow remains intentionally open.
+- Rust modules can use nested directories without becoming separate Cargo
+  packages. CoCo currently has one package, one library crate, and three binary
+  crates; the flat module tree is normal but its largest files now mix enough
+  responsibilities to justify child modules.
+- The top-level module graph is acyclic, but coordinator currently depends on
+  RPC and CLI depends on a Codex adapter type. These are the first seams to
+  correct before physical source movement.
+- The pinned Nixpkgs input contains the selected dependency/analysis tools.
+  `cargo-modules --acyclic` currently produces a false self-cycle for an
+  inherent method, so its graph is diagnostic rather than a CI architecture
+  gate.
 
 ## Verification
 
@@ -190,8 +222,9 @@ architectural baseline for CoCo.
 - All expected local documentation targets exist.
 - Every non-index knowledge document has the required frontmatter and a
   non-empty `type`.
-- The new MCP architecture document is linked from the engineering index and
-  `AGENTS.md`; targeted trailing-whitespace checks are clean.
+- The MCP and Rust architecture documents are linked from the engineering
+  index and routed from `AGENTS.md`; targeted trailing-whitespace checks are
+  clean.
 - `cargo test --locked --offline --all-targets` passes all 44 tests, including
   native Git worktrees, legacy-goal retirement, task preparation without a
   turn, externally started TUI turns, authenticated WebSocket bridging,
@@ -224,7 +257,6 @@ architectural baseline for CoCo.
   marks in-flight work interrupted after daemon loss.
 - When the public site is scheduled, validate its production export under the
   GitHub Pages project subpath before enabling deployment from `main`.
-- Revisit source layout after the current vertical slice. The review should
-  distinguish ordinary Rust module directories from true Cargo package/crate
-  boundaries and avoid a premature multi-crate workspace without measurable
-  coupling or build-time benefits.
+- Implement Phase 0 from `knowledge/engineering/rust-architecture.md`: add the
+  Rust CI and process-level fake-App-Server safety net before moving source
+  modules.

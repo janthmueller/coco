@@ -6,6 +6,10 @@
   read `knowledge/engineering/mcp-runtime.md`. Do not conflate that data flow
   with CoCo's own control MCP server; Agentgateway is a deferred optional
   adapter, not a current dependency.
+- Before changing Rust module layout, crate boundaries, public visibility, or
+  code-health gates, read `knowledge/engineering/rust-architecture.md` and
+  preserve its staged dependency direction unless the same change records why
+  it is superseded.
 - Every branch has one working document. At the start of a task, resolve the
   current branch and create or resume `knowledge/work/<branch>.md`; preserve
   slashes as directories (for example, `feature/login` maps to
