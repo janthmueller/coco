@@ -10,6 +10,10 @@ status: stable
 
 ## 2026-09-05
 
+- **Coordinator module boundary**: Reduced the Coordinator production facade
+  to composition and shared invariants, extracted task commands, turn startup,
+  Codex event projection, errors, and the worker port, and moved the concrete
+  Codex-backed worker into the daemon adapter layer without changing behavior.
 - **Typed daemon seam**: Centralized the closed daemon method set and typed
   request/result contracts, made the RPC client infer wire methods and response
   types, moved dispatch/error translation into a daemon handler, and removed

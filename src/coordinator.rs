@@ -2,141 +2,27 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
 
-use async_trait::async_trait;
-use chrono::Utc;
-use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
-use thiserror::Error;
+use serde_json::json;
 use tokio::sync::Mutex as AsyncMutex;
-use tracing::{debug, error, warn};
+use tracing::error;
 
-use crate::codex::{CodexClient, CodexError, CodexEvent};
-use crate::domain::{
-    ContextMode, EventKind, EventSource, Repository, Task, TaskPhase, Turn, TurnPhase,
-};
-use crate::git::{Git, GitError, GitRepository};
-use crate::profile::{ProfileError, load_profile, with_effective_thread_settings};
-use crate::protocol::{
-    AuditRecordParams, EventListParams, EventListResult, GitIncomplete, GitObservationError,
-    GitUnavailable, RepositoryRegisterParams, TaskCreateParams, TaskDiffParams, TaskDiffResult,
-    TaskGetParams, TaskGitStatus, TaskListParams, TaskResult, TaskStatusResult, TurnStartParams,
-};
-use crate::store::{AuditDraft, EventDraft, NewTask, NewTurn, Store, StoreError, TurnCompletion};
+use crate::domain::{EventKind, EventSource, Repository, Task, TaskPhase};
+use crate::git::{Git, GitRepository};
+use crate::protocol::TaskResult;
+use crate::store::{EventDraft, Store};
 
-const DEFAULT_DIFF_BYTES: usize = 4 * 1024 * 1024;
-const MAX_DIFF_BYTES: usize = 16 * 1024 * 1024;
 const MAX_OPERATION_ID_BYTES: usize = 256;
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct StartedThread {
-    pub id: String,
-    pub response: Value,
-}
+mod codex_events;
+mod error;
+mod task;
+mod turn;
+mod worker;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StartedTurn {
-    pub id: String,
-}
+pub(crate) use error::CoordinatorError;
+pub(crate) use worker::{StartedThread, StartedTurn, WorkerError, WorkerRuntime};
 
-#[derive(Debug, Error)]
-pub enum WorkerError {
-    #[error(transparent)]
-    Codex(#[from] CodexError),
-    #[error("Codex response is missing required field {0}")]
-    InvalidResponse(&'static str),
-    #[error("worker runtime is unavailable: {0}")]
-    Unavailable(String),
-    #[error("Codex thread cwd mismatch: expected {expected}, received {actual}")]
-    CwdMismatch { expected: PathBuf, actual: PathBuf },
-}
-
-#[async_trait]
-pub trait WorkerRuntime: Send + Sync + 'static {
-    async fn start_thread(&self, cwd: &Path, config: Value) -> Result<StartedThread, WorkerError>;
-
-    async fn start_turn(
-        &self,
-        thread_id: &str,
-        cwd: &Path,
-        client_message_id: &str,
-        message: &str,
-    ) -> Result<StartedTurn, WorkerError>;
-}
-
-#[derive(Debug, Clone)]
-pub struct CodexWorker {
-    client: CodexClient,
-}
-
-impl CodexWorker {
-    pub fn new(client: CodexClient) -> Self {
-        Self { client }
-    }
-}
-
-#[async_trait]
-impl WorkerRuntime for CodexWorker {
-    async fn start_thread(&self, cwd: &Path, config: Value) -> Result<StartedThread, WorkerError> {
-        let response = self
-            .client
-            .request(
-                "thread/start",
-                json!({
-                    "cwd": cwd,
-                    "runtimeWorkspaceRoots": [cwd],
-                    "config": config,
-                    "ephemeral": false,
-                }),
-            )
-            .await?;
-        let id = response
-            .pointer("/thread/id")
-            .and_then(Value::as_str)
-            .ok_or(WorkerError::InvalidResponse("thread.id"))?
-            .to_owned();
-        let returned_cwd = response
-            .get("cwd")
-            .and_then(Value::as_str)
-            .ok_or(WorkerError::InvalidResponse("cwd"))
-            .map(PathBuf::from)?;
-        if returned_cwd != cwd {
-            return Err(WorkerError::CwdMismatch {
-                expected: cwd.to_owned(),
-                actual: returned_cwd,
-            });
-        }
-        Ok(StartedThread { id, response })
-    }
-
-    async fn start_turn(
-        &self,
-        thread_id: &str,
-        cwd: &Path,
-        client_message_id: &str,
-        message: &str,
-    ) -> Result<StartedTurn, WorkerError> {
-        let response = self
-            .client
-            .request(
-                "turn/start",
-                json!({
-                    "threadId": thread_id,
-                    "cwd": cwd,
-                    "clientUserMessageId": client_message_id,
-                    "input": [{"type": "text", "text": message}],
-                }),
-            )
-            .await?;
-        let id = response
-            .pointer("/turn/id")
-            .and_then(Value::as_str)
-            .ok_or(WorkerError::InvalidResponse("turn.id"))?
-            .to_owned();
-        Ok(StartedTurn { id })
-    }
-}
-
-pub struct Coordinator {
+pub(crate) struct Coordinator {
     store: Arc<Store>,
     git: Git,
     worker: Arc<dyn WorkerRuntime>,
@@ -146,35 +32,8 @@ pub struct Coordinator {
     pending_turn_threads: StdMutex<HashSet<String>>,
 }
 
-struct PendingTurnGuard<'a> {
-    pending: &'a StdMutex<HashSet<String>>,
-    thread_id: String,
-}
-
-impl<'a> PendingTurnGuard<'a> {
-    fn new(pending: &'a StdMutex<HashSet<String>>, thread_id: &str) -> Self {
-        pending
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .insert(thread_id.to_owned());
-        Self {
-            pending,
-            thread_id: thread_id.to_owned(),
-        }
-    }
-}
-
-impl Drop for PendingTurnGuard<'_> {
-    fn drop(&mut self) {
-        self.pending
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(&self.thread_id);
-    }
-}
-
 impl Coordinator {
-    pub fn new(
+    pub(crate) fn new(
         store: Arc<Store>,
         git: Git,
         worker: Arc<dyn WorkerRuntime>,
@@ -190,647 +49,6 @@ impl Coordinator {
             repository_locks: AsyncMutex::new(HashMap::new()),
             pending_turn_threads: StdMutex::new(HashSet::new()),
         }
-    }
-
-    pub fn store(&self) -> &Arc<Store> {
-        &self.store
-    }
-
-    pub(crate) fn register_repository(
-        &self,
-        params: RepositoryRegisterParams,
-    ) -> Result<Repository, CoordinatorError> {
-        let discovered = self.git.discover(params.path)?;
-        let now = Utc::now().timestamp_millis();
-        let repository = self.store.register_repository(&Repository {
-            id: discovered.id,
-            root_path: discovered.root_path,
-            git_common_dir: discovered.git_common_dir,
-            display_name: discovered.display_name,
-            is_linked_worktree: discovered.is_linked_worktree,
-            created_at_ms: now,
-            updated_at_ms: now,
-        })?;
-        Ok(repository)
-    }
-
-    pub(crate) async fn create_task(
-        &self,
-        params: TaskCreateParams,
-    ) -> Result<TaskResult, CoordinatorError> {
-        validate_non_empty("baseRef", &params.base_ref)?;
-        validate_operation_id(&params.operation_id)?;
-        let context_mode = params.context_mode;
-        if context_mode != ContextMode::Fresh {
-            return Err(CoordinatorError::UnsupportedContext(
-                context_mode.as_str().to_owned(),
-            ));
-        }
-
-        let (repository, git_repository) =
-            self.registered_repository_for_path(&params.repository_path)?;
-        let repository_lock = self.repository_lock(&repository.id).await;
-        let _guard = repository_lock.lock().await;
-
-        if let Some(existing) = self
-            .store
-            .task_by_create_operation_id(&params.operation_id)?
-        {
-            ensure_create_replay_matches(&existing, &params, &repository.id)?;
-            return self.task_response(existing);
-        }
-
-        let loaded_profile = load_profile(&params.profile, &self.codex_home)?;
-        let base_sha = self.git.resolve_commit(&git_repository, &params.base_ref)?;
-        self.git.assert_clean(&git_repository)?;
-        if self
-            .store
-            .task_by_name(&repository.id, &params.name)?
-            .is_some()
-        {
-            return Err(CoordinatorError::TaskExists(params.name));
-        }
-        let plan = self.git.plan_worktree(
-            &git_repository,
-            &self.worktrees_dir,
-            &params.name,
-            &base_sha,
-        )?;
-
-        let (task, _) = self.store.create_task_with_event(
-            NewTask {
-                create_operation_id: Some(params.operation_id.clone()),
-                repository_id: repository.id.clone(),
-                name: params.name.clone(),
-                context_mode,
-                context: json!({
-                    "version": 1,
-                    "mode": context_mode,
-                    "baseRef": params.base_ref,
-                }),
-                profile: loaded_profile.snapshot.clone(),
-                branch_name: Some(plan.branch_name.clone()),
-                base_sha: Some(plan.base_sha.clone()),
-                worktree_path: Some(plan.path.clone()),
-            },
-            EventDraft::task(
-                EventKind::TaskCreated,
-                EventSource::Coco,
-                json!({
-                    "operationId": params.operation_id,
-                    "name": params.name,
-                    "baseSha": plan.base_sha,
-                }),
-            ),
-        )?;
-
-        let binding = match self.git.create_worktree(&git_repository, &plan) {
-            Ok(binding) => binding,
-            Err(source) => {
-                let error = CoordinatorError::Git(source);
-                self.mark_task_failed(&task.id, "worktree.create", &error, EventSource::Git);
-                return Err(error);
-            }
-        };
-        self.store.transition_task_with_event(
-            &task.id,
-            TaskPhase::Provisioning,
-            TaskPhase::Starting,
-            None,
-            EventDraft::task(
-                EventKind::WorktreeCreated,
-                EventSource::Git,
-                json!({
-                    "path": binding.path,
-                    "branchName": binding.branch_name,
-                    "headSha": binding.head_sha,
-                }),
-            ),
-        )?;
-
-        let started_thread = match self
-            .worker
-            .start_thread(&binding.path, loaded_profile.thread_config)
-            .await
-        {
-            Ok(thread) => thread,
-            Err(source) => {
-                let error = CoordinatorError::Worker(source);
-                self.mark_task_failed(&task.id, "thread.start", &error, EventSource::Codex);
-                return Err(error);
-            }
-        };
-        let effective_profile =
-            with_effective_thread_settings(loaded_profile.snapshot, &started_thread.response);
-        self.store
-            .update_task_profile(&task.id, &effective_profile)?;
-        let (task, _) = self.store.bind_thread_with_event(
-            &task.id,
-            TaskPhase::Starting,
-            TaskPhase::Idle,
-            &started_thread.id,
-            None,
-            EventDraft::task(
-                EventKind::AgentStarted,
-                EventSource::Codex,
-                json!({"threadId": started_thread.id}),
-            ),
-        )?;
-        self.task_response(task)
-    }
-
-    pub(crate) fn list_tasks(&self, params: TaskListParams) -> Result<Vec<Task>, CoordinatorError> {
-        let (repository, _) = self.registered_repository_for_path(&params.repository_path)?;
-        let mut tasks = self.store.list_tasks(Some(&repository.id))?;
-        if let Some(phases) = params.phases {
-            let phases = phases
-                .iter()
-                .map(|phase| {
-                    TaskPhase::parse(phase).ok_or_else(|| {
-                        CoordinatorError::InvalidParams(format!("unknown task phase {phase:?}"))
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            tasks.retain(|task| phases.contains(&task.phase));
-        }
-        Ok(tasks)
-    }
-
-    pub(crate) fn get_task(
-        &self,
-        params: TaskGetParams,
-    ) -> Result<TaskStatusResult, CoordinatorError> {
-        let (repository, git_repository) =
-            self.registered_repository_for_path(&params.repository_path)?;
-        let task = self.resolve_task(&repository, &params.task)?;
-        let git = match task_git_binding(&task) {
-            Some((worktree, branch, base)) => {
-                match self.git.observe(&git_repository, worktree, branch, base) {
-                    Ok(observation) => TaskGitStatus::Observed(observation),
-                    Err(source) => {
-                        warn!(task_id = %task.id, %source, "could not refresh task Git state");
-                        TaskGitStatus::Unavailable(GitUnavailable {
-                            observed: false,
-                            error: GitObservationError {
-                                code: "GIT_OBSERVATION_FAILED".to_owned(),
-                                message: "Git state could not be refreshed".to_owned(),
-                            },
-                        })
-                    }
-                }
-            }
-            None => TaskGitStatus::Incomplete(GitIncomplete {
-                observed: false,
-                reason: "task has no complete Git binding".to_owned(),
-            }),
-        };
-        let events = self.store.events_after(Some(&task.id), 0)?;
-        let next_sequence = events.last().map_or(0, |event| event.sequence);
-        Ok(TaskStatusResult {
-            task,
-            git,
-            next_sequence,
-        })
-    }
-
-    pub(crate) async fn start_turn(
-        &self,
-        params: TurnStartParams,
-    ) -> Result<TaskResult, CoordinatorError> {
-        validate_non_empty("message", &params.message)?;
-        validate_operation_id(&params.operation_id)?;
-        let (repository, _) = self.registered_repository_for_path(&params.repository_path)?;
-        let repository_lock = self.repository_lock(&repository.id).await;
-        let _guard = repository_lock.lock().await;
-        let task = self.resolve_task(&repository, &params.task)?;
-        let client_message_id =
-            message_fingerprint(&params.operation_id, &task.id, &params.message);
-        if let Some(existing) = self.store.turn_by_operation_id(&params.operation_id)? {
-            if existing.task_id != task.id || existing.client_message_id != client_message_id {
-                return Err(CoordinatorError::IdempotencyConflict);
-            }
-            return Ok(task_and_turn_response(task, &existing));
-        }
-        if task.phase != TaskPhase::Idle {
-            return Err(CoordinatorError::InvalidTaskState {
-                expected: "idle",
-                actual: task.phase,
-            });
-        }
-        let thread_id = task
-            .codex_thread_id
-            .as_deref()
-            .ok_or(CoordinatorError::IncompleteTask("Codex thread"))?;
-        let worktree = task
-            .worktree_path
-            .as_deref()
-            .ok_or(CoordinatorError::IncompleteTask("worktree"))?;
-
-        self.store.append_event(EventDraft {
-            task_id: Some(task.id.clone()),
-            turn_id: None,
-            kind: EventKind::MessageReceived,
-            source: EventSource::Coco,
-            source_method: Some("turn.start".to_owned()),
-            occurred_at_ms: None,
-            payload: json!({
-                "clientMessageId": client_message_id,
-                "text": params.message,
-            }),
-        })?;
-        let _pending_turn = PendingTurnGuard::new(&self.pending_turn_threads, thread_id);
-        let started = self
-            .worker
-            .start_turn(thread_id, worktree, &client_message_id, &params.message)
-            .await?;
-        let (task, turn, _) = self.store.start_turn_with_event(
-            &task.id,
-            &[TaskPhase::Idle],
-            NewTurn {
-                operation_id: Some(params.operation_id),
-                client_message_id,
-                codex_turn_id: Some(started.id.clone()),
-                started_at_ms: None,
-            },
-            EventDraft::task(
-                EventKind::TurnStarted,
-                EventSource::Codex,
-                json!({"codexTurnId": started.id}),
-            ),
-        )?;
-        Ok(task_and_turn_response(task, &turn))
-    }
-
-    pub(crate) fn list_events(
-        &self,
-        params: EventListParams,
-    ) -> Result<EventListResult, CoordinatorError> {
-        let (repository, _) = self.registered_repository_for_path(&params.repository_path)?;
-        let task = self.resolve_task(&repository, &params.task)?;
-        let events = self
-            .store
-            .events_after(Some(&task.id), params.after_sequence)?;
-        let next_sequence = events
-            .last()
-            .map_or(params.after_sequence, |event| event.sequence);
-        Ok(EventListResult {
-            task,
-            events,
-            next_sequence,
-        })
-    }
-
-    pub(crate) fn task_diff(
-        &self,
-        params: TaskDiffParams,
-    ) -> Result<TaskDiffResult, CoordinatorError> {
-        let (repository, _) = self.registered_repository_for_path(&params.repository_path)?;
-        let task = self.resolve_task(&repository, &params.task)?;
-        let worktree = task
-            .worktree_path
-            .as_deref()
-            .ok_or(CoordinatorError::IncompleteTask("worktree"))?;
-        let base_sha = task
-            .base_sha
-            .as_deref()
-            .ok_or(CoordinatorError::IncompleteTask("base SHA"))?;
-        let diff = self.git.diff(worktree, base_sha)?;
-        let requested = params
-            .max_bytes
-            .map(|value| usize::try_from(value).unwrap_or(usize::MAX))
-            .unwrap_or(DEFAULT_DIFF_BYTES)
-            .min(MAX_DIFF_BYTES);
-        let retained = diff.tracked_patch.len().min(requested);
-        let patch = String::from_utf8_lossy(&diff.tracked_patch[..retained]);
-        Ok(TaskDiffResult {
-            patch: patch.into_owned(),
-            patch_truncated: diff.tracked_patch_truncated || retained < diff.tracked_patch.len(),
-            untracked_paths: diff.untracked_paths,
-        })
-    }
-
-    pub(crate) fn record_audit(
-        &self,
-        params: AuditRecordParams,
-    ) -> Result<crate::domain::Audit, CoordinatorError> {
-        let task_id = params.task_id.as_deref().and_then(|candidate| {
-            if let Ok(Some(task)) = self.store.task_by_id(candidate) {
-                return Some(task.id);
-            }
-            let repository_path = params.details.get("repositoryPath")?.as_str()?;
-            let discovered = self.git.discover(repository_path).ok()?;
-            let repository = self
-                .store
-                .repository_by_common_dir(&discovered.git_common_dir)
-                .ok()??;
-            let task = self.store.task_by_name(&repository.id, candidate).ok()??;
-            Some(task.id)
-        });
-        let audit = self.store.append_audit(AuditDraft {
-            source: params.source,
-            action: params.action,
-            task_id,
-            operation_id: params.operation_id,
-            outcome: params.outcome,
-            details: params.details,
-            occurred_at_ms: None,
-        })?;
-        Ok(audit)
-    }
-
-    pub fn record_codex_event(&self, event: CodexEvent) -> Result<(), StoreError> {
-        match event {
-            CodexEvent::Notification { method, params } => {
-                self.record_codex_notification(&method, params)
-            }
-            CodexEvent::ServerRequest { id, method, params } => {
-                self.record_codex_server_request(id, &method, params)
-            }
-        }
-    }
-
-    fn record_codex_notification(&self, method: &str, params: Value) -> Result<(), StoreError> {
-        let Some(task) = self.task_for_codex_params(&params)? else {
-            debug!(method, "ignoring uncorrelated Codex notification");
-            return Ok(());
-        };
-        if method == "turn/started" {
-            return self.record_external_turn_started(&task, &params);
-        }
-        if method == "thread/status/changed" {
-            return self.record_thread_status_changed(&task, &params);
-        }
-        let turn = self.turn_for_codex_params(&task, &params)?;
-        match method {
-            "turn/completed" => {
-                let Some(turn) = turn else {
-                    warn!(task_id = %task.id, "ignoring turn completion without a correlated turn");
-                    return Ok(());
-                };
-                if matches!(
-                    turn.phase,
-                    TurnPhase::Completed | TurnPhase::Failed | TurnPhase::Interrupted
-                ) {
-                    return Ok(());
-                }
-                let status = params
-                    .pointer("/turn/status")
-                    .and_then(Value::as_str)
-                    .unwrap_or("failed");
-                let phase = match status {
-                    "completed" => TurnPhase::Completed,
-                    "interrupted" => TurnPhase::Interrupted,
-                    "failed" => TurnPhase::Failed,
-                    _ => {
-                        warn!(status, "ignoring non-terminal turn/completed payload");
-                        return Ok(());
-                    }
-                };
-                let error = params
-                    .pointer("/turn/error")
-                    .filter(|value| !value.is_null())
-                    .cloned();
-                self.store.complete_turn_with_event(
-                    &task.id,
-                    &turn.id,
-                    TurnCompletion {
-                        phase,
-                        error,
-                        completed_at_ms: None,
-                    },
-                    EventDraft::task(
-                        EventKind::TurnCompleted,
-                        EventSource::Codex,
-                        json!({"status": status}),
-                    ),
-                )?;
-            }
-            "item/completed"
-                if params.pointer("/item/type").and_then(Value::as_str) == Some("agentMessage") =>
-            {
-                self.store.append_event(EventDraft {
-                    task_id: Some(task.id),
-                    turn_id: turn.map(|turn| turn.id),
-                    kind: EventKind::AgentMessageCompleted,
-                    source: EventSource::Codex,
-                    source_method: Some(method.to_owned()),
-                    occurred_at_ms: params.get("completedAtMs").and_then(Value::as_i64),
-                    payload: json!({
-                        "itemId": params.pointer("/item/id"),
-                        "text": params.pointer("/item/text"),
-                    }),
-                })?;
-            }
-            "turn/plan/updated" => {
-                self.store.append_event(codex_event_draft(
-                    &task,
-                    turn.as_ref(),
-                    EventKind::PlanUpdated,
-                    method,
-                    params,
-                ))?;
-            }
-            "turn/diff/updated" => {
-                self.store.append_event(codex_event_draft(
-                    &task,
-                    turn.as_ref(),
-                    EventKind::DiffUpdated,
-                    method,
-                    params,
-                ))?;
-            }
-            "error"
-                if !params
-                    .get("willRetry")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false) =>
-            {
-                self.store.append_event(codex_event_draft(
-                    &task,
-                    turn.as_ref(),
-                    EventKind::AgentFailed,
-                    method,
-                    params,
-                ))?;
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-
-    fn record_external_turn_started(&self, task: &Task, params: &Value) -> Result<(), StoreError> {
-        let Some(codex_turn_id) = params.pointer("/turn/id").and_then(Value::as_str) else {
-            warn!(task_id = %task.id, "ignoring turn/started without a turn id");
-            return Ok(());
-        };
-        let pending = task.codex_thread_id.as_deref().is_some_and(|thread_id| {
-            self.pending_turn_threads
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .contains(thread_id)
-        });
-        if self.store.turn_by_codex_id(codex_turn_id)?.is_some() || pending {
-            return Ok(());
-        }
-        if task.phase != TaskPhase::Idle {
-            warn!(
-                task_id = %task.id,
-                phase = task.phase.as_str(),
-                "ignoring an external turn for a task that is not idle"
-            );
-            return Ok(());
-        }
-        self.store.start_turn_with_event(
-            &task.id,
-            &[TaskPhase::Idle],
-            NewTurn {
-                operation_id: None,
-                client_message_id: format!("codex-external:{codex_turn_id}"),
-                codex_turn_id: Some(codex_turn_id.to_owned()),
-                started_at_ms: None,
-            },
-            EventDraft::task(
-                EventKind::TurnStarted,
-                EventSource::Codex,
-                json!({"codexTurnId": codex_turn_id, "origin": "external_client"}),
-            ),
-        )?;
-        Ok(())
-    }
-
-    fn record_thread_status_changed(&self, task: &Task, params: &Value) -> Result<(), StoreError> {
-        let status = params.pointer("/status/type").and_then(Value::as_str);
-        if status != Some("active") {
-            return Ok(());
-        }
-        let flags = params
-            .pointer("/status/activeFlags")
-            .and_then(Value::as_array)
-            .map(Vec::as_slice)
-            .unwrap_or(&[]);
-        let next = if flags
-            .iter()
-            .any(|flag| flag.as_str() == Some("waitingOnUserInput"))
-        {
-            TaskPhase::WaitingForInput
-        } else if flags
-            .iter()
-            .any(|flag| flag.as_str() == Some("waitingOnApproval"))
-        {
-            TaskPhase::WaitingForApproval
-        } else {
-            TaskPhase::Active
-        };
-        if task.phase == next {
-            return Ok(());
-        }
-        let active_or_waiting = |phase| {
-            matches!(
-                phase,
-                TaskPhase::Active | TaskPhase::WaitingForApproval | TaskPhase::WaitingForInput
-            )
-        };
-        let allowed = active_or_waiting(task.phase) && active_or_waiting(next);
-        if !allowed {
-            return Ok(());
-        }
-        let kind = if next == TaskPhase::Active {
-            EventKind::ApprovalResolved
-        } else {
-            EventKind::ApprovalRequested
-        };
-        self.store.transition_task_with_event(
-            &task.id,
-            task.phase,
-            next,
-            None,
-            EventDraft {
-                task_id: Some(task.id.clone()),
-                turn_id: task.active_turn_id.clone(),
-                kind,
-                source: EventSource::Codex,
-                source_method: Some("thread/status/changed".to_owned()),
-                occurred_at_ms: None,
-                payload: json!({"status": params.get("status")}),
-            },
-        )?;
-        Ok(())
-    }
-
-    fn record_codex_server_request(
-        &self,
-        id: Value,
-        method: &str,
-        params: Value,
-    ) -> Result<(), StoreError> {
-        let Some(task) = self.task_for_codex_params(&params)? else {
-            warn!(method, "ignoring uncorrelated Codex server request");
-            return Ok(());
-        };
-        let turn = self.turn_for_codex_params(&task, &params)?;
-        let waiting_phase = if method.contains("requestUserInput") {
-            TaskPhase::WaitingForInput
-        } else {
-            TaskPhase::WaitingForApproval
-        };
-        let payload = json!({
-            "requestId": id,
-            "method": method,
-            "reason": params.get("reason"),
-        });
-        let event = EventDraft {
-            task_id: Some(task.id.clone()),
-            turn_id: turn.map(|turn| turn.id),
-            kind: EventKind::ApprovalRequested,
-            source: EventSource::Codex,
-            source_method: Some(method.to_owned()),
-            occurred_at_ms: None,
-            payload,
-        };
-        if task.phase == TaskPhase::Active {
-            self.store.transition_task_with_event(
-                &task.id,
-                TaskPhase::Active,
-                waiting_phase,
-                None,
-                event,
-            )?;
-        } else {
-            self.store.append_event(event)?;
-        }
-        Ok(())
-    }
-
-    fn task_for_codex_params(&self, params: &Value) -> Result<Option<Task>, StoreError> {
-        let thread_id = params
-            .get("threadId")
-            .or_else(|| params.pointer("/thread/id"))
-            .and_then(Value::as_str);
-        match thread_id {
-            Some(thread_id) => self.store.task_by_thread_id(thread_id),
-            None => Ok(None),
-        }
-    }
-
-    fn turn_for_codex_params(
-        &self,
-        task: &Task,
-        params: &Value,
-    ) -> Result<Option<Turn>, StoreError> {
-        let codex_turn_id = params
-            .get("turnId")
-            .or_else(|| params.pointer("/turn/id"))
-            .and_then(Value::as_str);
-        if let Some(codex_turn_id) = codex_turn_id
-            && let Some(turn) = self.store.turn_by_codex_id(codex_turn_id)?
-        {
-            return Ok((turn.task_id == task.id).then_some(turn));
-        }
-        task.active_turn_id
-            .as_deref()
-            .map(|turn_id| self.store.turn_by_id(turn_id))
-            .transpose()
-            .map(Option::flatten)
     }
 
     fn registered_repository_for_path(
@@ -881,7 +99,7 @@ impl Coordinator {
             .transpose()?
             .flatten();
         match turn {
-            Some(turn) => Ok(task_and_turn_response(task, &turn)),
+            Some(turn) => Ok(TaskResult::with_turn(task, &turn)),
             None => Ok(TaskResult::prepared(task)),
         }
     }
@@ -911,65 +129,6 @@ impl Coordinator {
     }
 }
 
-#[derive(Debug, Error)]
-pub(crate) enum CoordinatorError {
-    #[error("invalid request parameters: {0}")]
-    InvalidParams(String),
-    #[error("unsupported context mode {0:?}")]
-    UnsupportedContext(String),
-    #[error("repository is not registered: {0}")]
-    RepositoryNotRegistered(PathBuf),
-    #[error("task already exists: {0}")]
-    TaskExists(String),
-    #[error("task not found: {0}")]
-    TaskNotFound(String),
-    #[error("operation ID was already used with different parameters")]
-    IdempotencyConflict,
-    #[error("task must be {expected}, but is {actual:?}")]
-    InvalidTaskState {
-        expected: &'static str,
-        actual: TaskPhase,
-    },
-    #[error("task has no bound {0}")]
-    IncompleteTask(&'static str),
-    #[error(transparent)]
-    Git(#[from] GitError),
-    #[error(transparent)]
-    Store(#[from] StoreError),
-    #[error(transparent)]
-    Profile(#[from] ProfileError),
-    #[error(transparent)]
-    Worker(#[from] WorkerError),
-}
-
-impl CoordinatorError {
-    pub(crate) fn code(&self) -> &'static str {
-        match self {
-            Self::InvalidParams(_) => "INVALID_PARAMS",
-            Self::UnsupportedContext(_) => "UNSUPPORTED_CONTEXT",
-            Self::RepositoryNotRegistered(_) => "REPOSITORY_NOT_REGISTERED",
-            Self::TaskExists(_) => "TASK_EXISTS",
-            Self::TaskNotFound(_) => "TASK_NOT_FOUND",
-            Self::IdempotencyConflict => "IDEMPOTENCY_CONFLICT",
-            Self::InvalidTaskState { .. } => "INVALID_TASK_STATE",
-            Self::IncompleteTask(_) => "INCOMPLETE_TASK",
-            Self::Git(GitError::DirtyRepository(_)) => "DIRTY_SOURCE",
-            Self::Git(GitError::InvalidTaskName(_)) => "INVALID_TASK_NAME",
-            Self::Git(GitError::BranchExists(_) | GitError::DestinationExists(_)) => {
-                "TASK_COLLISION"
-            }
-            Self::Git(GitError::NotAWorktree(_)) => "NOT_A_GIT_REPOSITORY",
-            Self::Git(_) => "GIT_ERROR",
-            Self::Store(StoreError::NotFound { .. }) => "NOT_FOUND",
-            Self::Store(StoreError::InvalidTaskTransition { .. }) => "INVALID_TASK_STATE",
-            Self::Store(_) => "INTERNAL",
-            Self::Profile(ProfileError::NotFound { .. }) => "PROFILE_NOT_FOUND",
-            Self::Profile(_) => "INVALID_PROFILE",
-            Self::Worker(_) => "CODEX_ERROR",
-        }
-    }
-}
-
 fn validate_non_empty(field: &str, value: &str) -> Result<(), CoordinatorError> {
     if value.trim().is_empty() {
         Err(CoordinatorError::InvalidParams(format!(
@@ -989,73 +148,24 @@ fn validate_operation_id(operation_id: &str) -> Result<(), CoordinatorError> {
     Ok(())
 }
 
-fn ensure_create_replay_matches(
-    existing: &Task,
-    params: &TaskCreateParams,
-    repository_id: &str,
-) -> Result<(), CoordinatorError> {
-    let matches = existing.repository_id == repository_id
-        && existing.name == params.name
-        && existing.context_mode == ContextMode::Fresh
-        && existing.context.get("baseRef").and_then(Value::as_str)
-            == Some(params.base_ref.as_str())
-        && existing.profile.name == params.profile;
-    if matches {
-        Ok(())
-    } else {
-        Err(CoordinatorError::IdempotencyConflict)
-    }
-}
-
-fn message_fingerprint(operation_id: &str, task_id: &str, message: &str) -> String {
-    let mut digest = Sha256::new();
-    digest.update(operation_id.as_bytes());
-    digest.update([0]);
-    digest.update(task_id.as_bytes());
-    digest.update([0]);
-    digest.update(message.as_bytes());
-    format!("coco-{}", hex::encode(digest.finalize()))
-}
-
-fn task_git_binding(task: &Task) -> Option<(&Path, &str, &str)> {
-    Some((
-        task.worktree_path.as_deref()?,
-        task.branch_name.as_deref()?,
-        task.base_sha.as_deref()?,
-    ))
-}
-
-fn task_and_turn_response(task: Task, turn: &Turn) -> TaskResult {
-    TaskResult::with_turn(task, turn)
-}
-
-fn codex_event_draft(
-    task: &Task,
-    turn: Option<&Turn>,
-    kind: EventKind,
-    method: &str,
-    payload: Value,
-) -> EventDraft {
-    EventDraft {
-        task_id: Some(task.id.clone()),
-        turn_id: turn.map(|turn| turn.id.clone()),
-        kind,
-        source: EventSource::Codex,
-        source_method: Some(method.to_owned()),
-        occurred_at_ms: None,
-        payload,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
     use std::process::Command;
     use std::sync::Mutex as StdMutex;
 
+    use async_trait::async_trait;
+    use serde_json::Value;
     use tempfile::TempDir;
 
+    use super::turn::PendingTurnGuard;
     use super::*;
+    use crate::codex::CodexEvent;
+    use crate::domain::ContextMode;
+    use crate::protocol::{
+        EventListParams, RepositoryRegisterParams, TaskCreateParams, TaskDiffParams, TaskGetParams,
+        TaskGitStatus, TaskListParams, TurnStartParams,
+    };
 
     #[derive(Debug, Clone, PartialEq)]
     enum WorkerCall {
@@ -1103,7 +213,9 @@ mod tests {
                 config,
             });
             if self.fail_thread_start {
-                return Err(WorkerError::Unavailable("injected failure".to_owned()));
+                return Err(WorkerError::runtime(std::io::Error::other(
+                    "injected failure",
+                )));
             }
             let sequence = calls
                 .iter()
@@ -1473,7 +585,7 @@ mod tests {
                 .coordinator
                 .create_task(fixture.create_params())
                 .await,
-            Err(CoordinatorError::Worker(WorkerError::Unavailable(_)))
+            Err(CoordinatorError::Worker(WorkerError::Runtime(_)))
         ));
         let task = fixture
             .store

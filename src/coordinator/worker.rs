@@ -1,0 +1,46 @@
+use std::error::Error as StdError;
+use std::path::{Path, PathBuf};
+
+use async_trait::async_trait;
+use serde_json::Value;
+use thiserror::Error;
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct StartedThread {
+    pub(crate) id: String,
+    pub(crate) response: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StartedTurn {
+    pub(crate) id: String,
+}
+
+#[derive(Debug, Error)]
+pub(crate) enum WorkerError {
+    #[error(transparent)]
+    Runtime(Box<dyn StdError + Send + Sync>),
+    #[error("Codex response is missing required field {0}")]
+    InvalidResponse(&'static str),
+    #[error("Codex thread cwd mismatch: expected {expected}, received {actual}")]
+    CwdMismatch { expected: PathBuf, actual: PathBuf },
+}
+
+impl WorkerError {
+    pub(crate) fn runtime(source: impl StdError + Send + Sync + 'static) -> Self {
+        Self::Runtime(Box::new(source))
+    }
+}
+
+#[async_trait]
+pub(crate) trait WorkerRuntime: Send + Sync + 'static {
+    async fn start_thread(&self, cwd: &Path, config: Value) -> Result<StartedThread, WorkerError>;
+
+    async fn start_turn(
+        &self,
+        thread_id: &str,
+        cwd: &Path,
+        client_message_id: &str,
+        message: &str,
+    ) -> Result<StartedTurn, WorkerError>;
+}

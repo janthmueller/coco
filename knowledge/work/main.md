@@ -186,6 +186,11 @@ architectural baseline for CoCo.
   run heavy Nix/Cargo checks sequentially. `path:.` copied the ignored
   multi-gigabyte `target/` tree and parallel invocations created avoidable CPU
   and I/O pressure.
+- 2026-09-05 — Keep `coordinator.rs` as the application facade and move its
+  task commands, turn startup, Codex event projection, errors, and worker port
+  into responsibility-based child modules. Put the concrete Codex worker under
+  the daemon composition root so the worker contract no longer depends on the
+  Codex client implementation.
 
 ## Findings
 
@@ -242,6 +247,10 @@ architectural baseline for CoCo.
 - The Phase 1 seam removes both measured dependency leaks: Coordinator has no
   RPC imports, CLI has no Codex imports, daemon method strings are centralized,
   and MCP/CLI calls receive typed results instead of traversing arbitrary JSON.
+- After the first Phase 2 extraction, `coordinator.rs` contains roughly 150
+  production lines before its still-inline tests; the extracted task and Codex
+  event modules are each about 320 lines, and the turn, error, and worker-port
+  modules are smaller focused units.
 
 ## Verification
 
@@ -274,6 +283,9 @@ architectural baseline for CoCo.
 - After the typed daemon refactor, a resource-limited sequential run passes 48
   library tests and the process test; Clippy with warnings denied and
   `cargo machete` are also clean.
+- After splitting the Coordinator production responsibilities, the same 48
+  library tests plus the process test pass with one Cargo build job and one
+  test thread; the all-target/all-feature Clippy run remains warning-free.
 - The documentation TypeScript, Oxlint, and Prettier checks pass. Both the
   root and `/coco` builds export 88 static files across eight pages with static
   search, valid local links, no server artifact, and no internal knowledge.
@@ -299,5 +311,6 @@ architectural baseline for CoCo.
 - When the public site is scheduled, validate its production export under the
   GitHub Pages project subpath before enabling deployment from `main`.
 - Begin Phase 2 from `knowledge/engineering/rust-architecture.md`: extract
-  coherent coordinator command and Codex-event modules first, preserving the
-  now-typed daemon boundary and avoiding product behavior changes.
+  the shared Coordinator fixture/tests into responsibility-based test modules,
+  then continue with store migrations and row/repository boundaries. Preserve
+  the now-typed daemon boundary and avoid product behavior changes.

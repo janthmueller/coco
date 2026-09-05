@@ -251,6 +251,13 @@ the dedicated handler.
 
 ### Phase 2 — split the hot modules
 
+The first coordinator slice completed on 2026-09-05: its production facade is
+about 150 lines, with task/repository commands, turn startup, Codex event
+projection, error policy, and the worker port in focused child modules. The
+concrete Codex-backed worker moved to `daemon/worker.rs`, so the coordinator's
+worker contract no longer imports the Codex client. Coordinator test fixtures
+remain together until a subsequent mechanical test-only split.
+
 Extract coherent child modules in this order:
 
 1. coordinator commands and Codex event projection;

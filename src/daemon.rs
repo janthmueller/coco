@@ -10,15 +10,17 @@ use tokio::sync::watch;
 use tracing::{error, info, warn};
 
 use crate::codex::{CodexClient, CodexClientOptions, CodexEvent, SharedAppServerOptions};
-use crate::coordinator::{CodexWorker, Coordinator};
+use crate::coordinator::Coordinator;
 use crate::git::Git;
 use crate::paths::CocoPaths;
 use crate::rpc::{RpcHandler, RpcServer};
 use crate::store::Store;
 
 mod handler;
+mod worker;
 
 use handler::DaemonHandler;
+use worker::CodexWorker;
 
 pub async fn run_from_env() -> Result<()> {
     let paths = CocoPaths::from_env()?;
