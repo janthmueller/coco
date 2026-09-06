@@ -1,6 +1,8 @@
 use rusqlite::{Transaction, TransactionBehavior, params};
 
-use super::rows::{AUDIT_SELECT, EVENT_SELECT, map_audit, map_event, require_turn};
+#[cfg(test)]
+use super::rows::{AUDIT_SELECT, map_audit};
+use super::rows::{EVENT_SELECT, map_event, require_turn};
 use super::{AuditDraft, EventDraft, Store, StoreError, json_to_sql_error, new_id, now_ms};
 use crate::domain::{Audit, NormalizedEvent};
 
@@ -46,6 +48,7 @@ impl Store {
             .map_err(StoreError::from)
     }
 
+    #[cfg(test)]
     pub fn audits_after(
         &self,
         task_id: Option<&str>,

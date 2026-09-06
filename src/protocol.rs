@@ -22,6 +22,7 @@ pub enum DaemonMethod {
 }
 
 impl DaemonMethod {
+    #[cfg(test)]
     pub const ALL: [Self; 9] = [
         Self::Health,
         Self::RepositoryRegister,

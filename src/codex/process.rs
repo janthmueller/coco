@@ -280,15 +280,13 @@ async fn initialize_client(
             }),
         )
         .await;
-    let initialize = match initialize {
-        Ok(value) => value,
+    match initialize {
+        Ok(_) => {}
         Err(error) => {
             let _ = client.close().await;
             return Err(error);
         }
-    };
-    let _ = client.initialize_result.set(initialize);
-
+    }
     if let Err(error) = client.notify("initialized", None).await {
         let _ = client.close().await;
         return Err(error);

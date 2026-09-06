@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, OnceLock};
 
 use serde_json::Value;
 use thiserror::Error;
@@ -107,14 +107,12 @@ pub enum CodexError {
 #[derive(Clone)]
 pub struct CodexClient {
     inner: Arc<Inner>,
-    initialize_result: Arc<OnceLock<Value>>,
 }
 
 impl std::fmt::Debug for CodexClient {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("CodexClient")
-            .field("initialize_result", &self.initialize_result.get())
             .finish_non_exhaustive()
     }
 }
@@ -185,14 +183,6 @@ impl StderrTail {
 }
 
 impl CodexClient {
-    pub fn initialize_result(&self) -> Option<&Value> {
-        self.initialize_result.get()
-    }
-
-    pub async fn stderr_context(&self) -> String {
-        self.inner.stderr_context().await
-    }
-
     /// Closes the transport, terminates the owned App Server if it is still
     /// running, waits for its I/O tasks, and rejects outstanding requests.
     pub async fn close(&self) -> Result<(), CodexError> {

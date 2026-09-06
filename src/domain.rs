@@ -73,17 +73,6 @@ impl TaskPhase {
             _ => None,
         }
     }
-
-    pub const fn is_unfinished(self) -> bool {
-        matches!(
-            self,
-            Self::Provisioning
-                | Self::Starting
-                | Self::Active
-                | Self::WaitingForApproval
-                | Self::WaitingForInput
-        )
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -339,6 +328,7 @@ impl AuditOutcome {
         }
     }
 
+    #[cfg(test)]
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "succeeded" => Some(Self::Succeeded),
@@ -378,9 +368,6 @@ mod tests {
             "\"agent.message.completed\""
         );
         assert_eq!(ContextMode::parse("handoff"), Some(ContextMode::Handoff));
-        assert!(TaskPhase::Active.is_unfinished());
-        assert!(!TaskPhase::Idle.is_unfinished());
-
         let profile = ProfileSnapshot {
             name: "default".to_owned(),
             source_path: None,

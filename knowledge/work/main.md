@@ -80,6 +80,9 @@ architectural baseline for CoCo.
   - [x] CLI arguments, commands, output, and tests.
 - [x] Reduce the measured production function-size findings and enforce the
   selected `too_many_lines` plus `excessive_nesting` Clippy gates.
+- [x] Run the post-Phase-2 architecture review, reaffirm the one-package
+  decision, and hide implementation modules behind three executable library
+  entry points.
 - [ ] Design task annotations and external references as a deliberate future
   feature. Decide typed versus free-form values, mutation/audit semantics,
   privacy and display rules, fork/handoff inheritance, and explicit projection
@@ -230,6 +233,11 @@ architectural baseline for CoCo.
   `clippy::excessive_nesting` package-wide after removing every production
   finding. Keep one local, reasoned exception for the single process-level
   lifecycle scenario; split tests that contain separable assertions instead.
+- 2026-09-06 — Reaffirm one Cargo package after the Phase-2 review. No
+  component has an independent consumer/release or measured isolation need.
+  Export only `run_cli_from_env`, `run_daemon_from_env`, and
+  `run_mcp_from_env`; keep all implementation modules private until a real
+  client boundary justifies a small protocol crate.
 
 ## Findings
 
@@ -318,6 +326,12 @@ architectural baseline for CoCo.
   protocol test naturally split into wire-field and defaulting assertions; the
   process smoke test remains one ordered cross-process scenario and carries
   the only local exception. `excessive_nesting` has no current findings.
+- The post-Phase-2 measurement finds 10,093 Rust lines and the same one Cargo
+  package with one library plus three binary crates. The top-level import graph
+  remains acyclic. Hiding the twelve implementation modules surfaced fourteen
+  masked dead-code warnings; removing unused helpers, limiting fixtures to test
+  builds, and retaining only the reasoned approval-response seam leaves a
+  warning-free build and exactly three Rustdoc-visible entry points.
 
 ## Verification
 
@@ -384,6 +398,12 @@ architectural baseline for CoCo.
   warnings denied and `cargo machete` are clean. The resource-limited
   `nix flake check . --no-write-lock-file` run builds its tooling check and
   passes against the staged Git source.
+- After narrowing the library facade, all 49 library tests and the process
+  smoke test pass sequentially; all-target/all-feature Clippy is warning-free,
+  `cargo machete` finds no unused dependency, and `cargo doc --no-deps`
+  exposes exactly the three intended executable entry points. The
+  resource-limited `nix flake check . --no-write-lock-file` run also passes
+  against the staged Git source.
 - The documentation TypeScript, Oxlint, and Prettier checks pass. Both the
   root and `/coco` builds export 88 static files across eight pages with static
   search, valid local links, no server artifact, and no internal knowledge.
@@ -408,7 +428,9 @@ architectural baseline for CoCo.
   worker turn, and an ordinary cancel must remain unambiguous and observable.
 - When the public site is scheduled, validate its production export under the
   GitHub Pages project subpath before enabling deployment from `main`.
-- Phase 2 is complete. Perform its architecture review trigger before starting
-  platform transport work: remeasure module boundaries and public visibility,
-  confirm the one-package decision, then decide whether Phase 3 (Unix socket
-  backend plus Windows named pipes) or a product capability should be next.
+- Phase 2 and its review are complete. Do not split a workspace now. If
+  cross-platform support is scheduled next, begin Phase 3 by moving the
+  existing Unix RPC backend behind the common transport API, then add Windows
+  named pipes with native CI before claiming Windows support. Otherwise prefer
+  a user-visible capability such as safe approval responses or daemon recovery
+  over more structural movement.

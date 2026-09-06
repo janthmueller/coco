@@ -3,7 +3,7 @@ type: Engineering Decision
 title: Rust source architecture and code-health strategy
 description: Records the measured source-layout problems, target module boundaries, crate-split criteria, and enforceable Rust hygiene checks for CoCo.
 tags: [architecture, rust, modules, cargo, quality, dependencies, testing]
-status: proposed
+status: stable
 ---
 
 # Rust source architecture and code-health strategy
@@ -203,11 +203,11 @@ crates can share code. `lib.rs` should expose only stable executable entry
 points and, where needed, protocol types used by future clients. Everything
 else should prefer private or `pub(crate)` visibility.
 
-A suitable end state is a small facade such as `run_cli_from_env`,
-`run_daemon_from_env`, and an MCP serve entry point, rather than eleven public
-modules. Integration tests should exercise binaries through
-`CARGO_BIN_EXE_*` or the intentional facade instead of making internals public
-for convenience.
+This end state is now implemented: Rustdoc exposes only
+`run_cli_from_env`, `run_daemon_from_env`, and `run_mcp_from_env`; all twelve
+implementation modules are private. Integration tests exercise binaries
+through `CARGO_BIN_EXE_*`, while in-crate unit tests use module privacy rather
+than expanding the external library API for convenience.
 
 ## Refactor sequence
 
@@ -305,6 +305,35 @@ Exit achieved on 2026-09-06: parent modules are readable facades, boundaries
 match the dependency rules, behavior is unchanged, and the selected structural
 lints are enforced.
 
+### Post-Phase-2 review
+
+The required review trigger ran on 2026-09-06 after commit `567140a`.
+
+- The tree contains 10,093 Rust lines across production, unit tests, binaries,
+  and the process harness. Growth from the historical baseline includes the
+  shipped CLI/App Server slice and more boundary tests, not a return to flat
+  hot modules.
+- The formerly hot parents are now small facades: Coordinator about 150 lines,
+  Store about 300, Codex about 230, Git about 100, and CLI under 20. Larger
+  child files own one responsibility, and the enforced function/nesting lints
+  provide a more actionable guard than raw file length.
+- A direct import audit leaves the top-level graph acyclic and preserves the
+  staged dependency direction. Codex notification projection remains the
+  deliberate App Server edge described by the target layout; local daemon
+  envelopes do not leak into Coordinator use cases.
+- Cargo metadata still reports one package with one library and three binary
+  crates. Nothing is independently released or consumed, and no measured
+  dependency/build problem calls for crate isolation. The workspace split is
+  therefore rejected again.
+- Hiding the implementation modules exposed fourteen previously masked
+  dead-code findings. Unused accessors/builders were removed, test fixtures
+  became test-only, and the explicit Codex response methods retain a local
+  reason because the planned approval workflow will need them. The normal
+  warning-denied build is clean.
+- Generated library documentation contains exactly the three executable entry
+  points and no internal module API. A future native client remains the first
+  likely reason to extract `coco-protocol` as a separate package.
+
 ### Phase 3 — platform transport boundary
 
 Move Unix socket operations behind `rpc/unix.rs`; implement Windows named
@@ -376,5 +405,6 @@ behavioral changes. Neither replaces contract-focused tests.
 
 ## Review trigger
 
-Revisit this decision after Phase 2, when a native Windows client begins, or
-when another Rust client needs the daemon protocol—whichever happens first.
+The post-Phase-2 review reaffirmed this decision. Revisit it next when native
+Windows work begins, another Rust client needs the daemon protocol, or a
+measured build/distribution cost demonstrates a real crate boundary need.

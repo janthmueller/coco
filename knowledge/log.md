@@ -10,6 +10,9 @@ status: stable
 
 ## 2026-09-06
 
+- **Post-Phase-2 architecture review**: Reaffirmed the single-package design,
+  hid twelve implementation modules behind three executable entry points, and
+  used the narrower facade to remove previously masked dead code.
 - **Structural lint gates**: Removed the remaining production function-size
   findings and now deny Clippy's `too_many_lines` plus `excessive_nesting`
   lints, retaining one explicit exception for the ordered process smoke test.

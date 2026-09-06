@@ -5,9 +5,11 @@ use rusqlite::{Connection, OptionalExtension, Row};
 use serde_json::Value;
 
 use super::{StoreError, path_text};
+#[cfg(test)]
+use crate::domain::{Audit, AuditOutcome};
 use crate::domain::{
-    Audit, AuditOutcome, ContextMode, EventKind, EventSource, NormalizedEvent, Repository, Task,
-    TaskPhase, Turn, TurnPhase,
+    ContextMode, EventKind, EventSource, NormalizedEvent, Repository, Task, TaskPhase, Turn,
+    TurnPhase,
 };
 
 pub(super) const TASK_SELECT: &str = "SELECT id, create_operation_id, repository_id, name,
@@ -21,6 +23,7 @@ pub(super) const TURN_SELECT: &str = "SELECT id, task_id, operation_id, client_m
 pub(super) const EVENT_SELECT: &str = "SELECT sequence, id, task_id, turn_id, kind, source,
     source_method, occurred_at_ms, recorded_at_ms, payload_json FROM events";
 
+#[cfg(test)]
 pub(super) const AUDIT_SELECT: &str = "SELECT sequence, id, source, action, task_id, operation_id,
     outcome, details_json, occurred_at_ms FROM audit_events";
 
@@ -97,6 +100,7 @@ pub(super) fn map_event(row: &Row<'_>) -> rusqlite::Result<NormalizedEvent> {
     })
 }
 
+#[cfg(test)]
 pub(super) fn map_audit(row: &Row<'_>) -> rusqlite::Result<Audit> {
     let outcome: String = row.get(6)?;
     Ok(Audit {
@@ -142,21 +146,6 @@ fn invalid_value(index: usize, field: &'static str, value: &str) -> rusqlite::Er
             value: value.to_owned(),
         }),
     )
-}
-
-pub(super) fn get_repository_by_id(
-    connection: &Connection,
-    id: &str,
-) -> Result<Option<Repository>, StoreError> {
-    connection
-        .query_row(
-            "SELECT id, root_path, git_common_dir, display_name, is_linked_worktree,
-                created_at_ms, updated_at_ms FROM repositories WHERE id = ?1",
-            [id],
-            map_repository,
-        )
-        .optional()
-        .map_err(StoreError::from)
 }
 
 pub(super) fn get_repository_by_root(

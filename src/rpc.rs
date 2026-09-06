@@ -44,11 +44,6 @@ impl RpcErrorPayload {
             data: None,
         }
     }
-
-    pub fn with_data(mut self, data: Value) -> Self {
-        self.data = Some(data);
-        self
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -99,10 +94,6 @@ impl RpcServer {
             socket_path,
             handler,
         })
-    }
-
-    pub fn socket_path(&self) -> &Path {
-        &self.socket_path
     }
 
     pub async fn run(self, mut shutdown: watch::Receiver<bool>) -> Result<(), RpcTransportError> {

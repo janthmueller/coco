@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use anyhow::Context;
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
@@ -24,13 +23,5 @@ async fn main() -> anyhow::Result<()> {
         .try_init();
 
     let args = Args::parse();
-    let paths = coco::paths::CocoPaths::from_env()?;
-    let repository = if args.repository.is_absolute() {
-        args.repository
-    } else {
-        std::env::current_dir()
-            .context("could not determine current directory")?
-            .join(args.repository)
-    };
-    coco::mcp::serve(repository, args.allow_send, paths.socket_path).await
+    coco::run_mcp_from_env(args.repository, args.allow_send).await
 }

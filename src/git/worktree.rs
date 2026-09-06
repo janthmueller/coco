@@ -177,7 +177,7 @@ impl Git {
     }
 }
 
-pub fn validate_task_name(name: &str) -> Result<(), GitError> {
+pub(super) fn validate_task_name(name: &str) -> Result<(), GitError> {
     let bytes = name.as_bytes();
     let valid = (1..=63).contains(&bytes.len())
         && bytes

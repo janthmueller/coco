@@ -14,6 +14,7 @@ use tracing::warn;
 use uuid::Uuid;
 
 use crate::domain::AuditOutcome;
+use crate::paths::CocoPaths;
 use crate::protocol::{
     AuditRecordParams, DaemonRequest, TaskDiffParams, TaskGetParams, TaskListParams,
     TurnStartParams,
@@ -374,7 +375,19 @@ fn bounded(message: String) -> String {
     }
 }
 
-pub async fn serve(
+pub async fn run_from_env(repository: PathBuf, allow_send: bool) -> anyhow::Result<()> {
+    let paths = CocoPaths::from_env()?;
+    let repository = if repository.is_absolute() {
+        repository
+    } else {
+        std::env::current_dir()
+            .context("could not determine current directory")?
+            .join(repository)
+    };
+    serve(repository, allow_send, paths.socket_path).await
+}
+
+pub(crate) async fn serve(
     repository: PathBuf,
     allow_send: bool,
     socket_path: PathBuf,

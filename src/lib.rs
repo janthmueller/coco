@@ -1,12 +1,16 @@
-pub mod cli;
-pub mod codex;
-pub mod coordinator;
-pub mod daemon;
-pub mod domain;
-pub mod git;
-pub mod mcp;
-pub mod paths;
-pub mod profile;
-pub mod protocol;
-pub mod rpc;
-pub mod store;
+mod cli;
+mod codex;
+mod coordinator;
+mod daemon;
+mod domain;
+mod git;
+mod mcp;
+mod paths;
+mod profile;
+mod protocol;
+mod rpc;
+mod store;
+
+pub use cli::run_from_env as run_cli_from_env;
+pub use daemon::run_from_env as run_daemon_from_env;
+pub use mcp::run_from_env as run_mcp_from_env;

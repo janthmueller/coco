@@ -6,7 +6,8 @@ use tempfile::TempDir;
 
 use crate::domain::BaseRelation;
 
-use super::{Git, GitError, validate_task_name};
+use super::worktree::validate_task_name;
+use super::{Git, GitError};
 
 struct Fixture {
     _temp: TempDir,

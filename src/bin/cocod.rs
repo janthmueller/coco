@@ -13,5 +13,5 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(filter)
         .with_writer(std::io::stderr)
         .try_init();
-    coco::daemon::run_from_env().await
+    coco::run_daemon_from_env().await
 }

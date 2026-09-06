@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock, Weak};
+use std::sync::{Arc, Weak};
 
 use serde_json::{Map, Value, json};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -64,6 +64,13 @@ impl CodexClient {
 
     /// Explicitly answers a server-initiated request. Incoming requests are
     /// only emitted as events and are never answered automatically.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "reserved for the explicit approval-response workflow"
+        )
+    )]
     pub async fn respond(&self, id: RequestId, result: Value) -> Result<(), CodexError> {
         validate_request_id(&id)?;
         self.inner
@@ -72,6 +79,10 @@ impl CodexClient {
     }
 
     /// Explicitly rejects a server-initiated request.
+    #[expect(
+        dead_code,
+        reason = "reserved for the explicit approval-response workflow"
+    )]
     pub async fn respond_error(
         &self,
         id: RequestId,
@@ -126,14 +137,7 @@ impl CodexClient {
         ));
         inner.tasks.lock().await.reader = Some(reader_task);
 
-        (
-            Self {
-                inner,
-                initialize_result: Arc::new(OnceLock::new()),
-            },
-            event_receiver,
-            shutdown_receiver,
-        )
+        (Self { inner }, event_receiver, shutdown_receiver)
     }
 }
 

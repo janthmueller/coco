@@ -23,7 +23,7 @@ mod rows;
 mod tasks;
 
 use migrations::migrate;
-use rows::{get_repository_by_common_dir, get_repository_by_id, get_repository_by_root};
+use rows::{get_repository_by_common_dir, get_repository_by_root};
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -146,6 +146,7 @@ impl Store {
         Self::from_connection(connection)
     }
 
+    #[cfg(test)]
     pub fn in_memory() -> Result<Self, StoreError> {
         Self::from_connection(Connection::open_in_memory()?)
     }
@@ -203,16 +204,6 @@ impl Store {
             })?;
         transaction.commit()?;
         Ok(stored)
-    }
-
-    pub fn repository_by_id(&self, id: &str) -> Result<Option<Repository>, StoreError> {
-        let connection = self.lock()?;
-        get_repository_by_id(&connection, id)
-    }
-
-    pub fn repository_by_root(&self, path: &Path) -> Result<Option<Repository>, StoreError> {
-        let connection = self.lock()?;
-        get_repository_by_root(&connection, path)
     }
 
     pub fn repository_by_common_dir(&self, path: &Path) -> Result<Option<Repository>, StoreError> {

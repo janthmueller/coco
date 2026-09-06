@@ -13,8 +13,6 @@ mod worktree;
 #[cfg(test)]
 mod tests;
 
-pub use worktree::validate_task_name;
-
 #[derive(Debug, Error)]
 pub enum GitError {
     #[error("filesystem operation failed for {path}: {source}")]
@@ -100,10 +98,5 @@ impl Git {
             executable: executable.into(),
             capture_limit: DEFAULT_CAPTURE_LIMIT,
         }
-    }
-
-    pub fn with_capture_limit(mut self, capture_limit: usize) -> Self {
-        self.capture_limit = capture_limit.max(1);
-        self
     }
 }
