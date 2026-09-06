@@ -20,6 +20,7 @@ use crate::protocol::{
 #[derive(Debug, Clone, PartialEq)]
 enum WorkerCall {
     Thread {
+        name: String,
         cwd: PathBuf,
         config: Value,
     },
@@ -67,9 +68,15 @@ impl FakeWorker {
 
 #[async_trait]
 impl WorkerRuntime for FakeWorker {
-    async fn start_thread(&self, cwd: &Path, config: Value) -> Result<StartedThread, WorkerError> {
+    async fn start_thread(
+        &self,
+        name: &str,
+        cwd: &Path,
+        config: Value,
+    ) -> Result<StartedThread, WorkerError> {
         let mut calls = self.calls.lock().unwrap();
         calls.push(WorkerCall::Thread {
+            name: name.to_owned(),
             cwd: cwd.to_owned(),
             config,
         });
@@ -263,8 +270,8 @@ async fn prepares_an_idle_task_without_starting_a_turn_and_replays_operation_ids
     assert_eq!(calls.len(), 1);
     assert!(matches!(
         &calls[0],
-        WorkerCall::Thread { cwd, config }
-            if cwd == worktree && config == &json!({})
+        WorkerCall::Thread { name, cwd, config }
+            if name == "first-task" && cwd == worktree && config == &json!({})
     ));
     let replay = fixture
         .coordinator

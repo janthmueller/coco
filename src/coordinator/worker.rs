@@ -42,7 +42,12 @@ impl WorkerError {
 
 #[async_trait]
 pub(crate) trait WorkerRuntime: Send + Sync + 'static {
-    async fn start_thread(&self, cwd: &Path, config: Value) -> Result<StartedThread, WorkerError>;
+    async fn start_thread(
+        &self,
+        name: &str,
+        cwd: &Path,
+        config: Value,
+    ) -> Result<StartedThread, WorkerError>;
 
     async fn resume_thread(
         &self,

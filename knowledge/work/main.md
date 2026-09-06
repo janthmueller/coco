@@ -124,7 +124,7 @@ architectural baseline for CoCo.
     daemon-level restart in automated tests.
   - [x] Update public restart guidance and canonical recovery semantics, then
     create a dedicated checkpoint commit.
-- [ ] Add an explicit opt-in compatibility smoke test against the installed,
+- [x] Add an explicit opt-in compatibility smoke test against the installed,
   pinned Codex executable. Verify the reported version, generated resume
   schema, authenticated WebSocket startup, persistent thread creation, and
   resume through a fresh App Server process without consuming a model turn.
@@ -326,6 +326,16 @@ architectural baseline for CoCo.
   their ID, worktree, and immutable named-profile provenance. Turns unfinished
   at daemon loss remain interrupted; making an active turn survive an App
   Server crash would require a separately supervised worker lifetime.
+- 2026-09-06 — Keep the real-Codex compatibility test both ignored by default
+  and guarded by `COCO_RUN_REAL_CODEX_COMPAT=1`. It uses isolated homes, pins
+  the executable and relevant generated schemas, and deliberately never sends
+  `turn/start`, so a maintainer cannot consume a model turn by running it.
+- 2026-09-06 — Do not negotiate Codex's broad `experimentalApi` capability
+  merely to repeat the task `cwd` as `runtimeWorkspaceRoots`; omit that guarded
+  field and rely on Codex's documented default. After validating a new thread,
+  issue the stable, model-free `thread/name/set` operation with the task name
+  before binding it, because the pinned App Server does not otherwise
+  materialize an empty thread's rollout for later resume.
 
 ## Findings
 
@@ -452,6 +462,14 @@ architectural baseline for CoCo.
   App Server process. A response supplies the only fresh native status for the
   new runtime generation; unsuccessful tasks remain unavailable and do not
   prevent the daemon from recovering other threads.
+- The first run of the real compatibility test found that Codex 0.147.0 rejects
+  `thread/start.runtimeWorkspaceRoots` unless the client declares the broad
+  experimental API capability. The same generated schema says omission
+  defaults that value to `cwd`, so the field had no benefit for CoCo.
+- The pinned App Server returns an ID and future rollout path for a persistent
+  empty thread but does not create the rollout file at `thread/start`. A
+  model-free `thread/name/set` creates the durable record; after that operation
+  a fresh App Server resumes the exact ID successfully.
 
 ## Verification
 
@@ -558,6 +576,17 @@ architectural baseline for CoCo.
   all-feature Clippy with warnings denied, rustfmt, `cargo machete`,
   `nix run .#docs-check`, `nix run .#docs-build`, and
   `nix flake check . --no-write-lock-file --max-jobs 1` pass.
+- The explicit real-Codex command
+  `COCO_RUN_REAL_CODEX_COMPAT=1 CARGO_BUILD_JOBS=1 cargo test --locked --test real_codex_compat -- --ignored --test-threads=1 --nocapture`
+  passes against `codex-cli 0.147.0`. It compares the generated experimental
+  start/resume/name schemas with the committed bundle, runs the built daemon
+  and CLI against isolated state, and verifies the same idle thread and
+  worktree after a new daemon/App Server generation with no active turn.
+- After the compatibility corrections, the normal suite passes all 55 library
+  tests and the fake process smoke while compiling and skipping the guarded
+  real test. All-target/all-feature Clippy with warnings denied, rustfmt,
+  `cargo machete`, `nix run .#docs-check`, `nix run .#docs-build`, and
+  `nix flake check . --no-write-lock-file --max-jobs 1` pass.
 
 ## Open questions and handoff
 
@@ -573,7 +602,7 @@ architectural baseline for CoCo.
 - Keep the durable pending-request model and numbered `coco decide` flow
   recorded but unscheduled. If it is selected later, do not let it introduce
   another state machine.
-- Add the explicit real-Codex compatibility smoke, then stop and discuss Git
+- The real-Codex compatibility smoke is complete. Stop now and discuss Git
   administrative write policy with the user before implementing more product
   behavior.
 - Research Codex's native lifecycle extensibility before designing CoCo hooks.

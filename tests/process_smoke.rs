@@ -483,6 +483,9 @@ async fn handle_daemon_connection(
                 )
                 .await?;
             }
+            Some("thread/name/set") => {
+                send_result(&mut websocket, &frame, json!({})).await?;
+            }
             Some("turn/start") => {
                 let completion = completion
                     .take()
@@ -939,14 +942,26 @@ fn verify_codex_requests(requests: &[Value], worktree: &Path) -> Result<()> {
     let thread_start = request(requests, "thread/start")?;
     let worktree_value = Value::String(worktree.to_string_lossy().into_owned());
     assert_eq!(thread_start.pointer("/params/cwd"), Some(&worktree_value));
-    assert_eq!(
-        thread_start.pointer("/params/runtimeWorkspaceRoots/0"),
-        Some(&worktree_value)
+    ensure!(
+        thread_start
+            .pointer("/params/runtimeWorkspaceRoots")
+            .is_none(),
+        "thread/start used an experimental field without negotiating the capability"
     );
     assert_eq!(thread_start.pointer("/params/config"), Some(&json!({})));
     assert_eq!(
         thread_start.pointer("/params/ephemeral"),
         Some(&json!(false))
+    );
+
+    let thread_name = request(requests, "thread/name/set")?;
+    assert_eq!(
+        thread_name.pointer("/params/threadId"),
+        Some(&json!(THREAD_ID))
+    );
+    assert_eq!(
+        thread_name.pointer("/params/name"),
+        Some(&json!("process-smoke"))
     );
 
     let turn_start = request(requests, "turn/start")?;

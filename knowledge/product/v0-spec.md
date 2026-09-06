@@ -241,8 +241,11 @@ selected internally. Creation must execute as a recoverable saga:
 6. Create `coco/<name>` and its worktree at the exact base SHA.
 7. Start a non-ephemeral Codex thread with canonical `cwd` equal to the task
    worktree and with the snapshotted worker profile.
-8. Atomically persist the returned thread ID and move the task to `idle`.
-9. Return the prepared task without starting a turn. Work begins only after an
+8. Verify the returned binding and set the Codex thread name to the task name;
+   for the pinned App Server this model-free metadata write also makes an empty
+   prepared thread resumable after process restart.
+9. Atomically persist the returned thread ID and move the task to `idle`.
+10. Return the prepared task without starting a turn. Work begins only after an
    explicit `send` or an operator starts a turn through `jump`.
 
 If a post-worktree step fails, CoCo must mark the task `failed`, record the
@@ -500,9 +503,11 @@ The following are intentionally outside v0:
 
 ### Interaction and observation
 
-- A fake App Server contract test and an opt-in real Codex smoke test both
-  exercise initialization, thread preparation, explicit turn start, event
-  correlation, and completion/failure.
+- A fake App Server contract test exercises initialization, thread preparation,
+  explicit turn start, event correlation, and completion/failure. A separate
+  opt-in real Codex compatibility test performs no model turn: it checks the
+  pinned executable and generated schemas, prepares a persistent thread, then
+  resumes the same thread through a fresh App Server process.
 - Two sequential `send` operations use the same thread and different turn IDs;
   concurrent sends yield one accepted turn and one deterministic conflict.
 - `status --follow` can attach during a turn, reflects durable phase changes,

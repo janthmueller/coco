@@ -20,21 +20,36 @@ impl CodexWorker {
 
 #[async_trait]
 impl WorkerRuntime for CodexWorker {
-    async fn start_thread(&self, cwd: &Path, config: Value) -> Result<StartedThread, WorkerError> {
+    async fn start_thread(
+        &self,
+        name: &str,
+        cwd: &Path,
+        config: Value,
+    ) -> Result<StartedThread, WorkerError> {
         let response = self
             .client
             .request(
                 "thread/start",
                 json!({
                     "cwd": cwd,
-                    "runtimeWorkspaceRoots": [cwd],
                     "config": config,
                     "ephemeral": false,
                 }),
             )
             .await
             .map_err(WorkerError::runtime)?;
-        decode_thread_response(response, cwd)
+        let started = decode_thread_response(response, cwd)?;
+        self.client
+            .request(
+                "thread/name/set",
+                json!({
+                    "threadId": started.id,
+                    "name": name,
+                }),
+            )
+            .await
+            .map_err(WorkerError::runtime)?;
+        Ok(started)
     }
 
     async fn resume_thread(

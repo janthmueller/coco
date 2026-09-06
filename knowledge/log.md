@@ -10,6 +10,11 @@ status: stable
 
 ## 2026-09-06
 
+- **Pinned Codex compatibility**: Added an explicit opt-in process smoke test
+  for Codex 0.147.0 covering generated schemas, authenticated startup,
+  model-free persistent thread preparation, and resume through a fresh App
+  Server. The test exposed and removed an unnegotiated experimental field and
+  established `thread/name/set` as the empty-thread durability step.
 - **Daemon thread recovery**: A fresh `cocod` now resumes each persisted
   `ready` Codex thread with its verified ID, worktree, and unchanged in-memory
   profile overlay. Successful responses refresh native status; profile drift

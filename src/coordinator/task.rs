@@ -110,7 +110,7 @@ impl Coordinator {
 
         let started_thread = match self
             .worker
-            .start_thread(&binding.path, loaded_profile.thread_config)
+            .start_thread(&params.name, &binding.path, loaded_profile.thread_config)
             .await
         {
             Ok(thread) => thread,

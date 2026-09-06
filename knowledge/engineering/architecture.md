@@ -602,13 +602,20 @@ stages untracked files to make them appear in a patch.
 At build/development time run:
 
 ```bash
-codex app-server generate-json-schema --out ./schema/codex-app-server
+codex app-server generate-json-schema --experimental --out ./schema/codex-app-server
 ```
 
 Commit or reproducibly generate schemas for the supported Codex version and
 never hand-author lookalike protocol documentation. Validate the Rust
 adapter's request and response projections against that boundary so a Codex
 update does not leak method-specific payloads into core or CLI types.
+
+The committed bundle includes experimental fields so CoCo can audit the
+remote-attachment surface it depends on. The daemon client does not advertise
+the broad `experimentalApi` initialize capability and must not send fields
+guarded by it. In particular, omit `thread/start.runtimeWorkspaceRoots` when it
+would merely repeat `cwd`; Codex already defaults the runtime root to that
+directory.
 
 The local 0.147.0 observation supports this minimal sequence:
 
@@ -623,12 +630,17 @@ The local 0.147.0 observation supports this minimal sequence:
    metadata.
 5. Send `thread/start` with `cwd`, model/profile values, approval policy,
    sandbox mode, instructions, and `ephemeral: false`.
-6. Verify the returned thread ID and canonical returned `cwd`, then atomically
-   persist the binding, initial native status/generation, and `ready`
-   lifecycle.
-7. On an explicit `send`, issue `turn/start` with thread ID, text input, client
+6. Verify the returned thread ID and canonical returned `cwd`, then set the
+   native thread name to the CoCo task name with `thread/name/set` before
+   committing the binding. In Codex 0.147.0 an empty thread has a rollout path
+   in the response but does not materialize that file until this durable,
+   model-free metadata write; the pinned compatibility smoke verifies that the
+   named thread survives a fresh App Server process.
+7. Atomically persist the binding, initial native status/generation, and
+   `ready` lifecycle only after both App Server operations succeed.
+8. On an explicit `send`, issue `turn/start` with thread ID, text input, client
    message ID, the same canonical `cwd`, and effective turn overrides.
-8. Correlate responses, notifications, and server-initiated requests by the
+9. Correlate responses, notifications, and server-initiated requests by the
    generated protocol fields; map only understood semantics into CoCo events.
 
 `coco jump` reads the endpoint descriptor and token after resolving the task
@@ -728,6 +740,7 @@ CLI             cocod              SQLite             Git          App Server
  |               | bind worktree --->|                 |                |
  |               |------------------------------------ thread/start --->|
  |               |<----------------------------------- thread id --------|
+ |               |--------------------------------- thread/name/set --->|
  |               | bind idle task --->|                 |                |
  |<--------------| prepared result     |                 |                |
 ```
@@ -799,7 +812,13 @@ process owned by this daemon. It does not delete worktrees or branches.
   deliberately reorders response/notification delivery, requests approval,
   writes stderr, disconnects, and emits an unknown method.
 - Add an opt-in smoke test against the installed authenticated Codex executable
-  for schema generation, initialize, real thread/turn, cwd, and event flow.
+  for exact version/schema compatibility, initialize, persistent thread
+  creation, verified cwd, and resume through a fresh App Server process. Keep
+  this check free of `turn/start` so it never consumes a model turn; the fake
+  process contract test owns deterministic turn and event-flow coverage.
+  Run it explicitly with
+  `COCO_RUN_REAL_CODEX_COMPAT=1 cargo test --locked --test real_codex_compat -- --ignored --test-threads=1`;
+  `COCO_REAL_CODEX_BINARY` may select a non-default executable.
 - Test CLI snapshots for human rendering and parse/shape tests for JSON and
   NDJSON; core behavior is asserted below the renderer.
 - Launch the MCP adapter under a protocol test harness, verify advertised tools
