@@ -397,8 +397,11 @@ mod tests {
                 "details": {"repositoryPath": "/repo"},
             }),
         );
+    }
 
-        let defaults: TaskCreateParams = serde_json::from_value(json!({
+    #[test]
+    fn task_creation_defaults_to_the_default_profile() {
+        let params: TaskCreateParams = serde_json::from_value(json!({
             "repositoryPath": "/repo",
             "name": "task",
             "baseRef": "HEAD",
@@ -406,7 +409,7 @@ mod tests {
             "operationId": "create-1",
         }))
         .unwrap();
-        assert_eq!(defaults.profile, "default");
+        assert_eq!(params.profile, "default");
     }
 
     #[test]

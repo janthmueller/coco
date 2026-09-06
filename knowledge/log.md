@@ -10,6 +10,9 @@ status: stable
 
 ## 2026-09-06
 
+- **Structural lint gates**: Removed the remaining production function-size
+  findings and now deny Clippy's `too_many_lines` plus `excessive_nesting`
+  lints, retaining one explicit exception for the ordered process smoke test.
 - **CLI module boundary**: Reduced the public CLI facade to parsing and
   delegation, and separated Clap arguments, typed command handlers, status
   following, authenticated TUI jump, output rendering, and contract tests.

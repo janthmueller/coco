@@ -31,49 +31,7 @@ impl Coordinator {
         }
         let turn = self.turn_for_codex_params(&task, &params)?;
         match method {
-            "turn/completed" => {
-                let Some(turn) = turn else {
-                    warn!(task_id = %task.id, "ignoring turn completion without a correlated turn");
-                    return Ok(());
-                };
-                if matches!(
-                    turn.phase,
-                    TurnPhase::Completed | TurnPhase::Failed | TurnPhase::Interrupted
-                ) {
-                    return Ok(());
-                }
-                let status = params
-                    .pointer("/turn/status")
-                    .and_then(Value::as_str)
-                    .unwrap_or("failed");
-                let phase = match status {
-                    "completed" => TurnPhase::Completed,
-                    "interrupted" => TurnPhase::Interrupted,
-                    "failed" => TurnPhase::Failed,
-                    _ => {
-                        warn!(status, "ignoring non-terminal turn/completed payload");
-                        return Ok(());
-                    }
-                };
-                let error = params
-                    .pointer("/turn/error")
-                    .filter(|value| !value.is_null())
-                    .cloned();
-                self.store.complete_turn_with_event(
-                    &task.id,
-                    &turn.id,
-                    TurnCompletion {
-                        phase,
-                        error,
-                        completed_at_ms: None,
-                    },
-                    EventDraft::task(
-                        EventKind::TurnCompleted,
-                        EventSource::Codex,
-                        json!({"status": status}),
-                    ),
-                )?;
-            }
+            "turn/completed" => self.record_turn_completed(&task, turn.as_ref(), &params)?,
             "item/completed"
                 if params.pointer("/item/type").and_then(Value::as_str) == Some("agentMessage") =>
             {
@@ -124,6 +82,56 @@ impl Coordinator {
             }
             _ => {}
         }
+        Ok(())
+    }
+
+    fn record_turn_completed(
+        &self,
+        task: &Task,
+        turn: Option<&Turn>,
+        params: &Value,
+    ) -> Result<(), StoreError> {
+        let Some(turn) = turn else {
+            warn!(task_id = %task.id, "ignoring turn completion without a correlated turn");
+            return Ok(());
+        };
+        if matches!(
+            turn.phase,
+            TurnPhase::Completed | TurnPhase::Failed | TurnPhase::Interrupted
+        ) {
+            return Ok(());
+        }
+        let status = params
+            .pointer("/turn/status")
+            .and_then(Value::as_str)
+            .unwrap_or("failed");
+        let phase = match status {
+            "completed" => TurnPhase::Completed,
+            "interrupted" => TurnPhase::Interrupted,
+            "failed" => TurnPhase::Failed,
+            _ => {
+                warn!(status, "ignoring non-terminal turn/completed payload");
+                return Ok(());
+            }
+        };
+        let error = params
+            .pointer("/turn/error")
+            .filter(|value| !value.is_null())
+            .cloned();
+        self.store.complete_turn_with_event(
+            &task.id,
+            &turn.id,
+            TurnCompletion {
+                phase,
+                error,
+                completed_at_ms: None,
+            },
+            EventDraft::task(
+                EventKind::TurnCompleted,
+                EventSource::Codex,
+                json!({"status": status}),
+            ),
+        )?;
         Ok(())
     }
 

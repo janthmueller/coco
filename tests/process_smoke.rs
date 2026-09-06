@@ -91,6 +91,10 @@ impl TestPaths {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "one end-to-end scenario keeps daemon, CLI, App Server, and cleanup assertions ordered"
+)]
 async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     let temporary = tempfile::tempdir()?;
     let paths = TestPaths::new(temporary.path());

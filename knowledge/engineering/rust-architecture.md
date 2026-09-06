@@ -280,9 +280,13 @@ construction, and the unchanged native-Git fixture lives in `git/tests.rs`.
 The final physical split completed with the CLI: the facade now only parses
 and delegates, while Clap arguments, typed command execution, the status
 follow-loop, authenticated TUI jump, output rendering, and tests have focused
-child modules. The original `cli::run` size finding is gone. Phase 2 still
-needs the three remaining production `too_many_lines` findings reduced before
-that lint can become a project gate.
+child modules. The original `cli::run` size finding is gone. A final cleanup
+extracted shared App Server process startup, prepared-task persistence, and
+terminal-turn projection, removing every production `too_many_lines` finding.
+Both `too_many_lines` and the separately reviewed `excessive_nesting` lint are
+now denied package-wide. The single end-to-end process scenario has a local,
+reasoned size exception; the oversized protocol test was split by assertion
+responsibility instead.
 
 Extract coherent child modules in this order:
 
@@ -297,8 +301,9 @@ flagged functions below 100 lines, then enable `clippy::too_many_lines` as a
 project lint. Review `excessive_nesting` separately; do not enable the complete
 Clippy restriction group.
 
-Exit: parent modules are readable facades, boundaries match the dependency
-rules, and behavior is unchanged.
+Exit achieved on 2026-09-06: parent modules are readable facades, boundaries
+match the dependency rules, behavior is unchanged, and the selected structural
+lints are enforced.
 
 ### Phase 3 — platform transport boundary
 
@@ -332,7 +337,7 @@ Nix development shell/check apps, not in application dependencies.
 | --- | --- | --- |
 | `cargo fmt --check` | deterministic formatting | required on every change |
 | `cargo clippy --all-targets --all-features -- -D warnings` | compiler-aware correctness/style/performance | required on every change |
-| selected `too_many_lines` and `excessive_nesting` lints | actionable structural pressure | enable individually after the current findings are fixed |
+| selected `too_many_lines` and `excessive_nesting` lints | actionable structural pressure | denied package-wide; exceptions must be local and reasoned |
 | `cargo test --all-targets` | behavior and contract safety | required on every change |
 | `cargo machete` | fast unused direct-dependency detection | required; document justified false positives |
 | `cargo deny` | advisories, sources, licenses, and duplicate/banned crates | required after policy/config review; do not use an unreviewed generated config |

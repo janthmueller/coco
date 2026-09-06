@@ -1,9 +1,10 @@
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 
 use serde_json::json;
 use tokio::io::{AsyncRead, AsyncReadExt};
-use tokio::process::{Child, Command};
+use tokio::process::{Child, ChildStderr, Command};
 use tokio::sync::{Mutex, mpsc, watch};
 
 use crate::protocol::AppServerEndpoint;
@@ -96,61 +97,13 @@ impl CodexClient {
         options: CodexClientOptions,
         shared: SharedAppServerOptions,
     ) -> Result<(Self, mpsc::Receiver<CodexEvent>), CodexError> {
-        prepare_shared_runtime(&shared).await?;
-        if let Some(codex_home) = options.codex_home.as_ref() {
-            tokio::fs::create_dir_all(codex_home)
-                .await
-                .map_err(|error| CodexError::Spawn {
-                    message: format!(
-                        "could not create Codex home {}: {error}",
-                        codex_home.display()
-                    ),
-                })?;
-        }
-
-        let address = reserve_loopback_address().await?;
-        let token = new_capability_token();
-        write_private_file(&shared.token_path, token.as_bytes()).map_err(|error| {
-            CodexError::Spawn {
-                message: format!(
-                    "could not write App Server capability token {}: {error}",
-                    shared.token_path.display()
-                ),
-            }
-        })?;
-        let endpoint = format!("ws://{address}");
-        let mut command = Command::new(&options.codex_binary);
-        command
-            .args(["app-server", "--listen"])
-            .arg(&endpoint)
-            .args(["--ws-auth", "capability-token", "--ws-token-file"])
-            .arg(&shared.token_path)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true);
-        apply_codex_home(&mut command, options.codex_home.as_ref());
-
-        let mut child = match command.spawn() {
-            Ok(child) => child,
-            Err(error) => {
-                remove_runtime_file(&shared.token_path).await;
-                return Err(CodexError::Spawn {
-                    message: error.to_string(),
-                });
-            }
-        };
-        let stderr = match child.stderr.take() {
-            Some(stderr) => stderr,
-            None => {
-                let _ = child.start_kill();
-                let _ = child.wait().await;
-                remove_runtime_file(&shared.token_path).await;
-                return Err(CodexError::Spawn {
-                    message: "spawned App Server did not expose stderr".to_owned(),
-                });
-            }
-        };
+        let SharedProcess {
+            mut child,
+            stderr,
+            address,
+            endpoint,
+            token,
+        } = spawn_shared_process(&options, &shared).await?;
         let stderr_tail = Arc::new(Mutex::new(StderrTail::new(STDERR_TAIL_BYTES)));
         let stderr_task = tokio::spawn(collect_stderr(stderr, Arc::clone(&stderr_tail)));
 
@@ -228,6 +181,82 @@ impl CodexClient {
 
         Ok((client, events))
     }
+}
+
+struct SharedProcess {
+    child: Child,
+    stderr: ChildStderr,
+    address: SocketAddr,
+    endpoint: String,
+    token: String,
+}
+
+async fn spawn_shared_process(
+    options: &CodexClientOptions,
+    shared: &SharedAppServerOptions,
+) -> Result<SharedProcess, CodexError> {
+    prepare_shared_runtime(shared).await?;
+    if let Some(codex_home) = options.codex_home.as_ref() {
+        tokio::fs::create_dir_all(codex_home)
+            .await
+            .map_err(|error| CodexError::Spawn {
+                message: format!(
+                    "could not create Codex home {}: {error}",
+                    codex_home.display()
+                ),
+            })?;
+    }
+
+    let address = reserve_loopback_address().await?;
+    let token = new_capability_token();
+    write_private_file(&shared.token_path, token.as_bytes()).map_err(|error| {
+        CodexError::Spawn {
+            message: format!(
+                "could not write App Server capability token {}: {error}",
+                shared.token_path.display()
+            ),
+        }
+    })?;
+    let endpoint = format!("ws://{address}");
+    let mut command = Command::new(&options.codex_binary);
+    command
+        .args(["app-server", "--listen"])
+        .arg(&endpoint)
+        .args(["--ws-auth", "capability-token", "--ws-token-file"])
+        .arg(&shared.token_path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    apply_codex_home(&mut command, options.codex_home.as_ref());
+
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            remove_runtime_file(&shared.token_path).await;
+            return Err(CodexError::Spawn {
+                message: error.to_string(),
+            });
+        }
+    };
+    let stderr = match child.stderr.take() {
+        Some(stderr) => stderr,
+        None => {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            remove_runtime_file(&shared.token_path).await;
+            return Err(CodexError::Spawn {
+                message: "spawned App Server did not expose stderr".to_owned(),
+            });
+        }
+    };
+    Ok(SharedProcess {
+        child,
+        stderr,
+        address,
+        endpoint,
+        token,
+    })
 }
 
 fn apply_codex_home(command: &mut Command, codex_home: Option<&PathBuf>) {

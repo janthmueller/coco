@@ -79,32 +79,8 @@ impl Coordinator {
             &base_sha,
         )?;
 
-        let (task, _) = self.store.create_task_with_event(
-            NewTask {
-                create_operation_id: Some(params.operation_id.clone()),
-                repository_id: repository.id.clone(),
-                name: params.name.clone(),
-                context_mode,
-                context: json!({
-                    "version": 1,
-                    "mode": context_mode,
-                    "baseRef": params.base_ref,
-                }),
-                profile: loaded_profile.snapshot.clone(),
-                branch_name: Some(plan.branch_name.clone()),
-                base_sha: Some(plan.base_sha.clone()),
-                worktree_path: Some(plan.path.clone()),
-            },
-            EventDraft::task(
-                EventKind::TaskCreated,
-                EventSource::Coco,
-                json!({
-                    "operationId": params.operation_id,
-                    "name": params.name,
-                    "baseSha": plan.base_sha,
-                }),
-            ),
-        )?;
+        let task =
+            self.persist_prepared_task(&params, &repository, context_mode, &loaded_profile, &plan)?;
 
         let binding = match self.git.create_worktree(&git_repository, &plan) {
             Ok(binding) => binding,
@@ -159,6 +135,43 @@ impl Coordinator {
             ),
         )?;
         self.task_response(task)
+    }
+
+    fn persist_prepared_task(
+        &self,
+        params: &TaskCreateParams,
+        repository: &Repository,
+        context_mode: ContextMode,
+        loaded_profile: &crate::profile::LoadedProfile,
+        plan: &crate::git::WorktreePlan,
+    ) -> Result<Task, CoordinatorError> {
+        let (task, _) = self.store.create_task_with_event(
+            NewTask {
+                create_operation_id: Some(params.operation_id.clone()),
+                repository_id: repository.id.clone(),
+                name: params.name.clone(),
+                context_mode,
+                context: json!({
+                    "version": 1,
+                    "mode": context_mode,
+                    "baseRef": params.base_ref,
+                }),
+                profile: loaded_profile.snapshot.clone(),
+                branch_name: Some(plan.branch_name.clone()),
+                base_sha: Some(plan.base_sha.clone()),
+                worktree_path: Some(plan.path.clone()),
+            },
+            EventDraft::task(
+                EventKind::TaskCreated,
+                EventSource::Coco,
+                json!({
+                    "operationId": params.operation_id,
+                    "name": params.name,
+                    "baseSha": plan.base_sha,
+                }),
+            ),
+        )?;
+        Ok(task)
     }
 
     pub(crate) fn list_tasks(&self, params: TaskListParams) -> Result<Vec<Task>, CoordinatorError> {

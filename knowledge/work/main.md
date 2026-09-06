@@ -78,6 +78,8 @@ architectural baseline for CoCo.
   - [x] Codex process, JSONL, WebSocket, and tests.
   - [x] Git command, repository, worktree, diff, and tests.
   - [x] CLI arguments, commands, output, and tests.
+- [x] Reduce the measured production function-size findings and enforce the
+  selected `too_many_lines` plus `excessive_nesting` Clippy gates.
 - [ ] Design task annotations and external references as a deliberate future
   feature. Decide typed versus free-form values, mutation/audit semantics,
   privacy and display rules, fork/handoff inheritance, and explicit projection
@@ -224,6 +226,10 @@ architectural baseline for CoCo.
   Separate Clap definitions, typed command handlers, status following, TUI
   jump setup, output formatting, and contract tests without changing command
   names, JSON schema, human output, or process behavior.
+- 2026-09-06 — Deny `clippy::too_many_lines` and
+  `clippy::excessive_nesting` package-wide after removing every production
+  finding. Keep one local, reasoned exception for the single process-level
+  lifecycle scenario; split tests that contain separable assertions instead.
 
 ## Findings
 
@@ -305,9 +311,13 @@ architectural baseline for CoCo.
 - The completed CLI split leaves a 17-line facade, 90-line argument module,
   155-line typed command module, 94-line status follower, 102-line jump module,
   151-line output module, and 109-line test module. A targeted Clippy
-  measurement confirms the old 117-line dispatcher is gone; three existing
-  production functions and two integration-style tests still exceed the
-  default 100-line threshold, so the lint is not enabled yet.
+  measurement confirmed the old 117-line dispatcher was gone and identified
+  the final three production functions plus two tests for focused cleanup.
+- Extracting shared-process startup, prepared-task persistence, and terminal
+  turn completion removed the final production `too_many_lines` findings. The
+  protocol test naturally split into wire-field and defaulting assertions; the
+  process smoke test remains one ordered cross-process scenario and carries
+  the only local exception. `excessive_nesting` has no current findings.
 
 ## Verification
 
@@ -369,6 +379,11 @@ architectural baseline for CoCo.
   Clippy gate and `cargo machete` remain clean. The resource-limited
   `nix flake check . --no-write-lock-file` run also passes against the staged
   Git source.
+- With both selected structural lints denied, all 49 library tests and the
+  process smoke test pass sequentially; all-target/all-feature Clippy with
+  warnings denied and `cargo machete` are clean. The resource-limited
+  `nix flake check . --no-write-lock-file` run builds its tooling check and
+  passes against the staged Git source.
 - The documentation TypeScript, Oxlint, and Prettier checks pass. Both the
   root and `/coco` builds export 88 static files across eight pages with static
   search, valid local links, no server artifact, and no internal knowledge.
@@ -393,9 +408,7 @@ architectural baseline for CoCo.
   worker turn, and an ordinary cancel must remain unambiguous and observable.
 - When the public site is scheduled, validate its production export under the
   GitHub Pages project subpath before enabling deployment from `main`.
-- Complete Phase 2 from `knowledge/engineering/rust-architecture.md`: reduce
-  the remaining production `too_many_lines` findings in shared App Server
-  startup, task creation, and Codex notification projection. Review the two
-  integration-style test findings separately, then enable the selected lint
-  only with narrow, reasoned test exceptions where splitting would obscure a
-  single scenario.
+- Phase 2 is complete. Perform its architecture review trigger before starting
+  platform transport work: remeasure module boundaries and public visibility,
+  confirm the one-package decision, then decide whether Phase 3 (Unix socket
+  backend plus Windows named pipes) or a product capability should be next.
