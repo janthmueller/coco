@@ -44,6 +44,11 @@ data.
   behavior.
 - Keep design rationale, speculative alternatives, and agent bookkeeping out
   of public pages.
+- Explain the product with the smallest useful technical model: CoCo is a local
+  orchestration layer around Codex App Server, and a workspace binds a Git
+  worktree, Codex thread, and selected configuration. This helps users
+  understand prerequisites and process lifetime; storage, RPC, schema, and
+  adapter details remain internal.
 
 ## Strict public/internal boundary
 

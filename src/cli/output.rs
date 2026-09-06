@@ -221,12 +221,24 @@ pub(super) fn print_decision_hints(decisions: &[Value]) {
 }
 
 pub(super) fn print_diff(value: &Value) {
+    print!("{}", render_diff(value));
+}
+
+pub(super) fn render_diff(value: &Value) -> String {
+    let mut output = String::new();
     let patch = value.get("patch").and_then(Value::as_str).unwrap_or("");
     if !patch.is_empty() {
-        print!("{patch}");
+        output.push_str(patch);
         if !patch.ends_with('\n') {
-            println!();
+            output.push('\n');
         }
+    }
+    let patch_truncated = value
+        .get("patchTruncated")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if patch_truncated {
+        output.push_str("Warning: tracked patch output was truncated.\n");
     }
     let untracked = value
         .get("untrackedPaths")
@@ -234,14 +246,16 @@ pub(super) fn print_diff(value: &Value) {
         .map(Vec::as_slice)
         .unwrap_or(&[]);
     if !untracked.is_empty() {
-        println!("Untracked:");
+        output.push_str("Untracked:\n");
         for path in untracked {
-            println!("{}", compact(path));
+            output.push_str(&compact(path));
+            output.push('\n');
         }
     }
-    if patch.is_empty() && untracked.is_empty() {
-        println!("No changes.");
+    if patch.is_empty() && untracked.is_empty() && !patch_truncated {
+        output.push_str("No changes.\n");
     }
+    output
 }
 
 fn text(value: &Value, key: &str) -> String {

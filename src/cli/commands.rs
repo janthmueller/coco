@@ -24,10 +24,11 @@ use super::status::follow_status;
 pub(super) async fn run(cli: Cli) -> Result<()> {
     let paths = CocoPaths::from_env()?;
     let cwd = std::env::current_dir().context("could not determine current directory")?;
+    let all_repos = cli.requests_all_repositories();
     let Cli {
         scope_path,
-        all_repos,
         command,
+        ..
     } = cli;
     validate_scope_selection(scope_path.is_some(), all_repos)?;
     let has_explicit_scope = scope_path.is_some() || all_repos;
@@ -57,11 +58,12 @@ pub(super) async fn run(cli: Cli) -> Result<()> {
             }
             create_workspace(&paths, repository_path, args).await
         }
-        Command::Ls { json } => list_workspaces(&paths, scope, json).await,
+        Command::Ls { json, .. } => list_workspaces(&paths, scope, json).await,
         Command::Status {
             workspace,
             follow,
             json,
+            ..
         } => {
             show_status(
                 &paths,
@@ -72,7 +74,9 @@ pub(super) async fn run(cli: Cli) -> Result<()> {
             )
             .await
         }
-        Command::Send { workspace, message } => {
+        Command::Send {
+            workspace, message, ..
+        } => {
             send(
                 &paths,
                 scope_for_reference(scope, &workspace),
@@ -81,14 +85,14 @@ pub(super) async fn run(cli: Cli) -> Result<()> {
             )
             .await
         }
-        Command::Jump { workspace } => {
+        Command::Jump { workspace, .. } => {
             jump_to_workspace(&paths, scope_for_reference(scope, &workspace), workspace).await
         }
         Command::Decide { decision } => {
             reject_top_level_scope(has_explicit_scope, "decide")?;
             decide(&paths, decision).await
         }
-        Command::Diff { workspace } => {
+        Command::Diff { workspace, .. } => {
             show_diff(&paths, scope_for_reference(scope, &workspace), workspace).await
         }
     }

@@ -52,6 +52,10 @@ that the behavior is already implemented.
 - `cocod` owns one Codex App Server child and connects through an authenticated
   IPv4-loopback WebSocket. This same endpoint lets `coco jump` attach the
   official Codex TUI without creating a second App Server process.
+- Alpha packages install the executables but do not enable a background
+  service. The operator starts `cocod` explicitly in the foreground. A later
+  user service must remain opt-in and cross-platform, and is gated on graceful
+  SIGTERM handling plus defined App Server child-failure and recovery behavior.
 - Git isolation uses native Git worktrees and persistence uses SQLite.
 - The CLI and a local CoCo MCP server are v0 client adapters. Later TUI and
   local web clients are equal peers and must use the same headless
@@ -113,11 +117,14 @@ release:
 - `fresh` and same-repository `fork` are executable context modes.
   `handoff` remains reserved and returns a clear unsupported-mode error until
   its transfer-artifact contract is deliberately designed.
-- v0 uses Codex's base configuration by default and accepts a named
-  `[profiles.<name>]` overlay from `$CODEX_HOME/config.toml`. The applied,
-  non-secret effective settings are snapshotted onto each workspace; profile CRUD is
-  not part of v0. Future MCP capability profiles are a separate snapshot
-  dimension rather than an unstructured extension of this execution profile.
+- v0 uses the App Server's base Codex configuration by default, represented by
+  an empty per-thread overlay. A non-default `--profile <name>` loads the
+  complete `$CODEX_HOME/<name>.config.toml` document as that thread's overlay.
+  CoCo persists its name, source path, parsed-configuration hash, explicit
+  model override, and non-secret effective settings, never the complete
+  overlay. Profile CRUD is not part of v0. Future MCP capability profiles are
+  a separate snapshot dimension rather than an unstructured extension of this
+  execution profile.
 - CLI and MCP adapter connect to one user-scoped `cocod`; the daemon owns one
   App Server child process at a time in v0.
 - The MCP adapter is repository-scoped at launch and read-only by default. An
@@ -351,9 +358,10 @@ does not duplicate thread or turn orchestration.
 ### `coco create`
 
 `--base` defaults to `HEAD` for a fresh workspace. Optional `--profile <name>`
-applies the matching Codex profile table only to the new thread; omitting it
-keeps the App Server's base configuration. Optional `--model <model>`/`-m`
-passes an explicit top-level model override alongside that profile overlay.
+loads the complete `$CODEX_HOME/<name>.config.toml` document and applies it only
+to the new thread; omitting it sends an empty overlay and keeps the App Server's
+base configuration. Optional `--model <model>`/`-m` passes an explicit
+top-level model override alongside that profile overlay.
 Codex remains authoritative for resolving the effective configuration: CoCo
 must not extract, merge, or duplicate a profile's model setting itself. The
 requested override and Codex-reported non-secret effective model are retained
@@ -679,12 +687,16 @@ The following are intentionally outside v0:
 - Injected failures after each saga stage leave a diagnosable `failed` workspace and
   never delete the external artifacts automatically.
 - Restarting the daemon preserves list/status output, resumes bound `ready`
-  threads with their stored worktree and unchanged profile overlay, refreshes
-  their current-generation native status, and truthfully records an in-flight
-  turn as interrupted without misclassifying the whole workspace as failed.
-- Recovery rejects changed named profiles and mismatched returned thread IDs or
-  working directories. One failed resume remains diagnosable and does not
-  prevent other bound workspaces or the daemon from becoming available.
+  threads with their stored worktree and a freshly loaded overlay whose name,
+  source path, and parsed-configuration hash still match the immutable
+  snapshot, refreshes their current-generation native status, and truthfully
+  records an in-flight turn as interrupted without misclassifying the whole
+  workspace as failed.
+- Recovery rejects a missing, invalid, moved, or changed named profile and
+  mismatched returned thread IDs or working directories. The default profile
+  consistently reloads as an empty overlay. One failed resume remains
+  diagnosable and does not prevent other bound workspaces or the daemon from
+  becoming available.
 
 ### Interaction and observation
 
@@ -757,4 +769,7 @@ convenience, but it is not part of the isolation contract.
 
 Release follow-ups that are not blockers for the proof slice are the exact
 supported Codex CLI version range, Windows support, profile configuration UX,
-and the future explicit workspace-completion command.
+and the future explicit workspace-completion command. Background supervision
+also remains post-alpha: do not ship an auto-enabled service until graceful
+SIGTERM and App Server child-failure/recovery semantics are implemented and
+tested across the supported service managers.

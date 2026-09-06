@@ -1,12 +1,13 @@
 [package]
 name = "codex-coordinator"
-version = "0.1.0"
+version = "0.1.0-alpha.0"
 edition = "2024"
 rust-version = "1.98.1"
-description = "Local Codex agent orchestration"
+description = "Coordinate parallel Codex threads in separate Git worktrees"
 license = "MIT"
 repository = "https://github.com/janthmueller/coco"
 homepage = "https://janthmueller.github.io/coco/"
+documentation = "https://janthmueller.github.io/coco/"
 readme = "README.md"
 keywords = ["codex", "agents", "orchestration", "worktree", "cli"]
 categories = ["command-line-utilities", "development-tools"]

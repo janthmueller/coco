@@ -6,7 +6,7 @@ use clap::{Args, Parser, Subcommand};
 #[command(
     name = "coco",
     version,
-    about = "Coordinate isolated Codex work",
+    about = "Coordinate Codex work in separate worktrees",
     subcommand_precedence_over_arg = true
 )]
 pub struct Cli {
@@ -14,7 +14,7 @@ pub struct Cli {
     #[arg(value_name = "REPOSITORY_PATH")]
     pub(super) scope_path: Option<PathBuf>,
     /// Search or list workspaces across every registered repository.
-    #[arg(long, short = 'a', global = true)]
+    #[arg(long, short = 'a')]
     pub(super) all_repos: bool,
     #[command(subcommand)]
     pub(super) command: Command,
@@ -33,10 +33,13 @@ pub(super) enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Create a Codex workspace in an isolated worktree.
+    /// Create a Codex workspace in a separate worktree.
     Create(CreateArgs),
     /// List workspaces in the selected repository, or across all repositories.
     Ls {
+        /// List workspaces across every registered repository.
+        #[arg(long, short = 'a')]
+        all_repos: bool,
         /// Emit stable, machine-readable JSON.
         #[arg(long)]
         json: bool,
@@ -45,6 +48,9 @@ pub(super) enum Command {
     Status {
         /// Workspace name or ID.
         workspace: String,
+        /// Resolve the workspace across every registered repository.
+        #[arg(long, short = 'a')]
+        all_repos: bool,
         /// Keep updating until the workspace becomes ready, pauses, or finishes.
         #[arg(long, conflicts_with = "json")]
         follow: bool,
@@ -56,6 +62,9 @@ pub(super) enum Command {
     Send {
         /// Workspace name or ID.
         workspace: String,
+        /// Resolve the workspace across every registered repository.
+        #[arg(long, short = 'a')]
+        all_repos: bool,
         /// Instruction to send to Codex.
         #[arg(value_parser = non_empty_message)]
         message: String,
@@ -65,19 +74,51 @@ pub(super) enum Command {
     Jump {
         /// Workspace name or ID.
         workspace: String,
+        /// Resolve the workspace across every registered repository.
+        #[arg(long, short = 'a')]
+        all_repos: bool,
     },
     /// Answer a pending Codex approval or question.
     Decide {
         /// Decision ID shown by `coco status`.
         decision: String,
     },
-    /// Show all tracked and untracked changes from the immutable base.
-    Diff { workspace: String },
+    /// Show a bounded tracked patch and untracked paths from the immutable base.
+    Diff {
+        /// Workspace name or ID.
+        workspace: String,
+        /// Resolve the workspace across every registered repository.
+        #[arg(long, short = 'a')]
+        all_repos: bool,
+    },
     /// Run CoCo as a local MCP server.
     Mcp {
         #[command(subcommand)]
         command: McpCommand,
     },
+}
+
+impl Cli {
+    pub(super) fn requests_all_repositories(&self) -> bool {
+        self.all_repos || self.command.requests_all_repositories()
+    }
+}
+
+impl Command {
+    fn requests_all_repositories(&self) -> bool {
+        match self {
+            Self::Ls { all_repos, .. }
+            | Self::Status { all_repos, .. }
+            | Self::Send { all_repos, .. }
+            | Self::Jump { all_repos, .. }
+            | Self::Diff { all_repos, .. } => *all_repos,
+            Self::Repo { .. }
+            | Self::Models { .. }
+            | Self::Create(_)
+            | Self::Decide { .. }
+            | Self::Mcp { .. } => false,
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -108,7 +149,7 @@ pub(super) struct CreateArgs {
     /// Compact the new fork before accepting its first message.
     #[arg(long, requires = "fork_from")]
     pub(super) compact: bool,
-    /// Apply `[profiles.<PROFILE>]` from `$CODEX_HOME/config.toml` to the thread.
+    /// Layer `$CODEX_HOME/<PROFILE>.config.toml` onto the thread configuration.
     #[arg(long, default_value = "default")]
     pub(super) profile: String,
     /// Override the profile or default model for this workspace's Codex thread.

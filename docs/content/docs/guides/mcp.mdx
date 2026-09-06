@@ -3,18 +3,63 @@ title: Use CoCo through MCP
 description: Let an MCP-capable application inspect or continue workspaces in one repository.
 ---
 
-CoCo includes an MCP server for applications that should work with the same
-workspaces as the CLI. Start `cocod`, then configure your MCP host to launch:
+CoCo includes a local MCP server for applications that should work with the
+same workspaces as the CLI. It uses standard input and output, so the MCP host
+starts it as a child process.
+
+## Before you begin
+
+Start `cocod` in one terminal:
 
 ```bash
-coco-mcp --repository /absolute/path/to/project
+cocod
 ```
 
-The equivalent command is:
+Then register the repository from another terminal if you have not already:
+
+```bash
+coco repo add /absolute/path/to/project
+```
+
+Use an absolute repository path in MCP configuration so behavior does not
+depend on the directory from which the host starts.
+
+## Configure an MCP host
+
+Set the server command to `coco-mcp` and pass the repository as arguments. A
+typical JSON-based host entry looks like this:
+
+```json
+{
+  "mcpServers": {
+    "coco": {
+      "command": "coco-mcp",
+      "args": ["--repository", "/absolute/path/to/project"]
+    }
+  }
+}
+```
+
+Hosts use different configuration filenames and sometimes different outer
+keys, but the command and argument list stay the same.
+
+### Configure Codex as the host
+
+For Codex, add a standard input/output server to `~/.codex/config.toml`:
+
+```toml title="~/.codex/config.toml"
+[mcp_servers.coco]
+command = "coco-mcp"
+args = ["--repository", "/absolute/path/to/project"]
+```
+
+The equivalent standalone command is:
 
 ```bash
 coco mcp serve --repository /absolute/path/to/project
 ```
+
+## Available tools
 
 The repository is fixed when the server starts. By default it offers only
 read-only tools:
@@ -25,18 +70,32 @@ read-only tools:
 | `workspaces.status` | Show the current state of one workspace |
 | `workspaces.diff`   | Show changes made by one workspace      |
 
+Read-only does not mean content-free: the connected host can see workspace
+metadata, repository paths, and diffs returned by these tools. Enable the
+server only in hosts you trust with that information.
+
 ## Allow messages
 
 Add `--allow-send` only when the MCP host should be allowed to start another
 Codex turn:
 
-```bash
-coco-mcp --repository /absolute/path/to/project --allow-send
+```json
+{
+  "mcpServers": {
+    "coco": {
+      "command": "coco-mcp",
+      "args": ["--repository", "/absolute/path/to/project", "--allow-send"]
+    }
+  }
+}
 ```
 
-This adds `workspaces.send`. Any connected MCP host can then start the first or
-a later turn for a ready workspace, so keep the option disabled unless you need
-it.
+This adds `workspaces.send`. Any connected host can then start the first or a
+later turn under that workspace's Codex permissions and account usage. Leave
+it disabled unless that is the access you intend to grant.
 
-This MCP server controls CoCo workspaces. Selecting which MCP servers are
-available inside an individual Codex workspace is not supported yet.
+## What this integration controls
+
+This MCP server lets another application control existing CoCo workspaces.
+CoCo does not currently provide its own registry or per-workspace selector for
+the MCP tools available _inside_ a Codex workspace.

@@ -10,6 +10,21 @@ status: stable
 
 ## 2026-09-06
 
+- **Codex named-profile contract corrected**: Aligned execution profiles with
+  Codex 0.147.0: `default` sends an empty per-thread overlay over the App
+  Server's base configuration, while another name loads the complete
+  `$CODEX_HOME/<name>.config.toml` document. CoCo keeps the overlay in memory,
+  persists only named-file provenance and redacted effective settings, and
+  rejects profile drift during daemon recovery.
+- **Foreground daemon alpha policy**: Kept package installation separate from
+  process activation. Alpha users start `cocod` explicitly in the foreground;
+  an opt-in cross-platform user service remains gated on graceful SIGTERM and
+  defined, tested App Server child-failure and recovery semantics.
+- **Installable Nix flake**: Added a version-synchronized default Nix package
+  containing all three executables, with `coco` as the default app and named
+  daemon/control-MCP apps. The public installation guide now supports the
+  flake while retaining Cargo Git and local-checkout paths; a registry command
+  remains intentionally absent until the first irreversible publication exists.
 - **Guarded semantic alpha releases**: Ported Wuf's tested-main release pattern
   to CoCo with Conventional Commit versioning, generated changelog and release
   commit, synchronized Cargo metadata, immutable action pins, a reviewed
@@ -174,9 +189,10 @@ status: stable
   failure retention now run through the local daemon boundary.
 - **Repository command**: Selected `coco repo add [path]` and the
   `repository.register` daemon method instead of the ambiguous `coco init`.
-- **Codex execution profiles**: Named profiles now resolve from
-  `[profiles.<name>]` in `$CODEX_HOME/config.toml`, while only a redacted
-  effective snapshot is persisted per task.
+- **Codex execution profiles (superseded source shape)**: The first profile
+  slice read named tables from the base Codex configuration while persisting
+  only a redacted effective snapshot per task. The 2026-09-06 named-file
+  contract above replaces that source interpretation.
 - **Static public documentation**: Fixed GitHub Pages as the deployment target
   for the future Next.js/Fumadocs site. The site must use a fully static
   export, client-side static search, project-subpath-safe assets and routes,

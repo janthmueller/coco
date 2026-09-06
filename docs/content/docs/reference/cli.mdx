@@ -1,80 +1,124 @@
 ---
 title: Command reference
-description: The CoCo commands available in the current preview.
+description: Commands and options available in the current CoCo alpha.
 ---
 
-Run `coco --help` or `coco COMMAND --help` for the exact options in your build.
+Run `coco --help` or `coco COMMAND --help` for the options in your installed
+version.
 
-| Command                            | Purpose                                             |
-| ---------------------------------- | --------------------------------------------------- |
-| `coco repo add [path]`             | Add a Git repository to CoCo                        |
-| `coco repo list`                   | List added repositories                             |
-| `coco models`                      | List models available through Codex                 |
-| `coco create <name> …`             | Prepare a separate worktree and conversation        |
-| `coco ls`                          | List workspaces in the selected repository          |
-| `coco status <workspace>`          | Show one workspace's current state                  |
-| `coco status <workspace> --follow` | Follow a workspace until it pauses or becomes ready |
-| `coco send <workspace> <message>`  | Start the first or next turn                        |
-| `coco jump <workspace>`            | Open the workspace in the Codex terminal UI         |
-| `coco decide <decision-id>`        | Answer a pending approval or question               |
-| `coco diff <workspace>`            | Show changes made in the workspace                  |
-| `coco mcp serve …`                 | Expose CoCo to an MCP host                          |
+## Installed commands
 
-## Create a workspace
+| Command    | Purpose                                                  |
+| ---------- | -------------------------------------------------------- |
+| `coco`     | Create, inspect, and control workspaces                  |
+| `cocod`    | Keep CoCo and its Codex work available between CLI calls |
+| `coco-mcp` | Expose repository-scoped workspace tools to an MCP host  |
 
-```bash
-coco create <name> \
-  [--base <git-ref>] \
-  [--fork-from <workspace>] \
-  [--compact] \
-  [--profile <name>] \
-  [-m, --model <model>] \
-  [-s, --send <message>] \
-  [-j, --jump]
+Start `cocod` before using either of the other commands.
+
+## Command shape
+
+```text
+coco [OPTIONS] [REPOSITORY_PATH] <COMMAND>
 ```
 
-Names contain lowercase letters, numbers, and hyphens, with optional slashes
-between components, such as `fix/login`. `--base` defaults to `HEAD`. For a
-fresh workspace, the selected checkout must be clean. Without `--send`,
-creating a workspace does not start a turn.
-
-Use `--fork-from` instead of `--base` to create from a ready, clean workspace
-in the same repository. The new workspace receives that workspace's Codex
-conversation and committed code, but not uncommitted files. Add `--compact` to
-shorten the copied context before the new workspace becomes ready.
-
-Use `coco models` to find valid model values. `--model` selects a model for the
-new workspace. If its profile also contains a model, `--model` takes priority;
-all other profile settings continue to apply.
-
-## List available models
-
-```bash
-coco models
-coco models --json
-```
-
-This list belongs to the running Codex installation, not to a repository, so it
-does not accept a leading repository path or `--all-repos`.
-
-## Choose a repository
-
-Workspace commands use the repository containing your current directory. A
-leading path selects another added repository:
+Workspace commands use the repository containing the current directory by
+default. Put a registered path before the command to select another
+repository:
 
 ```bash
 coco ../api ls
 coco ../api status fix/login
 ```
 
-Use `coco --all-repos ls` (short: `coco -a ls`) for a combined list.
-`--all-repos` also lets
-`status`, `send`, `jump`, and `diff` resolve a name that is unique across all
-added repositories. Full workspace IDs always resolve globally.
+Use `--all-repos` or `-a` with `ls`, `status`, `send`, `jump`, or `diff` to
+list across repositories or resolve a globally unique name:
+
+```bash
+coco --all-repos ls
+coco -a jump fix/login
+```
+
+`create` always needs one repository. `repo`, `models`, `decide`, and `mcp`
+do not accept the leading path or `--all-repos`. A full workspace ID resolves
+globally without either option.
+
+## Repository commands
+
+```text
+coco repo add [PATH]
+coco repo list [--json]
+```
+
+`repo add` registers the Git repository containing `PATH`; it defaults to `.`
+and is safe to repeat. `repo list` shows every registered repository.
+
+## Model command
+
+```text
+coco models [--json]
+```
+
+Lists the models reported by the running Codex installation. This command is
+not repository-scoped.
+
+## Create a workspace
+
+```text
+coco [REPOSITORY_PATH] create <NAME>
+  [--base <GIT_REF>]
+  [--fork-from <WORKSPACE>]
+  [--compact]
+  [--profile <NAME>]
+  [-m, --model <MODEL>]
+  [-s, --send <MESSAGE>]
+  [-j, --jump]
+```
+
+`--base` defaults to `HEAD`. Names are 1–63 bytes and contain lowercase ASCII
+letters, numbers, and hyphens, with optional single slashes between
+components, such as `fix/login`. Each component begins and ends with a letter
+or number. The normal creation path requires a clean checkout.
+
+Use `--fork-from` instead of `--base` to create from a ready, clean workspace
+in the same repository. `--compact` is available only with `--fork-from`.
+
+`--send` starts the first turn after creation. `--jump` then opens the same
+thread in the Codex terminal UI. Their short forms are independent and may be
+combined.
+
+## Workspace commands
+
+In the forms below, `<WORKSPACE>` may be a repository-local name or full ID.
+
+| Command                            | Purpose                                           |
+| ---------------------------------- | ------------------------------------------------- |
+| `coco ls [--json]`                 | List workspaces in the selected scope             |
+| `coco status <WORKSPACE> [--json]` | Show current state and pending input              |
+| `coco status <WORKSPACE> --follow` | Follow activity until it stops or needs you       |
+| `coco send <WORKSPACE> <MESSAGE>`  | Start the first or next turn                      |
+| `coco jump <WORKSPACE>`            | Open the existing thread in the Codex TUI         |
+| `coco diff <WORKSPACE>`            | Print a bounded tracked patch and untracked paths |
+
+`status --follow` cannot be combined with `--json`. Quote messages containing
+spaces. `send` returns after Codex accepts the turn; use `status --follow` to
+watch it.
+
+## Answer a request
+
+```text
+coco decide <DECISION_ID>
+```
+
+When CoCo can present a pending approval or question, `status` prints its
+decision ID. `decide` shows numbered choices and may accept text for an
+ordinary question. Secret answers are hidden while you type and are not
+retained by CoCo.
+
+Decision IDs work from any directory and do not accept a repository path or
+`--all-repos`.
 
 ## Machine-readable output
-
-Use `--json` with repository or workspace listing and inspection:
 
 ```bash
 coco repo list --json
@@ -83,26 +127,15 @@ coco ls --json
 coco status feat/first --json
 ```
 
-`status --follow` is human-oriented and cannot be combined with `--json`.
+These commands emit one JSON value to standard output. Human-oriented follow
+mode is intentionally excluded.
 
-## Answer a request
+## MCP commands
 
-When `status` shows that Codex is waiting, it also prints a decision ID. Open
-the request and choose from its numbered options:
-
-```bash
-coco decide <decision-id>
+```text
+coco mcp serve --repository <PATH> [--allow-send]
+coco-mcp --repository <PATH> [--allow-send]
 ```
 
-Decision IDs work from any directory and do not take a repository path or
-`--all-repos`. Secret answers are hidden while you type and are not retained by
-CoCo.
-
-## MCP
-
-```bash
-coco mcp serve --repository /absolute/path/to/project
-coco mcp serve --repository /absolute/path/to/project --allow-send
-```
-
+Both forms expose the same repository-scoped standard input/output server.
 See [Use CoCo through MCP](../../guides/mcp/) before enabling `--allow-send`.

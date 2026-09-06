@@ -26,10 +26,51 @@
         };
 
         rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+        rustPlatform = pkgs.makeRustPlatform {
+          cargo = rustToolchain;
+          rustc = rustToolchain;
+        };
+
+        packageVersion = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
+
+        cocoPackage = rustPlatform.buildRustPackage {
+          pname = "codex-coordinator";
+          version = packageVersion;
+          src = pkgs.lib.fileset.toSource {
+            root = ./.;
+            fileset = pkgs.lib.fileset.unions [
+              ./Cargo.lock
+              ./Cargo.toml
+              ./LICENSE
+              ./README.md
+              ./src
+            ];
+          };
+          cargoLock.lockFile = ./Cargo.lock;
+          doCheck = false;
+
+          meta = {
+            description = "Coordinate Codex workspaces, Git worktrees, and conversations";
+            homepage = "https://github.com/janthmueller/coco";
+            license = pkgs.lib.licenses.mit;
+            mainProgram = "coco";
+            platforms = pkgs.lib.platforms.linux ++ pkgs.lib.platforms.darwin;
+          };
+        };
 
         app =
           drv: description:
           (flake-utils.lib.mkApp { inherit drv; })
+          // {
+            meta = { inherit description; };
+          };
+
+        binaryApp =
+          binary: description:
+          (flake-utils.lib.mkApp {
+            drv = cocoPackage;
+            exePath = "/bin/${binary}";
+          })
           // {
             meta = { inherit description; };
           };
@@ -262,8 +303,16 @@
             '';
       in
       {
+        packages = {
+          default = cocoPackage;
+          coco = cocoPackage;
+        };
+
         apps = {
-          default = app check "Check all CoCo Rust targets";
+          default = binaryApp "coco" "Run the CoCo CLI";
+          coco = binaryApp "coco" "Run the CoCo CLI";
+          cocod = binaryApp "cocod" "Run the CoCo daemon";
+          coco-mcp = binaryApp "coco-mcp" "Run the CoCo MCP stdio server";
           build = app build "Build CoCo";
           test = app test "Run the CoCo test suite";
           check = app check "Check all CoCo Rust targets";
@@ -286,6 +335,7 @@
           default = tooling-check;
           tooling = tooling-check;
           apps = app-check;
+          package = cocoPackage;
         };
 
         formatter = pkgs.nixfmt;

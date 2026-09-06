@@ -31,6 +31,26 @@ The project remains one version and one Cargo package. All three executables
 ship together because they implement one product and share one protocol and
 state schema.
 
+The root Nix flake exposes the same package independently of registry releases:
+its default package installs all three executables, its default app runs
+`coco`, and named `cocod` and `coco-mcp` apps support direct execution. The
+package version is read from `Cargo.toml`, so Semantic Release stamps Cargo,
+Nix, registry, and executable output from one source value.
+
+## Daemon service policy
+
+Alpha packages install the `cocod` executable but never start or enable it as a
+background service. The supported lifecycle is an explicit foreground
+invocation, independent of whether installation used Cargo, a release archive,
+or Nix. Package installation must not create a surprising persistent process.
+
+A supervised user service is a later, opt-in, cross-platform feature. Do not
+ship a Linux-only unit as the product contract. First route SIGTERM through the
+orderly shutdown path and define/test App Server child-exit handling, generation
+replacement, stale-state reconciliation, eligible thread recovery, logs, and
+restart limits. Only then may platform adapters such as systemd user services,
+launchd agents, and the eventual Windows equivalent enable supervision.
+
 ## Publication guard
 
 Automatic releases after a successful push are disabled unless the repository
@@ -62,10 +82,15 @@ updates only the matching source-less root package in `Cargo.lock` and fails
 closed on malformed, duplicate, or inconsistent metadata. The lockfile is
 committed as a release asset so a tag always passes `cargo --locked`.
 
-While CoCo is an early preview, the workflow forces the `alpha` prerelease
+While CoCo is in alpha, the workflow forces the `alpha` prerelease
 token even though the `main` branch configuration itself remains stable-ready.
 Moving to stable releases therefore requires an explicit workflow decision,
 not a branch rename or an accidental commit type.
+
+Before the first published tag, the source tree uses `0.1.0-alpha.0` as an
+explicit unreleased baseline. Local and flake-built executables therefore do
+not present themselves as stable; the first Semantic Release advances that
+baseline to `0.1.0-alpha.1`.
 
 Commit subjects follow Conventional Commits. `feat` causes a feature bump,
 `fix` causes a patch bump, and an explicit breaking-change marker causes the

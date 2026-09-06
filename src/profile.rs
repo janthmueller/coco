@@ -39,7 +39,7 @@ pub enum ProfileError {
     #[error("CODEX_HOME must be an absolute path, received {0}")]
     RelativeCodexHome(PathBuf),
 
-    #[error("profile {name:?} does not exist at {path}")]
+    #[error("profile file for {name:?} does not exist at {path}")]
     NotFound { name: String, path: PathBuf },
 
     #[error("profile source is not a regular file: {0}")]
@@ -115,8 +115,8 @@ pub fn validate_profile_name(name: &str) -> Result<(), ProfileError> {
 ///
 /// `default` deliberately supplies an empty per-thread overlay: the app-server
 /// keeps using the base `$CODEX_HOME/config.toml` that it loaded itself. Any
-/// other safe name resolves `[profiles.<name>]` from that same file, matching
-/// `codex --profile <name>`, and converts the table into the JSON object
+/// other safe name loads the complete `$CODEX_HOME/<name>.config.toml` file,
+/// matching `codex --profile <name>`, and converts it into the JSON object
 /// accepted by `thread/start.config`.
 pub fn load_profile(name: &str, codex_home: &Path) -> Result<LoadedProfile, ProfileError> {
     validate_profile_name(name)?;
@@ -148,15 +148,7 @@ pub fn load_profile(name: &str, codex_home: &Path) -> Result<LoadedProfile, Prof
         path: source_path.clone(),
         source,
     })?;
-    let selected = parsed
-        .get("profiles")
-        .and_then(toml::Value::as_table)
-        .and_then(|profiles| profiles.get(name))
-        .ok_or_else(|| ProfileError::NotFound {
-            name: name.to_owned(),
-            path: source_path.clone(),
-        })?;
-    let thread_config = serde_json::to_value(selected).map_err(|source| ProfileError::Json {
+    let thread_config = serde_json::to_value(parsed).map_err(|source| ProfileError::Json {
         path: source_path.clone(),
         source,
     })?;
@@ -189,7 +181,7 @@ pub fn profile_path(codex_home: &Path, name: &str) -> Result<PathBuf, ProfileErr
     if !codex_home.is_absolute() {
         return Err(ProfileError::RelativeCodexHome(codex_home.to_path_buf()));
     }
-    Ok(codex_home.join("config.toml"))
+    Ok(codex_home.join(format!("{name}.config.toml")))
 }
 
 /// Replaces configured hints with the non-secret settings the App Server says
@@ -379,23 +371,20 @@ mod tests {
     }
 
     #[test]
-    fn loads_named_codex_profile_as_thread_config_and_hashes_the_overlay() {
+    fn loads_the_complete_named_codex_profile_as_thread_config() {
         let home = tempdir().unwrap();
         let path = profile_path(home.path(), "backend").unwrap();
+        assert_eq!(path, home.path().join("backend.config.toml"));
         let source = concat!(
-            "model = \"base-model\"\n",
-            "[profiles.backend]\n",
             "model = \"gpt-5.6-codex\"\n",
             "model_reasoning_effort = \"high\"\n",
             "sandbox_mode = \"workspace-write\"\n",
             "instructions = \"private operating context\"\n",
             "api_key = \"super-secret\"\n",
-            "[profiles.backend.mcp_servers.internal]\n",
+            "[mcp_servers.internal]\n",
             "command = \"internal-server\"\n",
-            "[profiles.backend.mcp_servers.internal.env]\n",
+            "[mcp_servers.internal.env]\n",
             "TOKEN = \"also-secret\"\n",
-            "[profiles.other]\n",
-            "model = \"must-not-leak\"\n",
         );
         fs::write(&path, source).unwrap();
 
@@ -404,7 +393,6 @@ mod tests {
         assert_eq!(loaded.snapshot.source_path.as_deref(), Some(path.as_path()));
         assert_eq!(loaded.snapshot.source_hash.len(), 64);
         assert_eq!(loaded.thread_config["model"], "gpt-5.6-codex");
-        assert!(loaded.thread_config.get("profiles").is_none());
         assert_eq!(loaded.thread_config["api_key"], "super-secret");
         assert_eq!(
             loaded.thread_config["mcp_servers"]["internal"]["env"]["TOKEN"],
@@ -423,14 +411,13 @@ mod tests {
         assert!(!persisted.contains("super-secret"));
         assert!(!persisted.contains("also-secret"));
         assert!(!persisted.contains("private operating context"));
-        assert!(!persisted.contains("must-not-leak"));
     }
 
     #[test]
     fn rejects_invalid_toml_with_its_source_path() {
         let home = tempdir().unwrap();
         let path = profile_path(home.path(), "broken").unwrap();
-        fs::write(&path, "[profiles.broken]\nmodel = [").unwrap();
+        fs::write(&path, "model = [").unwrap();
 
         match load_profile("broken", home.path()) {
             Err(ProfileError::Parse {
@@ -441,16 +428,28 @@ mod tests {
     }
 
     #[test]
-    fn reports_a_missing_named_profile_in_an_existing_config() {
+    fn does_not_treat_a_legacy_profile_table_as_a_named_profile_file() {
         let home = tempdir().unwrap();
         let path = profile_path(home.path(), "missing").unwrap();
-        fs::write(&path, "[profiles.other]\nmodel = \"gpt-5\"\n").unwrap();
+        fs::write(
+            home.path().join("config.toml"),
+            "[profiles.missing]\nmodel = \"gpt-5\"\n",
+        )
+        .unwrap();
 
+        let error = load_profile("missing", home.path()).unwrap_err();
         assert!(matches!(
-            load_profile("missing", home.path()),
-            Err(ProfileError::NotFound { name, path: error_path })
-                if name == "missing" && error_path == path
+            &error,
+            ProfileError::NotFound { name, path: error_path }
+                if name == "missing" && error_path == &path
         ));
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "profile file for \"missing\" does not exist at {}",
+                path.display()
+            )
+        );
     }
 
     #[test]

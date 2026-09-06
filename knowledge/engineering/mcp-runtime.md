@@ -94,6 +94,15 @@ mechanism. CoCo may expose a profile-oriented UX, but must resolve the profile
 and pass the resulting thread overlay itself. A truly process-scoped profile
 would require a separate App Server process or pool and is not part of v0.
 
+For execution profiles, `default` means an empty per-thread overlay on the App
+Server's already loaded base configuration. Every other safe name resolves the
+complete `$CODEX_HOME/<name>.config.toml` document. CoCo holds that potentially
+secret overlay only in memory; it persists the name, source path and parsed-
+configuration hash plus redacted effective settings, then requires the same
+provenance when reloading it for recovery. This execution-profile mechanism
+remains separate from the future MCP capability-profile and binding records
+described above.
+
 Before relying on this boundary, a contract test against the pinned Codex
 version must prove that two threads in one App Server can use disjoint MCP
 server/tool selections and that the selections behave correctly across resume

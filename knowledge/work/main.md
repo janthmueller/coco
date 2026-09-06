@@ -229,13 +229,37 @@ architectural baseline for CoCo.
   - [x] Port Wuf's tested-revision semantic-release pattern to the Rust
     package: Conventional Commits, alpha versions, synchronized Cargo metadata,
     generated changelog, tag, and GitHub Release.
-  - [ ] Build and smoke-test release archives for all currently supported host
+  - [x] Build and smoke-test release archives for all currently supported host
     platforms before allowing a release, without claiming Windows support.
   - [x] Keep automatic publication opt-in until the remaining public-release
     blockers are deliberately resolved. The user selected MIT and supplied a
     local crates.io token for secure GitHub-secret upload; never record it.
+  - [x] Ship an installable default Nix package with `coco`, `cocod`, and
+    `coco-mcp`, then document the verified flake path publicly.
+  - [ ] Replace the truthful Cargo Git installation with an explicit registry
+    alpha version only after the first crates.io package actually exists;
+    prereleases are not selected by a bare `cargo install`.
   - [ ] Run the complete sequential verification gates and record the final
     release recommendation.
+- [x] Re-audit every public page against the shipped CLI, the pinned Codex
+  executable, and current official Codex documentation before the first alpha.
+  - [x] Replace the legacy `[profiles.<name>]` interpretation with Codex
+    0.147.0's `$CODEX_HOME/<name>.config.toml` profile files across runtime,
+    tests, help, and documentation.
+  - [x] Use `alpha` consistently instead of the less precise `early preview`.
+  - [x] Keep `cocod` startup explicit for the first alpha and record an
+    opt-in, cross-platform user-service integration as separate follow-up;
+    installing a package must not silently start a background process.
+- [x] Verify the newly merged experimental Codex worktree surfaces from
+  official source and a containing release, then reassess CoCo's product
+  boundary feature by feature. Do not defend worktree creation as sufficient
+  differentiation if upstream now owns it; compare durable daemon ownership,
+  multi-workspace and multi-repository control, status/decisions, reattachment,
+  context transfer, MCP, and automation before recommending the first alpha.
+- [ ] Decide with the user whether CoCo should continue as a narrower headless
+  orchestration/control layer. Do not publish to crates.io unless that product
+  boundary is compelling enough to justify the additional compatibility and
+  maintenance burden.
 - [ ] Keep handoff deferred as a separate artifact-design task. Treat authoring
   and consumption independently; consider agent-generated material, existing
   Markdown, direct CLI input, ticket or other external references, and an
@@ -282,7 +306,7 @@ architectural baseline for CoCo.
 - 2026-09-05 — Spell repository registration `coco repo add [path]`; the nested
   namespace leaves room for later `repo list`, `repo show`, and `repo remove`
   commands without an ambiguous top-level `init`.
-- 2026-09-05 — Resolve a named execution profile from
+- 2026-09-05 — Superseded on 2026-09-06: resolve a named execution profile from
   `[profiles.<name>]` in `$CODEX_HOME/config.toml` and project that overlay into
   `thread/start.config`. The full overlay stays in memory; SQLite receives only
   its identity/hash and the App Server's allowlisted effective settings.
@@ -524,9 +548,81 @@ architectural baseline for CoCo.
   `publish=true` before any release commit, tag, GitHub Release, binary upload,
   or crates.io publication can occur; the exact successful Rust revision is
   required in either mode.
+- 2026-09-06 — Stamp the never-published source baseline as
+  `0.1.0-alpha.0`, not stable-looking `0.1.0`. Local, source, and Nix builds
+  must identify as prerelease software before Semantic Release creates the
+  first `0.1.0-alpha.1` tag.
+- 2026-09-06 — Keep alpha package installation side-effect free. `cocod`
+  remains an explicit foreground process; an opt-in cross-platform user
+  service waits for graceful SIGTERM and defined App Server child-exit,
+  reconciliation, logging, and restart behavior rather than shipping a
+  Linux-only unit prematurely.
+- 2026-09-06 — Use Cargo as the primary public installation path without
+  claiming an unpublished registry artifact. Until the first crates.io alpha,
+  install the package from the Git repository with its lockfile; after
+  publication, replace that command with an explicit prerelease version because
+  Cargo does not select prereleases implicitly. Nix remains a supported
+  secondary installation path.
+- 2026-09-06 — Restructure the public site around eight product pages plus the
+  landing page: overview, installation, quickstart, three task-oriented guides,
+  CLI reference, and troubleshooting/limitations. Explain only the user-visible
+  lifetime of `cocod`; keep service design, persistence, protocol, gateway, and
+  roadmap material in `knowledge/`.
+- 2026-09-06 — Correct the shipped execution-profile contract to the pinned
+  Codex convention: `default` is an empty per-thread overlay and a named profile
+  is the parsed complete `$CODEX_HOME/<name>.config.toml` document. Persist only
+  provenance and redacted settings, reject named-overlay drift on recovery, and
+  disclose that changes to inherited base configuration are not pinned.
+- 2026-09-06 — Pause the first crates.io publication after three upstream Codex
+  PRs made managed worktree creation available to `codex exec`, interactive
+  startup, and TUI new/fork flows. A merge to Codex main is not a released
+  compatibility target, but CoCo must no longer claim worktree creation or a
+  one-command TUI launch as sufficient differentiation. Publication now
+  requires an explicit product decision after testing the first containing
+  Codex release.
 
 ## Findings
 
+- Codex PRs 42652, 43069, and 43120 directly overlap CoCo's most visible
+  create/send/jump and fresh/fork flows. They add experimental managed
+  worktrees to new and forked `codex exec` runs, `codex --worktree`, explicit
+  interactive forks, `/worktree`, and worktree choices under `/new` and
+  `/fork`. The upstream implementation also binds the checkout to the Codex
+  thread and loads destination configuration before the first turn.
+- The latest documented Codex CLI release is 0.153.4 from 2026-09-04. The two
+  interactive PRs merged on 2026-09-05 and therefore are not in that release;
+  the exec PR is not named in the 0.153.x notes or current option tables. The
+  new commands must be treated as unreleased, experimental main-branch behavior
+  until a containing version is identified and tested.
+- The native lifetime behavior currently has two distinct paths. Direct
+  `codex --worktree` deliberately bypasses the implicit local daemon, rejects an
+  explicit remote endpoint, and runs against an App Server embedded in the TUI;
+  closing that non-daemon TUI therefore does not detach a running turn. An
+  ordinary TUI attached to the experimental local App Server daemon can create
+  a worktree through `/worktree`, `/new`, or `/fork` and offers **Run in
+  background** on exit, which detaches without interrupting its threads. CoCo's
+  remaining distinction is consequently deterministic daemon ownership and a
+  stable external control surface, not the detach capability itself.
+- CoCo is no longer justified as a convenience wrapper for parallel Codex
+  worktrees. Its remaining possible product is a headless control layer:
+  durable named workspace bindings, repository-wide and daemon-wide lookup,
+  separate later send/status/decision operations, reattachment, JSON/local RPC,
+  and a narrowly exposed control MCP server. That narrower thesis still needs
+  a concrete workflow and user decision before publication; otherwise the
+  additional daemon, database, compatibility pin, and lifecycle semantics are
+  unjustified maintenance.
+- crates.io renders the package `README.md` as its long-form description; the
+  manifest `description` remains a short plain-text blurb. The current Git
+  install is executable before publication and installs all three binary
+  targets. A later registry command must name the alpha explicitly.
+- A package manager should install `cocod` without starting it. Automatic
+  service activation would be surprising and is currently unsafe: the daemon
+  handles foreground interruption but lacks the complete SIGTERM and child-
+  failure contract expected by systemd, launchd, or a future Windows service.
+- A shared local Cargo target briefly retained an old executable despite newer
+  sources compiled by overlapping checks. A fresh one-job target is the release
+  authority for this slice; cached `target/debug/coco` output is not accepted as
+  verification.
 - The implementation is suitable for a first supervised developer alpha once
   the public GitHub run proves native Linux/macOS packaging and Pages
   deployment. It is not a stable or production-ready release: Windows IPC is
@@ -750,12 +846,30 @@ architectural baseline for CoCo.
 
 ## Verification
 
+- The final public-content audit finds no remaining behavior, navigation,
+  link, terminology, or public/internal-boundary mismatch. Direct pinned-tool
+  checks pass Next route generation, TypeScript, Oxlint, and Prettier. A clean
+  `DOCS_BASE_PATH=/coco` Next export verifies 93 static files across the landing
+  page and eight documentation pages, static browser search, project-subpath
+  routing, valid local links, no server runtime, and no internal knowledge.
+- A fresh one-job Cargo target compiles the complete current source and runs 90
+  library tests: 88 pass, the explicitly model-consuming Git proof remains
+  ignored, and the one Unix-socket test is denied only by the managed sandbox.
+  That exact test passes outside the sandbox, as do both real daemon/CLI process
+  smokes. Fresh all-target/all-feature Clippy with warnings denied, Rustfmt,
+  `cargo machete`, and `git diff --check` pass.
 - Release preparation passes `actionlint` for every workflow, the version-sync
   script's three unit tests, Python Semantic Release's no-operation version
-  calculation to `0.1.0-alpha.1`, `cargo publish --locked --dry-run`, and
-  inspection of the resulting 56-file package boundary. The package verifies
-  as `codex-coordinator` and contains only production Rust source, Cargo
-  metadata, README, and MIT license.
+  calculation from the explicit `0.1.0-alpha.0` source baseline to
+  `0.1.0-alpha.1`, `cargo publish --locked --dry-run`, and inspection of the
+  resulting 56-file package boundary. The package verifies as
+  `codex-coordinator` and contains only production Rust source, Cargo metadata,
+  README, and MIT license.
+- The installable Nix package builds from its restricted source fileset, and
+  its `coco`, `cocod`, and `coco-mcp` outputs each report
+  `0.1.0-alpha.0`. `nix run .`, `nix run .#cocod`, and
+  `nix run .#coco-mcp` select the intended executable; `nix flake show .`
+  exposes the default package and named apps on Linux and Darwin systems.
 - The release-readiness run passes Rustfmt, all-target/all-feature Clippy with
   warnings denied, all 85 library tests (84 passed, one explicitly
   model-consuming test ignored), both process smokes, `cargo machete`, and the
@@ -766,6 +880,12 @@ architectural baseline for CoCo.
   search, project-subpath routing, and the public-only boundary. The complete
   `nix flake check . --no-write-lock-file --max-jobs 1` passes locally; native
   macOS archive and hosted Pages proof remain pending the first GitHub run.
+- The new public repository's first two `Rust` runs pass on GitHub, including
+  native Ubuntu 22.04 and macOS 15 release builds and version/help/package
+  smokes. The repeated `Documentation` run builds and deploys successfully;
+  both the site root and quickstart return HTTP 200 from GitHub Pages. The
+  automatic `Release` workflow is observed as skipped while the repository
+  switch remains false.
 - The model-selection slice passes all 85 library tests (84 passed and the
   model-consuming approval proof ignored), both daemon/CLI process smokes, and
   the separately enabled turn-free real-Codex 0.147.0 compatibility test. The
@@ -969,14 +1089,40 @@ architectural baseline for CoCo.
   TypeScript/Oxlint/Prettier, the fully static 88-file/eight-page export,
   `git diff --check`, and `nix flake check . --no-write-lock-file --max-jobs 1`
   pass.
+- The alpha-packaging, profile-contract, CLI-help, and public-documentation
+  checkpoint passes Rustfmt; locked all-target/all-feature Clippy with warnings
+  denied; 89 library tests and two process smokes with two deliberate live
+  tests ignored; `cargo machete`; the reviewed `cargo deny` policy; release
+  lockfile tests; Actionlint; and a 56-file crates.io dry run with no upload.
+  Documentation typechecking, Oxlint, Prettier, and the production
+  `DOCS_BASE_PATH=/coco` export pass with 93 files, all nine required pages,
+  static search, project-subpath routing, and no internal-knowledge leakage.
+  `nix flake check .` and `git diff --check` also pass. The repository release
+  switch was re-read immediately before checkpointing and remains `false`.
 
 ## Open questions and handoff
 
-- Release code and local gates are prepared. Create and push the public
-  `janthmueller/coco` repository, store the registry credential only in its
-  protected `crates.io` environment, keep `COCO_RELEASE_ENABLED=false`, and
-  require the first hosted Rust, macOS binary smoke, and Pages runs to pass
-  before deciding whether to publish the irreversible first alpha.
+- The public `janthmueller/coco` repository, workflow-based GitHub Pages site,
+  protected `crates.io` environment, and repository release switch exist. The
+  credential name is present without exposing its value, file permissions were
+  narrowed before transfer, and `COCO_RELEASE_ENABLED` remains false. The next
+  release step is a non-publishing hosted rehearsal after the installable-flake
+  commit passes; irreversible alpha publication still requires an explicit
+  operator decision.
+- Before enabling automatic releases, make the successful Documentation run
+  for the exact candidate SHA an automated release prerequisite as well as the
+  existing Rust run. For the first manual alpha, inspect both hosted results
+  and complete a `publish=false` rehearsal before requesting publication.
+- Crates.io publication is paused. The upstream comparison shows that managed
+  worktree creation and TUI launch are no longer a defensible product boundary.
+  The next step is a user decision between stopping the project and narrowing
+  it to a demonstrable headless multi-repository control-plane workflow; if the
+  latter is selected, test the first Codex release containing PRs 42652, 43069,
+  and 43120 before revising public positioning or publishing an alpha.
+- After this checkpoint is pushed, map issues explicitly linked from those
+  three upstream PRs separately from merely similar requests. Draft any useful
+  upstream comment for user review first; do not post promotional or duplicate
+  material automatically.
 - Prove native Codex per-thread MCP isolation across start, resume, and fork
   before scheduling the registry feature.
 - Agentgateway is deliberately not scheduled. Reconsider it only when
@@ -1003,9 +1149,9 @@ architectural baseline for CoCo.
   Keep the distinction between internal normalized events and executable user
   automation explicit; hooks must not silently inherit credentials or block
   coordinator state transitions without a deliberate policy.
-- The public site now passes a production export under the `/coco` GitHub Pages
-  project subpath. Keep that static-export check when changing its routing or
-  deployment workflow.
+- The reorganized public site now passes a production export under the `/coco`
+  GitHub Pages project subpath with nine total routes. Keep that static-export
+  check when changing its routing or deployment workflow.
 - Phase 2 and its review are complete. Do not split a workspace now. If
   cross-platform support is scheduled next, begin Phase 3 by moving the
   existing Unix RPC backend behind the common transport API, then add Windows

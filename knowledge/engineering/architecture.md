@@ -26,6 +26,9 @@ status: draft
   capability-token-protected IPv4-loopback WebSocket.
 - `cocod` owns orchestration and policy. CLI, CoCo's local MCP server, and later
   TUI/web clients are equal presentation/control adapters only.
+- Alpha distribution installs `cocod` without enabling it as a service; its
+  lifecycle is an explicit foreground command. A future user service is
+  opt-in, cross-platform work rather than a Linux-only packaging side effect.
 - CoCo's v0 MCP server uses local `stdio` and delegates every tool to `cocod`;
   it does not own Git, SQLite, or Codex orchestration.
 - No public network API, destructive automatic cleanup, dirty-checkout
@@ -39,9 +42,11 @@ status: draft
 - Client adapters use one request/event protocol over OS-local IPC: a Unix
   domain socket on Linux/macOS and, once implemented, a Windows named pipe.
   The MCP adapter separately speaks MCP over stdio to its host.
-- The default Codex configuration or a named `[profiles.<name>]` overlay is
-  snapshotted per workspace; `fresh` and same-repository `fork` context are
-  executable in v0.
+- The default Codex configuration is represented by an empty per-thread
+  overlay. A named execution profile is the complete
+  `$CODEX_HOME/<name>.config.toml` document; its provenance and redacted
+  effective settings are snapshotted per workspace. `fresh` and
+  same-repository `fork` context are executable in v0.
 - Model discovery delegates to the daemon-owned App Server's paginated
   `model/list`. An explicit workspace model remains a separate `thread/start`,
   `thread/fork`, or `thread/resume` field beside the profile `config` object so
@@ -370,7 +375,7 @@ current schema.
 | `legacy_goal` | compatibility-only copy from the prerelease v1 schema; omitted from the domain/API and never written for new workspaces |
 | `context_mode` | implemented `fresh` or `fork`, with `handoff` reserved |
 | `context_json` | versioned context provenance, not conversation history |
-| `profile_json` | versioned immutable effective profile snapshot |
+| `profile_json` | immutable execution-profile snapshot: name, optional named-file path and parsed-configuration hash, separate model override, and non-secret effective settings; never the complete overlay |
 | `lifecycle` | CoCo-owned `provisioning`, `starting`, `ready`, `completed`, or `failed` |
 | `thread_status_json` | nullable exact native `ThreadStatus`, including every `activeFlag` |
 | `thread_status_generation` | App Server process generation that made the observation |
@@ -701,11 +706,14 @@ The local 0.147.0 observation supports this minimal sequence:
 4. Publish the selected loopback URL in a separate user-only descriptor only
    after initialization succeeds. Never persist the token in SQLite or workspace
    metadata.
-5. Send `thread/start` with `cwd`, the selected profile overlay as `config`,
-   an optional explicit `model`, and `ephemeral: false`. Never synthesize a
-   model from the profile: the App Server owns effective configuration
-   resolution. Use its paginated `model/list` method for discovery rather than
-   maintaining a CoCo model registry.
+5. Resolve `default` to an empty `config` object, or parse the complete
+   `$CODEX_HOME/<name>.config.toml` document for a named profile. Hold that
+   overlay in memory and send it to `thread/start` with `cwd`, an optional
+   explicit `model`, and `ephemeral: false`. Persist only its provenance and
+   redacted effective settings. Never synthesize a model from the profile: the
+   App Server owns effective configuration resolution. Use its paginated
+   `model/list` method for discovery rather than maintaining a CoCo model
+   registry.
 6. Verify the returned thread ID and canonical returned `cwd`, then set the
    native thread name to the CoCo workspace name with `thread/name/set` before
    committing the binding. In Codex 0.147.0 an empty thread has a rollout path
@@ -739,10 +747,13 @@ is inherited through the child environment rather than exposed in arguments.
 
 On daemon recovery use `thread/resume` by stored thread ID, supplying and then
 verifying the stored `cwd`, unchanged profile overlay, and separately stored
-explicit model override. Reload a named profile only when its name, source
-path, and source hash still match the immutable workspace snapshot; never
-persist the full overlay merely to make recovery convenient. Never accept a
-resumed thread whose ID or canonical cwd conflicts with the workspace record.
+explicit model override. `default` deterministically resolves to the empty
+overlay. For a named profile, reparse its complete named file and resume only
+when its name, source path, and parsed-content hash still match the immutable
+workspace snapshot. A missing, moved, invalid, or changed file is profile
+drift and leaves that workspace unavailable. Never persist the full overlay
+merely to make recovery convenient, and never accept a resumed thread whose ID
+or canonical cwd conflicts with the workspace record.
 
 ### Minimum notification mapping
 
@@ -894,6 +905,16 @@ On shutdown, stop accepting mutations, close watcher streams with their last
 cursor, interrupt or reconcile in-flight App Server requests according to its
 supported protocol, checkpoint/close SQLite, and terminate only the child
 process owned by this daemon. It does not delete worktrees or branches.
+
+The alpha exposes only this foreground lifecycle and currently treats terminal
+interrupt as its orderly stop trigger. Packaging must not install or enable a
+systemd, launchd, or Windows service yet. Before an opt-in cross-platform user
+service is offered, the daemon must handle SIGTERM through the same graceful
+shutdown path and define what happens when its App Server child exits while the
+local RPC server is still running: fail fast or restart a generation, stale
+native observations, reconcile in-flight work truthfully, recover eligible
+threads, and preserve isolated failure reporting. These paths require process
+tests before a service manager may restart `cocod` automatically.
 
 ## Concurrency
 

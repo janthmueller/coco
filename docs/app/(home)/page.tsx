@@ -31,7 +31,7 @@ export default function HomePage() {
         <div>
           <div className="coco-eyebrow">
             <span className="coco-eyebrow-dot" />
-            Codex Coordinator · early preview
+            Codex Coordinator · alpha
           </div>
           <h1>Run Codex workspaces side by side.</h1>
           <p className="coco-hero-copy">
@@ -42,7 +42,7 @@ export default function HomePage() {
           <div className="coco-actions">
             <Link
               className="coco-button coco-button-primary"
-              href="/docs/getting-started"
+              href="/docs/installation"
             >
               Get started
               <ArrowRight aria-hidden="true" size={16} />
@@ -113,10 +113,10 @@ export default function HomePage() {
       </section>
 
       <footer className="coco-container coco-footer">
-        <span>coco · early preview</span>
+        <span>coco · alpha</span>
         <span className="inline-flex items-center gap-4">
           <Link href="/docs/reference/current-limitations">
-            Current limitations
+            Troubleshooting
           </Link>
           <a href={site.repositoryUrl}>GitHub</a>
         </span>

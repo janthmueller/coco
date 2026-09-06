@@ -458,8 +458,8 @@ async fn passes_an_explicit_model_separately_from_the_selected_profile() {
     fixture.register().await;
     fs::create_dir_all(&fixture.codex_home).unwrap();
     fs::write(
-        fixture.codex_home.join("config.toml"),
-        "[profiles.dev]\nmodel = \"gpt-profile\"\n",
+        fixture.codex_home.join("dev.config.toml"),
+        "model = \"gpt-profile\"\n",
     )
     .unwrap();
     let mut params = fixture.create_params();
@@ -987,8 +987,8 @@ async fn refuses_to_resume_when_the_named_profile_changed() {
     fixture.register().await;
     fs::create_dir_all(&fixture.codex_home).unwrap();
     fs::write(
-        fixture.codex_home.join("config.toml"),
-        "[profiles.dev]\nmodel = \"gpt-before\"\n",
+        fixture.codex_home.join("dev.config.toml"),
+        "model = \"gpt-before\"\n",
     )
     .unwrap();
     let mut params = fixture.create_params();
@@ -1001,8 +1001,8 @@ async fn refuses_to_resume_when_the_named_profile_changed() {
         .workspace;
     fixture.store.reconcile_unfinished().unwrap();
     fs::write(
-        fixture.codex_home.join("config.toml"),
-        "[profiles.dev]\nmodel = \"gpt-after\"\n",
+        fixture.codex_home.join("dev.config.toml"),
+        "model = \"gpt-after\"\n",
     )
     .unwrap();
 

@@ -4,6 +4,7 @@
   "pages": [
     "---Getting started---",
     "[Overview](/docs)",
+    "installation",
     "getting-started",
     "---Guides---",
     "guides/workspaces",

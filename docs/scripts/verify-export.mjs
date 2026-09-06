@@ -9,6 +9,7 @@ const configuredBasePath = normalizeBasePath(process.env.DOCS_BASE_PATH);
 const requiredPages = [
   "index.html",
   "docs/index.html",
+  "docs/installation/index.html",
   "docs/getting-started/index.html",
   "docs/guides/workspaces/index.html",
   "docs/guides/execution-profiles/index.html",

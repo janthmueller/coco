@@ -1,58 +1,87 @@
 ---
 title: Models and profiles
-description: Choose a model or reuse a named set of Codex settings.
+description: Choose one model or apply a reusable Codex configuration to a workspace.
 ---
 
-Choose a model for one workspace with `--model`. Use a profile when you want to
-reuse several Codex settings together, such as reasoning effort, sandbox, or
-approval policy.
+A **model** chooses which model runs the workspace. A **profile** is a named
+Codex configuration file that can group settings such as reasoning effort,
+sandbox mode, approval policy, or instructions.
 
-## See available models
+## List available models
 
-With `cocod` running, list the models offered by your Codex installation:
+With `cocod` running, ask the connected Codex installation for its current
+model catalog:
 
 ```bash
 coco models
 ```
 
-Use the value in the `MODEL` column when creating a workspace:
+The output shows the value to pass as `--model`, its display name, whether it
+is the default, and the reasoning efforts it advertises. For scripts, use:
+
+```bash
+coco models --json
+```
+
+## Select a model
+
+Choose a model when you create the workspace:
 
 ```bash
 coco create refactor/cache --model gpt-5.6-sol
 ```
 
-For scripts, `coco models --json` returns the same catalog as structured JSON.
+Without `--model`, Codex selects the model from its normal configuration.
+CoCo does not maintain a separate model catalog or alias list.
 
-## Define a profile
+## Define a Codex profile
 
-Add it to your Codex configuration file, normally `~/.codex/config.toml`:
+Named profiles use the same file convention as `codex --profile`. Create a
+file next to your normal Codex configuration:
 
-```toml title="~/.codex/config.toml"
-[profiles.dev]
+```toml title="~/.codex/dev.config.toml"
 model_reasoning_effort = "high"
 approval_policy = "on-request"
 sandbox_mode = "workspace-write"
 ```
 
-Use keys supported by your installed Codex version.
+For a profile named `dev`, the filename must be `dev.config.toml` below
+`$CODEX_HOME`, normally `~/.codex`. The file itself is the configuration layer;
+do not wrap it in a `[profiles.dev]` table. Use keys supported by your installed
+Codex version.
 
-## Use it for a workspace
+## Apply a profile
 
 ```bash
 coco create refactor/cache \
   --base main \
   --profile dev
-
-coco send refactor/cache "Refactor the cache and run its tests"
 ```
 
-Without `--profile`, CoCo uses Codex's default configuration. You can combine a
-profile with `--model`; the explicit model wins while the other profile settings
-still apply:
+The special profile name `default` uses Codex's normal base configuration and
+does not require `default.config.toml`.
+
+## Combine a profile and model
+
+An explicit model overrides a model named inside the profile. Every other
+profile setting still applies:
 
 ```bash
-coco create refactor/cache --profile dev --model gpt-5.6-sol
+coco create refactor/cache \
+  --profile dev \
+  --model gpt-5.6-sol
 ```
 
-The chosen settings apply when the workspace is created. Changing the profile
-file later does not reconfigure an existing workspace.
+## Keep profile files stable
+
+CoCo records which named profile was applied when the workspace was created.
+Do not change or remove its settings while you still need the workspace: after
+a `cocod` restart, CoCo refuses to resume the thread if the parsed
+configuration no longer matches. Comments and formatting do not affect this
+check.
+
+When you want different settings, create another profile name and use it for a
+new workspace. CoCo checks the named profile file, not Codex's base
+configuration layer. If you change the base configuration, inherited settings can
+therefore change for any resumed workspace the next time `cocod` starts. Put
+settings that must stay fixed explicitly in the named profile.

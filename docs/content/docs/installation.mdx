@@ -1,0 +1,92 @@
+---
+title: Installation
+description: Install the CoCo alpha with Cargo or Nix and start its coordinator.
+---
+
+CoCo supports Linux and macOS. It uses your existing Codex login and
+configuration; it does not require a separate API key.
+
+## Requirements
+
+You need:
+
+- Git;
+- a configured `codex` command on `PATH`; and
+- either Rust 1.98.1 or newer, or Nix with flakes enabled.
+
+The current alpha is tested with `codex-cli 0.147.0`.
+
+## Install with Cargo
+
+Cargo is the recommended installation method. Install the current alpha from
+its Git repository:
+
+```bash
+cargo install --locked \
+  --git https://github.com/janthmueller/coco \
+  codex-coordinator
+```
+
+The package name is `codex-coordinator`, but it installs three executable
+commands: `coco`, `cocod`, and `coco-mcp`. Cargo normally places them in
+`~/.cargo/bin`; make sure that directory is on `PATH`.
+
+## Install with Nix
+
+The repository flake provides the same three commands and does not require a
+separate Rust toolchain:
+
+```bash
+nix profile add github:janthmueller/coco
+```
+
+You can also run the CLI without installing it:
+
+```bash
+nix run github:janthmueller/coco -- --help
+```
+
+## Build from a checkout
+
+```bash
+git clone https://github.com/janthmueller/coco.git
+cd coco
+cargo install --path . --locked
+```
+
+If you prefer the pinned development environment, replace the final command
+with:
+
+```bash
+nix develop -c cargo install --path . --locked
+```
+
+## Verify the installation
+
+```bash
+coco --version
+cocod --version
+coco-mcp --version
+```
+
+All three commands should report the same alpha version.
+
+## Start the coordinator
+
+Run this in its own terminal and leave it open while CoCo is active:
+
+```bash
+cocod
+```
+
+The `coco` CLI exits after each command. `cocod` stays running so a Codex turn
+can continue and remain reachable from a later `status`, `decide`, or `jump`.
+With the default paths, a second `cocod` process exits instead of competing for
+the same workspaces.
+
+Stop the coordinator with <kbd>Ctrl</kbd>+<kbd>C</kbd>. Prepared workspaces can
+be loaded again the next time it starts, but a turn that was active when it
+stopped is interrupted. The alpha does not install or enable a background
+service automatically.
+
+Next, [run your first workspace](../getting-started/).

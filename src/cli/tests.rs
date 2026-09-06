@@ -1,7 +1,7 @@
 use std::ffi::OsStr;
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use serde_json::json;
 
 use crate::paths::CocoPaths;
@@ -9,8 +9,111 @@ use crate::paths::CocoPaths;
 use super::args::{Cli, Command, RepoCommand};
 use super::commands::validate_scope_selection;
 use super::jump::{jump_command, load_jump_target};
-use super::output::phase_label;
+use super::output::{phase_label, render_diff};
 use super::status::follow_stops_at;
+
+#[test]
+fn create_help_describes_the_codex_named_profile_file() {
+    let mut command = Cli::command();
+    let help = command
+        .find_subcommand_mut("create")
+        .expect("create subcommand must exist")
+        .render_long_help()
+        .to_string();
+
+    assert!(help.contains("$CODEX_HOME/<PROFILE>.config.toml"));
+    assert!(!help.contains("[profiles.<PROFILE>]"));
+}
+
+#[test]
+fn help_describes_separate_worktrees_without_implying_security_isolation() {
+    let mut command = Cli::command();
+    let root_help = command.render_long_help().to_string();
+    assert!(root_help.contains("separate worktrees"));
+    assert!(!root_help.contains("isolated"));
+
+    let mut command = Cli::command();
+    let create_help = command
+        .find_subcommand_mut("create")
+        .expect("create subcommand must exist")
+        .render_long_help()
+        .to_string();
+    assert!(create_help.contains("separate worktree"));
+    assert!(!create_help.contains("isolated"));
+}
+
+#[test]
+fn diff_help_and_human_output_disclose_bounded_patches() {
+    let mut command = Cli::command();
+    let help = command
+        .find_subcommand_mut("diff")
+        .expect("diff subcommand must exist")
+        .render_long_help()
+        .to_string();
+    assert!(help.contains("bounded tracked patch"));
+    assert!(!help.contains("Show all tracked"));
+
+    let rendered = render_diff(&json!({
+        "patch": "diff --git a/file b/file\n",
+        "patchTruncated": true,
+        "untrackedPaths": ["new.txt"],
+    }));
+    assert_eq!(
+        rendered,
+        concat!(
+            "diff --git a/file b/file\n",
+            "Warning: tracked patch output was truncated.\n",
+            "Untracked:\n",
+            "new.txt\n",
+        )
+    );
+
+    assert_eq!(
+        render_diff(&json!({
+            "patch": "",
+            "patchTruncated": true,
+            "untrackedPaths": [],
+        })),
+        "Warning: tracked patch output was truncated.\n"
+    );
+    assert_eq!(
+        render_diff(&json!({
+            "patch": "",
+            "patchTruncated": false,
+            "untrackedPaths": [],
+        })),
+        "No changes.\n"
+    );
+}
+
+#[test]
+fn all_repository_help_is_limited_to_workspace_scope_commands() {
+    for name in ["ls", "status", "send", "jump", "diff"] {
+        let mut command = Cli::command();
+        let help = command
+            .find_subcommand_mut(name)
+            .unwrap_or_else(|| panic!("{name} subcommand must exist"))
+            .render_long_help()
+            .to_string();
+        assert!(
+            help.contains("--all-repos"),
+            "{name} help must advertise cross-repository scope"
+        );
+    }
+
+    for name in ["repo", "models", "create", "decide", "mcp"] {
+        let mut command = Cli::command();
+        let help = command
+            .find_subcommand_mut(name)
+            .unwrap_or_else(|| panic!("{name} subcommand must exist"))
+            .render_long_help()
+            .to_string();
+        assert!(
+            !help.contains("--all-repos"),
+            "{name} help must not advertise an unsupported scope"
+        );
+    }
+}
 
 #[test]
 fn parses_workspace_creation_with_an_optional_profile() {
@@ -151,19 +254,80 @@ fn parses_local_explicit_and_all_repository_scopes() {
 
     let global = Cli::try_parse_from(["coco", "-a", "ls"]).unwrap();
     assert!(global.scope_path.is_none());
-    assert!(global.all_repos);
+    assert!(global.requests_all_repositories());
 
-    assert!(Cli::try_parse_from(["coco", "--all-repos", "status", "feat/login"]).is_ok());
+    for command in ["ls", "status", "send", "jump", "diff"] {
+        let mut leading = vec!["coco", "-a", command];
+        let mut trailing = vec!["coco", command];
+        match command {
+            "status" | "jump" | "diff" => {
+                leading.push("feat/login");
+                trailing.push("feat/login");
+            }
+            "send" => {
+                leading.extend(["feat/login", "continue"]);
+                trailing.extend(["feat/login", "continue"]);
+            }
+            "ls" => {}
+            _ => unreachable!(),
+        }
+        trailing.push("-a");
+
+        let leading = Cli::try_parse_from(leading).unwrap();
+        let trailing = Cli::try_parse_from(trailing).unwrap();
+        assert!(leading.requests_all_repositories());
+        assert!(trailing.requests_all_repositories());
+    }
 
     let conflicting = Cli::try_parse_from(["coco", "--all-repos", "../other", "ls"]).unwrap();
     assert!(
-        validate_scope_selection(conflicting.scope_path.is_some(), conflicting.all_repos).is_err()
+        validate_scope_selection(
+            conflicting.scope_path.is_some(),
+            conflicting.requests_all_repositories()
+        )
+        .is_err()
     );
-    assert!(Cli::try_parse_from(["coco", "ls", "--all-repos"]).is_ok());
     let conflicting = Cli::try_parse_from(["coco", "../other", "ls", "-a"]).unwrap();
     assert!(
-        validate_scope_selection(conflicting.scope_path.is_some(), conflicting.all_repos).is_err()
+        validate_scope_selection(
+            conflicting.scope_path.is_some(),
+            conflicting.requests_all_repositories()
+        )
+        .is_err()
     );
+
+    for arguments in [
+        vec!["coco", "repo", "list", "-a"],
+        vec!["coco", "models", "-a"],
+        vec!["coco", "create", "auth", "-a"],
+        vec!["coco", "decide", "decision-123", "-a"],
+        vec!["coco", "mcp", "serve", "--repository", ".", "-a"],
+    ] {
+        assert!(
+            Cli::try_parse_from(&arguments).is_err(),
+            "{} must reject a trailing --all-repos flag",
+            arguments[1]
+        );
+    }
+}
+
+#[tokio::test]
+async fn leading_all_repository_scope_is_rejected_by_unscoped_commands() {
+    for arguments in [
+        vec!["coco", "-a", "repo", "list"],
+        vec!["coco", "-a", "models"],
+        vec!["coco", "-a", "create", "auth"],
+        vec!["coco", "-a", "decide", "decision-123"],
+        vec!["coco", "-a", "mcp", "serve", "--repository", "."],
+    ] {
+        let command = arguments[2];
+        let cli = Cli::try_parse_from(arguments).unwrap();
+        let error = super::commands::run(cli).await.unwrap_err().to_string();
+        assert!(
+            error.contains("does not accept") || error.contains("requires one repository"),
+            "unexpected {command} scope error: {error}"
+        );
+    }
 }
 
 #[test]

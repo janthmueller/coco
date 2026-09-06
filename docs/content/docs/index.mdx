@@ -1,53 +1,87 @@
 ---
 title: CoCo
-description: Run several Codex workspaces without mixing their files or losing track of their results.
+description: Coordinate parallel Codex work without losing the thread—or mixing the files.
 ---
 
-CoCo stands for **Codex Coordinator**. A CoCo workspace keeps one Codex
-conversation together with its own Git worktree and branch.
+CoCo stands for **Codex Coordinator**. It keeps parallel Codex conversations
+attached to the Git checkout and settings where each piece of work belongs.
 
-Use it when you want Codex to investigate or change several things at once
-without mixing their files or disturbing your own checkout.
+Use it when you want to leave one piece of Codex work running, move to
+something else, and return later without guessing which conversation changed
+which files.
 
-## A typical workflow
+## What CoCo does
 
-```bash
-coco repo add .
+CoCo adds durable, named workspaces around Codex. It can:
 
-coco create fix/login --base main
-coco send fix/login "Fix the login redirect and run the relevant tests"
+- prepare several separate pieces of work before starting any model turns;
+- start and follow Codex work from short terminal commands;
+- surface approvals and questions that need your answer;
+- reopen the same conversation in the Codex terminal UI; and
+- find workspaces across several registered repositories.
 
-coco status fix/login --follow
-```
+Codex still performs the actual reasoning, tool calls, and file changes, and
+raises approval requests for you to decide. CoCo keeps their surrounding
+context together.
 
-`create` prepares `coco/fix/login`, its separate checkout, and its Codex
-conversation. Nothing runs until `send`. Use `jump` whenever you want to open
-that same conversation in the Codex terminal UI.
+## What is a workspace?
 
-<Callout type="warn" title="Early preview">
-  CoCo currently installs from source and is intended for supervised local use.
-  Read the current limitations before relying on it for unattended work.
+A workspace is one unit of Codex work. It contains:
+
+- a registered repository;
+- a separate Git worktree and `coco/<name>` branch;
+- one persistent Codex thread; and
+- its selected model and Codex profile.
+
+The worktree prevents changes from being mixed into your current checkout.
+The stored thread means `send`, `status`, and `jump` all continue the same
+conversation instead of starting unrelated sessions.
+
+## How the workflow fits together
+
+| You want to…                               | Use…          |
+| ------------------------------------------ | ------------- |
+| Prepare work in a separate checkout        | `coco create` |
+| Start or continue a Codex turn             | `coco send`   |
+| Check once or follow live activity         | `coco status` |
+| Answer an approval or question             | `coco decide` |
+| Enter the existing Codex terminal UI       | `coco jump`   |
+| Review tracked changes and untracked paths | `coco diff`   |
+
+The `coco` command exits after each operation. Keep `cocod` running while you
+use CoCo so ongoing work remains available to later commands. Leaving
+`status --follow` or the terminal UI does not by itself cancel an active turn.
+
+For automation, `coco-mcp` can expose a repository-scoped view of the same
+workspaces to an MCP host. Its default tools are read-only.
+
+<Callout type="warn" title="Alpha software">
+  CoCo is intended for supervised local use on Linux and macOS. Read the
+  [troubleshooting and limitations](/docs/reference/current-limitations) before
+  relying on it for important or unattended work.
 </Callout>
+
+## Next steps
 
 <Cards>
   <Card
-    title="Get started"
-    description="Build CoCo and run your first isolated workspace."
+    title="Install CoCo"
+    description="Choose Cargo or Nix and verify the three commands."
+    href="/docs/installation"
+  />
+  <Card
+    title="Run the quickstart"
+    description="Create, start, follow, and enter your first workspace."
     href="/docs/getting-started"
   />
   <Card
     title="Work with workspaces"
-    description="Prepare, start, follow, and enter Codex work."
+    description="Learn the full create, status, decide, jump, diff, and fork flow."
     href="/docs/guides/workspaces"
   />
   <Card
     title="Choose a model or profile"
-    description="Select a model or apply reusable Codex settings to a workspace."
+    description="Select a model or apply reusable Codex settings."
     href="/docs/guides/execution-profiles"
-  />
-  <Card
-    title="Current limitations"
-    description="Know what the early preview does not handle yet."
-    href="/docs/reference/current-limitations"
   />
 </Cards>

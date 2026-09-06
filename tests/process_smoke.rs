@@ -1229,8 +1229,8 @@ fn prepare_repository(repository: &Path) -> Result<()> {
 fn prepare_codex_profile(paths: &TestPaths) -> Result<()> {
     fs::create_dir_all(&paths.codex_home)?;
     fs::write(
-        paths.codex_home.join("config.toml"),
-        format!("[profiles.{PROFILE_NAME}]\nmodel = \"{PROFILE_MODEL}\"\n"),
+        paths.codex_home.join(format!("{PROFILE_NAME}.config.toml")),
+        format!("model = \"{PROFILE_MODEL}\"\n"),
     )?;
     Ok(())
 }
