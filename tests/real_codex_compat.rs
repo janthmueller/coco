@@ -139,6 +139,8 @@ async fn verify_generated_schemas(
         "v2/FileChangePatchUpdatedNotification.json",
         "v2/ItemCompletedNotification.json",
         "v2/ItemStartedNotification.json",
+        "v2/ModelListParams.json",
+        "v2/ModelListResponse.json",
         "v2/ThreadCompactStartParams.json",
         "v2/ThreadCompactStartResponse.json",
         "v2/ThreadStartParams.json",
@@ -191,11 +193,24 @@ async fn run_daemon_lifecycle(
         run_cli(paths, codex_binary, repository, &["repo", "add", "."])
             .await
             .with_context(|| format!("cocod log:\n{}", read_log(&log)))?;
+        let models = run_cli(paths, codex_binary, repository, &["models", "--json"])
+            .await
+            .with_context(|| format!("cocod log:\n{}", read_log(&log)))?;
+        let models = serde_json::from_slice::<Value>(&models.stdout)
+            .context("coco models did not return JSON")?;
+        let model = select_default_model(&models)?;
         run_cli(
             paths,
             codex_binary,
             repository,
-            &["create", WORKSPACE_NAME, "--base", "HEAD"],
+            &[
+                "create",
+                WORKSPACE_NAME,
+                "--base",
+                "HEAD",
+                "--model",
+                &model,
+            ],
         )
         .await
         .with_context(|| format!("cocod log:\n{}", read_log(&log)))?;
@@ -206,6 +221,26 @@ async fn run_daemon_lifecycle(
     stop_daemon(&mut daemon, &log).await?;
     verify_runtime_cleanup(paths)?;
     Ok(status)
+}
+
+fn select_default_model(response: &Value) -> Result<String> {
+    ensure!(
+        response["schemaVersion"] == 5,
+        "coco models returned an unexpected schema version: {response}"
+    );
+    let models = response["models"]
+        .as_array()
+        .context("coco models response did not contain a models array")?;
+    let selected = models
+        .iter()
+        .find(|model| model["isDefault"] == true)
+        .or_else(|| models.first())
+        .context("the installed Codex executable advertised no visible models")?;
+    selected["model"]
+        .as_str()
+        .filter(|model| !model.trim().is_empty())
+        .map(ToOwned::to_owned)
+        .context("the selected catalog entry did not contain a usable model value")
 }
 
 fn spawn_daemon(paths: &TestPaths, codex_binary: &Path, log: &Path) -> Result<Child> {
@@ -361,6 +396,13 @@ fn assert_same_persisted_thread(first: &Value, second: &Value) -> Result<()> {
             status["workspace"]["activeTurnId"].is_null(),
             "compatibility smoke unexpectedly created a model turn: {status}"
         );
+        let model_override = status["workspace"]["profile"]["modelOverride"]
+            .as_str()
+            .context("workspace did not retain its explicit model override")?;
+        ensure!(
+            status["workspace"]["profile"]["effectiveSettings"]["model"] == model_override,
+            "Codex did not report the requested model as effective: {status}"
+        );
     }
     ensure!(
         first["workspace"]["codexThreadId"] == second["workspace"]["codexThreadId"],
@@ -369,6 +411,11 @@ fn assert_same_persisted_thread(first: &Value, second: &Value) -> Result<()> {
     ensure!(
         first["workspace"]["worktreePath"] == second["workspace"]["worktreePath"],
         "daemon restart changed the workspace worktree"
+    );
+    ensure!(
+        first["workspace"]["profile"]["modelOverride"]
+            == second["workspace"]["profile"]["modelOverride"],
+        "daemon restart changed the explicit model override"
     );
     ensure!(
         first["workspace"]["threadRuntime"]["runtimeGeneration"]

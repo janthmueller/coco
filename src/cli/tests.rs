@@ -25,8 +25,20 @@ fn parses_workspace_creation_with_an_optional_profile() {
         "main",
         "--profile",
         "dev",
+        "--model",
+        "gpt-explicit",
     ]);
-    assert!(configured.is_ok());
+    let configured = configured.unwrap();
+    let Command::Create(configured) = configured.command else {
+        panic!("create did not parse as the create command");
+    };
+    assert_eq!(configured.model.as_deref(), Some("gpt-explicit"));
+
+    let short_model = Cli::try_parse_from(["coco", "create", "auth", "-m", "gpt-short"]).unwrap();
+    let Command::Create(short_model) = short_model.command else {
+        panic!("create -m did not parse as the create command");
+    };
+    assert_eq!(short_model.model.as_deref(), Some("gpt-short"));
 
     let combined = Cli::try_parse_from([
         "coco",
@@ -60,6 +72,7 @@ fn parses_workspace_creation_with_an_optional_profile() {
     assert!(Cli::try_parse_from(["coco", "create", "auth", "--goal", "work"]).is_err());
     assert!(Cli::try_parse_from(["coco", "create", "auth", "--context", "fresh"]).is_err());
     assert!(Cli::try_parse_from(["coco", "create", "auth", "--send", "  "]).is_err());
+    assert!(Cli::try_parse_from(["coco", "create", "auth", "--model", "  "]).is_err());
     assert!(Cli::try_parse_from(["coco", "send", "auth", ""]).is_err());
     assert!(Cli::try_parse_from(["coco", "new", "auth"]).is_err());
 }
@@ -116,6 +129,14 @@ fn repository_registration_is_a_nested_repo_command() {
         }
     ));
     assert!(Cli::try_parse_from(["coco", "init"]).is_err());
+}
+
+#[test]
+fn model_discovery_is_a_daemon_wide_command() {
+    let human = Cli::try_parse_from(["coco", "models"]).unwrap();
+    assert!(matches!(human.command, Command::Models { json: false }));
+    let json = Cli::try_parse_from(["coco", "models", "--json"]).unwrap();
+    assert!(matches!(json.command, Command::Models { json: true }));
 }
 
 #[test]

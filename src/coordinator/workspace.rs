@@ -74,6 +74,9 @@ impl Coordinator {
         params: WorkspaceCreateParams,
     ) -> Result<WorkspaceResult, CoordinatorError> {
         validate_non_empty("baseRef", &params.base_ref)?;
+        if let Some(model) = params.model.as_deref() {
+            validate_non_empty("model", model)?;
+        }
         validate_operation_id(&params.operation_id)?;
         validate_context_request(&params)?;
 
@@ -90,7 +93,8 @@ impl Coordinator {
             return self.workspace_response(existing);
         }
 
-        let loaded_profile = load_profile(&params.profile, &self.codex_home)?;
+        let mut loaded_profile = load_profile(&params.profile, &self.codex_home)?;
+        loaded_profile.snapshot.model_override = params.model.clone();
         let context = self.resolve_creation_context(&params, &repository, &git_repository)?;
         if self
             .store
@@ -122,6 +126,7 @@ impl Coordinator {
                 &context,
                 &binding.path,
                 loaded_profile.thread_config,
+                params.model.as_deref(),
             )
             .await
         {
@@ -293,14 +298,15 @@ impl Coordinator {
         context: &CreationContext,
         cwd: &Path,
         config: Value,
+        model: Option<&str>,
     ) -> Result<super::StartedThread, super::WorkerError> {
         match &context.fork {
             Some(fork) => {
                 self.worker
-                    .fork_thread(name, &fork.thread_id, cwd, config)
+                    .fork_thread(name, &fork.thread_id, cwd, config, model)
                     .await
             }
-            None => self.worker.start_thread(name, cwd, config).await,
+            None => self.worker.start_thread(name, cwd, config, model).await,
         }
     }
 
@@ -569,7 +575,8 @@ fn ensure_create_replay_matches(
             .and_then(Value::as_bool)
             .unwrap_or(false)
             == params.compact
-        && existing.profile.name == params.profile;
+        && existing.profile.name == params.profile
+        && existing.profile.model_override == params.model;
     if matches {
         Ok(())
     } else {

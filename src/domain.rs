@@ -244,8 +244,39 @@ pub struct ProfileSnapshot {
     pub name: String,
     pub source_path: Option<PathBuf>,
     pub source_hash: String,
+    /// Explicit per-thread model requested outside the profile, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_override: Option<String>,
     /// Effective, non-secret worker settings only. Callers must redact before storing.
     pub effective_settings: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexReasoningEffort {
+    pub reasoning_effort: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexModel {
+    pub id: String,
+    /// Exact value accepted by the App Server's thread model override.
+    pub model: String,
+    pub display_name: String,
+    pub description: String,
+    pub is_default: bool,
+    pub default_reasoning_effort: String,
+    pub supported_reasoning_efforts: Vec<CodexReasoningEffort>,
+    #[serde(default = "default_model_input_modalities")]
+    pub input_modalities: Vec<String>,
+    #[serde(default)]
+    pub supports_personality: bool,
+}
+
+fn default_model_input_modalities() -> Vec<String> {
+    vec!["text".to_owned(), "image".to_owned()]
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -669,6 +700,7 @@ mod tests {
             name: "default".to_owned(),
             source_path: None,
             source_hash: "sha256:test".to_owned(),
+            model_override: None,
             effective_settings: serde_json::json!({"networkAccess": false}),
         };
         let wire = serde_json::to_value(profile).unwrap();

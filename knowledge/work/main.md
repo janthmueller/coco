@@ -214,6 +214,16 @@ architectural baseline for CoCo.
     failure retention, idempotency, and recovery.
   - [x] Pin the relevant Codex schemas, update public docs for shipped behavior,
     run the full gates, and create a checkpoint commit.
+- [x] Add App-Server-backed model discovery and an explicit per-workspace model
+  override without duplicating Codex configuration resolution.
+  - [x] Add `coco models [--json]` over the daemon-owned App Server's
+    `model/list` result.
+  - [x] Add `coco create --model/-m <model-id>` and pass it as the explicit
+    `thread/start` or `thread/fork` model override alongside the selected
+    profile configuration.
+  - [x] Preserve the effective model across daemon recovery, cover the exact
+    wire contract, and update public/internal documentation for shipped
+    behavior.
 - [ ] Keep handoff deferred as a separate artifact-design task. Treat authoring
   and consumption independently; consider agent-generated material, existing
   Markdown, direct CLI input, ticket or other external references, and an
@@ -477,6 +487,12 @@ architectural baseline for CoCo.
   native choices and permission/file-change shapes; an unknown extension is
   observational instead of enabling a blind approval. Secret answers use a
   cross-platform no-echo terminal reader and are never persisted.
+- 2026-09-06 — Discover models through the daemon-owned App Server rather than
+  a CoCo catalog or hard-coded list. Pass an explicit `--model` as the native
+  top-level thread override alongside, but never merged into, the selected
+  profile `config`. Codex owns final configuration precedence; CoCo persists
+  the requested override and returned non-secret effective settings only so
+  restart recovery can make the same request.
 - 2026-09-06 — Do not advertise `coco jump` as replay for an already pending
   request. Codex 0.147.0's TUI retains only request IDs delivered through that
   client's own event stream, so attaching later cannot reliably answer the
@@ -484,6 +500,12 @@ architectural baseline for CoCo.
 
 ## Findings
 
+- The pinned App Server's `model/list` is cursor-paginated and distinguishes a
+  catalog entry's stable `id`, exact thread selector `model`, display metadata,
+  default marker, reasoning choices, modalities, and personality support.
+  `thread/start`, `thread/fork`, and `thread/resume` each accept a separate
+  optional `model` beside their generic `config` object, so CoCo has no reason
+  to reproduce Codex's configuration merge rules.
 - Codex 0.147.0 represents a file update kind as a tagged object such as
   `{"type":"update","move_path":null}`, not a bare string. Decision
   presentation now parses that exact shape, preserves move targets, bounds the
@@ -690,6 +712,21 @@ architectural baseline for CoCo.
 
 ## Verification
 
+- The model-selection slice passes all 85 library tests (84 passed and the
+  model-consuming approval proof ignored), both daemon/CLI process smokes, and
+  the separately enabled turn-free real-Codex 0.147.0 compatibility test. The
+  real test compares the generated model-list schemas, selects the advertised
+  default, prepares an empty thread with that explicit model, restarts the
+  daemon/App Server, and resumes with the same persisted override without
+  starting a turn. Fake-process coverage proves complete two-page catalog
+  traversal and that profile `config` plus top-level `model` remain separate
+  for start, fork, and resume. Rustfmt, all-target/all-feature Clippy with
+  warnings denied, `cargo machete`, and `git diff --check` pass.
+- `nix run .#docs-check` passes after the public models/profile guide and CLI
+  reference update. The final `DOCS_BASE_PATH=/coco nix run .#docs-build`
+  verifies 88 static files across eight pages, client-side search,
+  project-subpath routing, and the public-only boundary. `nix flake check .
+  --no-write-lock-file --max-jobs 1` also passes.
 - The completed decision slice passes 73 library tests plus the real
   daemon/CLI fake-App-Server process smoke with one build job and one test
   thread. The process test observes a native command approval, finds its opaque

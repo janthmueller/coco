@@ -30,7 +30,7 @@ that the behavior is already implemented.
 - The locally installed `codex-cli 0.147.0` can generate App Server protocol
   schemas.
 - Schemas generated from that installation expose the `initialize`,
-  `thread/start`, `thread/resume`, and `turn/start` client requests;
+  `model/list`, `thread/start`, `thread/resume`, and `turn/start` client requests;
   thread/turn, plan, diff, item, token, error, and status notifications; and
   server-initiated approval and user-input requests.
 - That observed protocol is version-specific. Generated schemas from the
@@ -85,6 +85,11 @@ that the behavior is already implemented.
   the source workspace's committed code and native Codex history. The source
   must be idle and clean; optional `--compact` applies only to the child and
   completes before `--send` or `--jump` runs.
+- `coco models` exposes the visible catalog reported by the daemon-owned Codex
+  App Server. `coco create --model/-m` is an explicit per-workspace model
+  override. CoCo passes the named profile overlay in `config` and the explicit
+  model in the App Server's separate `model` field; it does not reimplement
+  Codex configuration precedence.
 - Native worktrees intentionally share their repository's Git object and ref
   storage. CoCo does not proxy ordinary worker commits or allocate a separate
   Git database per workspace.
@@ -271,7 +276,8 @@ context transfer never implies copying uncommitted files.
 ```text
 coco repo add [path]
 coco repo list [--json]
-coco [<repository-path>] create <name> [--base <ref>] [--profile <name>] [--send <message>] [--jump]
+coco models [--json]
+coco [<repository-path>] create <name> [--base <ref>] [--profile <name>] [--model <model>] [--send <message>] [--jump]
 coco [<repository-path>] ls [--json]
 coco --all-repos ls [--json]        # `-a` is the short form
 coco [<repository-path>] status <workspace> [--json]
@@ -302,7 +308,9 @@ repository paths. A local miss never silently targets another repository, but
 the error points out global matches when they exist. CoCo does not encode a
 path and workspace name into a composite string.
 
-`decide` is intentionally not repository-scoped. It accepts only the globally
+`models` and `decide` are intentionally not repository-scoped. `models` reads
+the daemon-owned App Server catalog and accepts only its optional `--json`
+output flag. `decide` accepts only the globally
 unique opaque CoCo decision ID printed by `status`; a leading repository path
 or `--all-repos` is an error.
 
@@ -329,11 +337,28 @@ does not duplicate thread or turn orchestration.
 - This is a daemon-wide inventory and therefore needs no repository scope.
 - `--json` returns one versioned document with stable repository identities.
 
+### `coco models`
+
+- Page through `model/list` on the daemon-owned App Server and return every
+  visible catalog entry in its reported order.
+- Keep the App Server's exact `model` selector, display name, description,
+  default marker, supported reasoning efforts, input modalities, and
+  personality support. Ignore added upstream fields safely.
+- This is a daemon-wide capability query, not repository data. A leading
+  repository path and `--all-repos` are invalid.
+- `--json` returns one versioned document under the `models` key.
+
 ### `coco create`
 
 `--base` defaults to `HEAD` for a fresh workspace. Optional `--profile <name>`
 applies the matching Codex profile table only to the new thread; omitting it
-keeps the App Server's base configuration. `--fork-from <workspace>` instead
+keeps the App Server's base configuration. Optional `--model <model>`/`-m`
+passes an explicit top-level model override alongside that profile overlay.
+Codex remains authoritative for resolving the effective configuration: CoCo
+must not extract, merge, or duplicate a profile's model setting itself. The
+requested override and Codex-reported non-secret effective model are retained
+in the workspace snapshot so recovery can reapply and audit the same request.
+`--fork-from <workspace>` instead
 selects an idle, clean source workspace in the same repository, derives code
 from that worktree's committed `HEAD`, and calls native `thread/fork` to carry
 its conversation history. It conflicts with an explicit `--base`.
@@ -357,8 +382,9 @@ as a recoverable saga:
    external side effects.
 6. Create `coco/<name>` and its worktree at the exact base SHA.
 7. Start a non-ephemeral Codex thread for fresh context, or fork the selected
-   source thread. In both cases canonical `cwd` equals the destination worktree
-   and the snapshotted worker profile applies to the destination.
+   source thread. In both cases canonical `cwd` equals the destination worktree,
+   `config` contains the selected profile overlay, and the separate `model`
+   field is present only when the user requested an explicit override.
 8. Verify the returned binding and set the Codex thread name to the workspace
    name; for the pinned App Server this model-free metadata write also makes an
    empty prepared thread resumable after process restart.

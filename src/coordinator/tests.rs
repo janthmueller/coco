@@ -11,8 +11,8 @@ use super::turn::PendingTurnGuard;
 use super::*;
 use crate::codex::CodexEvent;
 use crate::domain::{
-    CodexThreadStatus, ContextMode, DecisionKind, DecisionPrompt, DecisionState, Workspace,
-    WorkspaceLifecycle, WorkspacePhase, WorkspaceWaitReason,
+    CodexModel, CodexReasoningEffort, CodexThreadStatus, ContextMode, DecisionKind, DecisionPrompt,
+    DecisionState, Workspace, WorkspaceLifecycle, WorkspacePhase, WorkspaceWaitReason,
 };
 use crate::protocol::{
     DecisionGetParams, DecisionRespondParams, DecisionSubmission, EventListParams,
@@ -22,21 +22,25 @@ use crate::protocol::{
 
 #[derive(Debug, Clone, PartialEq)]
 enum WorkerCall {
+    Models,
     Thread {
         name: String,
         cwd: PathBuf,
         config: Value,
+        model: Option<String>,
     },
     Resume {
         thread_id: String,
         cwd: PathBuf,
         config: Value,
+        model: Option<String>,
     },
     Fork {
         name: String,
         source_thread_id: String,
         cwd: PathBuf,
         config: Value,
+        model: Option<String>,
     },
     Compact {
         thread_id: String,
@@ -97,17 +101,38 @@ impl FakeWorker {
 
 #[async_trait]
 impl WorkerRuntime for FakeWorker {
+    async fn list_models(&self) -> Result<Vec<CodexModel>, WorkerError> {
+        self.calls.lock().unwrap().push(WorkerCall::Models);
+        Ok(vec![CodexModel {
+            id: "gpt-test".to_owned(),
+            model: "gpt-test".to_owned(),
+            display_name: "GPT Test".to_owned(),
+            description: "Test model".to_owned(),
+            is_default: true,
+            default_reasoning_effort: "medium".to_owned(),
+            supported_reasoning_efforts: vec![CodexReasoningEffort {
+                reasoning_effort: "medium".to_owned(),
+                description: "Balanced".to_owned(),
+            }],
+            input_modalities: vec!["text".to_owned(), "image".to_owned()],
+            supports_personality: true,
+        }])
+    }
+
     async fn start_thread(
         &self,
         name: &str,
         cwd: &Path,
         config: Value,
+        model: Option<&str>,
     ) -> Result<StartedThread, WorkerError> {
+        let effective_model = model.unwrap_or("gpt-test").to_owned();
         let mut calls = self.calls.lock().unwrap();
         calls.push(WorkerCall::Thread {
             name: name.to_owned(),
             cwd: cwd.to_owned(),
             config,
+            model: model.map(ToOwned::to_owned),
         });
         if self.fail_thread_start {
             return Err(WorkerError::runtime(std::io::Error::other(
@@ -126,7 +151,7 @@ impl WorkerRuntime for FakeWorker {
             response: json!({
                 "thread": {"id": id, "status": {"type": "idle"}},
                 "cwd": cwd,
-                "model": "gpt-test",
+                "model": effective_model,
                 "modelProvider": "test-provider",
                 "approvalPolicy": "on-request",
                 "approvalsReviewer": "user",
@@ -140,11 +165,13 @@ impl WorkerRuntime for FakeWorker {
         thread_id: &str,
         cwd: &Path,
         config: Value,
+        model: Option<&str>,
     ) -> Result<StartedThread, WorkerError> {
         self.calls.lock().unwrap().push(WorkerCall::Resume {
             thread_id: thread_id.to_owned(),
             cwd: cwd.to_owned(),
             config,
+            model: model.map(ToOwned::to_owned),
         });
         if self.fail_resume_thread.as_deref() == Some(thread_id) {
             return Err(WorkerError::runtime(std::io::Error::other(
@@ -168,13 +195,16 @@ impl WorkerRuntime for FakeWorker {
         source_thread_id: &str,
         cwd: &Path,
         config: Value,
+        model: Option<&str>,
     ) -> Result<StartedThread, WorkerError> {
+        let effective_model = model.unwrap_or("gpt-test").to_owned();
         let mut calls = self.calls.lock().unwrap();
         calls.push(WorkerCall::Fork {
             name: name.to_owned(),
             source_thread_id: source_thread_id.to_owned(),
             cwd: cwd.to_owned(),
             config,
+            model: model.map(ToOwned::to_owned),
         });
         let sequence = calls
             .iter()
@@ -188,7 +218,7 @@ impl WorkerRuntime for FakeWorker {
             response: json!({
                 "thread": {"id": id, "status": {"type": "idle"}},
                 "cwd": cwd,
-                "model": "gpt-test",
+                "model": effective_model,
                 "modelProvider": "test-provider",
                 "approvalPolicy": "on-request",
                 "approvalsReviewer": "user",
@@ -307,6 +337,7 @@ impl Fixture {
             fork_from: None,
             compact: false,
             profile: "default".to_owned(),
+            model: None,
             operation_id: "create-operation-1".to_owned(),
         }
     }
@@ -320,6 +351,7 @@ impl Fixture {
             fork_from: Some(source.name.clone()),
             compact,
             profile: "default".to_owned(),
+            model: None,
             operation_id: format!("create-{name}"),
         }
     }
@@ -338,6 +370,18 @@ impl Fixture {
             runtime_generation.to_owned(),
         )
     }
+}
+
+#[tokio::test]
+async fn lists_the_app_server_model_catalog_without_repository_state() {
+    let fixture = Fixture::new(FakeWorker::default());
+
+    let models = fixture.coordinator.list_models().await.unwrap();
+
+    assert_eq!(models.len(), 1);
+    assert_eq!(models[0].model, "gpt-test");
+    assert!(models[0].is_default);
+    assert_eq!(fixture.worker.calls(), [WorkerCall::Models]);
 }
 
 #[tokio::test]
@@ -372,8 +416,15 @@ async fn prepares_an_idle_workspace_without_starting_a_turn_and_replays_operatio
     assert_eq!(calls.len(), 1);
     assert!(matches!(
         &calls[0],
-        WorkerCall::Thread { name, cwd, config }
-            if name == "first-workspace" && cwd == worktree && config == &json!({})
+        WorkerCall::Thread {
+            name,
+            cwd,
+            config,
+            model,
+        } if name == "first-workspace"
+            && cwd == worktree
+            && config == &json!({})
+            && model.is_none()
     ));
     let replay = fixture
         .coordinator
@@ -399,6 +450,49 @@ async fn prepares_an_idle_workspace_without_starting_a_turn_and_replays_operatio
             EventKind::AgentStarted,
         ]
     );
+}
+
+#[tokio::test]
+async fn passes_an_explicit_model_separately_from_the_selected_profile() {
+    let fixture = Fixture::new(FakeWorker::default());
+    fixture.register().await;
+    fs::create_dir_all(&fixture.codex_home).unwrap();
+    fs::write(
+        fixture.codex_home.join("config.toml"),
+        "[profiles.dev]\nmodel = \"gpt-profile\"\n",
+    )
+    .unwrap();
+    let mut params = fixture.create_params();
+    params.profile = "dev".to_owned();
+    params.model = Some("gpt-explicit".to_owned());
+
+    let created = fixture
+        .coordinator
+        .create_workspace(params.clone())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        created.workspace.profile.model_override.as_deref(),
+        Some("gpt-explicit")
+    );
+    assert_eq!(
+        created.workspace.profile.effective_settings["model"],
+        "gpt-explicit"
+    );
+    assert!(matches!(
+        fixture.worker.calls().as_slice(),
+        [WorkerCall::Thread { config, model, .. }]
+            if config == &json!({"model": "gpt-profile"})
+                && model.as_deref() == Some("gpt-explicit")
+    ));
+
+    params.model = Some("gpt-other".to_owned());
+    assert!(matches!(
+        fixture.coordinator.create_workspace(params).await,
+        Err(CoordinatorError::IdempotencyConflict)
+    ));
+    assert_eq!(fixture.worker.calls().len(), 1);
 }
 
 #[tokio::test]
@@ -760,6 +854,13 @@ async fn rejects_incoherent_or_unimplemented_context_requests() {
         Err(CoordinatorError::InvalidParams(_))
     ));
 
+    let mut blank_model = fixture.create_params();
+    blank_model.model = Some("  ".to_owned());
+    assert!(matches!(
+        fixture.coordinator.create_workspace(blank_model).await,
+        Err(CoordinatorError::InvalidParams(_))
+    ));
+
     let mut handoff = fixture.create_params();
     handoff.context_mode = ContextMode::Handoff;
     assert!(matches!(
@@ -773,11 +874,9 @@ async fn rejects_incoherent_or_unimplemented_context_requests() {
 async fn recovers_a_ready_thread_with_its_stored_worktree_and_profile() {
     let fixture = Fixture::new(FakeWorker::default());
     fixture.register().await;
-    let created = fixture
-        .coordinator
-        .create_workspace(fixture.create_params())
-        .await
-        .unwrap();
+    let mut params = fixture.create_params();
+    params.model = Some("gpt-recovery".to_owned());
+    let created = fixture.coordinator.create_workspace(params).await.unwrap();
     let workspace = created.workspace;
     assert!(fixture.store.reconcile_unfinished().unwrap().is_empty());
     assert_eq!(
@@ -813,6 +912,7 @@ async fn recovers_a_ready_thread_with_its_stored_worktree_and_profile() {
             thread_id: "thread-1".to_owned(),
             cwd: workspace.worktree_path.unwrap(),
             config: json!({}),
+            model: Some("gpt-recovery".to_owned()),
         }]
     );
     let event = fixture
@@ -1576,6 +1676,7 @@ async fn prepare_multi_repository_workspaces(fixture: &Fixture) -> MultiReposito
             fork_from: None,
             compact: false,
             profile: "default".to_owned(),
+            model: None,
             operation_id: "create-first-shared".to_owned(),
         })
         .await
@@ -1591,6 +1692,7 @@ async fn prepare_multi_repository_workspaces(fixture: &Fixture) -> MultiReposito
             fork_from: None,
             compact: false,
             profile: "default".to_owned(),
+            model: None,
             operation_id: "create-second-shared".to_owned(),
         })
         .await
@@ -1606,6 +1708,7 @@ async fn prepare_multi_repository_workspaces(fixture: &Fixture) -> MultiReposito
             fork_from: None,
             compact: false,
             profile: "default".to_owned(),
+            model: None,
             operation_id: "create-second-unique".to_owned(),
         })
         .await

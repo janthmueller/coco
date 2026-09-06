@@ -375,6 +375,7 @@ mod tests {
                     name: "default".to_owned(),
                     source_path: None,
                     source_hash: "test".to_owned(),
+                    model_override: None,
                     effective_settings: json!({}),
                 },
                 lifecycle: WorkspaceLifecycle::Ready,

@@ -1,10 +1,27 @@
 ---
-title: Codex profiles
-description: Prepare a workspace with a named set of Codex settings.
+title: Models and profiles
+description: Choose a model or reuse a named set of Codex settings.
 ---
 
-Use a profile when one workspace needs different Codex settings, such as a different
-reasoning effort, sandbox, or approval policy.
+Choose a model for one workspace with `--model`. Use a profile when you want to
+reuse several Codex settings together, such as reasoning effort, sandbox, or
+approval policy.
+
+## See available models
+
+With `cocod` running, list the models offered by your Codex installation:
+
+```bash
+coco models
+```
+
+Use the value in the `MODEL` column when creating a workspace:
+
+```bash
+coco create refactor/cache --model gpt-5.6-sol
+```
+
+For scripts, `coco models --json` returns the same catalog as structured JSON.
 
 ## Define a profile
 
@@ -29,6 +46,13 @@ coco create refactor/cache \
 coco send refactor/cache "Refactor the cache and run its tests"
 ```
 
-Without `--profile`, CoCo uses Codex's default configuration. The chosen
-profile applies when the workspace is created; changing the profile file later
-does not reconfigure an existing workspace.
+Without `--profile`, CoCo uses Codex's default configuration. You can combine a
+profile with `--model`; the explicit model wins while the other profile settings
+still apply:
+
+```bash
+coco create refactor/cache --profile dev --model gpt-5.6-sol
+```
+
+The chosen settings apply when the workspace is created. Changing the profile
+file later does not reconfigure an existing workspace.

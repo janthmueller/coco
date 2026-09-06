@@ -29,6 +29,7 @@ fn new_workspace(repository_id: &str, name: &str) -> NewWorkspace {
             name: "default".to_owned(),
             source_path: None,
             source_hash: "sha256:test".to_owned(),
+            model_override: None,
             effective_settings: json!({"network_access": false}),
         },
         branch_name: Some(format!("coco/{name}")),
@@ -307,6 +308,7 @@ fn state_and_events_change_atomically() {
         name: "effective".to_owned(),
         source_path: Some(PathBuf::from("/tmp/profile.toml")),
         source_hash: "sha256:effective".to_owned(),
+        model_override: Some("gpt-explicit".to_owned()),
         effective_settings: json!({"approvalPolicy": "on-request"}),
     };
     let workspace = store

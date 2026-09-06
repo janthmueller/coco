@@ -9,8 +9,8 @@ use tracing::error;
 use crate::coordinator::{Coordinator, CoordinatorError};
 use crate::protocol::{
     AuditRecordParams, DaemonMethod, DecisionGetParams, DecisionRespondParams, EventListParams,
-    HealthParams, HealthResult, TurnStartParams, WorkspaceCreateParams, WorkspaceDiffParams,
-    WorkspaceGetParams, WorkspaceListParams,
+    HealthParams, HealthResult, ModelListParams, TurnStartParams, WorkspaceCreateParams,
+    WorkspaceDiffParams, WorkspaceGetParams, WorkspaceListParams,
 };
 use crate::rpc::{RpcErrorPayload, RpcHandler};
 
@@ -39,6 +39,10 @@ impl RpcHandler for DaemonHandler {
                 encode(HealthResult {
                     status: "ok".to_owned(),
                 })
+            }
+            DaemonMethod::ModelList => {
+                decode::<ModelListParams>(params)?;
+                execute(self.coordinator.list_models().await)
             }
             DaemonMethod::RepositoryRegister => {
                 execute(self.coordinator.register_repository(decode(params)?))

@@ -19,7 +19,8 @@ current checkout.
 - send work, follow its state, answer approvals or questions, or enter the same
   conversation in the Codex terminal UI;
 - work across several registered repositories from one daemon;
-- choose a named Codex profile when a workspace starts;
+- list available Codex models and choose a model or named profile when a
+  workspace starts;
 - let MCP-capable applications inspect workspaces, with sending disabled by
   default.
 
@@ -45,6 +46,7 @@ Then, from a clean Git repository with at least one commit:
 
 ```bash
 coco repo add .
+coco models
 coco create feat/first --base HEAD
 coco send feat/first "Inspect the project and propose one focused improvement"
 coco status feat/first --follow

@@ -459,6 +459,7 @@ mod tests {
     fn fake_response(method: DaemonMethod) -> Value {
         match method {
             DaemonMethod::Health => json!({"status": "ok"}),
+            DaemonMethod::ModelList => json!([]),
             DaemonMethod::RepositoryRegister => json!({
                 "id": "repo-test",
                 "rootPath": "/repo",

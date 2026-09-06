@@ -128,6 +128,47 @@ pub(super) fn print_repository_list(value: &Value) {
     }
 }
 
+pub(super) fn print_model_list(value: &Value) {
+    let Some(models) = value.as_array() else {
+        println!("No models available.");
+        return;
+    };
+    if models.is_empty() {
+        println!("No models available.");
+        return;
+    }
+    println!("MODEL\tNAME\tDEFAULT\tREASONING");
+    for model in models {
+        let reasoning = model
+            .get("supportedReasoningEfforts")
+            .and_then(Value::as_array)
+            .map(|efforts| {
+                efforts
+                    .iter()
+                    .filter_map(|effort| effort.get("reasoningEffort").and_then(Value::as_str))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
+            .filter(|efforts| !efforts.is_empty())
+            .unwrap_or_else(|| "-".to_owned());
+        println!(
+            "{}\t{}\t{}\t{}",
+            text(model, "model"),
+            text(model, "displayName"),
+            if model
+                .get("isDefault")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                "yes"
+            } else {
+                ""
+            },
+            reasoning,
+        );
+    }
+}
+
 pub(super) fn print_status(value: &Value) {
     let workspace = value.get("workspace").unwrap_or(value);
     let name = workspace

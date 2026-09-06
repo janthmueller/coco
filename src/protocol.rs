@@ -6,13 +6,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::domain::{
-    Audit, AuditOutcome, ContextMode, Decision, GitObservation, NormalizedEvent, Repository, Turn,
-    Workspace,
+    Audit, AuditOutcome, CodexModel, ContextMode, Decision, GitObservation, NormalizedEvent,
+    Repository, Turn, Workspace,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DaemonMethod {
     Health,
+    ModelList,
     RepositoryRegister,
     RepositoryList,
     WorkspaceCreate,
@@ -28,8 +29,9 @@ pub enum DaemonMethod {
 
 impl DaemonMethod {
     #[cfg(test)]
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Health,
+        Self::ModelList,
         Self::RepositoryRegister,
         Self::RepositoryList,
         Self::WorkspaceCreate,
@@ -46,6 +48,7 @@ impl DaemonMethod {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Health => "health",
+            Self::ModelList => "model.list",
             Self::RepositoryRegister => "repository.register",
             Self::RepositoryList => "repository.list",
             Self::WorkspaceCreate => "workspace.create",
@@ -63,6 +66,7 @@ impl DaemonMethod {
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "health" => Some(Self::Health),
+            "model.list" => Some(Self::ModelList),
             "repository.register" => Some(Self::RepositoryRegister),
             "repository.list" => Some(Self::RepositoryList),
             "workspace.create" => Some(Self::WorkspaceCreate),
@@ -102,6 +106,10 @@ pub struct AppServerEndpoint {
 #[serde(deny_unknown_fields)]
 pub struct HealthParams {}
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelListParams {}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RepositoryRegisterParams {
@@ -138,6 +146,8 @@ pub struct WorkspaceCreateParams {
     pub compact: bool,
     #[serde(default = "default_profile")]
     pub profile: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     pub operation_id: String,
 }
 
@@ -351,6 +361,7 @@ macro_rules! daemon_request {
 }
 
 daemon_request!(HealthParams, Health, HealthResult);
+daemon_request!(ModelListParams, ModelList, Vec<CodexModel>);
 daemon_request!(RepositoryRegisterParams, RepositoryRegister, Repository);
 daemon_request!(RepositoryListParams, RepositoryList, Vec<RepositorySummary>);
 daemon_request!(WorkspaceCreateParams, WorkspaceCreate, WorkspaceResult);
@@ -379,6 +390,7 @@ mod tests {
             names,
             [
                 "health",
+                "model.list",
                 "repository.register",
                 "repository.list",
                 "workspace.create",
@@ -402,6 +414,7 @@ mod tests {
     #[test]
     fn request_dtos_preserve_all_wire_field_names_and_defaults() {
         assert_request(HealthParams {}, DaemonMethod::Health, json!({}));
+        assert_request(ModelListParams {}, DaemonMethod::ModelList, json!({}));
         assert_request(
             RepositoryRegisterParams {
                 path: PathBuf::from("/repo"),
@@ -423,6 +436,7 @@ mod tests {
                 fork_from: None,
                 compact: false,
                 profile: "dev".to_owned(),
+                model: Some("gpt-explicit".to_owned()),
                 operation_id: "create-1".to_owned(),
             },
             DaemonMethod::WorkspaceCreate,
@@ -433,6 +447,7 @@ mod tests {
                 "contextMode": "fresh",
                 "compact": false,
                 "profile": "dev",
+                "model": "gpt-explicit",
                 "operationId": "create-1",
             }),
         );
@@ -445,6 +460,7 @@ mod tests {
                 fork_from: Some("source".to_owned()),
                 compact: true,
                 profile: "default".to_owned(),
+                model: None,
                 operation_id: "create-fork".to_owned(),
             },
             DaemonMethod::WorkspaceCreate,
@@ -569,6 +585,7 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(params.profile, "default");
+        assert_eq!(params.model, None);
         assert_eq!(params.fork_from, None);
         assert!(!params.compact);
     }
@@ -582,6 +599,24 @@ mod tests {
         }))
         .unwrap_err();
         assert!(error.to_string().contains("unknown field `goal`"));
+    }
+
+    #[test]
+    fn model_response_preserves_catalog_fields() {
+        assert_response::<ModelListParams>(json!([{
+            "id": "gpt-test",
+            "model": "gpt-test",
+            "displayName": "GPT Test",
+            "description": "Test model",
+            "isDefault": true,
+            "defaultReasoningEffort": "medium",
+            "supportedReasoningEfforts": [{
+                "reasoningEffort": "medium",
+                "description": "Balanced",
+            }],
+            "inputModalities": ["text", "image"],
+            "supportsPersonality": true,
+        }]));
     }
 
     #[test]

@@ -40,7 +40,12 @@ status: draft
   domain socket on Linux/macOS and, once implemented, a Windows named pipe.
   The MCP adapter separately speaks MCP over stdio to its host.
 - The default Codex configuration or a named `[profiles.<name>]` overlay is
-  snapshotted per workspace; only `fresh` context is executable in v0.
+  snapshotted per workspace; `fresh` and same-repository `fork` context are
+  executable in v0.
+- Model discovery delegates to the daemon-owned App Server's paginated
+  `model/list`. An explicit workspace model remains a separate `thread/start`,
+  `thread/fork`, or `thread/resume` field beside the profile `config` object so
+  Codex, not CoCo, resolves their precedence.
 
 ### Recommended
 
@@ -196,6 +201,7 @@ Request:
     "baseRef": "HEAD",
     "contextMode": "fresh",
     "profile": "default",
+    "model": "gpt-5.6-sol",
     "operationId": "d414..."
   }
 }
@@ -695,8 +701,11 @@ The local 0.147.0 observation supports this minimal sequence:
 4. Publish the selected loopback URL in a separate user-only descriptor only
    after initialization succeeds. Never persist the token in SQLite or workspace
    metadata.
-5. Send `thread/start` with `cwd`, model/profile values, approval policy,
-   sandbox mode, instructions, and `ephemeral: false`.
+5. Send `thread/start` with `cwd`, the selected profile overlay as `config`,
+   an optional explicit `model`, and `ephemeral: false`. Never synthesize a
+   model from the profile: the App Server owns effective configuration
+   resolution. Use its paginated `model/list` method for discovery rather than
+   maintaining a CoCo model registry.
 6. Verify the returned thread ID and canonical returned `cwd`, then set the
    native thread name to the CoCo workspace name with `thread/name/set` before
    committing the binding. In Codex 0.147.0 an empty thread has a rollout path
@@ -729,11 +738,11 @@ executes the built `coco jump` launcher and verifies that the capability token
 is inherited through the child environment rather than exposed in arguments.
 
 On daemon recovery use `thread/resume` by stored thread ID, supplying and then
-verifying the stored `cwd` and profile overrides. Reload a named profile only
-when its name, source path, and source hash still match the immutable workspace
-snapshot; never persist the full overlay merely to make recovery convenient.
-Never accept a resumed thread whose ID or canonical cwd conflicts with the workspace
-record.
+verifying the stored `cwd`, unchanged profile overlay, and separately stored
+explicit model override. Reload a named profile only when its name, source
+path, and source hash still match the immutable workspace snapshot; never
+persist the full overlay merely to make recovery convenient. Never accept a
+resumed thread whose ID or canonical cwd conflicts with the workspace record.
 
 ### Minimum notification mapping
 
@@ -910,10 +919,11 @@ process owned by this daemon. It does not delete worktrees or branches.
   deliberately reorders response/notification delivery, requests approval,
   writes stderr, disconnects, and emits an unknown method.
 - Add an opt-in smoke test against the installed authenticated Codex executable
-  for exact version/schema compatibility, initialize, persistent thread
-  creation, verified cwd, and resume through a fresh App Server process. Keep
-  this check free of `turn/start` so it never consumes a model turn; the fake
-  process contract test owns deterministic turn and event-flow coverage.
+  for exact version/schema compatibility, initialize, paginated model
+  discovery, an explicit catalog model on persistent thread creation, verified
+  cwd, and resume through a fresh App Server process. Keep this check free of
+  `turn/start` so it never consumes a model turn; the fake process contract
+  test owns deterministic turn and event-flow coverage.
   Run it explicitly with
   `COCO_RUN_REAL_CODEX_COMPAT=1 cargo test --locked --test real_codex_compat -- --ignored --test-threads=1`;
   `COCO_REAL_CODEX_BINARY` may select a non-default executable.

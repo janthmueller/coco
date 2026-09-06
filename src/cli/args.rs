@@ -27,6 +27,12 @@ pub(super) enum Command {
         #[command(subcommand)]
         command: RepoCommand,
     },
+    /// List the models available to this Codex installation.
+    Models {
+        /// Emit stable, machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Create a Codex workspace in an isolated worktree.
     Create(CreateArgs),
     /// List workspaces in the selected repository, or across all repositories.
@@ -105,6 +111,9 @@ pub(super) struct CreateArgs {
     /// Apply `[profiles.<PROFILE>]` from `$CODEX_HOME/config.toml` to the thread.
     #[arg(long, default_value = "default")]
     pub(super) profile: String,
+    /// Override the profile or default model for this workspace's Codex thread.
+    #[arg(long, short = 'm', value_name = "MODEL", value_parser = non_empty_model)]
+    pub(super) model: Option<String>,
     /// Start the first turn with MESSAGE after creating the workspace.
     #[arg(long, short = 's', value_name = "MESSAGE", value_parser = non_empty_message)]
     pub(super) send: Option<String>,
@@ -116,6 +125,14 @@ pub(super) struct CreateArgs {
 fn non_empty_message(value: &str) -> Result<String, String> {
     if value.trim().is_empty() {
         Err("message must not be empty".to_owned())
+    } else {
+        Ok(value.to_owned())
+    }
+}
+
+fn non_empty_model(value: &str) -> Result<String, String> {
+    if value.trim().is_empty() {
+        Err("model must not be empty".to_owned())
     } else {
         Ok(value.to_owned())
     }

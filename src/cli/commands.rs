@@ -6,9 +6,9 @@ use uuid::Uuid;
 use crate::domain::ContextMode;
 use crate::paths::CocoPaths;
 use crate::protocol::{
-    RepositoryListParams, RepositoryRegisterParams, RepositoryScope, TurnStartParams,
-    WorkspaceCreateParams, WorkspaceDiffParams, WorkspaceGetParams, WorkspaceListParams,
-    WorkspaceResult,
+    ModelListParams, RepositoryListParams, RepositoryRegisterParams, RepositoryScope,
+    TurnStartParams, WorkspaceCreateParams, WorkspaceDiffParams, WorkspaceGetParams,
+    WorkspaceListParams, WorkspaceResult,
 };
 use crate::rpc::RpcClient;
 
@@ -16,8 +16,8 @@ use super::args::{Cli, Command, CreateArgs, McpCommand, RepoCommand};
 use super::decision::decide;
 use super::jump::jump;
 use super::output::{
-    print_diff, print_human, print_json, print_repository_list, print_status, print_workspace_list,
-    versioned, versioned_array,
+    print_diff, print_human, print_json, print_model_list, print_repository_list, print_status,
+    print_workspace_list, versioned, versioned_array,
 };
 use super::status::follow_status;
 
@@ -46,6 +46,10 @@ pub(super) async fn run(cli: Cli) -> Result<()> {
         Command::Repo { command } => {
             reject_top_level_scope(has_explicit_scope, "repo")?;
             run_repo(command, &paths, &cwd).await
+        }
+        Command::Models { json } => {
+            reject_top_level_scope(has_explicit_scope, "models")?;
+            list_models(&paths, json).await
         }
         Command::Create(args) => {
             if all_repos {
@@ -87,6 +91,19 @@ pub(super) async fn run(cli: Cli) -> Result<()> {
         Command::Diff { workspace } => {
             show_diff(&paths, scope_for_reference(scope, &workspace), workspace).await
         }
+    }
+}
+
+async fn list_models(paths: &CocoPaths, json_output: bool) -> Result<()> {
+    let models = RpcClient::new(paths.socket_path.clone())
+        .request(ModelListParams {})
+        .await?;
+    let models = serde_json::to_value(models)?;
+    if json_output {
+        print_json(versioned_array("models", models))
+    } else {
+        print_model_list(&models);
+        Ok(())
     }
 }
 
@@ -157,6 +174,7 @@ async fn create_workspace(paths: &CocoPaths, cwd: PathBuf, args: CreateArgs) -> 
         fork_from,
         compact,
         profile,
+        model,
         send: initial_message,
         jump: should_jump,
     } = args;
@@ -175,6 +193,7 @@ async fn create_workspace(paths: &CocoPaths, cwd: PathBuf, args: CreateArgs) -> 
             fork_from,
             compact,
             profile,
+            model,
             operation_id: Uuid::new_v4().to_string(),
         })
         .await?;

@@ -102,7 +102,12 @@ impl Coordinator {
         }
         let resumed = self
             .worker
-            .resume_thread(thread_id, worktree, profile.thread_config)
+            .resume_thread(
+                thread_id,
+                worktree,
+                profile.thread_config,
+                workspace.profile.model_override.as_deref(),
+            )
             .await?;
         if resumed.id != thread_id {
             return Err(CoordinatorError::Worker(WorkerError::ThreadIdMismatch {

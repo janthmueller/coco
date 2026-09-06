@@ -10,6 +10,13 @@ status: stable
 
 ## 2026-09-06
 
+- **Native model discovery and selection**: Added daemon-backed `coco models`
+  with human and versioned JSON output, using the Codex App Server's complete
+  visible `model/list` catalog. `coco create --model`/`-m` now carries an
+  explicit model separately from the named profile overlay through fresh
+  start, native fork, idempotency, persistence, and recovery. Codex remains
+  authoritative for configuration precedence; CoCo records only the requested
+  override and Codex-reported non-secret effective settings.
 - **Native workspace fork delivered**: Added same-repository
   `coco create --fork-from <workspace> [--compact]`. The destination derives
   from an idle, clean source workspace's committed `HEAD` and native Codex

@@ -9,6 +9,7 @@ Run `coco --help` or `coco COMMAND --help` for the exact options in your build.
 | ---------------------------------- | --------------------------------------------------- |
 | `coco repo add [path]`             | Add a Git repository to CoCo                        |
 | `coco repo list`                   | List added repositories                             |
+| `coco models`                      | List models available through Codex                 |
 | `coco create <name> …`             | Prepare a separate worktree and conversation        |
 | `coco ls`                          | List workspaces in the selected repository          |
 | `coco status <workspace>`          | Show one workspace's current state                  |
@@ -27,6 +28,7 @@ coco create <name> \
   [--fork-from <workspace>] \
   [--compact] \
   [--profile <name>] \
+  [-m, --model <model>] \
   [-s, --send <message>] \
   [-j, --jump]
 ```
@@ -40,6 +42,20 @@ Use `--fork-from` instead of `--base` to create from a ready, clean workspace
 in the same repository. The new workspace receives that workspace's Codex
 conversation and committed code, but not uncommitted files. Add `--compact` to
 shorten the copied context before the new workspace becomes ready.
+
+Use `coco models` to find valid model values. `--model` selects a model for the
+new workspace. If its profile also contains a model, `--model` takes priority;
+all other profile settings continue to apply.
+
+## List available models
+
+```bash
+coco models
+coco models --json
+```
+
+This list belongs to the running Codex installation, not to a repository, so it
+does not accept a leading repository path or `--all-repos`.
 
 ## Choose a repository
 
@@ -62,6 +78,7 @@ Use `--json` with repository or workspace listing and inspection:
 
 ```bash
 coco repo list --json
+coco models --json
 coco ls --json
 coco status feat/first --json
 ```

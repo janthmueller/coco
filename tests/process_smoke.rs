@@ -32,6 +32,10 @@ const FORK_CHILD_THREAD_ID: &str = "thread-fork-child";
 const FORK_SOURCE_WORKSPACE: &str = "feat/fork-source";
 const FORK_CHILD_WORKSPACE: &str = "review/fork-child";
 const FORK_CHILD_MESSAGE: &str = "Review the inherited work";
+const PROFILE_NAME: &str = "process";
+const PROFILE_MODEL: &str = "gpt-profile";
+const MODEL_OVERRIDE: &str = "gpt-explicit";
+const DEFAULT_MODEL: &str = "gpt-default";
 
 struct CaptureAuthorization(Arc<Mutex<Vec<String>>>);
 
@@ -116,6 +120,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     let recovery_log = temporary.path().join("cocod-recovery.log");
 
     prepare_repository(&repository)?;
+    prepare_codex_profile(&paths)?;
     write_fake_codex(&paths.fake_codex)?;
 
     let mut daemon = spawn_daemon(&paths, &daemon_log)?;
@@ -164,6 +169,21 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     assert_mode(&paths.endpoint, 0o600)?;
     assert_mode(&paths.database, 0o600)?;
 
+    let models = cli_json(&run_cli(&paths, &repository, &["models", "--json"]).await?)?;
+    assert_eq!(models["schemaVersion"], 5);
+    assert_eq!(models["models"].as_array().map(Vec::len), Some(2));
+    assert_eq!(models["models"][0]["model"], DEFAULT_MODEL);
+    assert_eq!(models["models"][0]["isDefault"], true);
+    assert_eq!(models["models"][1]["model"], MODEL_OVERRIDE);
+    let human_models = run_cli(&paths, &repository, &["models"]).await?;
+    let human_models = String::from_utf8_lossy(&human_models.stdout);
+    ensure!(
+        human_models.contains("MODEL\tNAME\tDEFAULT\tREASONING")
+            && human_models.contains(DEFAULT_MODEL)
+            && human_models.contains(MODEL_OVERRIDE),
+        "coco models did not render the App Server catalog: {human_models}"
+    );
+
     run_cli(&paths, &repository, &["repo", "add", "."]).await?;
     let repositories = cli_json(&run_cli(&paths, &repository, &["repo", "list", "--json"]).await?)?;
     assert_eq!(repositories["schemaVersion"], 5);
@@ -185,6 +205,10 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
             WORKSPACE_NAME,
             "--base",
             "HEAD",
+            "--profile",
+            PROFILE_NAME,
+            "-m",
+            MODEL_OVERRIDE,
             "-s",
             "Complete the process smoke test",
             "-j",
@@ -229,6 +253,12 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     );
     assert_eq!(workspace["threadRuntime"]["isFresh"], true);
     assert_eq!(workspace["codexThreadId"], THREAD_ID);
+    assert_eq!(workspace["profile"]["name"], PROFILE_NAME);
+    assert_eq!(workspace["profile"]["modelOverride"], MODEL_OVERRIDE);
+    assert_eq!(
+        workspace["profile"]["effectiveSettings"]["model"],
+        MODEL_OVERRIDE
+    );
     ensure!(
         workspace.get("goal").is_none(),
         "retired goal field was exposed"
@@ -497,6 +527,8 @@ async fn real_daemon_and_cli_create_a_compacted_native_fork() -> Result<()> {
             "--fork-from",
             FORK_SOURCE_WORKSPACE,
             "--compact",
+            "--model",
+            MODEL_OVERRIDE,
             "--send",
             FORK_CHILD_MESSAGE,
         ],
@@ -520,6 +552,10 @@ async fn real_daemon_and_cli_create_a_compacted_native_fork() -> Result<()> {
     );
     assert_eq!(child["workspace"]["parentThreadId"], FORK_SOURCE_THREAD_ID);
     assert_eq!(child["workspace"]["codexThreadId"], FORK_CHILD_THREAD_ID);
+    assert_eq!(
+        child["workspace"]["profile"]["modelOverride"],
+        MODEL_OVERRIDE
+    );
     let child_worktree = PathBuf::from(
         child["workspace"]["worktreePath"]
             .as_str()
@@ -626,33 +662,19 @@ async fn run_fake_fork_server(
             Some("initialize") => send_result(&mut websocket, &frame, json!({})).await?,
             Some("initialized") => {}
             Some("thread/start") => {
-                let cwd = frame.pointer("/params/cwd").cloned().unwrap_or(Value::Null);
                 send_result(
                     &mut websocket,
                     &frame,
-                    json!({
-                        "thread": {
-                            "id": FORK_SOURCE_THREAD_ID,
-                            "status": {"type": "idle"}
-                        },
-                        "cwd": cwd,
-                    }),
+                    idle_thread_response(&frame, FORK_SOURCE_THREAD_ID, DEFAULT_MODEL),
                 )
                 .await?;
             }
             Some("thread/name/set") => send_result(&mut websocket, &frame, json!({})).await?,
             Some("thread/fork") => {
-                let cwd = frame.pointer("/params/cwd").cloned().unwrap_or(Value::Null);
                 send_result(
                     &mut websocket,
                     &frame,
-                    json!({
-                        "thread": {
-                            "id": FORK_CHILD_THREAD_ID,
-                            "status": {"type": "idle"}
-                        },
-                        "cwd": cwd,
-                    }),
+                    idle_thread_response(&frame, FORK_CHILD_THREAD_ID, MODEL_OVERRIDE),
                 )
                 .await?;
             }
@@ -700,6 +722,18 @@ async fn run_fake_fork_server(
     Ok(())
 }
 
+fn idle_thread_response(request: &Value, thread_id: &str, model: &str) -> Value {
+    json!({
+        "thread": {
+            "id": thread_id,
+            "status": {"type": "idle"}
+        },
+        "cwd": request.pointer("/params/cwd").cloned().unwrap_or(Value::Null),
+        "model": model,
+        "modelProvider": "test-provider",
+    })
+}
+
 async fn run_fake_recovery_server(
     listener: TcpListener,
     observed_authorization: Arc<Mutex<Vec<String>>>,
@@ -738,6 +772,8 @@ async fn run_fake_recovery_server(
                     json!({
                         "thread": {"id": THREAD_ID, "status": {"type": "idle"}},
                         "cwd": expected_cwd,
+                        "model": MODEL_OVERRIDE,
+                        "modelProvider": "test-provider",
                     }),
                 )
                 .await?;
@@ -778,6 +814,9 @@ async fn handle_daemon_connection(
                 send_result(&mut websocket, &frame, json!({})).await?;
             }
             Some("initialized") => {}
+            Some("model/list") => {
+                send_result(&mut websocket, &frame, fake_model_page(&frame)?).await?;
+            }
             Some("thread/start") => {
                 let cwd = frame.pointer("/params/cwd").cloned().unwrap_or(Value::Null);
                 send_result(
@@ -785,7 +824,9 @@ async fn handle_daemon_connection(
                     &frame,
                     json!({
                         "thread": {"id": THREAD_ID, "status": {"type": "idle"}},
-                        "cwd": cwd
+                        "cwd": cwd,
+                        "model": MODEL_OVERRIDE,
+                        "modelProvider": "test-provider",
                     }),
                 )
                 .await?;
@@ -1012,6 +1053,48 @@ async fn handle_remote_connection(
     Ok(())
 }
 
+fn fake_model_page(request: &Value) -> Result<Value> {
+    match request.pointer("/params/cursor").and_then(Value::as_str) {
+        None => Ok(json!({
+            "data": [{
+                "id": DEFAULT_MODEL,
+                "model": DEFAULT_MODEL,
+                "displayName": "GPT Default",
+                "description": "Default test model",
+                "hidden": false,
+                "isDefault": true,
+                "defaultReasoningEffort": "medium",
+                "supportedReasoningEfforts": [{
+                    "reasoningEffort": "medium",
+                    "description": "Balanced",
+                }],
+                "inputModalities": ["text", "image"],
+                "supportsPersonality": true,
+            }],
+            "nextCursor": "models-page-2",
+        })),
+        Some("models-page-2") => Ok(json!({
+            "data": [{
+                "id": MODEL_OVERRIDE,
+                "model": MODEL_OVERRIDE,
+                "displayName": "GPT Explicit",
+                "description": "Explicit test model",
+                "hidden": false,
+                "isDefault": false,
+                "defaultReasoningEffort": "high",
+                "supportedReasoningEfforts": [
+                    {"reasoningEffort": "medium", "description": "Balanced"},
+                    {"reasoningEffort": "high", "description": "Thorough"},
+                ],
+                "inputModalities": ["text", "image"],
+                "supportsPersonality": true,
+            }],
+            "nextCursor": null,
+        })),
+        Some(cursor) => bail!("unexpected model-list cursor {cursor:?}"),
+    }
+}
+
 async fn send_result(
     websocket: &mut WebSocketStream<TcpStream>,
     request: &Value,
@@ -1139,6 +1222,15 @@ fn prepare_repository(repository: &Path) -> Result<()> {
             "-m",
             "initial",
         ],
+    )?;
+    Ok(())
+}
+
+fn prepare_codex_profile(paths: &TestPaths) -> Result<()> {
+    fs::create_dir_all(&paths.codex_home)?;
+    fs::write(
+        paths.codex_home.join("config.toml"),
+        format!("[profiles.{PROFILE_NAME}]\nmodel = \"{PROFILE_MODEL}\"\n"),
     )?;
     Ok(())
 }
@@ -1422,6 +1514,35 @@ fn verify_codex_requests(requests: &[Value], worktree: &Path) -> Result<()> {
         Some(&json!("coco"))
     );
 
+    let model_requests = requests
+        .iter()
+        .filter(|request| request.get("method") == Some(&json!("model/list")))
+        .collect::<Vec<_>>();
+    assert_eq!(model_requests.len(), 4);
+    for request in &model_requests {
+        assert_eq!(request.pointer("/params/limit"), Some(&json!(100)));
+        assert_eq!(
+            request.pointer("/params/includeHidden"),
+            Some(&json!(false))
+        );
+    }
+    assert_eq!(
+        model_requests
+            .iter()
+            .filter(|request| request.pointer("/params/cursor").is_none())
+            .count(),
+        2
+    );
+    assert_eq!(
+        model_requests
+            .iter()
+            .filter(|request| {
+                request.pointer("/params/cursor") == Some(&json!("models-page-2"))
+            })
+            .count(),
+        2
+    );
+
     let thread_start = request(requests, "thread/start")?;
     let worktree_value = Value::String(worktree.to_string_lossy().into_owned());
     assert_eq!(thread_start.pointer("/params/cwd"), Some(&worktree_value));
@@ -1431,7 +1552,14 @@ fn verify_codex_requests(requests: &[Value], worktree: &Path) -> Result<()> {
             .is_none(),
         "thread/start used an experimental field without negotiating the capability"
     );
-    assert_eq!(thread_start.pointer("/params/config"), Some(&json!({})));
+    assert_eq!(
+        thread_start.pointer("/params/config"),
+        Some(&json!({"model": PROFILE_MODEL}))
+    );
+    assert_eq!(
+        thread_start.pointer("/params/model"),
+        Some(&json!(MODEL_OVERRIDE))
+    );
     assert_eq!(
         thread_start.pointer("/params/ephemeral"),
         Some(&json!(false))
@@ -1485,6 +1613,11 @@ fn verify_fork_requests(requests: &[Value], child_worktree: &Path) -> Result<()>
             "turn/start",
         ]
     );
+    let source_start = request(requests, "thread/start")?;
+    ensure!(
+        source_start.pointer("/params/model").is_none(),
+        "thread/start invented an explicit model when none was requested"
+    );
     let fork = request(requests, "thread/fork")?;
     assert_eq!(
         fork.pointer("/params/threadId"),
@@ -1495,6 +1628,7 @@ fn verify_fork_requests(requests: &[Value], child_worktree: &Path) -> Result<()>
         Some(&json!(child_worktree.to_string_lossy()))
     );
     assert_eq!(fork.pointer("/params/config"), Some(&json!({})));
+    assert_eq!(fork.pointer("/params/model"), Some(&json!(MODEL_OVERRIDE)));
     assert_eq!(fork.pointer("/params/ephemeral"), Some(&json!(false)));
     assert_eq!(
         fork.pointer("/params/deferGoalContinuation"),
@@ -1539,7 +1673,14 @@ fn verify_recovery_requests(requests: &[Value], worktree: &Path) -> Result<()> {
         resume.pointer("/params/cwd"),
         Some(&json!(worktree.to_string_lossy()))
     );
-    assert_eq!(resume.pointer("/params/config"), Some(&json!({})));
+    assert_eq!(
+        resume.pointer("/params/config"),
+        Some(&json!({"model": PROFILE_MODEL}))
+    );
+    assert_eq!(
+        resume.pointer("/params/model"),
+        Some(&json!(MODEL_OVERRIDE))
+    );
     ensure!(
         request(requests, "thread/start").is_err(),
         "recovery created a replacement thread"
