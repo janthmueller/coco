@@ -158,12 +158,28 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     assert_mode(&paths.database, 0o600)?;
 
     run_cli(&paths, &repository, &["repo", "add", "."]).await?;
-    run_cli(
+    let failed_jump = run_cli_with_jump_exit(
         &paths,
         &repository,
-        &["create", "process-smoke", "--base", "HEAD"],
+        &[
+            "create",
+            "process-smoke",
+            "--base",
+            "HEAD",
+            "--send",
+            "Complete the process smoke test",
+            "--jump",
+        ],
+        23,
     )
     .await?;
+    let failed_jump_error = String::from_utf8_lossy(&failed_jump.stderr);
+    ensure!(
+        failed_jump_error.contains(
+            "workspace \"process-smoke\" was created and its initial turn was accepted, but the Codex terminal UI did not open"
+        ),
+        "create did not explain its retained state after jump failure: {failed_jump_error}"
+    );
 
     let listed = cli_json(&run_cli(&paths, &repository, &["ls", "--json"]).await?)?;
     assert_eq!(listed["schemaVersion"], 3);
@@ -177,9 +193,15 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     let workspace = &workspaces[0];
     assert_eq!(workspace["name"], "process-smoke");
     assert_eq!(workspace["lifecycle"], "ready");
-    assert_eq!(workspace["phase"], "idle");
+    assert_eq!(workspace["phase"], "active");
     assert_eq!(workspace["waitReasons"], json!([]));
-    assert_eq!(workspace["threadRuntime"]["status"]["type"], "idle");
+    ensure!(
+        matches!(
+            workspace["threadRuntime"]["status"]["type"].as_str(),
+            Some("idle" | "active")
+        ),
+        "workspace exposed an unexpected native thread status"
+    );
     assert_eq!(workspace["threadRuntime"]["isFresh"], true);
     assert_eq!(workspace["codexThreadId"], THREAD_ID);
     ensure!(
@@ -196,12 +218,6 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         "prepared workspace worktree does not exist"
     );
 
-    run_cli(
-        &paths,
-        &repository,
-        &["send", "process-smoke", "Complete the process smoke test"],
-    )
-    .await?;
     let active = workspace_status(&paths, &repository).await?;
     assert_eq!(active["workspace"]["phase"], "active");
 
@@ -795,6 +811,9 @@ mv "$arguments_tmp" "$destination"
 if [ "$1" = "app-server" ]; then
   exec sleep 3600
 fi
+if [ "$1" = "resume" ]; then
+  exit "${COCO_TEST_JUMP_EXIT:-0}"
+fi
 "#,
     )?;
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
@@ -858,15 +877,7 @@ fn spawn_daemon(paths: &TestPaths, log: &Path) -> Result<Child> {
 }
 
 async fn run_cli(paths: &TestPaths, repository: &Path, arguments: &[&str]) -> Result<Output> {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_coco"));
-    paths.apply(&mut command);
-    command
-        .args(arguments)
-        .current_dir(repository)
-        .kill_on_drop(true);
-    let output = timeout(PROCESS_TIMEOUT, command.output())
-        .await
-        .with_context(|| format!("coco {} timed out", arguments.join(" ")))??;
+    let output = capture_cli(paths, repository, arguments, None).await?;
     ensure!(
         output.status.success(),
         "coco {} failed:\nstdout: {}\nstderr: {}",
@@ -874,6 +885,42 @@ async fn run_cli(paths: &TestPaths, repository: &Path, arguments: &[&str]) -> Re
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    Ok(output)
+}
+
+async fn run_cli_with_jump_exit(
+    paths: &TestPaths,
+    repository: &Path,
+    arguments: &[&str],
+    exit_code: u8,
+) -> Result<Output> {
+    let output = capture_cli(paths, repository, arguments, Some(exit_code)).await?;
+    ensure!(
+        !output.status.success(),
+        "coco {} unexpectedly succeeded",
+        arguments.join(" ")
+    );
+    Ok(output)
+}
+
+async fn capture_cli(
+    paths: &TestPaths,
+    repository: &Path,
+    arguments: &[&str],
+    jump_exit: Option<u8>,
+) -> Result<Output> {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_coco"));
+    paths.apply(&mut command);
+    command
+        .args(arguments)
+        .current_dir(repository)
+        .kill_on_drop(true);
+    if let Some(exit_code) = jump_exit {
+        command.env("COCO_TEST_JUMP_EXIT", exit_code.to_string());
+    }
+    let output = timeout(PROCESS_TIMEOUT, command.output())
+        .await
+        .with_context(|| format!("coco {} timed out", arguments.join(" ")))??;
     Ok(output)
 }
 

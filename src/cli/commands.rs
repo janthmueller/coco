@@ -7,7 +7,7 @@ use crate::domain::ContextMode;
 use crate::paths::CocoPaths;
 use crate::protocol::{
     RepositoryRegisterParams, TurnStartParams, WorkspaceCreateParams, WorkspaceDiffParams,
-    WorkspaceGetParams, WorkspaceListParams,
+    WorkspaceGetParams, WorkspaceListParams, WorkspaceResult,
 };
 use crate::rpc::RpcClient;
 
@@ -60,22 +60,53 @@ async fn run_repo(command: RepoCommand, paths: &CocoPaths, cwd: &Path) -> Result
     let result = RpcClient::new(paths.socket_path.clone())
         .request(RepositoryRegisterParams { path })
         .await?;
-    print_human(&serde_json::to_value(result)?);
+    print_human(&serde_json::to_value(&result)?);
     Ok(())
 }
 
 async fn create_workspace(paths: &CocoPaths, cwd: PathBuf, args: CreateArgs) -> Result<()> {
-    let result = RpcClient::new(paths.socket_path.clone())
+    let CreateArgs {
+        name,
+        base,
+        profile,
+        send: initial_message,
+        jump: should_jump,
+    } = args;
+    let client = RpcClient::new(paths.socket_path.clone());
+    let mut result: WorkspaceResult = client
         .request(WorkspaceCreateParams {
-            repository_path: cwd,
-            name: args.name,
-            base_ref: args.base,
+            repository_path: cwd.clone(),
+            name: name.clone(),
+            base_ref: base,
             context_mode: ContextMode::Fresh,
-            profile: args.profile,
+            profile,
             operation_id: Uuid::new_v4().to_string(),
         })
         .await?;
-    print_human(&serde_json::to_value(result)?);
+    let workspace_id = result.workspace.id.clone();
+    let sent = initial_message.is_some();
+    if let Some(message) = initial_message {
+        result = request_turn(&client, &cwd, workspace_id, message)
+            .await
+            .with_context(|| {
+                format!("workspace {name:?} was created, but its initial message was not accepted")
+            })?;
+    }
+    print_human(&serde_json::to_value(&result)?);
+    if should_jump {
+        let result = serde_json::to_value(&result)?;
+        jump(paths, &result).await.with_context(|| {
+            if sent {
+                format!(
+                    "workspace {name:?} was created and its initial turn was accepted, but the Codex terminal UI did not open"
+                )
+            } else {
+                format!(
+                    "workspace {name:?} was created, but the Codex terminal UI did not open"
+                )
+            }
+        })?;
+    }
     Ok(())
 }
 
@@ -122,19 +153,34 @@ async fn show_status(
 }
 
 async fn send(paths: &CocoPaths, cwd: PathBuf, workspace: String, message: String) -> Result<()> {
+    let result = request_turn(
+        &RpcClient::new(paths.socket_path.clone()),
+        &cwd,
+        workspace,
+        message,
+    )
+    .await?;
+    print_human(&serde_json::to_value(result)?);
+    Ok(())
+}
+
+async fn request_turn(
+    client: &RpcClient,
+    cwd: &Path,
+    workspace: String,
+    message: String,
+) -> Result<WorkspaceResult> {
     if message.trim().is_empty() {
         bail!("message must not be empty");
     }
-    let result = RpcClient::new(paths.socket_path.clone())
+    Ok(client
         .request(TurnStartParams {
-            repository_path: cwd,
+            repository_path: cwd.to_path_buf(),
             workspace,
             message,
             operation_id: Uuid::new_v4().to_string(),
         })
-        .await?;
-    print_human(&serde_json::to_value(result)?);
-    Ok(())
+        .await?)
 }
 
 async fn jump_to_workspace(paths: &CocoPaths, cwd: PathBuf, workspace: String) -> Result<()> {

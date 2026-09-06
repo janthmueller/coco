@@ -40,6 +40,7 @@ pub(super) enum Command {
         /// Workspace name or ID.
         workspace: String,
         /// Instruction to send to Codex.
+        #[arg(value_parser = non_empty_message)]
         message: String,
     },
     /// Open the workspace's existing Codex thread in its managed worktree.
@@ -76,6 +77,20 @@ pub(super) struct CreateArgs {
     /// Apply `[profiles.<PROFILE>]` from `$CODEX_HOME/config.toml` to the thread.
     #[arg(long, default_value = "default")]
     pub(super) profile: String,
+    /// Start the first turn with MESSAGE after creating the workspace.
+    #[arg(long, value_name = "MESSAGE", value_parser = non_empty_message)]
+    pub(super) send: Option<String>,
+    /// Open the workspace in the Codex terminal UI after creating it.
+    #[arg(long)]
+    pub(super) jump: bool,
+}
+
+fn non_empty_message(value: &str) -> Result<String, String> {
+    if value.trim().is_empty() {
+        Err("message must not be empty".to_owned())
+    } else {
+        Ok(value.to_owned())
+    }
 }
 
 #[derive(Debug, Subcommand)]

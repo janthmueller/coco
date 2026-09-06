@@ -6,7 +6,7 @@ use serde_json::json;
 
 use crate::paths::CocoPaths;
 
-use super::args::Cli;
+use super::args::{Cli, Command};
 use super::jump::{jump_command, load_jump_target};
 use super::output::phase_label;
 use super::status::follow_stops_at;
@@ -27,8 +27,25 @@ fn parses_workspace_creation_with_an_optional_profile() {
     ]);
     assert!(configured.is_ok());
 
+    let combined = Cli::try_parse_from([
+        "coco",
+        "create",
+        "auth",
+        "--send",
+        "Fix the login flow",
+        "--jump",
+    ])
+    .unwrap();
+    let Command::Create(combined) = combined.command else {
+        panic!("create did not parse as the create command");
+    };
+    assert_eq!(combined.send.as_deref(), Some("Fix the login flow"));
+    assert!(combined.jump);
+
     assert!(Cli::try_parse_from(["coco", "create", "auth", "--goal", "work"]).is_err());
     assert!(Cli::try_parse_from(["coco", "create", "auth", "--context", "fresh"]).is_err());
+    assert!(Cli::try_parse_from(["coco", "create", "auth", "--send", "  "]).is_err());
+    assert!(Cli::try_parse_from(["coco", "send", "auth", ""]).is_err());
     assert!(Cli::try_parse_from(["coco", "new", "auth"]).is_err());
 }
 

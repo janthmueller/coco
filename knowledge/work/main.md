@@ -158,6 +158,12 @@ architectural baseline for CoCo.
   `--jump` opens the existing thread; both run create, send, then jump. Preserve
   a successfully created workspace when a later action fails, and leave an
   accepted turn running when TUI launch fails.
+  - [x] Implement the ordered create/send/jump execution and reject blank
+    messages before workspace creation.
+  - [x] Prove through the process smoke that a failed TUI child leaves both the
+    workspace and accepted initial turn active, with a truthful CLI error.
+  - [ ] Complete the requested command-versus-flag UX review with the user,
+    then finalize short options and documentation.
 - [ ] Then prove with pinned real Codex that an ordinary `git add`/`git commit`
   in a linked workspace worktree follows the native approval protocol and
   advances only the bound workspace branch without a blanket writable Git
@@ -547,6 +553,12 @@ architectural baseline for CoCo.
   owns table/foreign-key/index names, durable event and audit strings need
   translation, the daemon and MCP each expose independent method namespaces,
   and CLI JSON consumers need an explicit schema-version break.
+- `jump` and `send` remain useful after creation, while their create flags are
+  one-time post-actions. Replacing the standalone verbs with global `-j`/`-s`
+  flags would make required workspace/message positionals ambiguous and weaken
+  per-action help. The clean candidate is to retain the verbs and, if desired,
+  add local `-j`/`-s` spellings only to `coco create`; this remains pending the
+  user's requested UX review before public documentation is changed.
 
 ## Verification
 
@@ -670,6 +682,11 @@ architectural baseline for CoCo.
   through SQLite schema v4, the new `workspace.*` and `workspaces.*` surfaces,
   `coco create`, and CLI JSON schema version 3. The all-target/all-feature
   Clippy gate with warnings denied also passes.
+- The provisional create-action pipeline passes the same 55 library tests and
+  fake process smoke sequentially, plus all-target/all-feature Clippy with
+  warnings denied. The smoke invokes create, send, and jump as one ordered
+  command, forces the TUI child to exit 23, observes the retained workspace and
+  active turn, and then successfully reattaches with standalone `coco jump`.
 - The repository-scope, slash-name, and native Git policy record passes
   `git diff --check` and a targeted stale-decision scan. No Rust code or public
   documentation changed in this decision-only slice.
