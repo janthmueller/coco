@@ -5,7 +5,7 @@ description: Tracks repository bootstrap, the Rust baseline, and early CoCo arch
 tags: [work, branch, bootstrap, rust, mcp, architecture]
 status: active
 branch: main
-updated: 2026-09-05
+updated: 2026-09-06
 ---
 
 # main — repository foundation
@@ -191,6 +191,10 @@ architectural baseline for CoCo.
   into responsibility-based child modules. Put the concrete Codex worker under
   the daemon composition root so the worker contract no longer depends on the
   Codex client implementation.
+- 2026-09-06 — Keep the Coordinator's shared fake worker and cross-use-case
+  behavior tests together in `coordinator/tests.rs`. Their value is testing
+  orchestration across task, turn, event, Git, and store boundaries; splitting
+  individual cases across production modules would duplicate the fixture.
 
 ## Findings
 
@@ -248,9 +252,10 @@ architectural baseline for CoCo.
   RPC imports, CLI has no Codex imports, daemon method strings are centralized,
   and MCP/CLI calls receive typed results instead of traversing arbitrary JSON.
 - After the first Phase 2 extraction, `coordinator.rs` contains roughly 150
-  production lines before its still-inline tests; the extracted task and Codex
-  event modules are each about 320 lines, and the turn, error, and worker-port
-  modules are smaller focused units.
+  production lines; the extracted task and Codex event modules are each about
+  320 lines, and the turn, error, and worker-port modules are smaller focused
+  units. Its shared integration-style unit fixture now lives separately in
+  `coordinator/tests.rs`.
 
 ## Verification
 
@@ -286,6 +291,9 @@ architectural baseline for CoCo.
 - After splitting the Coordinator production responsibilities, the same 48
   library tests plus the process test pass with one Cargo build job and one
   test thread; the all-target/all-feature Clippy run remains warning-free.
+- Moving the unchanged Coordinator test body to `coordinator/tests.rs` keeps
+  all 48 library tests and the process test green; an old/new content diff
+  contains only two rustfmt line-wrap changes, and Clippy remains clean.
 - The documentation TypeScript, Oxlint, and Prettier checks pass. Both the
   root and `/coco` builds export 88 static files across eight pages with static
   search, valid local links, no server artifact, and no internal knowledge.
@@ -310,7 +318,7 @@ architectural baseline for CoCo.
   worker turn, and an ordinary cancel must remain unambiguous and observable.
 - When the public site is scheduled, validate its production export under the
   GitHub Pages project subpath before enabling deployment from `main`.
-- Begin Phase 2 from `knowledge/engineering/rust-architecture.md`: extract
-  the shared Coordinator fixture/tests into responsibility-based test modules,
-  then continue with store migrations and row/repository boundaries. Preserve
-  the now-typed daemon boundary and avoid product behavior changes.
+- Continue Phase 2 from `knowledge/engineering/rust-architecture.md`: map the
+  Store's transaction boundaries, then extract migrations and row mapping
+  before task/event repositories. Preserve the typed daemon boundary and avoid
+  product behavior changes.

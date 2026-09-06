@@ -8,6 +8,12 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-09-06
+
+- **Coordinator test boundary**: Moved the shared fake worker, fixture, and
+  cross-use-case orchestration tests out of the production facade and into
+  `coordinator/tests.rs` without changing assertions or behavior.
+
 ## 2026-09-05
 
 - **Coordinator module boundary**: Reduced the Coordinator production facade

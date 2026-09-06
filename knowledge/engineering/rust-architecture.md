@@ -255,8 +255,9 @@ The first coordinator slice completed on 2026-09-05: its production facade is
 about 150 lines, with task/repository commands, turn startup, Codex event
 projection, error policy, and the worker port in focused child modules. The
 concrete Codex-backed worker moved to `daemon/worker.rs`, so the coordinator's
-worker contract no longer imports the Codex client. Coordinator test fixtures
-remain together until a subsequent mechanical test-only split.
+worker contract no longer imports the Codex client. On 2026-09-06, the shared
+Coordinator fixture and its behavior tests moved unchanged into
+`coordinator/tests.rs`, leaving `coordinator.rs` as a production-only facade.
 
 Extract coherent child modules in this order:
 
