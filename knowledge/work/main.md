@@ -519,6 +519,11 @@ architectural baseline for CoCo.
   licenses outside the reviewed set; report ecosystem duplicate versions for
   review without pretending all transitive duplicates can currently be
   eliminated.
+- 2026-09-06 — Make a manual Release workflow dispatch rehearse versioning and
+  the configured build by default. Require the operator to choose
+  `publish=true` before any release commit, tag, GitHub Release, binary upload,
+  or crates.io publication can occur; the exact successful Rust revision is
+  required in either mode.
 
 ## Findings
 

@@ -6,6 +6,12 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the alpha instead of rehearsing the version build
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   actions: read
@@ -29,6 +35,7 @@ jobs:
     outputs:
       should_release: ${{ steps.check.outputs.should_release }}
       target_sha: ${{ steps.check.outputs.target_sha }}
+      publish_requested: ${{ steps.check.outputs.publish_requested }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -38,19 +45,26 @@ jobs:
       - name: Require the tested commit to remain current
         id: check
         env:
+          PUBLISH_REQUESTED: ${{ inputs.publish || false }}
           TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           if [ "${{ github.event_name }}" = workflow_dispatch ]; then
-            echo "should_release=true" >> "$GITHUB_OUTPUT"
-            echo "target_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            {
+              echo "should_release=true"
+              echo "target_sha=$(git rev-parse HEAD)"
+              echo "publish_requested=$PUBLISH_REQUESTED"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           git fetch origin main
           CURRENT_SHA="$(git rev-parse origin/main)"
           if [ "$TESTED_SHA" = "$CURRENT_SHA" ]; then
-            echo "should_release=true" >> "$GITHUB_OUTPUT"
-            echo "target_sha=$TESTED_SHA" >> "$GITHUB_OUTPUT"
+            {
+              echo "should_release=true"
+              echo "target_sha=$TESTED_SHA"
+              echo "publish_requested=true"
+            } >> "$GITHUB_OUTPUT"
           else
             echo "Tested SHA $TESTED_SHA is no longer current main ($CURRENT_SHA); skipping release."
             echo "should_release=false" >> "$GITHUB_OUTPUT"
@@ -64,8 +78,8 @@ jobs:
       actions: read
       contents: write
     outputs:
-      released: ${{ steps.release.outputs.released }}
-      tag: ${{ steps.release.outputs.tag }}
+      released: ${{ steps.publish.outputs.released }}
+      tag: ${{ steps.publish.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -89,8 +103,8 @@ jobs:
           CONCLUSION="$(gh run list --workflow rust.yml --commit "$SHA" --status completed --limit 1 --json conclusion --jq '.[0].conclusion // ""')"
           test "$CONCLUSION" = success
 
-      - name: Version and publish alpha release
-        id: release
+      - name: Rehearse alpha version and build
+        if: needs.guard.outputs.publish_requested != 'true'
         uses: python-semantic-release/python-semantic-release@39dd2052f2ce8282a5d932c31d58a2ca06d2550e # v10.6.1
         with:
           config_file: releaserc.toml
@@ -99,6 +113,24 @@ jobs:
           git_committer_email: github-actions[bot]@users.noreply.github.com
           prerelease: true
           prerelease_token: alpha
+          commit: false
+          tag: false
+          push: false
+          vcs_release: false
+          strict: true
+
+      - name: Version and publish alpha release
+        if: needs.guard.outputs.publish_requested == 'true'
+        id: publish
+        uses: python-semantic-release/python-semantic-release@39dd2052f2ce8282a5d932c31d58a2ca06d2550e # v10.6.1
+        with:
+          config_file: releaserc.toml
+          github_token: ${{ secrets.GH_PAT || github.token }}
+          git_committer_name: github-actions[bot]
+          git_committer_email: github-actions[bot]@users.noreply.github.com
+          prerelease: true
+          prerelease_token: alpha
+          strict: true
 
   binaries:
     needs: release

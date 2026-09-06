@@ -36,8 +36,10 @@ state schema.
 Automatic releases after a successful push are disabled unless the repository
 variable `COCO_RELEASE_ENABLED` is exactly `true`. This permits the pipeline to
 be tested and reviewed without making repository setup itself publish a
-release. A manual dispatch is intentional but still requires a successful
-`Rust` workflow for the exact current `main` commit.
+release. A manual dispatch defaults to a non-publishing version/build rehearsal;
+the operator must explicitly set its `publish` input to create the release.
+Both paths still require a successful `Rust` workflow for the exact current
+`main` commit.
 
 The release workflow never publishes an older successful commit after `main`
 has advanced. It uses a non-cancelling release concurrency group and rechecks

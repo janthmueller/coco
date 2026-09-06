@@ -18,8 +18,10 @@ status: stable
   `codex-coordinator`, while the product, library, and command remain CoCo and
   `coco`; its minimal package boundary excludes internal knowledge and site
   sources. Binary and registry dry-run smoke builds now belong to the complete
-  Rust workflow. Automatic publication remains explicitly gated by
-  `COCO_RELEASE_ENABLED` until the first-release documentation is settled.
+  Rust workflow. Manual dispatch rehearses the release build unless an
+  operator explicitly chooses publication, and automatic publication remains
+  gated by `COCO_RELEASE_ENABLED` until the first-release documentation is
+  settled.
 - **Native model discovery and selection**: Added daemon-backed `coco models`
   with human and versioned JSON output, using the Codex App Server's complete
   visible `model/list` catalog. `coco create --model`/`-m` now carries an
