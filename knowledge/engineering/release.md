@@ -53,6 +53,11 @@ launchd agents, and the eventual Windows equivalent enable supervision.
 
 ## Publication guard
 
+The repository remains private during the current product-boundary review, and
+GitHub Pages is disabled. Do not make the repository or documentation public,
+and do not publish the crate, without a new explicit user decision. Static
+site and package dry runs remain valid pre-publication checks.
+
 Automatic releases after a successful push are disabled unless the repository
 variable `COCO_RELEASE_ENABLED` is exactly `true`. This permits the pipeline to
 be tested and reviewed without making repository setup itself publish a

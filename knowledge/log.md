@@ -10,6 +10,12 @@ status: stable
 
 ## 2026-09-06
 
+- **Private incubation restored**: Changed `janthmueller/coco` from public to
+  private, deleted its GitHub Pages site, and disabled the Documentation
+  workflow server-side while the upstream-overlap and product boundary are
+  reviewed. The static Pages export remains a dormant, locally verifiable
+  deployment target; re-enabling repository, site, or crate publication
+  requires a new explicit user decision.
 - **Codex named-profile contract corrected**: Aligned execution profiles with
   Codex 0.147.0: `default` sends an empty per-thread overlay over the App
   Server's base configuration, while another name loads the complete

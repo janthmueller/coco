@@ -1102,13 +1102,13 @@ architectural baseline for CoCo.
 
 ## Open questions and handoff
 
-- The public `janthmueller/coco` repository, workflow-based GitHub Pages site,
-  protected `crates.io` environment, and repository release switch exist. The
-  credential name is present without exposing its value, file permissions were
-  narrowed before transfer, and `COCO_RELEASE_ENABLED` remains false. The next
-  release step is a non-publishing hosted rehearsal after the installable-flake
-  commit passes; irreversible alpha publication still requires an explicit
-  operator decision.
+- The `janthmueller/coco` repository and protected `crates.io` environment
+  exist, but the repository is private again, its Pages site is deleted, and
+  the Documentation workflow is disabled server-side at the user's direction.
+  The credential name is present without exposing its value, file permissions
+  were narrowed before transfer, and `COCO_RELEASE_ENABLED` remains false.
+  Repository, documentation, and crate publication each require a new explicit
+  user decision after the product-boundary review.
 - Before enabling automatic releases, make the successful Documentation run
   for the exact candidate SHA an automated release prerequisite as well as the
   existing Rust run. For the first manual alpha, inspect both hosted results
