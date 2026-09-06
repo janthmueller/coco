@@ -83,6 +83,28 @@ architectural baseline for CoCo.
 - [x] Run the post-Phase-2 architecture review, reaffirm the one-package
   decision, and hide implementation modules behind three executable library
   entry points.
+- [ ] Correct runtime-state ownership before adding more interaction commands.
+  Persist Codex's native thread status (`notLoaded`, `idle`, `systemError`, or
+  `active` with all `activeFlags`) as the thread-runtime truth; retain only
+  CoCo-owned provisioning/task lifecycle separately; derive the concise public
+  phase instead of maintaining a competing thread state machine. Remove
+  method-name-based wait-state guesses and cover mixed wait flags, stale
+  observations, restart, and schema migration.
+- [x] Verify the pinned Codex 0.147.0 remote-TUI exit path. A normal `/quit` or
+  `/exit` sends `thread/unsubscribe` and closes only the remote client
+  WebSocket; it does not send `turn/interrupt`. The App Server keeps an active
+  thread loaded, and `cocod` remains its independent subscriber.
+- [ ] Harden `coco jump`'s close-without-cancel contract before implementing
+  `decide`. Add a pinned contract/smoke test for normal TUI exit and abrupt
+  transport loss while a turn is active, prove daemon event projection keeps
+  running, and make the UX distinction explicit: leaving the TUI detaches;
+  an explicit Codex interrupt cancels the turn.
+- [ ] Implement durable pending decisions and `coco decide <request-id>` only
+  after the state and `jump` work above. The first interactive UX prints the
+  native choices as numbered options and accepts a number; user-input requests
+  may accept free text where the native schema permits it. Preserve native
+  option meaning and request correlation. Defer cursor-driven selection and
+  other TUI polish.
 - [ ] Design task annotations and external references as a deliberate future
   feature. Decide typed versus free-form values, mutation/audit semantics,
   privacy and display rules, fork/handoff inheritance, and explicit projection
@@ -94,12 +116,6 @@ architectural baseline for CoCo.
   thread/turn start, agent state transitions and terminal outcomes, then decide
   execution context, filtering, ordering, retries, timeouts, failure policy,
   secret handling, auditability, and platform behavior.
-- [ ] Revisit `coco jump` detach semantics. Verify with the pinned Codex TUI
-  whether closing a remote-attached UI cancels an active turn, and whether
-  Codex already exposes a detach action or configurable keybinding. If CoCo
-  needs its own UX, define an explicit shortcut or command that disconnects
-  the TUI while the daemon-owned turn continues, together with clear cancel,
-  reattach, signal, and accidental-exit behavior.
 
 ## Decisions
 
@@ -238,6 +254,21 @@ architectural baseline for CoCo.
   Export only `run_cli_from_env`, `run_daemon_from_env`, and
   `run_mcp_from_env`; keep all implementation modules private until a real
   client boundary justifies a small protocol crate.
+- 2026-09-06 — Treat Codex's native thread status and complete active-flag set
+  as authoritative for thread runtime. CoCo owns preparation and task
+  lifecycle, pending-decision correlation, Git state, and a derived display
+  summary; it must not infer a second thread state from server-request method
+  names.
+- 2026-09-06 — Use the stock remote Codex TUI's normal exit behavior as
+  `coco jump` detach semantics rather than inventing a keybinding. In pinned
+  0.147.0, the user-exit path unsubscribes the TUI connection without issuing
+  `turn/interrupt`; `/quit` and `/exit` therefore mean leave the UI, while an
+  explicit interrupt remains the unambiguous cancel action. Contract-test this
+  experimental upstream surface before relying on it in a release.
+- 2026-09-06 — Name the unified approval/user-input response command
+  `coco decide <request-id>`. Start with numbered native options and optional
+  free-text input; defer cursor navigation until the simpler workflow has
+  proven insufficient.
 
 ## Findings
 
@@ -271,6 +302,12 @@ architectural baseline for CoCo.
 - The installed Codex CLI accepts a capability-token-protected loopback
   WebSocket and can initialize successfully with an isolated temporary Codex
   home. This proves the shared transport without consuming a model turn.
+- Official App Server documentation now explicitly supports attaching the
+  stock terminal UI with `codex --remote`. It also specifies that the last
+  unsubscribe only permits unloading after both zero subscribers and zero
+  thread activity for 30 minutes. Inspection of tagged Codex 0.147.0 confirms
+  the normal user-exit path calls `thread/unsubscribe`, then closes the remote
+  WebSocket client; only the separate interrupt path sends `turn/interrupt`.
 - The executable coordinator now serializes creation and turn-start operations
   per repository, resolves client paths back to a registered Git common
   directory, and treats Git/Codex effects as persisted saga steps.
@@ -337,6 +374,13 @@ architectural baseline for CoCo.
 
 - `git rev-parse --is-inside-work-tree` returned `true`.
 - `git branch --show-current` returned `main`.
+- `codex --version` reports the pinned `codex-cli 0.147.0`; its help exposes
+  `resume --remote` and authenticated remote App Server attachment.
+- The tagged 0.147.0 TUI and app-server-client sources were inspected for the
+  exact exit path: normal exit unsubscribes and closes the client connection,
+  while the explicit turn-interrupt request is separate.
+- `git diff --check` passes for the state-ownership, `jump`, and `decide`
+  planning updates; no production code changed in this research slice.
 - All expected local documentation targets exist.
 - Every non-index knowledge document has the required frontmatter and a
   non-empty `type`.
@@ -415,17 +459,18 @@ architectural baseline for CoCo.
 - Agentgateway is deliberately not scheduled. Reconsider it only when
   federation, centralized credential custody, independent enforcement, or
   gateway observability becomes an actual requirement.
-- Add a safe approval-response command and durable pending-request model before
-  calling v0 generally usable.
+- Correct thread-runtime state ownership first, then lock down `jump` exit and
+  reattach behavior, then add the durable pending-request model and numbered
+  `coco decide` flow. Do not let `decide` introduce another state machine.
 - Add daemon recovery through `thread/resume`; the first slice conservatively
   marks in-flight work interrupted after daemon loss.
 - Research Codex's native lifecycle extensibility before designing CoCo hooks.
   Keep the distinction between internal normalized events and executable user
   automation explicit; hooks must not silently inherit credentials or block
   coordinator state transitions without a deliberate policy.
-- Investigate detached `jump` behavior with the pinned Codex TUI before
-  changing its process handling. A detached UI must not imply a cancelled
-  worker turn, and an ordinary cancel must remain unambiguous and observable.
+- Add a pinned remote-TUI contract test for `jump`: normal exit and connection
+  loss must leave the daemon-owned turn running and observable, while explicit
+  interruption must remain unambiguous and observable.
 - When the public site is scheduled, validate its production export under the
   GitHub Pages project subpath before enabling deployment from `main`.
 - Phase 2 and its review are complete. Do not split a workspace now. If

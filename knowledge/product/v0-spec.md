@@ -294,6 +294,8 @@ must not create duplicate artifacts.
   an argument or persisted task metadata.
 - Turns started in the TUI must update the same durable CoCo task state as turns
   started with `coco send`; exiting the TUI does not delete the task.
+- A normal `/quit` or `/exit` detaches the remote TUI without interrupting an
+  active turn. Explicit interruption remains the separate cancel action.
 
 ### `coco diff`
 
@@ -514,11 +516,12 @@ No open decision blocks the storage/Git scaffold or a non-destructive App
 Server proof turn. Two decisions block calling the complete v0 safe and
 generally usable:
 
-1. **Approval response UX:** the confirmed auditability requirement needs a
-   response path, but the handed-off command list has no approval command.
-   Recommendation: add
-   `coco approve <request-id> --decision accept|decline|cancel` in v0 and defer
-   session-wide/amendment decisions until their display contract is designed.
+1. **Decision response closure:** implement durable pending requests and
+   `coco decide <request-id>`. The first interactive flow prints Codex's native
+   choices as numbered options and accepts a number; structured user-input
+   requests may also accept free text where their native schema permits it.
+   Cursor navigation, exact non-interactive flags, and session-wide or policy-
+   amendment choices remain later design work.
 2. **Git administrative write scope:** a linked worktree stores objects and
    refs in the repository's shared Git directory. Decide whether v0 workers
    may commit. If they may, integration tests must establish the minimum safe

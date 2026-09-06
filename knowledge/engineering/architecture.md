@@ -487,6 +487,26 @@ event ID/cursor; it must never observe a committed state without its event.
 
 ### Task state transitions
 
+The existing `TaskPhase` storage is a transitional implementation that mixes
+CoCo lifecycle with a lossy projection of Codex thread runtime. Before adding
+the decision-response workflow, separate these owners:
+
+- CoCo persists its own preparation/task lifecycle, including provisioning,
+  startup, explicit completion, and coordinator failures.
+- Codex's native `ThreadStatus` is retained as the thread-runtime truth:
+  `notLoaded`, `idle`, `systemError`, or `active` with the complete
+  `activeFlags` set. Preserve an observation generation and timestamp so a
+  disconnected or restarted daemon cannot present stale state as current.
+- Pending server requests retain actionable request identity, kind, native
+  options, blocking metadata, process generation, and resolution; their method
+  names do not directly mutate a guessed thread state.
+- The concise CLI/API phase and wait reasons are a derived projection of those
+  facts, not another independently writable state machine. Turn and Git state
+  remain separate facets.
+
+The transition table below describes the current flattened projection until
+that migration lands; it is not the target ownership boundary.
+
 | From | Trigger | To | Durable event/effect |
 | --- | --- | --- | --- |
 | absent | accepted `task.create` | `provisioning` | `task.created` |
@@ -610,6 +630,15 @@ through local RPC, then launches `codex resume <thread-id> --remote <url>
 the child environment. Because Codex currently documents WebSocket App Server
 transport as experimental, releases must pin or compatibility-test the CLI
 surface.
+
+For pinned Codex 0.147.0, the remote TUI's normal user-exit path first sends
+`thread/unsubscribe` and then closes only its WebSocket client; it does not
+send `turn/interrupt`. App Server documents that a last-subscriber thread is
+retained while it still has activity, and in CoCo the daemon remains a second
+subscriber regardless. Therefore `/quit` and `/exit` are detach operations for
+`coco jump`; explicit Codex interruption remains cancellation. A contract test
+must cover normal exit, abrupt client loss, continued daemon observation, and
+reattachment because this upstream transport is experimental.
 
 On daemon recovery use `thread/resume` by stored thread ID, supplying and then
 verifying the stored `cwd` and profile overrides. Never accept a resumed thread
@@ -784,8 +813,10 @@ Each step remains runnable and testable:
 8. **MCP adapter:** implement local stdio serving, repository-scoped read-only
    `tasks.list`, `agents.status`, and `changes.diff`, opt-in idempotent
    `agents.send`, error mapping, cancellation, and control-call auditing.
-9. **Approval closure:** after confirming CLI spelling, implement pending
-   request display/response/audit before declaring v0 generally usable.
+9. **Interaction closure:** correct native thread-state ownership, verify
+   close-without-cancel and reattachment through `jump`, then implement pending
+   request display/response/audit through numbered `coco decide <request-id>`
+   choices before declaring v0 generally usable.
 10. **Release hardening:** real Codex smoke test, supported-version check,
    filesystem permission tests, help/public docs, packaging, and clean-install
    test.
@@ -799,8 +830,8 @@ implemented as a thin adapter in the same package.
 The following need confirmation, but only the first two gate a safe complete
 v0 rather than the initial proof slice:
 
-1. Approval response CLI/decision subset and behavior when the only watcher
-   disconnects.
+1. The exact non-interactive `decide` flags and which session-wide or policy-
+   amendment choices to expose beyond the first numbered interactive flow.
 2. Whether worker turns may write shared Git administrative storage to commit,
    and the minimum sandbox roots if so.
 3. Exact Codex CLI version and compatibility range to pin in the
