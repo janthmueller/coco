@@ -136,22 +136,30 @@ architectural baseline for CoCo.
   leading repository path, explicit `--all-repos`, global opaque task IDs,
   repository-scoped names, deterministic ambiguity errors, no hidden
   persistent selection, and safe slash-separated names such as `feat/login`.
-- [ ] Next selected slice: prove with pinned real Codex that an ordinary
-  `git add`/`git commit` in a linked task worktree follows the native approval
-  protocol and advances only the bound task branch without a blanket writable
-  Git common directory.
+- [x] Decide the stable vocabulary and creation UX: a CoCo `workspace` is the
+  durable aggregate around one repository binding, Git worktree, Codex thread,
+  and configuration snapshot. External tickets remain optional references,
+  not CoCo workspaces. Replace `new` with `create` and support explicit
+  composable `--send <message>` and `--jump` post-actions.
+- [ ] Next selected slice: rename the existing `task` model cleanly to
+  `workspace` across Rust types/modules, SQLite with a lossless migration,
+  daemon methods and DTOs, operation/event names, CLI rendering, MCP schemas,
+  tests, and internal documentation. Replace `coco new` with `coco create` and
+  update public docs only when that behavior ships.
+- [ ] Add the create convenience pipeline and process coverage:
+  `coco create <name>` prepares only; `--send <message>` starts the first turn;
+  `--jump` opens the existing thread; both run create, send, then jump. Preserve
+  a successfully created workspace when a later action fails, and leave an
+  accepted turn running when TUI launch fails.
+- [ ] Then prove with pinned real Codex that an ordinary `git add`/`git commit`
+  in a linked workspace worktree follows the native approval protocol and
+  advances only the bound workspace branch without a blanket writable Git
+  common directory.
 - [ ] Implement the confirmed multi-repository CLI ergonomics: `repo list`,
-  optional leading-path scope, `--all-repos`, global task-ID lookup, helpful
-  local-miss/ambiguity diagnostics, and slash-separated task names with secure
-  path/ref collision handling. Keep the MCP adapter fixed to its launch-time
-  repository.
-- [ ] Before that CLI vocabulary becomes stable, decide whether CoCo's primary
-  user-facing unit should remain a `task` or become a less ticket-loaded term
-  such as `session` or `workspace`. Keep it distinct from the native Codex
-  thread, Git worktree, and a future linked external ticket. In the same UX
-  review, consider renaming `new` to `create` and compare explicit
-  create-and-enter forms such as `coco create <name> --jump` and
-  `coco jump --create <name>`; do not add implicit creation to `jump`.
+  optional leading-path scope, `--all-repos`, global workspace-ID lookup,
+  helpful local-miss/ambiguity diagnostics, and slash-separated workspace
+  names with secure path/ref collision handling. Keep the MCP adapter fixed to
+  its launch-time repository.
 - [ ] Deferred and unscheduled: durable pending decisions and
   `coco decide <request-id>`. If selected at the post-`jump` review, the first
   interactive UX should print native choices as numbered options and accept a
@@ -373,6 +381,12 @@ architectural baseline for CoCo.
 - 2026-09-06 — Admit conventional slash-separated task names such as
   `feat/login`, producing `coco/feat/login`, while validating every component
   before path/ref use and rejecting Git ref-prefix collisions explicitly.
+- 2026-09-06 — Rename CoCo's durable aggregate from `task` to `workspace`
+  before extending the CLI. A workspace owns the repository/worktree/thread
+  binding and configuration snapshot; a future ticket or issue is a linked
+  external reference. Replace `new` with `create`. Let `--send <message>` and
+  `--jump` compose in the deterministic order create, send, jump; later-stage
+  failure never rolls back a successfully created workspace or accepted turn.
 
 ## Findings
 
@@ -636,6 +650,9 @@ architectural baseline for CoCo.
 - The repository-scope, slash-name, and native Git policy record passes
   `git diff --check` and a targeted stale-decision scan. No Rust code or public
   documentation changed in this decision-only slice.
+- The confirmed workspace/create migration and composable post-action plan
+  passes `git diff --check`; this planning update likewise changes no Rust code
+  or public documentation.
 
 ## Open questions and handoff
 
@@ -652,14 +669,10 @@ architectural baseline for CoCo.
   recorded. The selected Git-approval proof should establish the native
   request/response contract before scheduling that general implementation; do
   not let it introduce another state machine.
-- The real-Codex recovery smoke is complete and the Git policy is decided. The
-  next selected slice is the opt-in native Git-approval proof, followed by a
-  fresh priority check; multi-repository CLI ergonomics are specified but not
-  yet implemented.
-- Revisit the primary user-facing noun and creation/entry command shape before
-  implementing repository-scope ergonomics. `task`, `session`, and `workspace`
-  each collide with a different adjacent concept, so the rename must define
-  what the CoCo-owned aggregate means rather than only changing command text.
+- The real-Codex recovery smoke and Git policy decision are complete. The next
+  selected work is the clean workspace vocabulary/schema migration followed by
+  the create convenience pipeline. The native Git-approval proof and then
+  multi-repository CLI ergonomics follow those slices.
 - Research Codex's native lifecycle extensibility before designing CoCo hooks.
   Keep the distinction between internal normalized events and executable user
   automation explicit; hooks must not silently inherit credentials or block

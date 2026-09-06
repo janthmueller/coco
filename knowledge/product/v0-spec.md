@@ -66,6 +66,14 @@ that the behavior is already implemented.
   no hidden, persistent "selected repository" for CLI sessions.
 - Task names may use conventional slash-separated branch components such as
   `feat/login`; the generated branch remains `coco/<task-name>`.
+- The stable user-facing name for CoCo's durable aggregate is **workspace**,
+  not task or session. The current prerelease `task` schema and `coco new`
+  spelling will be migrated cleanly before more CLI behavior is added;
+  `coco create` becomes the creation command.
+- `coco create` prepares a workspace by default. `--send <message>` starts its
+  first turn, `--jump` opens its Codex TUI, and the two options compose in the
+  fixed order create, send, jump. Failure of a later post-action does not roll
+  back a successfully created workspace or accepted turn.
 - Native worktrees intentionally share their repository's Git object and ref
   storage. CoCo does not proxy ordinary worker commits or allocate a separate
   Git database per task.

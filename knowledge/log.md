@@ -10,12 +10,19 @@ status: stable
 
 ## 2026-09-06
 
-- **Multi-repository CLI contract**: Kept task names repository-scoped and
-  opaque task IDs globally unique. Repository-aware commands default to `.`,
-  accept an explicit leading path, and use `--all-repos` for an intentional
+- **Workspace vocabulary and creation UX**: Selected `workspace` as CoCo's
+  durable aggregate around a repository binding, Git worktree, Codex thread,
+  and configuration snapshot; external tickets remain optional references.
+  Scheduled the lossless `task`-to-`workspace` migration before further CLI
+  work, replaced `new` with `create`, and defined composable `--send`/`--jump`
+  post-actions with create-send-jump ordering and non-destructive partial
+  failure semantics.
+- **Multi-repository CLI contract**: Kept workspace names repository-scoped and
+  opaque workspace IDs globally unique. Repository-aware commands default to
+  `.`, accept an explicit leading path, and use `--all-repos` for an intentional
   daemon-wide list or unique name lookup; ambiguous names report every matching
   repository and the CLI keeps no hidden selected-repository state.
-- **Conventional task names**: Selected safe slash-separated names such as
+- **Conventional workspace names**: Selected safe slash-separated names such as
   `feat/login`, mapping to `coco/feat/login`, with component-level path/ref
   validation and explicit Git ref-prefix collision handling required before
   rollout.

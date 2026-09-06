@@ -893,15 +893,24 @@ Each step remains runnable and testable:
    findings and all remaining priorities with the user. Pending-request display
    and response through `coco decide <request-id>` remains a candidate rather
    than an automatically scheduled next slice.
-10. **Native Git approval proof:** exercise an ordinary linked-worktree commit
-    through the pinned Codex approval protocol, verify only the task branch
-    advances, and retain the shared native Git model without a custom commit
-    service.
-11. **Repository-scope ergonomics:** add `repo list`, optional leading-path
-    scope, `--all-repos`, global task-ID lookup, deterministic ambiguity
-    errors, and safe slash-separated task names without changing MCP's fixed
-    repository capability.
-12. **Remaining release hardening:** supported-version policy, filesystem
+10. **Workspace vocabulary migration:** rename the CoCo-owned `task` aggregate
+    across domain types, storage through a lossless migration, daemon protocol,
+    events, CLI/MCP schemas, tests, and documentation. Replace `new` with
+    `create` without conflating a workspace with its Git worktree, Codex thread,
+    or a future external ticket reference.
+11. **Create convenience pipeline:** add composable `--send <message>` and
+    `--jump` post-actions with the fixed order create, send, jump. Preserve a
+    successfully created workspace or accepted turn when a later action fails,
+    and cover every mode in process tests.
+12. **Native Git approval proof:** exercise an ordinary linked-worktree commit
+    through the pinned Codex approval protocol, verify only the workspace
+    branch advances, and retain the shared native Git model without a custom
+    commit service.
+13. **Repository-scope ergonomics:** add `repo list`, optional leading-path
+    scope, `--all-repos`, global workspace-ID lookup, deterministic ambiguity
+    errors, and safe slash-separated workspace names without changing MCP's
+    fixed repository capability.
+14. **Remaining release hardening:** supported-version policy, filesystem
     permission tests, help/public docs, packaging, and clean-install test.
 
 Do not split packages or build TUI/web scaffolding during these slices. The
