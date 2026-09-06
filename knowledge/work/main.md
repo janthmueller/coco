@@ -73,6 +73,11 @@ architectural baseline for CoCo.
 - [x] Implement the typed daemon seam and remove coordinator-to-RPC and
   CLI-to-Codex dependency leaks.
 - [ ] Split the measured hot modules without mixing in product behavior.
+  - [x] Coordinator responsibilities and tests.
+  - [x] Store migrations, rows, transactions, events, and tests.
+  - [x] Codex process, JSONL, WebSocket, and tests.
+  - [ ] Git command, repository, worktree, diff, and tests.
+  - [ ] CLI arguments, commands, output, and tests.
 - [ ] Design task annotations and external references as a deliberate future
   feature. Decide typed versus free-form values, mutation/audit semantics,
   privacy and display rules, fork/handoff inheritance, and explicit projection
@@ -206,6 +211,11 @@ architectural baseline for CoCo.
   `store/rows.rs` so the sibling modules do not depend on each other in both
   directions. Keep the cross-module atomicity/recovery fixture in
   `store/tests.rs`.
+- 2026-09-06 — Keep the Codex client as one public facade while separating
+  transport responsibilities underneath it: process startup and monitoring,
+  JSONL framing and correlation, and authenticated WebSocket/runtime-file
+  handling. Keep cross-transport contract tests together in `codex/tests.rs`
+  because they exercise the same client state machine through both transports.
 
 ## Findings
 
@@ -275,6 +285,10 @@ architectural baseline for CoCo.
   row-mapping module, 155-line migration module, and 333-line shared test
   module. The parent no longer mixes schema SQL, row decoding, lifecycle
   transactions, event persistence, and tests.
+- The completed Codex split leaves a 238-line facade, 437-line JSONL state
+  machine, 341-line process lifecycle module, 270-line authenticated WebSocket
+  adapter, and 287-line shared test module. Public methods remain on
+  `CodexClient`; the child modules are private implementation boundaries.
 
 ## Verification
 
@@ -319,6 +333,11 @@ architectural baseline for CoCo.
 - After completing the Store transaction/event split and moving its tests, all
   48 library tests plus the process test pass again with one build job and one
   test thread; the all-target/all-feature Clippy gate is warning-free.
+- After separating the Codex process, JSONL, WebSocket, and test layers, all 48
+  library tests plus the process test pass with one build job and one test
+  thread; all-target Clippy with warnings denied and `cargo machete` remain
+  clean. The resource-limited `nix flake check . --no-write-lock-file` run also
+  passes against the staged Git source.
 - The documentation TypeScript, Oxlint, and Prettier checks pass. Both the
   root and `/coco` builds export 88 static files across eight pages with static
   search, valid local links, no server artifact, and no internal knowledge.
@@ -343,7 +362,7 @@ architectural baseline for CoCo.
   worker turn, and an ordinary cancel must remain unambiguous and observable.
 - When the public site is scheduled, validate its production export under the
   GitHub Pages project subpath before enabling deployment from `main`.
-- Continue Phase 2 from `knowledge/engineering/rust-architecture.md`: map the
-  Codex adapter's process lifecycle, JSONL correlation, and authenticated
-  WebSocket responsibilities, then extract those boundaries without changing
-  App Server behavior. Preserve the typed daemon and WorkerRuntime boundaries.
+- Continue Phase 2 from `knowledge/engineering/rust-architecture.md`: map and
+  extract the Git command runner, repository/worktree operations, and diff
+  observation without changing worktree identity or safety behavior. Preserve
+  the typed daemon, coordinator, and process-test boundaries.

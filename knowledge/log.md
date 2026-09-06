@@ -10,6 +10,9 @@ status: stable
 
 ## 2026-09-06
 
+- **Codex adapter layers**: Split App Server child lifecycle, JSONL framing and
+  request correlation, authenticated shared WebSocket transport, and adapter
+  tests out of the public client facade without changing its API or behavior.
 - **Store transaction modules**: Split Task/Turn lifecycle operations from
   Event/Audit persistence, placed shared read lookups with row decoding, and
   moved cross-module persistence tests out of the facade while preserving the

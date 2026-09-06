@@ -266,6 +266,12 @@ without weakening their atomic boundaries: task/turn operations pass their
 existing `Transaction` into the shared event insert helper. Cross-module Store
 tests live in `store/tests.rs`; `store.rs` is now the connection, repository,
 shared-type, filesystem-safety, and facade layer.
+The Codex adapter split completed next: `codex/process.rs` owns child startup,
+initialization, stderr capture, and termination; `codex/jsonl.rs` owns framing,
+request correlation, and server-event dispatch; and `codex/websocket.rs` owns
+the authenticated shared transport and private runtime files. The public
+client state and close contract remain in the roughly 240-line `codex.rs`
+facade, while its unchanged transport tests live in `codex/tests.rs`.
 
 Extract coherent child modules in this order:
 
