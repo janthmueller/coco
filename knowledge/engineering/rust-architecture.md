@@ -272,6 +272,11 @@ request correlation, and server-event dispatch; and `codex/websocket.rs` owns
 the authenticated shared transport and private runtime files. The public
 client state and close contract remain in the roughly 240-line `codex.rs`
 facade, while its unchanged transport tests live in `codex/tests.rs`.
+The Git adapter followed on 2026-09-06. `git/command.rs` is now the only place
+that spawns Git and bounds stdout/stderr; repository identity, worktree
+lifecycle, and diff/observation policy live in their corresponding child
+modules. `git.rs` retains the error and public data types plus adapter
+construction, and the unchanged native-Git fixture lives in `git/tests.rs`.
 
 Extract coherent child modules in this order:
 

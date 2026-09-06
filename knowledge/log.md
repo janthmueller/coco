@@ -10,6 +10,9 @@ status: stable
 
 ## 2026-09-06
 
+- **Git adapter layers**: Centralized bounded, environment-hardened Git process
+  execution and split repository identity, worktree lifecycle, diff
+  observation, and native-Git tests out of the public adapter facade.
 - **Codex adapter layers**: Split App Server child lifecycle, JSONL framing and
   request correlation, authenticated shared WebSocket transport, and adapter
   tests out of the public client facade without changing its API or behavior.

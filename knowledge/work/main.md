@@ -76,7 +76,7 @@ architectural baseline for CoCo.
   - [x] Coordinator responsibilities and tests.
   - [x] Store migrations, rows, transactions, events, and tests.
   - [x] Codex process, JSONL, WebSocket, and tests.
-  - [ ] Git command, repository, worktree, diff, and tests.
+  - [x] Git command, repository, worktree, diff, and tests.
   - [ ] CLI arguments, commands, output, and tests.
 - [ ] Design task annotations and external references as a deliberate future
   feature. Decide typed versus free-form values, mutation/audit semantics,
@@ -216,6 +216,10 @@ architectural baseline for CoCo.
   JSONL framing and correlation, and authenticated WebSocket/runtime-file
   handling. Keep cross-transport contract tests together in `codex/tests.rs`
   because they exercise the same client state machine through both transports.
+- 2026-09-06 — Keep Git subprocess hardening in one internal command runner,
+  then separate repository identity, worktree mutation, and diff observation
+  as policy modules. Re-export the existing task-name validator and retain all
+  public methods on `Git`, so callers do not inherit the internal layout.
 
 ## Findings
 
@@ -289,6 +293,11 @@ architectural baseline for CoCo.
   machine, 341-line process lifecycle module, 270-line authenticated WebSocket
   adapter, and 287-line shared test module. Public methods remain on
   `CodexClient`; the child modules are private implementation boundaries.
+- The completed Git split leaves a 109-line facade, 180-line bounded command
+  runner, 111-line repository module, 212-line worktree module, 143-line diff
+  observer, and 135-line native-Git test fixture. Only the command module
+  touches `std::process::Command` in production; all child modules remain
+  private.
 
 ## Verification
 
@@ -338,6 +347,12 @@ architectural baseline for CoCo.
   thread; all-target Clippy with warnings denied and `cargo machete` remain
   clean. The resource-limited `nix flake check . --no-write-lock-file` run also
   passes against the staged Git source.
+- After separating Git command execution, repository identity, worktree
+  mutation, diff observation, and tests, all 48 library tests plus the process
+  test pass with one build job and one test thread; the all-target/all-feature
+  Clippy and `cargo machete` gates remain clean. The resource-limited
+  `nix flake check . --no-write-lock-file` run also passes against the staged
+  Git source.
 - The documentation TypeScript, Oxlint, and Prettier checks pass. Both the
   root and `/coco` builds export 88 static files across eight pages with static
   search, valid local links, no server artifact, and no internal knowledge.
@@ -362,7 +377,7 @@ architectural baseline for CoCo.
   worker turn, and an ordinary cancel must remain unambiguous and observable.
 - When the public site is scheduled, validate its production export under the
   GitHub Pages project subpath before enabling deployment from `main`.
-- Continue Phase 2 from `knowledge/engineering/rust-architecture.md`: map and
-  extract the Git command runner, repository/worktree operations, and diff
-  observation without changing worktree identity or safety behavior. Preserve
-  the typed daemon, coordinator, and process-test boundaries.
+- Complete Phase 2 from `knowledge/engineering/rust-architecture.md`: map the
+  remaining `cli.rs` argument, command execution, rendering, follow-loop, and
+  test responsibilities, then extract them without changing commands, output,
+  exit behavior, or protocol DTO usage.
