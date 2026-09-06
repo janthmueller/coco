@@ -58,6 +58,17 @@ that the behavior is already implemented.
   not silently copy, stash, reset, or snapshot uncommitted changes.
 - Worktrees live outside the registered repository by default.
 - CoCo does not automatically perform destructive branch or worktree cleanup.
+- One daemon may register multiple repositories. Tasks remain repository-owned,
+  task names are unique only within that repository, and opaque task IDs are
+  globally unique.
+- Repository-aware CLI commands use an optional leading repository path that
+  defaults to `.`. `--all-repos` is the explicit daemon-wide scope; CoCo keeps
+  no hidden, persistent "selected repository" for CLI sessions.
+- Task names may use conventional slash-separated branch components such as
+  `feat/login`; the generated branch remains `coco/<task-name>`.
+- Native worktrees intentionally share their repository's Git object and ref
+  storage. CoCo does not proxy ordinary worker commits or allocate a separate
+  Git database per task.
 - v0 has no publicly reachable network listener. Its App Server endpoint is
   capability-token protected and bound only to `127.0.0.1`.
 - v0 task worktrees are branch-backed. A detached task-worktree mode is a
@@ -80,8 +91,6 @@ release:
   non-secret effective settings are snapshotted onto each task; profile CRUD is
   not part of v0. Future MCP capability profiles are a separate snapshot
   dimension rather than an unstructured extension of this execution profile.
-- Task names are unique within a repository. Internal task IDs are globally
-  unique and remain stable if a display name is introduced later.
 - CLI and MCP adapter connect to one user-scoped `cocod`; the daemon owns one
   App Server child process at a time in v0.
 - The MCP adapter is repository-scoped at launch and read-only by default. An
@@ -98,9 +107,9 @@ release:
 - Make every mutating client request carry a client-generated operation ID.
   This lets the daemon reject or replay duplicate requests from CLI or MCP
   without creating a second branch, worktree, thread, or turn.
-- Add a minimal approval response command before calling v0 generally usable;
-  merely displaying an approval can otherwise leave a turn permanently
-  blocked. The exact command spelling remains open below.
+- Add the minimal `coco decide <request-id>` response command before calling v0
+  generally usable; merely displaying an approval can otherwise leave a turn
+  permanently blocked.
 
 ## v0 outcome
 
@@ -175,6 +184,11 @@ sharing conversation history.
 
 - A task name and generated `coco/<name>` branch are unique within the
   repository.
+- A task name is 1-63 bytes split into non-empty `/`-separated components.
+  Every component uses lowercase ASCII letters, digits, or `-`, starts and
+  ends alphanumerically, and is validated before it participates in a ref or
+  filesystem path. Leading, trailing, or repeated `/` and dot components are
+  invalid.
 - A managed worktree path and Codex thread ID belong to at most one task.
 - `base_sha`, repository, branch, worktree path, and context mode do not change
   after the task passes provisioning. A replacement creates a new task.
@@ -192,19 +206,36 @@ sharing conversation history.
 
 ```text
 coco repo add [path]
-coco new <name> [--base <ref>] [--profile <name>]
-coco ls [--json]
-coco status <task> [--json]
-coco status <task> --follow
-coco send <task> <message>
-coco jump <task>
-coco diff <task>
+coco repo list [--json]
+coco [<repository-path>] new <name> [--base <ref>] [--profile <name>]
+coco [<repository-path>] ls [--json]
+coco --all-repos ls [--json]
+coco [<repository-path>] status <task> [--json]
+coco --all-repos status <task> [--json]
+coco [<repository-path>] status <task> --follow
+coco [<repository-path>] send <task> <message>
+coco --all-repos send <task> <message>
+coco [<repository-path>] jump <task>
+coco --all-repos jump <task>
+coco [<repository-path>] diff <task>
+coco --all-repos diff <task>
 coco mcp serve --repository <path> [--allow-send]
 ```
 
-`<task>` accepts a full task ID everywhere. A name is resolved within the
-registered repository containing the CLI's current directory; ambiguity or a
-missing repository context is an error rather than a guess.
+For repository-aware commands the omitted leading path is exactly equivalent
+to `.`. An explicit path may point anywhere inside a registered repository;
+the daemon resolves its canonical Git identity. `--all-repos` is mutually
+exclusive with that path and is invalid for `new`, which necessarily creates
+inside one repository.
+
+`<task>` accepts a full task ID everywhere and resolves that ID independently
+of the current directory. A task name resolves only within the selected/current
+repository unless `--all-repos` is present. Global name resolution succeeds
+only for exactly one match. Multiple matches return
+`TASK_REFERENCE_AMBIGUOUS` with the matching repository paths and concrete
+retry commands. A local miss never silently targets another repository, but
+the error may point out global matches and suggest `--all-repos` or an explicit
+path. CoCo does not encode a path and task name into a composite string.
 
 All orchestration commands must use the daemon contract. The CLI must not open
 SQLite or operate worktrees. `jump` first resolves the task through the daemon,
@@ -222,6 +253,13 @@ does not duplicate thread or turn orchestration.
 - Do not require a clean checkout merely to register it; cleanliness is a
   creation precondition and must be reported by `new`.
 
+### `coco repo list`
+
+- List every repository registered with the user-scoped daemon, including its
+  stable ID, display name, and canonical root path.
+- This is a daemon-wide inventory and therefore needs no repository scope.
+- `--json` returns one versioned document with stable repository identities.
+
 ### `coco new`
 
 `--base` defaults to `HEAD`. Optional `--profile <name>` applies the matching
@@ -234,8 +272,10 @@ selected internally. Creation must execute as a recoverable saga:
 2. Under a repository-scoped lock, reject a dirty source checkout.
 3. Resolve `<ref>^{commit}` to a complete object ID and retain that SHA, never
    the moving ref, as `base_sha`.
-4. Validate the task name and `coco/<name>` with Git; reject existing task,
-   branch, or destination-path collisions.
+4. Validate every task-name component and `coco/<name>` with Git; reject
+   existing task, branch-namespace, or destination-path collisions. For
+   example, `feat` and `feat/login` cannot coexist when their Git refs would
+   require the same path to be both a ref and a directory.
 5. Persist a `provisioning` task and `task.created` event before external side
    effects.
 6. Create `coco/<name>` and its worktree at the exact base SHA.
@@ -257,8 +297,9 @@ must not create duplicate artifacts.
 
 - List task ID, name, repository, runtime phase, Git badges, branch, and last
   update time.
-- Default to tasks in the current registered repository. A later `--all`
-  option may expose the daemon-wide view.
+- Default to tasks in the selected/current registered repository.
+  `--all-repos` exposes the daemon-wide view and always includes repository
+  identity in each human and JSON row.
 - Sort deterministically by most recent update, then task ID.
 - `--json` emits one versioned JSON document and no decorative stdout text.
 
@@ -330,8 +371,9 @@ transport is separate from the daemon's authenticated loopback-WebSocket
 connection to the Codex App Server.
 
 The repository is fixed when the MCP process starts. Task names resolve only
-within that repository; full task IDs remain accepted. v0 exposes no MCP tool
-that registers arbitrary paths or expands filesystem authority at runtime.
+within that repository; full task IDs are accepted only when they belong to
+that same fixed scope. v0 exposes no MCP tool that registers arbitrary paths
+or expands filesystem authority at runtime.
 
 ### Minimum tools
 
@@ -451,6 +493,14 @@ inventing a normalized meaning.
 - Correlated server requests remain visible as sanitized events and are never
   auto-approved. Stable actionable request IDs and durable responses belong to
   the deferred pending-decision model.
+- Ordinary commits on a task's checked-out branch are supported worker
+  behavior, not a separate CoCo transaction. CoCo does not make the whole
+  shared Git common directory an ordinary writable workspace merely to enable
+  them; sandbox crossings use Codex's native command-approval request and the
+  selected user profile remains authoritative.
+- After Git-changing activity, CoCo observes and validates the recorded
+  worktree/branch binding. It reports drift instead of resetting refs or
+  repairing another task behind the operator's back.
 - Git commands are invoked as argument arrays with validated paths/refs, never
   through interpolated shell strings.
 - No lifecycle path uses `git reset --hard`, automatic stash, forced branch
@@ -517,6 +567,13 @@ The following are intentionally outside v0:
 - `jump` resumes the stored thread in the stored worktree through the shared
   authenticated App Server and keeps daemon event projection active.
 - `diff` reflects changes across all turns and does not change Git status.
+- Repository-scope tests cover the implicit `.`, an explicit path, daemon-wide
+  `--all-repos` listing, globally unique and ambiguous name lookup, globally
+  unique task IDs, and a local miss that suggests but never performs a
+  cross-repository retry.
+- Task creation accepts safe slash-separated names such as `feat/login` and
+  rejects traversal, empty components, unsafe ref syntax, and ref-prefix
+  collisions before creating external artifacts.
 
 ### MCP adapter
 
@@ -536,6 +593,11 @@ The following are intentionally outside v0:
   denied by the selected App Server/sandbox version.
 - Pending approval requests are persisted before presentation and resolutions
   are correlated to the original App Server request.
+- An explicit opt-in real-Codex test proves that a Git administrative write in
+  a linked task worktree follows Codex's native approval path and that an
+  accepted ordinary commit advances only the task's bound branch. The test
+  must not broaden the common Git directory into an unconditional writable
+  root.
 - The daemon socket, SQLite file, App Server endpoint descriptor, and
   capability token are user-only. The sole network port is authenticated and
   bound to IPv4 loopback.
@@ -543,8 +605,8 @@ The following are intentionally outside v0:
 ## Open decisions and blockers
 
 No open decision blocks the storage/Git scaffold or a non-destructive App
-Server proof turn. Two decisions block calling the complete v0 safe and
-generally usable:
+Server proof turn. Decision-response closure still blocks calling the complete
+v0 generally usable:
 
 1. **Decision response closure:** implement durable pending requests and
    `coco decide <request-id>`. The first interactive flow prints Codex's native
@@ -552,15 +614,14 @@ generally usable:
    requests may also accept free text where their native schema permits it.
    Cursor navigation, exact non-interactive flags, and session-wide or policy-
    amendment choices remain later design work. This remains necessary before
-   calling v0 generally usable, but it is intentionally unscheduled until the
-   post-state/post-`jump` priority review.
-2. **Git administrative write scope:** a linked worktree stores objects and
-   refs in the repository's shared Git directory. Decide whether v0 workers
-   may commit. If they may, integration tests must establish the minimum safe
-   App Server writable roots and document that worktree filesystem isolation
-   is not complete Git-ref isolation. If they may only edit files, keep the
-   shared Git directory read-only and make commits an explicit later
-   coordinator operation.
+   calling v0 generally usable. Its implementation priority is reconsidered
+   after the selected native Git-approval compatibility proof.
+
+The Git administrative-storage decision is closed: tasks use ordinary native
+worktrees and may commit on their own branches through Codex's existing
+approval model. CoCo neither supplies a separate Git database nor adds a
+custom commit proxy. A later app-side commit action may be useful UI
+convenience, but it is not part of the isolation contract.
 
 Release follow-ups that are not blockers for the proof slice are the exact
 supported Codex CLI version range, Windows support, profile configuration UX,

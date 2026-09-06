@@ -10,6 +10,20 @@ status: stable
 
 ## 2026-09-06
 
+- **Multi-repository CLI contract**: Kept task names repository-scoped and
+  opaque task IDs globally unique. Repository-aware commands default to `.`,
+  accept an explicit leading path, and use `--all-repos` for an intentional
+  daemon-wide list or unique name lookup; ambiguous names report every matching
+  repository and the CLI keeps no hidden selected-repository state.
+- **Conventional task names**: Selected safe slash-separated names such as
+  `feat/login`, mapping to `coco/feat/login`, with component-level path/ref
+  validation and explicit Git ref-prefix collision handling required before
+  rollout.
+- **Native Git write policy**: Closed the shared-Git decision in favor of
+  ordinary linked worktrees and Codex's native approvals. CoCo will not build a
+  per-task Git database or commit proxy, nor grant the whole common Git
+  directory as an unconditional writable root; a pinned opt-in approval/commit
+  proof is the next selected slice.
 - **Pinned Codex compatibility**: Added an explicit opt-in process smoke test
   for Codex 0.147.0 covering generated schemas, authenticated startup,
   model-free persistent thread preparation, and resume through a fresh App

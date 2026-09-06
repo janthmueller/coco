@@ -128,8 +128,30 @@ architectural baseline for CoCo.
   pinned Codex executable. Verify the reported version, generated resume
   schema, authenticated WebSocket startup, persistent thread creation, and
   resume through a fresh App Server process without consuming a model turn.
-- [ ] After recovery and compatibility are complete, stop and discuss the Git
-  administrative write policy with the user before implementing it.
+- [x] After recovery and compatibility are complete, stop and discuss the Git
+  administrative write policy with the user before implementing it. Retain
+  native shared worktrees and Codex approvals rather than adding a custom
+  commit service or per-task Git database.
+- [x] Define the multi-repository CLI contract: implicit `.` or an explicit
+  leading repository path, explicit `--all-repos`, global opaque task IDs,
+  repository-scoped names, deterministic ambiguity errors, no hidden
+  persistent selection, and safe slash-separated names such as `feat/login`.
+- [ ] Next selected slice: prove with pinned real Codex that an ordinary
+  `git add`/`git commit` in a linked task worktree follows the native approval
+  protocol and advances only the bound task branch without a blanket writable
+  Git common directory.
+- [ ] Implement the confirmed multi-repository CLI ergonomics: `repo list`,
+  optional leading-path scope, `--all-repos`, global task-ID lookup, helpful
+  local-miss/ambiguity diagnostics, and slash-separated task names with secure
+  path/ref collision handling. Keep the MCP adapter fixed to its launch-time
+  repository.
+- [ ] Before that CLI vocabulary becomes stable, decide whether CoCo's primary
+  user-facing unit should remain a `task` or become a less ticket-loaded term
+  such as `session` or `workspace`. Keep it distinct from the native Codex
+  thread, Git worktree, and a future linked external ticket. In the same UX
+  review, consider renaming `new` to `create` and compare explicit
+  create-and-enter forms such as `coco create <name> --jump` and
+  `coco jump --create <name>`; do not add implicit creation to `jump`.
 - [ ] Deferred and unscheduled: durable pending decisions and
   `coco decide <request-id>`. If selected at the post-`jump` review, the first
   interactive UX should print native choices as numbered options and accept a
@@ -336,9 +358,33 @@ architectural baseline for CoCo.
   issue the stable, model-free `thread/name/set` operation with the task name
   before binding it, because the pinned App Server does not otherwise
   materialize an empty thread's rollout for later resume.
+- 2026-09-06 — Keep ordinary Git work inside native linked worktrees. Agents
+  may commit on their bound task branch through Codex's existing approval
+  protocol; CoCo will not allocate separate Git databases, proxy commits, or
+  grant the complete shared Git directory as an unconditional writable root.
+  Validate the binding after Git-changing activity and treat drift as an
+  observable error rather than repairing refs automatically.
+- 2026-09-06 — Model CLI repository scope explicitly. An omitted leading path
+  means `.`, a path selects one registered repository, and `--all-repos`
+  requests daemon-wide listing or unique task-name resolution. Full task IDs
+  resolve globally; local name lookup never falls through silently to another
+  repository. Do not persist a process-global repo selection or combine paths
+  and names into a colon-delimited identifier.
+- 2026-09-06 — Admit conventional slash-separated task names such as
+  `feat/login`, producing `coco/feat/login`, while validating every component
+  before path/ref use and rejecting Git ref-prefix collisions explicitly.
 
 ## Findings
 
+- The current CLI already stores any number of repositories and every task has
+  a required repository ID, but all task commands resolve the current directory
+  first. Consequently even a globally unique task ID is currently unusable
+  outside its repository; `repo list`, leading-path scope, `--all-repos`, and
+  global name ambiguity reporting are implementation gaps.
+- Current task-name validation accepts only 1-63 lowercase ASCII letters,
+  digits, and hyphens. Supporting `/` safely also requires component-wise
+  validation, secure intermediate worktree directories, and explicit handling
+  of Git's ref file/directory prefix conflicts.
 - Wuf separates its concise README and user site from an internal OKF knowledge
   bundle, with `AGENTS.md` acting as a short router into that material.
 - The relevant Orca reference is `stablyai/orca`. Its public docs render with
@@ -587,6 +633,9 @@ architectural baseline for CoCo.
   real test. All-target/all-feature Clippy with warnings denied, rustfmt,
   `cargo machete`, `nix run .#docs-check`, `nix run .#docs-build`, and
   `nix flake check . --no-write-lock-file --max-jobs 1` pass.
+- The repository-scope, slash-name, and native Git policy record passes
+  `git diff --check` and a targeted stale-decision scan. No Rust code or public
+  documentation changed in this decision-only slice.
 
 ## Open questions and handoff
 
@@ -600,11 +649,17 @@ architectural baseline for CoCo.
   and its owned App Server stop; surviving that boundary would require a
   separately supervised App Server lifetime.
 - Keep the durable pending-request model and numbered `coco decide` flow
-  recorded but unscheduled. If it is selected later, do not let it introduce
-  another state machine.
-- The real-Codex compatibility smoke is complete. Stop now and discuss Git
-  administrative write policy with the user before implementing more product
-  behavior.
+  recorded. The selected Git-approval proof should establish the native
+  request/response contract before scheduling that general implementation; do
+  not let it introduce another state machine.
+- The real-Codex recovery smoke is complete and the Git policy is decided. The
+  next selected slice is the opt-in native Git-approval proof, followed by a
+  fresh priority check; multi-repository CLI ergonomics are specified but not
+  yet implemented.
+- Revisit the primary user-facing noun and creation/entry command shape before
+  implementing repository-scope ergonomics. `task`, `session`, and `workspace`
+  each collide with a different adjacent concept, so the rename must define
+  what the CoCo-owned aggregate means rather than only changing command text.
 - Research Codex's native lifecycle extensibility before designing CoCo hooks.
   Keep the distinction between internal normalized events and executable user
   automation explicit; hooks must not silently inherit credentials or block

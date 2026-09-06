@@ -141,10 +141,11 @@ Clock / IdGenerator
   injectable sources for deterministic tests and idempotency
 ```
 
-Core use cases are `RegisterRepository`, `CreateTask`, `ListTasks`, `StatusTask`,
-`SendTurn`, `FollowTask`, `DiffTask`, `AuditControlCall`, and the required
-approval-resolution use case once its CLI spelling is confirmed. MCP tools call
-these same use cases through daemon RPC rather than importing them directly.
+Core use cases are `RegisterRepository`, `ListRepositories`, `CreateTask`,
+`ListTasks`, `StatusTask`, `SendTurn`, `FollowTask`, `DiffTask`,
+`AuditControlCall`, and the required `DecideRequest` approval-resolution use
+case. MCP tools call these same use cases through daemon RPC rather than
+importing them directly.
 
 ## Local filesystem layout
 
@@ -242,17 +243,29 @@ Methods for the handed-off commands are:
 | Daemon method | CLI | MCP tool |
 | --- | --- | --- |
 | `repository.register` | `coco repo add` | not exposed |
+| `repository.list` | `coco repo list` | not exposed |
 | `task.create` | `coco new` | not exposed in v0 |
 | `task.list` | `coco ls` | `tasks.list` |
 | `task.get` | `coco status` and task resolution for `coco jump` | `agents.status` |
 | `turn.start` | `coco send` | `agents.send` when explicitly enabled |
 | `event.list` | `coco status --follow` polling | not exposed in v0 |
 | `task.diff` | `coco diff` | `changes.diff` |
-| `approval.respond` | Required by safety contract; CLI spelling open | not exposed in v0 |
+| `approval.respond` | `coco decide <request-id>` (planned) | not exposed in v0 |
 
-The client sends its canonical current directory as context; the daemon
-resolves it against registered repositories and never trusts a client-supplied
-repository ID/path combination without revalidation.
+Repository-aware CLI commands carry either one repository path or an explicit
+daemon-wide scope. An omitted path means `.`, and a supplied path may point
+inside a registered worktree; the daemon canonicalizes it through Git and
+resolves the stored common-directory identity. The client never combines a
+repository path and task name into one opaque selector.
+
+Full task IDs resolve globally. Human task names resolve within the selected
+repository, or across all repositories only when the client explicitly sends
+the `--all-repos` scope. The daemon owns global matching and returns every
+candidate repository for an ambiguous name; the CLI must not perform a
+read-then-guess lookup itself. A local miss may return bounded suggestions but
+must not silently retarget `send`, `jump`, or another command. There is no
+daemon-global mutable "selected repository"; a future GUI may keep a selection
+as client view state.
 
 `operationId` is required for mutating methods and stored with the resulting
 task, turn, or request resolution. Repeating an ID with identical parameters
@@ -313,6 +326,7 @@ REPOSITORY_NOT_REGISTERED
 DIRTY_SOURCE
 BASE_NOT_FOUND
 TASK_NOT_FOUND
+TASK_REFERENCE_AMBIGUOUS
 TASK_NAME_CONFLICT
 BRANCH_CONFLICT
 WORKTREE_PATH_CONFLICT
@@ -395,6 +409,11 @@ Branch, base, path, and thread columns are nullable only while the creation
 saga has not reached their stage. A `ready` task requires the complete binding.
 `phase` and `waitReasons` are computed on read and deliberately have no task
 table columns.
+
+Repository display names are not selectors by themselves because unrelated
+paths may share a basename. CLI repository scope is a canonicalizable path or
+stable repository ID; a display name may be accepted only when it has exactly
+one registered match.
 
 ### `turns`
 
@@ -552,8 +571,15 @@ category, not shell-expanded commands.
 - Resolve the base as a commit object with the equivalent of
   `rev-parse --verify --end-of-options <ref>^{commit}` and persist its complete
   output.
+- Accept slash-separated task names such as `feat/login`, but validate every
+  component before using it in a filesystem path: 1-63 total bytes, non-empty
+  lowercase ASCII alphanumeric/`-` components, and alphanumeric component
+  boundaries. Reject traversal, leading/trailing/repeated separators, and dot
+  components.
 - Validate the generated `coco/<name>` using Git's ref-format validation and
-  separately check that neither ref nor destination exists.
+  separately check that neither the exact ref/destination nor a conflicting
+  ref-path prefix exists. Securely create and canonicalize any intermediate
+  worktree directories below the repository's allocated CoCo root.
 
 ### Worktree creation
 
@@ -699,10 +725,22 @@ observed protocol, apply the restrictive turn-level sandbox policy on every
 `turn/start`, not only a broad mode at `thread/start`, and verify returned
 effective settings when available.
 
-Native worktrees share Git administrative storage. Granting the common Git
-directory may allow changes beyond one branch; do not add it as a writable
-root until the product decides workers may commit and an integration test
-proves the required scope. This is the principal unresolved sandbox boundary.
+Native worktrees deliberately share objects and refs while retaining their own
+`HEAD`, index, and checked-out files. Ordinary worker commits on the task's
+bound branch are supported; CoCo does not introduce a second Git database or a
+commit proxy. Do not add the entire common Git directory as an unconditional
+writable workspace. Let Codex's native command-approval flow mediate sandbox
+crossings, with the user's selected execution profile remaining authoritative.
+`coco jump` presents those decisions in the native TUI; daemon-originated turns
+need the same request persisted and answered through the general decision
+surface.
+
+After an approved Git-changing operation, observe the worktree again and
+verify its common directory, checked-out branch, and registered binding. A
+drift is diagnosable state, never grounds for an automatic reset. Before this
+contract is considered release-ready, an opt-in pinned-Codex test must prove
+the linked-worktree approval/commit path without granting broad permanent Git
+write access.
 
 When the App Server sends a request, persist it before notifying watchers. A
 response uses the exact original process generation and request ID. On daemon
@@ -855,9 +893,16 @@ Each step remains runnable and testable:
    findings and all remaining priorities with the user. Pending-request display
    and response through `coco decide <request-id>` remains a candidate rather
    than an automatically scheduled next slice.
-10. **Release hardening:** real Codex smoke test, supported-version check,
-   filesystem permission tests, help/public docs, packaging, and clean-install
-   test.
+10. **Native Git approval proof:** exercise an ordinary linked-worktree commit
+    through the pinned Codex approval protocol, verify only the task branch
+    advances, and retain the shared native Git model without a custom commit
+    service.
+11. **Repository-scope ergonomics:** add `repo list`, optional leading-path
+    scope, `--all-repos`, global task-ID lookup, deterministic ambiguity
+    errors, and safe slash-separated task names without changing MCP's fixed
+    repository capability.
+12. **Remaining release hardening:** supported-version policy, filesystem
+    permission tests, help/public docs, packaging, and clean-install test.
 
 Do not split packages or build TUI/web scaffolding during these slices. The
 daemon protocol and core ports are already the seam those clients need; MCP is
@@ -865,17 +910,15 @@ implemented as a thin adapter in the same package.
 
 ## Open architecture decisions
 
-The following need confirmation, but only the first two gate a safe complete
-v0 rather than the initial proof slice:
+The following still need confirmation. Only decision-response closure gates a
+safe complete v0 rather than the initial proof slice:
 
 1. If `decide` is selected at the post-`jump` planning checkpoint, the exact
    non-interactive flags and which session-wide or policy-amendment choices to
    expose beyond the first numbered interactive flow.
-2. Whether worker turns may write shared Git administrative storage to commit,
-   and the minimum sandbox roots if so.
-3. Exact Codex CLI version and compatibility range to pin in the
+2. Exact Codex CLI version and compatibility range to pin in the
    development/release toolchain.
-4. When the selected Windows named-pipe local-IPC backend and Windows CI become
+3. When the selected Windows named-pipe local-IPC backend and Windows CI become
    release requirements; the cross-platform transport shape itself is settled.
-5. Whether operator prompt text is duplicated in CoCo's audit DB or retained
+4. Whether operator prompt text is duplicated in CoCo's audit DB or retained
    only in Codex conversation history; the draft defaults to metadata only.
