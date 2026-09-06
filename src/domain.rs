@@ -32,30 +32,22 @@ impl ContextMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TaskPhase {
+pub enum TaskLifecycle {
     Provisioning,
     Starting,
-    Active,
-    WaitingForApproval,
-    WaitingForInput,
-    Idle,
+    Ready,
     Completed,
     Failed,
-    Interrupted,
 }
 
-impl TaskPhase {
+impl TaskLifecycle {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Provisioning => "provisioning",
             Self::Starting => "starting",
-            Self::Active => "active",
-            Self::WaitingForApproval => "waiting_for_approval",
-            Self::WaitingForInput => "waiting_for_input",
-            Self::Idle => "idle",
+            Self::Ready => "ready",
             Self::Completed => "completed",
             Self::Failed => "failed",
-            Self::Interrupted => "interrupted",
         }
     }
 
@@ -63,14 +55,152 @@ impl TaskPhase {
         match value {
             "provisioning" => Some(Self::Provisioning),
             "starting" => Some(Self::Starting),
+            "ready" => Some(Self::Ready),
+            "completed" => Some(Self::Completed),
+            "failed" => Some(Self::Failed),
+            _ => None,
+        }
+    }
+}
+
+/// The exact thread runtime state reported by Codex App Server.
+///
+/// Active flags intentionally remain strings so a newer App Server can add a
+/// flag without CoCo dropping it while persisting or forwarding the snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum CodexThreadStatus {
+    NotLoaded,
+    Idle,
+    SystemError,
+    Active {
+        #[serde(rename = "activeFlags")]
+        active_flags: Vec<String>,
+    },
+}
+
+impl CodexThreadStatus {
+    pub fn canonicalized(self) -> Self {
+        match self {
+            Self::Active { mut active_flags } => {
+                active_flags.sort_unstable();
+                active_flags.dedup();
+                Self::Active { active_flags }
+            }
+            status => status,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadRuntimeSnapshot {
+    pub status: CodexThreadStatus,
+    pub runtime_generation: String,
+    pub observed_at_ms: i64,
+    pub is_fresh: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskPhase {
+    Active,
+    WaitingForApproval,
+    WaitingForInput,
+    Idle,
+    NotLoaded,
+    SystemError,
+    Unavailable,
+    Provisioning,
+    Starting,
+    Completed,
+    Failed,
+}
+
+impl TaskPhase {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::WaitingForApproval => "waiting_for_approval",
+            Self::WaitingForInput => "waiting_for_input",
+            Self::Idle => "idle",
+            Self::NotLoaded => "not_loaded",
+            Self::SystemError => "system_error",
+            Self::Unavailable => "unavailable",
+            Self::Provisioning => "provisioning",
+            Self::Starting => "starting",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
             "active" => Some(Self::Active),
             "waiting_for_approval" => Some(Self::WaitingForApproval),
             "waiting_for_input" => Some(Self::WaitingForInput),
             "idle" => Some(Self::Idle),
+            "not_loaded" => Some(Self::NotLoaded),
+            "system_error" => Some(Self::SystemError),
+            "unavailable" => Some(Self::Unavailable),
+            "provisioning" => Some(Self::Provisioning),
+            "starting" => Some(Self::Starting),
             "completed" => Some(Self::Completed),
             "failed" => Some(Self::Failed),
-            "interrupted" => Some(Self::Interrupted),
             _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskWaitReason {
+    Approval,
+    UserInput,
+}
+
+pub fn derive_task_runtime(
+    lifecycle: TaskLifecycle,
+    thread_runtime: Option<&ThreadRuntimeSnapshot>,
+    has_active_turn: bool,
+) -> (TaskPhase, Vec<TaskWaitReason>) {
+    let lifecycle_phase = match lifecycle {
+        TaskLifecycle::Provisioning => Some(TaskPhase::Provisioning),
+        TaskLifecycle::Starting => Some(TaskPhase::Starting),
+        TaskLifecycle::Completed => Some(TaskPhase::Completed),
+        TaskLifecycle::Failed => Some(TaskPhase::Failed),
+        TaskLifecycle::Ready => None,
+    };
+    if let Some(phase) = lifecycle_phase {
+        return (phase, Vec::new());
+    }
+
+    let Some(snapshot) = thread_runtime.filter(|snapshot| snapshot.is_fresh) else {
+        return (TaskPhase::Unavailable, Vec::new());
+    };
+    match &snapshot.status {
+        CodexThreadStatus::NotLoaded => (TaskPhase::NotLoaded, Vec::new()),
+        CodexThreadStatus::Idle if has_active_turn => (TaskPhase::Active, Vec::new()),
+        CodexThreadStatus::Idle => (TaskPhase::Idle, Vec::new()),
+        CodexThreadStatus::SystemError => (TaskPhase::SystemError, Vec::new()),
+        CodexThreadStatus::Active { active_flags } => {
+            let approval = active_flags.iter().any(|flag| flag == "waitingOnApproval");
+            let user_input = active_flags.iter().any(|flag| flag == "waitingOnUserInput");
+            let mut reasons = Vec::with_capacity(usize::from(approval) + usize::from(user_input));
+            if approval {
+                reasons.push(TaskWaitReason::Approval);
+            }
+            if user_input {
+                reasons.push(TaskWaitReason::UserInput);
+            }
+            let phase = if approval {
+                TaskPhase::WaitingForApproval
+            } else if user_input {
+                TaskPhase::WaitingForInput
+            } else {
+                TaskPhase::Active
+            };
+            (phase, reasons)
         }
     }
 }
@@ -140,7 +270,12 @@ pub struct Task {
     pub context_mode: ContextMode,
     pub context: Value,
     pub profile: ProfileSnapshot,
+    pub lifecycle: TaskLifecycle,
+    pub thread_runtime: Option<ThreadRuntimeSnapshot>,
+    /// Derived on every storage read; never persisted as mutable state.
     pub phase: TaskPhase,
+    /// Derived from the complete native active-flag set.
+    pub wait_reasons: Vec<TaskWaitReason>,
     pub branch_name: Option<String>,
     pub base_sha: Option<String>,
     pub worktree_path: Option<PathBuf>,
@@ -214,6 +349,10 @@ pub enum EventKind {
     ApprovalRequested,
     #[serde(rename = "approval.resolved")]
     ApprovalResolved,
+    #[serde(rename = "thread.status.changed")]
+    ThreadStatusChanged,
+    #[serde(rename = "server_request.received")]
+    ServerRequestReceived,
     #[serde(rename = "diff.updated")]
     DiffUpdated,
     #[serde(rename = "agent.message.completed")]
@@ -241,6 +380,8 @@ impl EventKind {
             Self::PlanUpdated => "plan.updated",
             Self::ApprovalRequested => "approval.requested",
             Self::ApprovalResolved => "approval.resolved",
+            Self::ThreadStatusChanged => "thread.status.changed",
+            Self::ServerRequestReceived => "server_request.received",
             Self::DiffUpdated => "diff.updated",
             Self::AgentMessageCompleted => "agent.message.completed",
             Self::TurnCompleted => "turn.completed",
@@ -261,6 +402,8 @@ impl EventKind {
             "plan.updated" => Some(Self::PlanUpdated),
             "approval.requested" => Some(Self::ApprovalRequested),
             "approval.resolved" => Some(Self::ApprovalResolved),
+            "thread.status.changed" => Some(Self::ThreadStatusChanged),
+            "server_request.received" => Some(Self::ServerRequestReceived),
             "diff.updated" => Some(Self::DiffUpdated),
             "agent.message.completed" => Some(Self::AgentMessageCompleted),
             "turn.completed" => Some(Self::TurnCompleted),
@@ -378,5 +521,39 @@ mod tests {
         assert_eq!(wire["sourceHash"], "sha256:test");
         assert!(wire.get("effectiveSettings").is_some());
         assert!(wire.get("source_hash").is_none());
+    }
+
+    #[test]
+    fn derives_runtime_without_losing_native_flags_or_freshness() {
+        let snapshot = ThreadRuntimeSnapshot {
+            status: CodexThreadStatus::Active {
+                active_flags: vec![
+                    "waitingOnUserInput".to_owned(),
+                    "futureFlag".to_owned(),
+                    "waitingOnApproval".to_owned(),
+                ],
+            },
+            runtime_generation: "runtime-1".to_owned(),
+            observed_at_ms: 7,
+            is_fresh: true,
+        };
+        assert_eq!(
+            derive_task_runtime(TaskLifecycle::Ready, Some(&snapshot), true),
+            (
+                TaskPhase::WaitingForApproval,
+                vec![TaskWaitReason::Approval, TaskWaitReason::UserInput]
+            )
+        );
+        assert_eq!(
+            derive_task_runtime(
+                TaskLifecycle::Ready,
+                Some(&ThreadRuntimeSnapshot {
+                    is_fresh: false,
+                    ..snapshot
+                }),
+                true,
+            ),
+            (TaskPhase::Unavailable, Vec::new())
+        );
     }
 }

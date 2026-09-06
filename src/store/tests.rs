@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use super::*;
-use crate::domain::TaskPhase;
+use crate::domain::{CodexThreadStatus, Task, TaskLifecycle, TaskPhase, TaskWaitReason};
 
 fn repository(root: &Path) -> Repository {
     Repository {
@@ -32,6 +32,38 @@ fn new_task(repository_id: &str, name: &str) -> NewTask {
         base_sha: Some("0123456789abcdef".to_owned()),
         worktree_path: Some(PathBuf::from(format!("/tmp/worktrees/{name}"))),
     }
+}
+
+fn ready_task(store: &Store, repository_id: &str, name: &str) -> Task {
+    let (task, _) = store
+        .create_task_with_event(
+            new_task(repository_id, name),
+            EventDraft::task(EventKind::TaskCreated, EventSource::Coco, json!({})),
+        )
+        .unwrap();
+    let (task, _) = store
+        .transition_task_lifecycle_with_event(
+            &task.id,
+            TaskLifecycle::Provisioning,
+            TaskLifecycle::Starting,
+            None,
+            EventDraft::task(EventKind::WorktreeCreated, EventSource::Git, json!({})),
+        )
+        .unwrap();
+    store
+        .bind_thread_with_event(
+            &task.id,
+            TaskLifecycle::Starting,
+            NewThreadBinding {
+                thread_id: format!("thread-{name}"),
+                parent_thread_id: None,
+                status: CodexThreadStatus::Idle,
+                runtime_generation: "runtime-test".to_owned(),
+            },
+            EventDraft::task(EventKind::AgentStarted, EventSource::Codex, json!({})),
+        )
+        .unwrap()
+        .0
 }
 
 #[test]
@@ -82,11 +114,11 @@ fn retires_v1_goal_from_task_projection_without_losing_legacy_data() {
              );
              INSERT INTO tasks (
                 id, repository_id, name, goal, context_mode, context_json,
-                profile_json, phase, created_at_ms, updated_at_ms
+                profile_json, phase, codex_thread_id, created_at_ms, updated_at_ms
              ) VALUES (
                 'task-v1', 'repo-v1', 'legacy', 'legacy goal', 'fresh', '{}',
                 '{"name":"default","sourcePath":null,"sourceHash":"sha256:test","effectiveSettings":{}}',
-                'idle', 1, 1
+                'waiting_for_input', 'thread-v1', 1, 1
              );
              INSERT INTO child_reference VALUES ('child-v1', 'task-v1');
              PRAGMA user_version = 1;"#,
@@ -96,12 +128,23 @@ fn retires_v1_goal_from_task_projection_without_losing_legacy_data() {
     let store = Store::from_connection(connection).unwrap();
     let task = store.task_by_id("task-v1").unwrap().unwrap();
     assert_eq!(task.name, "legacy");
-    assert!(serde_json::to_value(task).unwrap().get("goal").is_none());
+    assert!(serde_json::to_value(&task).unwrap().get("goal").is_none());
     let connection = store.lock().unwrap();
     let version: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
+    assert_eq!(task.lifecycle, TaskLifecycle::Ready);
+    assert_eq!(task.phase, TaskPhase::Unavailable);
+    assert_eq!(
+        task.thread_runtime
+            .as_ref()
+            .map(|snapshot| &snapshot.status),
+        Some(&CodexThreadStatus::Active {
+            active_flags: vec!["waitingOnUserInput".to_owned()]
+        })
+    );
+    assert!(!task.thread_runtime.unwrap().is_fresh);
     let legacy_goal: Option<String> = connection
         .query_row(
             "SELECT legacy_goal FROM tasks WHERE id = 'task-v1'",
@@ -143,10 +186,10 @@ fn state_and_events_change_atomically() {
     assert_eq!(created.task_id.as_deref(), Some(task.id.as_str()));
 
     let (task, _) = store
-        .transition_task_with_event(
+        .transition_task_lifecycle_with_event(
             &task.id,
-            TaskPhase::Provisioning,
-            TaskPhase::Starting,
+            TaskLifecycle::Provisioning,
+            TaskLifecycle::Starting,
             None,
             EventDraft::task(EventKind::WorktreeCreated, EventSource::Git, json!({})),
         )
@@ -165,14 +208,18 @@ fn state_and_events_change_atomically() {
     let (task, _) = store
         .bind_thread_with_event(
             &task.id,
-            TaskPhase::Starting,
-            TaskPhase::Idle,
-            "thread-1",
-            None,
+            TaskLifecycle::Starting,
+            NewThreadBinding {
+                thread_id: "thread-1".to_owned(),
+                parent_thread_id: None,
+                status: CodexThreadStatus::Idle,
+                runtime_generation: "runtime-1".to_owned(),
+            },
             EventDraft::task(EventKind::AgentStarted, EventSource::Codex, json!({})),
         )
         .unwrap();
     assert_eq!(task.codex_thread_id.as_deref(), Some("thread-1"));
+    assert_eq!(task.lifecycle, TaskLifecycle::Ready);
     assert_eq!(task.phase, TaskPhase::Idle);
     assert_eq!(
         store.task_by_thread_id("thread-1").unwrap().unwrap().id,
@@ -182,7 +229,6 @@ fn state_and_events_change_atomically() {
     let (task, turn, _) = store
         .start_turn_with_event(
             &task.id,
-            &[TaskPhase::Idle],
             NewTurn {
                 operation_id: Some("turn-operation".to_owned()),
                 client_message_id: "client-message".to_owned(),
@@ -223,6 +269,43 @@ fn state_and_events_change_atomically() {
 }
 
 #[test]
+fn a_failed_turn_does_not_fail_the_task_lifecycle() {
+    let store = Store::in_memory().unwrap();
+    let repo = repository(Path::new("/tmp/source-failed-turn"));
+    store.register_repository(&repo).unwrap();
+    let task = ready_task(&store, &repo.id, "failed-turn");
+    let (task, turn, _) = store
+        .start_turn_with_event(
+            &task.id,
+            NewTurn {
+                operation_id: Some("failed-turn-operation".to_owned()),
+                client_message_id: "failed-client-message".to_owned(),
+                codex_turn_id: Some("failed-codex-turn".to_owned()),
+                started_at_ms: Some(40),
+            },
+            EventDraft::task(EventKind::TurnStarted, EventSource::Codex, json!({})),
+        )
+        .unwrap();
+    let (task, turn, _) = store
+        .complete_turn_with_event(
+            &task.id,
+            &turn.id,
+            TurnCompletion {
+                phase: TurnPhase::Failed,
+                error: Some(json!({"code": "MODEL_ERROR", "message": "try again"})),
+                completed_at_ms: Some(50),
+            },
+            EventDraft::task(EventKind::TurnCompleted, EventSource::Codex, json!({})),
+        )
+        .unwrap();
+
+    assert_eq!(task.lifecycle, TaskLifecycle::Ready);
+    assert_eq!(task.phase, TaskPhase::Idle);
+    assert_eq!(task.last_error_code.as_deref(), Some("MODEL_ERROR"));
+    assert_eq!(turn.phase, TurnPhase::Failed);
+}
+
+#[test]
 fn failed_compare_and_set_does_not_append_an_event() {
     let store = Store::in_memory().unwrap();
     let repo = repository(Path::new("/tmp/source-cas"));
@@ -235,10 +318,10 @@ fn failed_compare_and_set_does_not_append_an_event() {
         .unwrap();
 
     assert!(matches!(
-        store.transition_task_with_event(
+        store.transition_task_lifecycle_with_event(
             &task.id,
-            TaskPhase::Idle,
-            TaskPhase::Active,
+            TaskLifecycle::Ready,
+            TaskLifecycle::Completed,
             None,
             EventDraft::task(EventKind::TurnStarted, EventSource::Coco, json!({})),
         ),
@@ -249,6 +332,86 @@ fn failed_compare_and_set_does_not_append_an_event() {
         store.task_by_id(&task.id).unwrap().unwrap().phase,
         TaskPhase::Provisioning
     );
+}
+
+#[test]
+fn native_thread_status_is_persisted_losslessly_and_can_be_staled() {
+    let store = Store::in_memory().unwrap();
+    let repo = repository(Path::new("/tmp/source-runtime"));
+    store.register_repository(&repo).unwrap();
+    let (task, _) = store
+        .create_task_with_event(
+            new_task(&repo.id, "runtime"),
+            EventDraft::task(EventKind::TaskCreated, EventSource::Coco, json!({})),
+        )
+        .unwrap();
+    let (task, _) = store
+        .transition_task_lifecycle_with_event(
+            &task.id,
+            TaskLifecycle::Provisioning,
+            TaskLifecycle::Starting,
+            None,
+            EventDraft::task(EventKind::WorktreeCreated, EventSource::Git, json!({})),
+        )
+        .unwrap();
+    let (task, _) = store
+        .bind_thread_with_event(
+            &task.id,
+            TaskLifecycle::Starting,
+            NewThreadBinding {
+                thread_id: "thread-runtime".to_owned(),
+                parent_thread_id: None,
+                status: CodexThreadStatus::Idle,
+                runtime_generation: "runtime-1".to_owned(),
+            },
+            EventDraft::task(EventKind::AgentStarted, EventSource::Codex, json!({})),
+        )
+        .unwrap();
+    let (task, event) = store
+        .observe_thread_status_with_event(
+            &task.id,
+            CodexThreadStatus::Active {
+                active_flags: vec![
+                    "waitingOnUserInput".to_owned(),
+                    "futureFlag".to_owned(),
+                    "waitingOnApproval".to_owned(),
+                    "futureFlag".to_owned(),
+                ],
+            },
+            "runtime-2",
+            EventDraft::task(
+                EventKind::ThreadStatusChanged,
+                EventSource::Codex,
+                json!({}),
+            ),
+        )
+        .unwrap();
+
+    assert_eq!(event.kind, EventKind::ThreadStatusChanged);
+    assert_eq!(task.lifecycle, TaskLifecycle::Ready);
+    assert_eq!(task.phase, TaskPhase::WaitingForApproval);
+    assert_eq!(
+        task.wait_reasons,
+        [TaskWaitReason::Approval, TaskWaitReason::UserInput]
+    );
+    let snapshot = task.thread_runtime.unwrap();
+    assert_eq!(snapshot.runtime_generation, "runtime-2");
+    assert_eq!(
+        snapshot.status,
+        CodexThreadStatus::Active {
+            active_flags: vec![
+                "futureFlag".to_owned(),
+                "waitingOnApproval".to_owned(),
+                "waitingOnUserInput".to_owned(),
+            ]
+        }
+    );
+
+    assert_eq!(store.mark_thread_statuses_stale().unwrap(), 1);
+    let task = store.task_by_id(&task.id).unwrap().unwrap();
+    assert_eq!(task.lifecycle, TaskLifecycle::Ready);
+    assert_eq!(task.phase, TaskPhase::Unavailable);
+    assert!(!task.thread_runtime.unwrap().is_fresh);
 }
 
 #[test]
@@ -274,11 +437,19 @@ fn restart_reconciliation_marks_inflight_state_interrupted() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("coco.sqlite3");
     let task_id;
+    let unfinished_creation_id;
     let turn_id;
     {
         let store = Store::open(&path).unwrap();
         let repo = repository(&temp.path().join("source"));
         store.register_repository(&repo).unwrap();
+        let (unfinished_creation, _) = store
+            .create_task_with_event(
+                new_task(&repo.id, "unfinished-creation"),
+                EventDraft::task(EventKind::TaskCreated, EventSource::Coco, json!({})),
+            )
+            .unwrap();
+        unfinished_creation_id = unfinished_creation.id;
         let (task, _) = store
             .create_task_with_event(
                 new_task(&repo.id, "restart"),
@@ -286,18 +457,30 @@ fn restart_reconciliation_marks_inflight_state_interrupted() {
             )
             .unwrap();
         let (task, _) = store
-            .transition_task_with_event(
+            .transition_task_lifecycle_with_event(
                 &task.id,
-                TaskPhase::Provisioning,
-                TaskPhase::Starting,
+                TaskLifecycle::Provisioning,
+                TaskLifecycle::Starting,
                 None,
                 EventDraft::task(EventKind::WorktreeCreated, EventSource::Git, json!({})),
+            )
+            .unwrap();
+        let (task, _) = store
+            .bind_thread_with_event(
+                &task.id,
+                TaskLifecycle::Starting,
+                NewThreadBinding {
+                    thread_id: "thread-restart".to_owned(),
+                    parent_thread_id: None,
+                    status: CodexThreadStatus::Idle,
+                    runtime_generation: "runtime-before-restart".to_owned(),
+                },
+                EventDraft::task(EventKind::AgentStarted, EventSource::Codex, json!({})),
             )
             .unwrap();
         let (_, turn, _) = store
             .start_turn_with_event(
                 &task.id,
-                &[TaskPhase::Starting],
                 NewTurn {
                     operation_id: Some("restart-operation".to_owned()),
                     client_message_id: "restart-message".to_owned(),
@@ -313,11 +496,17 @@ fn restart_reconciliation_marks_inflight_state_interrupted() {
 
     let store = Store::open(&path).unwrap();
     let reconciled = store.reconcile_unfinished().unwrap();
-    assert_eq!(reconciled.len(), 1);
+    assert_eq!(reconciled.len(), 2);
+    let unfinished_creation = store.task_by_id(&unfinished_creation_id).unwrap().unwrap();
+    assert_eq!(unfinished_creation.lifecycle, TaskLifecycle::Failed);
+    assert_eq!(unfinished_creation.phase, TaskPhase::Failed);
     assert_eq!(
-        store.task_by_id(&task_id).unwrap().unwrap().phase,
-        TaskPhase::Interrupted
+        store.task_by_id(&task_id).unwrap().unwrap().lifecycle,
+        TaskLifecycle::Ready
     );
+    let task = store.task_by_id(&task_id).unwrap().unwrap();
+    assert_eq!(task.phase, TaskPhase::Unavailable);
+    assert!(!task.thread_runtime.unwrap().is_fresh);
     assert_eq!(
         store.turn_by_id(&turn_id).unwrap().unwrap().phase,
         TurnPhase::Interrupted

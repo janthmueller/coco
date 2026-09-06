@@ -9,9 +9,11 @@ pub(super) fn phase_label(phase: &str) -> &'static str {
         "waiting_for_approval" => "Waiting for approval",
         "waiting_for_input" => "Waiting for input",
         "idle" => "Ready",
+        "not_loaded" => "Codex thread is unloaded",
+        "system_error" => "Codex system error",
+        "unavailable" => "Status unavailable",
         "completed" => "Completed",
         "failed" => "Failed",
-        "interrupted" => "Interrupted",
         _ => "Unknown",
     }
 }
@@ -19,16 +21,16 @@ pub(super) fn phase_label(phase: &str) -> &'static str {
 pub(super) fn versioned(value: Value) -> Value {
     match value {
         Value::Object(mut object) => {
-            object.insert("schemaVersion".into(), Value::from(1));
+            object.insert("schemaVersion".into(), Value::from(2));
             Value::Object(object)
         }
-        value => json!({ "schemaVersion": 1, "result": value }),
+        value => json!({ "schemaVersion": 2, "result": value }),
     }
 }
 
 pub(super) fn versioned_array(key: &str, value: Value) -> Value {
     let mut object = serde_json::Map::new();
-    object.insert("schemaVersion".to_owned(), Value::from(1));
+    object.insert("schemaVersion".to_owned(), Value::from(2));
     object.insert(key.to_owned(), value);
     Value::Object(object)
 }

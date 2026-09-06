@@ -8,14 +8,15 @@ use super::{StoreError, path_text};
 #[cfg(test)]
 use crate::domain::{Audit, AuditOutcome};
 use crate::domain::{
-    ContextMode, EventKind, EventSource, NormalizedEvent, Repository, Task, TaskPhase, Turn,
-    TurnPhase,
+    CodexThreadStatus, ContextMode, EventKind, EventSource, NormalizedEvent, Repository, Task,
+    TaskLifecycle, ThreadRuntimeSnapshot, Turn, TurnPhase, derive_task_runtime,
 };
 
 pub(super) const TASK_SELECT: &str = "SELECT id, create_operation_id, repository_id, name,
-    context_mode, context_json, profile_json, phase, branch_name, base_sha, worktree_path,
-    codex_thread_id, parent_thread_id, active_turn_id, last_error_code, last_error_message,
-    created_at_ms, updated_at_ms, completed_at_ms FROM tasks";
+    context_mode, context_json, profile_json, lifecycle, thread_status_json,
+    thread_status_generation, thread_status_observed_at_ms, thread_status_is_fresh,
+    branch_name, base_sha, worktree_path, codex_thread_id, parent_thread_id, active_turn_id,
+    last_error_code, last_error_message, created_at_ms, updated_at_ms, completed_at_ms FROM tasks";
 
 pub(super) const TURN_SELECT: &str = "SELECT id, task_id, operation_id, client_message_id,
     codex_turn_id, phase, requested_at_ms, started_at_ms, completed_at_ms, error_json FROM turns";
@@ -41,7 +42,13 @@ pub(super) fn map_repository(row: &Row<'_>) -> rusqlite::Result<Repository> {
 
 pub(super) fn map_task(row: &Row<'_>) -> rusqlite::Result<Task> {
     let context_mode: String = row.get(4)?;
-    let phase: String = row.get(7)?;
+    let lifecycle: String = row.get(7)?;
+    let lifecycle = TaskLifecycle::parse(&lifecycle)
+        .ok_or_else(|| invalid_value(7, "task lifecycle", &lifecycle))?;
+    let thread_runtime = map_thread_status(row)?;
+    let active_turn_id: Option<String> = row.get(17)?;
+    let (phase, wait_reasons) =
+        derive_task_runtime(lifecycle, thread_runtime.as_ref(), active_turn_id.is_some());
     Ok(Task {
         id: row.get(0)?,
         create_operation_id: row.get(1)?,
@@ -51,19 +58,40 @@ pub(super) fn map_task(row: &Row<'_>) -> rusqlite::Result<Task> {
             .ok_or_else(|| invalid_value(4, "context_mode", &context_mode))?,
         context: json_from_column(row, 5)?,
         profile: json_from_column(row, 6)?,
-        phase: TaskPhase::parse(&phase).ok_or_else(|| invalid_value(7, "phase", &phase))?,
-        branch_name: row.get(8)?,
-        base_sha: row.get(9)?,
-        worktree_path: row.get::<_, Option<String>>(10)?.map(PathBuf::from),
-        codex_thread_id: row.get(11)?,
-        parent_thread_id: row.get(12)?,
-        active_turn_id: row.get(13)?,
-        last_error_code: row.get(14)?,
-        last_error_message: row.get(15)?,
-        created_at_ms: row.get(16)?,
-        updated_at_ms: row.get(17)?,
-        completed_at_ms: row.get(18)?,
+        lifecycle,
+        thread_runtime,
+        phase,
+        wait_reasons,
+        branch_name: row.get(12)?,
+        base_sha: row.get(13)?,
+        worktree_path: row.get::<_, Option<String>>(14)?.map(PathBuf::from),
+        codex_thread_id: row.get(15)?,
+        parent_thread_id: row.get(16)?,
+        active_turn_id,
+        last_error_code: row.get(18)?,
+        last_error_message: row.get(19)?,
+        created_at_ms: row.get(20)?,
+        updated_at_ms: row.get(21)?,
+        completed_at_ms: row.get(22)?,
     })
+}
+
+fn map_thread_status(row: &Row<'_>) -> rusqlite::Result<Option<ThreadRuntimeSnapshot>> {
+    let encoded: Option<String> = row.get(8)?;
+    let Some(encoded) = encoded else {
+        return Ok(None);
+    };
+    let status = serde_json::from_str::<CodexThreadStatus>(&encoded)
+        .map(CodexThreadStatus::canonicalized)
+        .map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(8, Type::Text, Box::new(error))
+        })?;
+    Ok(Some(ThreadRuntimeSnapshot {
+        status,
+        runtime_generation: row.get(9)?,
+        observed_at_ms: row.get(10)?,
+        is_fresh: row.get(11)?,
+    }))
 }
 
 pub(super) fn map_turn(row: &Row<'_>) -> rusqlite::Result<Turn> {

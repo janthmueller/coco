@@ -10,6 +10,10 @@ status: stable
 
 ## 2026-09-06
 
+- **Runtime-state ownership**: Migrated SQLite to schema v3, separated the
+  CoCo task lifecycle from exact generation-aware Codex thread status and turn
+  state, made public phase/wait reasons read-time projections, and stopped
+  treating server-request method names as state transitions.
 - **Post-Phase-2 architecture review**: Reaffirmed the single-package design,
   hid twelve implementation modules behind three executable entry points, and
   used the narrower facade to remove previously masked dead code.

@@ -3,7 +3,9 @@ use tracing::{debug, warn};
 
 use super::Coordinator;
 use crate::codex::CodexEvent;
-use crate::domain::{EventKind, EventSource, Task, TaskPhase, Turn, TurnPhase};
+use crate::domain::{
+    CodexThreadStatus, EventKind, EventSource, Task, TaskLifecycle, Turn, TurnPhase,
+};
 use crate::store::{EventDraft, NewTurn, StoreError, TurnCompletion};
 
 impl Coordinator {
@@ -16,6 +18,10 @@ impl Coordinator {
                 self.record_codex_server_request(id, &method, params)
             }
         }
+    }
+
+    pub(crate) fn record_codex_disconnected(&self) -> Result<usize, StoreError> {
+        self.store.mark_thread_statuses_stale()
     }
 
     fn record_codex_notification(&self, method: &str, params: Value) -> Result<(), StoreError> {
@@ -149,17 +155,16 @@ impl Coordinator {
         if self.store.turn_by_codex_id(codex_turn_id)?.is_some() || pending {
             return Ok(());
         }
-        if task.phase != TaskPhase::Idle {
+        if task.lifecycle != TaskLifecycle::Ready || task.active_turn_id.is_some() {
             warn!(
                 task_id = %task.id,
                 phase = task.phase.as_str(),
-                "ignoring an external turn for a task that is not idle"
+                "ignoring an external turn for a task that cannot accept one"
             );
             return Ok(());
         }
         self.store.start_turn_with_event(
             &task.id,
-            &[TaskPhase::Idle],
             NewTurn {
                 operation_id: None,
                 client_message_id: format!("codex-external:{codex_turn_id}"),
@@ -176,59 +181,29 @@ impl Coordinator {
     }
 
     fn record_thread_status_changed(&self, task: &Task, params: &Value) -> Result<(), StoreError> {
-        let status = params.pointer("/status/type").and_then(Value::as_str);
-        if status != Some("active") {
+        let Some(status) = params.get("status").cloned() else {
+            warn!(task_id = %task.id, "ignoring thread status notification without status");
             return Ok(());
-        }
-        let flags = params
-            .pointer("/status/activeFlags")
-            .and_then(Value::as_array)
-            .map(Vec::as_slice)
-            .unwrap_or(&[]);
-        let next = if flags
-            .iter()
-            .any(|flag| flag.as_str() == Some("waitingOnUserInput"))
-        {
-            TaskPhase::WaitingForInput
-        } else if flags
-            .iter()
-            .any(|flag| flag.as_str() == Some("waitingOnApproval"))
-        {
-            TaskPhase::WaitingForApproval
-        } else {
-            TaskPhase::Active
         };
-        if task.phase == next {
-            return Ok(());
-        }
-        let active_or_waiting = |phase| {
-            matches!(
-                phase,
-                TaskPhase::Active | TaskPhase::WaitingForApproval | TaskPhase::WaitingForInput
-            )
+        let status = match serde_json::from_value::<CodexThreadStatus>(status) {
+            Ok(status) => status.canonicalized(),
+            Err(source) => {
+                warn!(task_id = %task.id, %source, "ignoring invalid native thread status");
+                return Ok(());
+            }
         };
-        let allowed = active_or_waiting(task.phase) && active_or_waiting(next);
-        if !allowed {
-            return Ok(());
-        }
-        let kind = if next == TaskPhase::Active {
-            EventKind::ApprovalResolved
-        } else {
-            EventKind::ApprovalRequested
-        };
-        self.store.transition_task_with_event(
+        self.store.observe_thread_status_with_event(
             &task.id,
-            task.phase,
-            next,
-            None,
+            status.clone(),
+            &self.runtime_generation,
             EventDraft {
                 task_id: Some(task.id.clone()),
                 turn_id: task.active_turn_id.clone(),
-                kind,
+                kind: EventKind::ThreadStatusChanged,
                 source: EventSource::Codex,
                 source_method: Some("thread/status/changed".to_owned()),
                 occurred_at_ms: None,
-                payload: json!({"status": params.get("status")}),
+                payload: json!({"status": status}),
             },
         )?;
         Ok(())
@@ -245,11 +220,6 @@ impl Coordinator {
             return Ok(());
         };
         let turn = self.turn_for_codex_params(&task, &params)?;
-        let waiting_phase = if method.contains("requestUserInput") {
-            TaskPhase::WaitingForInput
-        } else {
-            TaskPhase::WaitingForApproval
-        };
         let payload = json!({
             "requestId": id,
             "method": method,
@@ -258,23 +228,13 @@ impl Coordinator {
         let event = EventDraft {
             task_id: Some(task.id.clone()),
             turn_id: turn.map(|turn| turn.id),
-            kind: EventKind::ApprovalRequested,
+            kind: EventKind::ServerRequestReceived,
             source: EventSource::Codex,
             source_method: Some(method.to_owned()),
             occurred_at_ms: None,
             payload,
         };
-        if task.phase == TaskPhase::Active {
-            self.store.transition_task_with_event(
-                &task.id,
-                TaskPhase::Active,
-                waiting_phase,
-                None,
-                event,
-            )?;
-        } else {
-            self.store.append_event(event)?;
-        }
+        self.store.append_event(event)?;
         Ok(())
     }
 

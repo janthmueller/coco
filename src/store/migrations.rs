@@ -3,16 +3,24 @@ use rusqlite::Connection;
 use super::StoreError;
 
 pub(super) fn migrate(connection: &Connection) -> Result<(), StoreError> {
-    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if version > 2 {
+    let mut version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version > 3 {
         return Err(StoreError::UnsupportedSchema(version));
     }
-    if version == 2 {
+    if version == 3 {
         return Ok(());
     }
     if version == 1 {
-        return migrate_retired_task_goal(connection);
+        migrate_retired_task_goal(connection)?;
+        version = 2;
     }
+    if version == 2 {
+        return migrate_task_runtime_ownership(connection);
+    }
+    create_current_schema(connection)
+}
+
+fn create_current_schema(connection: &Connection) -> Result<(), StoreError> {
     connection.execute_batch(
         "BEGIN IMMEDIATE;
          CREATE TABLE IF NOT EXISTS repositories (
@@ -33,10 +41,16 @@ pub(super) fn migrate(connection: &Connection) -> Result<(), StoreError> {
             context_mode TEXT NOT NULL CHECK (context_mode IN ('fresh', 'fork', 'handoff')),
             context_json TEXT NOT NULL CHECK (json_valid(context_json)),
             profile_json TEXT NOT NULL CHECK (json_valid(profile_json)),
-            phase TEXT NOT NULL CHECK (phase IN (
-                'provisioning', 'starting', 'active', 'waiting_for_approval',
-                'waiting_for_input', 'idle', 'completed', 'failed', 'interrupted'
+            lifecycle TEXT NOT NULL CHECK (lifecycle IN (
+                'provisioning', 'starting', 'ready', 'completed', 'failed'
             )),
+            thread_status_json TEXT CHECK (
+                thread_status_json IS NULL OR json_valid(thread_status_json)
+            ),
+            thread_status_generation TEXT,
+            thread_status_observed_at_ms INTEGER,
+            thread_status_is_fresh INTEGER NOT NULL DEFAULT 0
+                CHECK (thread_status_is_fresh IN (0, 1)),
             branch_name TEXT,
             base_sha TEXT,
             worktree_path TEXT UNIQUE,
@@ -48,6 +62,14 @@ pub(super) fn migrate(connection: &Connection) -> Result<(), StoreError> {
             created_at_ms INTEGER NOT NULL,
             updated_at_ms INTEGER NOT NULL,
             completed_at_ms INTEGER,
+            CHECK (
+                (thread_status_json IS NULL AND thread_status_generation IS NULL
+                    AND thread_status_observed_at_ms IS NULL
+                    AND thread_status_is_fresh = 0)
+                OR
+                (thread_status_json IS NOT NULL AND thread_status_generation IS NOT NULL
+                    AND thread_status_observed_at_ms IS NOT NULL)
+            ),
             UNIQUE(repository_id, name),
             UNIQUE(repository_id, branch_name)
          );
@@ -92,9 +114,105 @@ pub(super) fn migrate(connection: &Connection) -> Result<(), StoreError> {
          );
          CREATE INDEX IF NOT EXISTS audit_task_sequence_idx
             ON audit_events(task_id, sequence);
-         PRAGMA user_version = 2;
+         PRAGMA user_version = 3;
          COMMIT;",
     )?;
+    Ok(())
+}
+
+fn migrate_task_runtime_ownership(connection: &Connection) -> Result<(), StoreError> {
+    connection.pragma_update(None, "foreign_keys", false)?;
+    let migration = connection.execute_batch(
+        r#"BEGIN IMMEDIATE;
+         CREATE TABLE tasks_v3 (
+            id TEXT PRIMARY KEY,
+            create_operation_id TEXT UNIQUE,
+            repository_id TEXT NOT NULL REFERENCES repositories(id),
+            name TEXT NOT NULL,
+            legacy_goal TEXT,
+            context_mode TEXT NOT NULL CHECK (context_mode IN ('fresh', 'fork', 'handoff')),
+            context_json TEXT NOT NULL CHECK (json_valid(context_json)),
+            profile_json TEXT NOT NULL CHECK (json_valid(profile_json)),
+            lifecycle TEXT NOT NULL CHECK (lifecycle IN (
+                'provisioning', 'starting', 'ready', 'completed', 'failed'
+            )),
+            thread_status_json TEXT CHECK (
+                thread_status_json IS NULL OR json_valid(thread_status_json)
+            ),
+            thread_status_generation TEXT,
+            thread_status_observed_at_ms INTEGER,
+            thread_status_is_fresh INTEGER NOT NULL DEFAULT 0
+                CHECK (thread_status_is_fresh IN (0, 1)),
+            branch_name TEXT,
+            base_sha TEXT,
+            worktree_path TEXT UNIQUE,
+            codex_thread_id TEXT UNIQUE,
+            parent_thread_id TEXT,
+            active_turn_id TEXT,
+            last_error_code TEXT,
+            last_error_message TEXT,
+            created_at_ms INTEGER NOT NULL,
+            updated_at_ms INTEGER NOT NULL,
+            completed_at_ms INTEGER,
+            CHECK (
+                (thread_status_json IS NULL AND thread_status_generation IS NULL
+                    AND thread_status_observed_at_ms IS NULL
+                    AND thread_status_is_fresh = 0)
+                OR
+                (thread_status_json IS NOT NULL AND thread_status_generation IS NOT NULL
+                    AND thread_status_observed_at_ms IS NOT NULL)
+            ),
+            UNIQUE(repository_id, name),
+            UNIQUE(repository_id, branch_name)
+         );
+         INSERT INTO tasks_v3 (
+            id, create_operation_id, repository_id, name, legacy_goal, context_mode,
+            context_json, profile_json, lifecycle, thread_status_json,
+            thread_status_generation, thread_status_observed_at_ms,
+            thread_status_is_fresh, branch_name, base_sha, worktree_path,
+            codex_thread_id, parent_thread_id, active_turn_id, last_error_code,
+            last_error_message, created_at_ms, updated_at_ms, completed_at_ms
+         ) SELECT
+            id, create_operation_id, repository_id, name, legacy_goal, context_mode,
+            context_json, profile_json,
+            CASE
+                WHEN phase = 'provisioning' THEN 'provisioning'
+                WHEN phase = 'starting' THEN 'starting'
+                WHEN phase = 'completed' THEN 'completed'
+                WHEN codex_thread_id IS NOT NULL THEN 'ready'
+                ELSE 'failed'
+            END,
+            CASE phase
+                WHEN 'idle' THEN '{"type":"idle"}'
+                WHEN 'active' THEN '{"type":"active","activeFlags":[]}'
+                WHEN 'waiting_for_approval' THEN
+                    '{"type":"active","activeFlags":["waitingOnApproval"]}'
+                WHEN 'waiting_for_input' THEN
+                    '{"type":"active","activeFlags":["waitingOnUserInput"]}'
+                ELSE NULL
+            END,
+            CASE WHEN phase IN (
+                'idle', 'active', 'waiting_for_approval', 'waiting_for_input'
+            ) THEN 'legacy-v2' ELSE NULL END,
+            CASE WHEN phase IN (
+                'idle', 'active', 'waiting_for_approval', 'waiting_for_input'
+            ) THEN updated_at_ms ELSE NULL END,
+            0,
+            branch_name, base_sha, worktree_path, codex_thread_id, parent_thread_id,
+            active_turn_id, last_error_code, last_error_message, created_at_ms,
+            updated_at_ms, completed_at_ms
+         FROM tasks;
+         DROP TABLE tasks;
+         ALTER TABLE tasks_v3 RENAME TO tasks;
+         PRAGMA user_version = 3;
+         COMMIT;"#,
+    );
+    if migration.is_err() {
+        let _ = connection.execute_batch("ROLLBACK;");
+    }
+    let foreign_keys = connection.pragma_update(None, "foreign_keys", true);
+    migration?;
+    foreign_keys?;
     Ok(())
 }
 

@@ -87,8 +87,10 @@ pub(super) fn follow_stops_at(phase: &str) -> bool {
         "waiting_for_approval"
             | "waiting_for_input"
             | "idle"
+            | "not_loaded"
+            | "system_error"
+            | "unavailable"
             | "completed"
             | "failed"
-            | "interrupted"
     )
 }

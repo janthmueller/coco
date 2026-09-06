@@ -9,7 +9,9 @@ use tempfile::TempDir;
 use super::turn::PendingTurnGuard;
 use super::*;
 use crate::codex::CodexEvent;
-use crate::domain::ContextMode;
+use crate::domain::{
+    CodexThreadStatus, ContextMode, Task, TaskLifecycle, TaskPhase, TaskWaitReason,
+};
 use crate::protocol::{
     EventListParams, RepositoryRegisterParams, TaskCreateParams, TaskDiffParams, TaskGetParams,
     TaskGitStatus, TaskListParams, TurnStartParams,
@@ -68,8 +70,9 @@ impl WorkerRuntime for FakeWorker {
         let id = format!("thread-{sequence}");
         Ok(StartedThread {
             id: id.clone(),
+            status: CodexThreadStatus::Idle,
             response: json!({
-                "thread": {"id": id},
+                "thread": {"id": id, "status": {"type": "idle"}},
                 "cwd": cwd,
                 "model": "gpt-test",
                 "modelProvider": "test-provider",
@@ -137,6 +140,7 @@ impl Fixture {
             worker.clone(),
             worktrees.clone(),
             codex_home,
+            "runtime-test".to_owned(),
         );
         Self {
             _temp: temp,
@@ -179,7 +183,15 @@ async fn prepares_an_idle_task_without_starting_a_turn_and_replays_operation_ids
         .await
         .unwrap();
     let task = created.task.clone();
+    assert_eq!(task.lifecycle, TaskLifecycle::Ready);
     assert_eq!(task.phase, TaskPhase::Idle);
+    assert_eq!(
+        task.thread_runtime
+            .as_ref()
+            .map(|snapshot| &snapshot.status),
+        Some(&CodexThreadStatus::Idle)
+    );
+    assert!(task.thread_runtime.as_ref().unwrap().is_fresh);
     assert_eq!(task.codex_thread_id.as_deref(), Some("thread-1"));
     assert!(created.turn_id.is_none());
     assert_eq!(task.profile.effective_settings["model"], "gpt-test");
@@ -239,6 +251,7 @@ async fn normalizes_codex_events_and_allows_an_idempotent_follow_up_turn() {
     };
     let first_started = fixture.coordinator.start_turn(first_send).await.unwrap();
     assert_eq!(first_started.codex_turn_id.as_deref(), Some("turn-1"));
+    assert_eq!(first_started.task.phase, TaskPhase::Active);
 
     fixture
         .coordinator
@@ -255,16 +268,16 @@ async fn normalizes_codex_events_and_allows_an_idempotent_follow_up_turn() {
         .unwrap();
     assert_eq!(
         fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
-        TaskPhase::WaitingForApproval
+        TaskPhase::Active
     );
-    let approval = fixture
+    let request = fixture
         .store
         .events_after(Some(&task.id), 0)
         .unwrap()
         .pop()
         .unwrap();
-    assert_eq!(approval.kind, EventKind::ApprovalRequested);
-    assert!(!approval.payload.to_string().contains("must-not-persist"));
+    assert_eq!(request.kind, EventKind::ServerRequestReceived);
+    assert!(!request.payload.to_string().contains("must-not-persist"));
 
     fixture
         .coordinator
@@ -315,6 +328,77 @@ async fn normalizes_codex_events_and_allows_an_idempotent_follow_up_turn() {
     ));
 }
 
+fn record_thread_status(fixture: &Fixture, status: Value) {
+    fixture
+        .coordinator
+        .record_codex_event(CodexEvent::Notification {
+            method: "thread/status/changed".to_owned(),
+            params: json!({"threadId": "thread-1", "status": status}),
+        })
+        .unwrap();
+}
+
+fn assert_waiting_status_projection(fixture: &Fixture, task: &Task) {
+    record_thread_status(
+        fixture,
+        json!({
+            "type": "active",
+            "activeFlags": ["waitingOnUserInput", "futureFlag", "waitingOnApproval"]
+        }),
+    );
+    let waiting = fixture.store.task_by_id(&task.id).unwrap().unwrap();
+    assert_eq!(waiting.phase, TaskPhase::WaitingForApproval);
+    assert_eq!(
+        waiting.wait_reasons,
+        [TaskWaitReason::Approval, TaskWaitReason::UserInput]
+    );
+    assert_eq!(
+        waiting
+            .thread_runtime
+            .as_ref()
+            .map(|snapshot| &snapshot.status),
+        Some(&CodexThreadStatus::Active {
+            active_flags: vec![
+                "futureFlag".to_owned(),
+                "waitingOnApproval".to_owned(),
+                "waitingOnUserInput".to_owned(),
+            ]
+        })
+    );
+
+    record_thread_status(
+        fixture,
+        json!({"type": "active", "activeFlags": ["waitingOnUserInput"]}),
+    );
+    assert_eq!(
+        fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
+        TaskPhase::WaitingForInput
+    );
+    record_thread_status(fixture, json!({"type": "active", "activeFlags": []}));
+    assert_eq!(
+        fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
+        TaskPhase::Active
+    );
+}
+
+fn assert_nonactive_status_projection(fixture: &Fixture, task: &Task) {
+    record_thread_status(fixture, json!({"type": "systemError"}));
+    assert_eq!(
+        fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
+        TaskPhase::SystemError
+    );
+    record_thread_status(fixture, json!({"type": "notLoaded"}));
+    assert_eq!(
+        fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
+        TaskPhase::NotLoaded
+    );
+    assert_eq!(fixture.coordinator.record_codex_disconnected().unwrap(), 1);
+    assert_eq!(
+        fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
+        TaskPhase::Unavailable
+    );
+}
+
 #[tokio::test]
 async fn tracks_turns_started_by_an_external_tui_and_runtime_waiting_states() {
     let fixture = Fixture::new(FakeWorker::default());
@@ -357,20 +441,7 @@ async fn tracks_turns_started_by_an_external_tui_and_runtime_waiting_states() {
             .is_some()
     );
 
-    fixture
-        .coordinator
-        .record_codex_event(CodexEvent::Notification {
-            method: "thread/status/changed".to_owned(),
-            params: json!({
-                "threadId": "thread-1",
-                "status": {"type": "active", "activeFlags": ["waitingOnUserInput"]},
-            }),
-        })
-        .unwrap();
-    assert_eq!(
-        fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
-        TaskPhase::WaitingForInput
-    );
+    assert_waiting_status_projection(&fixture, &task);
 
     fixture
         .coordinator
@@ -378,22 +449,7 @@ async fn tracks_turns_started_by_an_external_tui_and_runtime_waiting_states() {
             method: "thread/status/changed".to_owned(),
             params: json!({
                 "threadId": "thread-1",
-                "status": {"type": "active", "activeFlags": ["waitingOnApproval"]},
-            }),
-        })
-        .unwrap();
-    assert_eq!(
-        fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
-        TaskPhase::WaitingForApproval
-    );
-
-    fixture
-        .coordinator
-        .record_codex_event(CodexEvent::Notification {
-            method: "thread/status/changed".to_owned(),
-            params: json!({
-                "threadId": "thread-1",
-                "status": {"type": "active", "activeFlags": []},
+                "status": {"type": "idle"},
             }),
         })
         .unwrap();
@@ -416,6 +472,8 @@ async fn tracks_turns_started_by_an_external_tui_and_runtime_waiting_states() {
         fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
         TaskPhase::Idle
     );
+
+    assert_nonactive_status_projection(&fixture, &task);
 }
 
 #[tokio::test]
@@ -436,6 +494,7 @@ async fn preserves_the_worktree_and_marks_the_task_failed_after_worker_failure()
         .unwrap()
         .unwrap();
     assert_eq!(task.phase, TaskPhase::Failed);
+    assert_eq!(task.lifecycle, TaskLifecycle::Failed);
     assert_eq!(task.last_error_code.as_deref(), Some("CODEX_ERROR"));
     assert!(task.worktree_path.unwrap().is_dir());
     assert_eq!(fixture.worker.calls().len(), 1);

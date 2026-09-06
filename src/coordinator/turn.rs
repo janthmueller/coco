@@ -89,7 +89,6 @@ impl Coordinator {
             .await?;
         let (task, turn, _) = self.store.start_turn_with_event(
             &task.id,
-            &[TaskPhase::Idle],
             NewTurn {
                 operation_id: Some(params.operation_id),
                 client_message_id,

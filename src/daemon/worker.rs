@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 
 use crate::codex::CodexClient;
 use crate::coordinator::{StartedThread, StartedTurn, WorkerError, WorkerRuntime};
+use crate::domain::CodexThreadStatus;
 
 #[derive(Debug, Clone)]
 pub(super) struct CodexWorker {
@@ -38,6 +39,15 @@ impl WorkerRuntime for CodexWorker {
             .and_then(Value::as_str)
             .ok_or(WorkerError::InvalidResponse("thread.id"))?
             .to_owned();
+        let status = response
+            .pointer("/thread/status")
+            .cloned()
+            .ok_or(WorkerError::InvalidResponse("thread.status"))
+            .and_then(|status| {
+                serde_json::from_value::<CodexThreadStatus>(status)
+                    .map(CodexThreadStatus::canonicalized)
+                    .map_err(|error| WorkerError::InvalidThreadStatus(error.to_string()))
+            })?;
         let returned_cwd = response
             .get("cwd")
             .and_then(Value::as_str)
@@ -49,7 +59,11 @@ impl WorkerRuntime for CodexWorker {
                 actual: returned_cwd,
             });
         }
-        Ok(StartedThread { id, response })
+        Ok(StartedThread {
+            id,
+            status,
+            response,
+        })
     }
 
     async fn start_turn(

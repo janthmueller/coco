@@ -89,10 +89,10 @@ release:
 
 ### Recommendations adopted by this draft
 
-- Represent runtime phase and Git condition separately. Values such as
-  `active` and `waiting_for_approval` describe execution, while `dirty` and
-  `ahead_of_base` are independently calculated Git facets. A single combined
-  enum would permit contradictory or lossy state.
+- Represent CoCo lifecycle, native Codex thread status, turn correlation, and
+  Git condition separately. `phase` and `waitReasons` are a read-time summary;
+  `dirty` and `ahead_of_base` remain independently calculated Git facets. A
+  single stored enum would permit contradictory or lossy state.
 - Store an immutable profile snapshot and context descriptor on each task so a
   later configuration edit cannot silently change the audit record.
 - Make every mutating client request carry a client-generated operation ID.
@@ -182,8 +182,9 @@ sharing conversation history.
   worktree.
 - A task has at most one in-progress turn in v0.
 - CoCo never guesses that a task is complete from a successful turn. Turn
-  completion returns the task to `idle`; explicit task completion is deferred
-  until a lifecycle command is specified.
+  completion clears the active-turn correlation; a fresh native Codex
+  `idle` observation makes the derived phase ready for another send. Explicit
+  task completion is deferred until a lifecycle command is specified.
 - External Git state is observed, never overwritten to make persisted state
   appear correct.
 
@@ -267,8 +268,9 @@ must not create duplicate artifacts.
 - `--json` uses the same field meanings as the daemon protocol and includes a
   top-level schema version.
 - `--follow` polls durable events and renders the current phase until the task
-  becomes ready, waits for approval/input, completes, fails, is interrupted,
-  or the operator detaches with Ctrl-C. It does not cancel the turn.
+  becomes ready, waits for approval/input, reports an unloaded/error/
+  unavailable thread, completes, fails, or the operator detaches with Ctrl-C.
+  It does not cancel the turn.
 - `--follow` and `--json` are intentionally mutually exclusive in the current
   CLI; machine clients can poll `status --json`.
 
@@ -278,12 +280,13 @@ must not create duplicate artifacts.
   not after the turn completes.
 - Start the first or a later turn in the existing thread with the stored
   worktree as `cwd` and the stored sandbox/profile policy.
-- Reject tasks that are provisioning, already active, waiting, completed, or
-  unreconciled after daemon failure. v0 does not silently queue messages.
+- Reject tasks that are provisioning, already active, waiting, completed,
+  failed, unloaded, in native system error, or unavailable after connection or
+  daemon loss. v0 does not silently queue messages.
 - Use a unique client message/operation ID so an uncertain CLI retry is
   idempotent.
-- A successful completed turn returns the task to `idle`, permitting another
-  `send`.
+- After a successful completed turn and fresh native `idle` status, another
+  `send` is permitted.
 
 ### `coco jump`
 
@@ -354,8 +357,11 @@ later work.
 
 ## Runtime status contract
 
-The public task projection contains a runtime `phase`, zero or more
-`waitReasons`, and a separate `git` object.
+The public task projection contains CoCo's `lifecycle`, the latest
+`threadRuntime` snapshot, a derived `phase`, zero or more `waitReasons`, and a
+separate `git` object. `threadRuntime.status` retains Codex's native status,
+`runtimeGeneration`, `observedAtMs`, and `isFresh`. A process restart or App
+Server disconnect changes `isFresh` to false before CoCo serves the old value.
 
 ### Runtime phases
 
@@ -367,13 +373,19 @@ The public task projection contains a runtime `phase`, zero or more
 | `waiting_for_approval` | The App Server has an unresolved approval request. |
 | `waiting_for_input` | The App Server has an unresolved user-input request. |
 | `idle` | The thread is available and no turn is running. |
-| `failed` | Provisioning or the latest execution ended in a non-recovered failure. |
-| `interrupted` | The latest turn stopped without completing, including unreconciled daemon loss. |
+| `not_loaded` | Codex reports that this thread is not loaded in the current runtime. |
+| `system_error` | Codex reports a native thread-level system error. |
+| `unavailable` | CoCo has no current-generation native thread observation. |
+| `failed` | CoCo could not complete task preparation or startup. |
 | `completed` | Reserved for an explicit future task-completion operation; never inferred in v0. |
 
-If Codex reports both wait flags, expose both in `waitReasons` and render
+The `phase` field is not stored independently. CoCo derives preparation and
+terminal phases from `lifecycle`; for a ready task it derives runtime phases
+from a fresh native status plus the separately correlated active turn. If
+Codex reports both wait flags, expose both in `waitReasons` and render
 `waiting_for_approval` as the summary phase. Resolving one flag reveals the
-remaining reason rather than incorrectly returning to `active`.
+remaining reason rather than incorrectly returning to `active`. A server
+request by itself never changes phase.
 
 ### Git facets
 
@@ -400,13 +412,15 @@ agent.started
 message.received
 turn.started
 plan.updated
-approval.requested
-approval.resolved
+thread.status.changed
+server_request.received
 diff.updated
 agent.message.completed
 turn.completed
 agent.failed
 task.completed        # reserved; not emitted by current v0 commands
+approval.requested    # reserved for the future pending-decision model
+approval.resolved     # reserved for the future pending-decision model
 control.call.started
 control.call.completed
 ```
@@ -431,14 +445,18 @@ inventing a normalized meaning.
 - The CoCo MCP server uses local stdio, is read-only unless the operator starts
   it with the send capability, and never bypasses daemon authorization or
   validation.
-- Operator approvals remain visible, identified by a stable CoCo request ID,
-  linked to task/thread/turn, and durably record their request and resolution.
+- Correlated server requests remain visible as sanitized events and are never
+  auto-approved. Stable actionable request IDs and durable responses belong to
+  the deferred pending-decision model.
 - Git commands are invoked as argument arrays with validated paths/refs, never
   through interpolated shell strings.
 - No lifecycle path uses `git reset --hard`, automatic stash, forced branch
   deletion, or automatic worktree deletion.
-- Task and event records survive daemon or App Server restarts. Recovery may
-  mark in-flight work interrupted; it must not report guessed success.
+- Task and event records survive daemon or App Server restarts. Current v0
+  recovery marks the old native snapshot stale and an unfinished local turn
+  interrupted while preserving the bound task as `ready`; the derived phase
+  remains `unavailable` until native resume support refreshes it. It must not
+  report guessed success.
 
 ## Non-goals
 
@@ -470,8 +488,9 @@ The following are intentionally outside v0:
   all fail before an unintended second worktree or thread is created.
 - Injected failures after each saga stage leave a diagnosable `failed` task and
   never delete the external artifacts automatically.
-- Restarting the daemon preserves list/status output and either resumes an idle
-  thread or truthfully marks an in-flight turn interrupted.
+- Restarting the daemon preserves list/status output, marks old thread-runtime
+  observations unavailable, and truthfully records an in-flight turn as
+  interrupted without misclassifying the whole task as failed.
 
 ### Interaction and observation
 

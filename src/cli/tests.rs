@@ -48,7 +48,9 @@ fn presents_stable_user_facing_task_states() {
     assert_eq!(phase_label("active"), "Working");
     assert_eq!(phase_label("waiting_for_approval"), "Waiting for approval");
     assert_eq!(phase_label("idle"), "Ready");
+    assert_eq!(phase_label("unavailable"), "Status unavailable");
     assert!(follow_stops_at("waiting_for_input"));
+    assert!(follow_stops_at("system_error"));
     assert!(!follow_stops_at("active"));
 }
 

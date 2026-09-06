@@ -83,13 +83,19 @@ architectural baseline for CoCo.
 - [x] Run the post-Phase-2 architecture review, reaffirm the one-package
   decision, and hide implementation modules behind three executable library
   entry points.
-- [ ] Correct runtime-state ownership before adding more interaction commands.
+- [x] Correct runtime-state ownership before adding more interaction commands.
   Persist Codex's native thread status (`notLoaded`, `idle`, `systemError`, or
   `active` with all `activeFlags`) as the thread-runtime truth; retain only
   CoCo-owned provisioning/task lifecycle separately; derive the concise public
   phase instead of maintaining a competing thread state machine. Remove
   method-name-based wait-state guesses and cover mixed wait flags, stale
   observations, restart, and schema migration.
+  - [x] Map the transitional phase writes, App Server status sources, storage
+    schema, CLI projection, and affected tests.
+  - [x] Add the separated lifecycle/native-status domain and v3 migration.
+  - [x] Move Store and Coordinator transitions onto owned facts and make
+    server requests observational only.
+  - [x] Update the derived CLI/API projection and regression coverage.
 - [x] Verify the pinned Codex 0.147.0 remote-TUI exit path. A normal `/quit` or
   `/exit` sends `thread/unsubscribe` and closes only the remote client
   WebSocket; it does not send `turn/interrupt`. The App Server keeps an active
@@ -99,6 +105,10 @@ architectural baseline for CoCo.
   transport loss while a turn is active, prove daemon event projection keeps
   running, and make the UX distinction explicit: leaving the TUI detaches;
   an explicit Codex interrupt cancels the turn.
+  - [ ] Exercise a second authenticated remote client in the process harness
+    and prove its disconnect does not end daemon observation or the turn.
+  - [ ] Cover the child-process exit contract and document the shipped user
+    behavior without exposing App Server internals publicly.
 - [ ] After the state-model and `jump` slices, stop implementation and review
   all findings and open work with the user. Reprioritize daemon recovery,
   cross-platform IPC, Git write policy, decision handling, hooks, MCP
@@ -279,6 +289,18 @@ architectural baseline for CoCo.
 - 2026-09-06 — Put an explicit planning checkpoint after the thread-state and
   `jump` slices. Report their findings and reprioritize the remaining backlog
   with the user instead of automatically continuing into `decide`.
+- 2026-09-06 — Replace persisted `TaskPhase` with schema-v3 facts owned by
+  their sources: CoCo stores `TaskLifecycle`, Codex supplies the complete
+  native `ThreadStatus`, each observation records runtime generation, time,
+  and freshness, and turns retain their own phase. Keep `phase` and
+  `waitReasons` as read-time projections only; bump CLI JSON documents to
+  schema version 2 because the task shape now exposes `lifecycle` and
+  `threadRuntime`.
+- 2026-09-06 — Treat every correlated App Server request as an observational,
+  sanitized `server_request.received` event until the pending-decision model
+  is deliberately implemented. Only `thread/start.thread.status` and
+  `thread/status/changed` may refresh native runtime state; request method
+  names never do.
 
 ## Findings
 
@@ -318,6 +340,22 @@ architectural baseline for CoCo.
   thread activity for 30 minutes. Inspection of tagged Codex 0.147.0 confirms
   the normal user-exit path calls `thread/unsubscribe`, then closes the remote
   WebSocket client; only the separate interrupt path sends `turn/interrupt`.
+- The thread returned by native `thread/start` already contains an exact
+  `ThreadStatus`, while `turn/start` returns a native turn rather than a new
+  thread-status snapshot. The durable model therefore needs to store the
+  former and later `thread/status/changed` observations, while deriving a
+  short display phase from lifecycle, status freshness, flags, and the
+  separately correlated active turn.
+- The pre-migration event projection mutated task phase from server-request
+  method names and labeled every request as an approval. Codex exposes several
+  request families beyond approvals and user input, so schema v3 now keeps
+  requests observational until the dedicated correlated decision model is
+  scheduled.
+- Schema v3 maps native-like v2 phases into diagnostic snapshots but marks
+  them stale, maps bound old tasks to lifecycle `ready`, and fails only
+  unfinished task preparation. On restart an unfinished turn becomes
+  interrupted while the task remains recoverable; without `thread/resume`,
+  its honest public phase is `unavailable`.
 - The executable coordinator now serializes creation and turn-start operations
   per repository, resolves client paths back to a registered Git common
   directory, and treats Git/Codex effects as persisted saga steps.
@@ -462,6 +500,12 @@ architectural baseline for CoCo.
 - The documentation TypeScript, Oxlint, and Prettier checks pass. Both the
   root and `/coco` builds export 88 static files across eight pages with static
   search, valid local links, no server artifact, and no internal knowledge.
+- After the runtime-ownership migration, the complete resource-limited Rust
+  suite passes 52 library tests and the process smoke test with one build job
+  and one test thread. All-target/all-feature Clippy with warnings denied,
+  rustfmt, and `cargo machete` pass. `nix run .#docs-check` and
+  `nix run .#docs-build` pass; the latter verifies 88 static files across eight
+  public pages.
 
 ## Open questions and handoff
 
@@ -470,9 +514,9 @@ architectural baseline for CoCo.
 - Agentgateway is deliberately not scheduled. Reconsider it only when
   federation, centralized credential custody, independent enforcement, or
   gateway observability becomes an actual requirement.
-- Correct thread-runtime state ownership first and then lock down `jump` exit
-  and reattach behavior. Stop there, report findings, and reprioritize all open
-  work with the user before beginning another feature.
+- Thread-runtime ownership is corrected. Lock down `jump` exit and reattach
+  behavior next, then stop, report findings, and reprioritize all open work
+  with the user before beginning another feature.
 - Keep the durable pending-request model and numbered `coco decide` flow
   recorded but unscheduled. If it is selected later, do not let it introduce
   another state machine.

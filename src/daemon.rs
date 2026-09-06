@@ -8,6 +8,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use tokio::sync::watch;
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 use crate::codex::{CodexClient, CodexClientOptions, CodexEvent, SharedAppServerOptions};
 use crate::coordinator::Coordinator;
@@ -50,19 +51,21 @@ pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<
     if !reconciled.is_empty() {
         warn!(
             tasks = reconciled.len(),
-            "marked unfinished tasks interrupted after daemon restart"
+            "reconciled unfinished task preparation or turns after daemon restart"
         );
     }
 
     let (codex, events) = CodexClient::spawn(codex_options)
         .await
         .context("could not start the Codex App Server")?;
+    let runtime_generation = Uuid::new_v4().to_string();
     let coordinator = Arc::new(Coordinator::new(
         store,
         Git::default(),
         Arc::new(CodexWorker::new(codex.clone())),
         paths.worktrees_dir,
         paths.codex_home,
+        runtime_generation,
     ));
     let event_task = tokio::spawn(pump_codex_events(Arc::clone(&coordinator), events));
 
@@ -145,6 +148,11 @@ async fn pump_codex_events(
         if let Err(source) = coordinator.record_codex_event(event) {
             error!(%source, "could not persist a Codex event");
         }
+    }
+    match coordinator.record_codex_disconnected() {
+        Ok(0) => {}
+        Ok(tasks) => warn!(tasks, "marked native thread status snapshots stale"),
+        Err(source) => error!(%source, "could not mark thread statuses stale"),
     }
 }
 

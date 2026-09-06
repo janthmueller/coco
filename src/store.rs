@@ -14,7 +14,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::domain::{
-    AuditOutcome, ContextMode, EventKind, EventSource, ProfileSnapshot, Repository, TurnPhase,
+    AuditOutcome, CodexThreadStatus, ContextMode, EventKind, EventSource, ProfileSnapshot,
+    Repository, TurnPhase,
 };
 
 mod events;
@@ -107,6 +108,14 @@ pub struct NewTurn {
     pub client_message_id: String,
     pub codex_turn_id: Option<String>,
     pub started_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewThreadBinding {
+    pub thread_id: String,
+    pub parent_thread_id: Option<String>,
+    pub status: CodexThreadStatus,
+    pub runtime_generation: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]

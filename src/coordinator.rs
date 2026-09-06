@@ -6,7 +6,7 @@ use serde_json::json;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::error;
 
-use crate::domain::{EventKind, EventSource, Repository, Task, TaskPhase};
+use crate::domain::{EventKind, EventSource, Repository, Task, TaskLifecycle};
 use crate::git::{Git, GitRepository};
 use crate::protocol::TaskResult;
 use crate::store::{EventDraft, Store};
@@ -28,6 +28,7 @@ pub(crate) struct Coordinator {
     worker: Arc<dyn WorkerRuntime>,
     worktrees_dir: PathBuf,
     codex_home: PathBuf,
+    runtime_generation: String,
     repository_locks: AsyncMutex<HashMap<String, Arc<AsyncMutex<()>>>>,
     pending_turn_threads: StdMutex<HashSet<String>>,
 }
@@ -39,6 +40,7 @@ impl Coordinator {
         worker: Arc<dyn WorkerRuntime>,
         worktrees_dir: PathBuf,
         codex_home: PathBuf,
+        runtime_generation: String,
     ) -> Self {
         Self {
             store,
@@ -46,6 +48,7 @@ impl Coordinator {
             worker,
             worktrees_dir,
             codex_home,
+            runtime_generation,
             repository_locks: AsyncMutex::new(HashMap::new()),
             pending_turn_threads: StdMutex::new(HashSet::new()),
         }
@@ -113,10 +116,10 @@ impl Coordinator {
     ) {
         let message = source_error.to_string();
         let code = source_error.code();
-        if let Err(store_error) = self.store.transition_task_from_with_event(
+        if let Err(store_error) = self.store.transition_task_lifecycle_from_with_event(
             task_id,
-            &[TaskPhase::Provisioning, TaskPhase::Starting],
-            TaskPhase::Failed,
+            &[TaskLifecycle::Provisioning, TaskLifecycle::Starting],
+            TaskLifecycle::Failed,
             Some((code, &message)),
             EventDraft::task(
                 EventKind::AgentFailed,

@@ -7,11 +7,12 @@ use super::rows::{
     require_turn,
 };
 use super::{
-    EventDraft, NewTask, NewTurn, Store, StoreError, TurnCompletion, json_to_sql_error, new_id,
-    now_ms, path_text, sanitized_error_columns,
+    EventDraft, NewTask, NewThreadBinding, NewTurn, Store, StoreError, TurnCompletion,
+    json_to_sql_error, new_id, now_ms, path_text, sanitized_error_columns,
 };
 use crate::domain::{
-    EventKind, EventSource, NormalizedEvent, ProfileSnapshot, Task, TaskPhase, Turn, TurnPhase,
+    CodexThreadStatus, EventKind, EventSource, NormalizedEvent, ProfileSnapshot, Task,
+    TaskLifecycle, Turn, TurnPhase,
 };
 
 impl Store {
@@ -35,12 +36,14 @@ impl Store {
         transaction.execute(
             "INSERT INTO tasks (
                 id, create_operation_id, repository_id, name, context_mode,
-                context_json, profile_json, phase, branch_name, base_sha, worktree_path,
+                context_json, profile_json, lifecycle, thread_status_json,
+                thread_status_generation, thread_status_observed_at_ms,
+                thread_status_is_fresh, branch_name, base_sha, worktree_path,
                 codex_thread_id, parent_thread_id, active_turn_id, last_error_code,
                 last_error_message, created_at_ms, updated_at_ms, completed_at_ms
              ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, 'provisioning', ?8, ?9, ?10,
-                NULL, NULL, NULL, NULL, NULL, ?11, ?11, NULL
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, 'provisioning', NULL, NULL, NULL, 0,
+                ?8, ?9, ?10, NULL, NULL, NULL, NULL, NULL, ?11, ?11, NULL
              )",
             params![
                 task_id,
@@ -66,35 +69,41 @@ impl Store {
         Ok((task, event))
     }
 
-    pub fn transition_task_with_event(
+    pub fn transition_task_lifecycle_with_event(
         &self,
         task_id: &str,
-        expected: TaskPhase,
-        next: TaskPhase,
+        expected: TaskLifecycle,
+        next: TaskLifecycle,
         last_error: Option<(&str, &str)>,
         event: EventDraft,
     ) -> Result<(Task, NormalizedEvent), StoreError> {
-        self.transition_task_from_with_event(task_id, &[expected], next, last_error, event)
+        self.transition_task_lifecycle_from_with_event(
+            task_id,
+            &[expected],
+            next,
+            last_error,
+            event,
+        )
     }
 
-    pub fn transition_task_from_with_event(
+    pub fn transition_task_lifecycle_from_with_event(
         &self,
         task_id: &str,
-        expected: &[TaskPhase],
-        next: TaskPhase,
+        expected: &[TaskLifecycle],
+        next: TaskLifecycle,
         last_error: Option<(&str, &str)>,
         mut event: EventDraft,
     ) -> Result<(Task, NormalizedEvent), StoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        assert_task_phase(&transaction, task_id, expected)?;
+        assert_task_lifecycle(&transaction, task_id, expected)?;
         let now = now_ms();
         let (error_code, error_message) = last_error
             .map(|(code, message)| (Some(code), Some(message)))
             .unwrap_or((None, None));
-        let completed_at = (next == TaskPhase::Completed).then_some(now);
+        let completed_at = (next == TaskLifecycle::Completed).then_some(now);
         transaction.execute(
-            "UPDATE tasks SET phase = ?1, last_error_code = ?2, last_error_message = ?3,
+            "UPDATE tasks SET lifecycle = ?1, last_error_code = ?2, last_error_message = ?3,
                 completed_at_ms = ?4, updated_at_ms = ?5 WHERE id = ?6",
             params![
                 next.as_str(),
@@ -115,23 +124,27 @@ impl Store {
     pub fn bind_thread_with_event(
         &self,
         task_id: &str,
-        expected: TaskPhase,
-        next: TaskPhase,
-        thread_id: &str,
-        parent_thread_id: Option<&str>,
+        expected: TaskLifecycle,
+        binding: NewThreadBinding,
         mut event: EventDraft,
     ) -> Result<(Task, NormalizedEvent), StoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        assert_task_phase(&transaction, task_id, &[expected])?;
+        assert_task_lifecycle(&transaction, task_id, &[expected])?;
+        let status_json =
+            serde_json::to_string(&binding.status.canonicalized()).map_err(json_to_sql_error)?;
+        let now = now_ms();
         transaction.execute(
-            "UPDATE tasks SET codex_thread_id = ?1, parent_thread_id = ?2, phase = ?3,
-                updated_at_ms = ?4 WHERE id = ?5",
+            "UPDATE tasks SET codex_thread_id = ?1, parent_thread_id = ?2,
+                lifecycle = 'ready', thread_status_json = ?3,
+                thread_status_generation = ?4, thread_status_observed_at_ms = ?5,
+                thread_status_is_fresh = 1, updated_at_ms = ?5 WHERE id = ?6",
             params![
-                thread_id,
-                parent_thread_id,
-                next.as_str(),
-                now_ms(),
+                binding.thread_id,
+                binding.parent_thread_id,
+                status_json,
+                binding.runtime_generation,
+                now,
                 task_id
             ],
         )?;
@@ -145,13 +158,20 @@ impl Store {
     pub fn start_turn_with_event(
         &self,
         task_id: &str,
-        allowed_task_phases: &[TaskPhase],
         input: NewTurn,
         mut event: EventDraft,
     ) -> Result<(Task, Turn, NormalizedEvent), StoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        assert_task_phase(&transaction, task_id, allowed_task_phases)?;
+        assert_task_lifecycle(&transaction, task_id, &[TaskLifecycle::Ready])?;
+        let current = require_task(&transaction, task_id)?;
+        if current.active_turn_id.is_some() {
+            return Err(StoreError::InvalidTaskTransition {
+                task_id: task_id.to_owned(),
+                expected: "no active turn".to_owned(),
+                actual: "active turn".to_owned(),
+            });
+        }
         let now = now_ms();
         let turn_id = new_id();
         let turn_phase = if input.codex_turn_id.is_some() {
@@ -180,8 +200,7 @@ impl Store {
             ],
         )?;
         transaction.execute(
-            "UPDATE tasks SET phase = 'active', active_turn_id = ?1, updated_at_ms = ?2
-             WHERE id = ?3",
+            "UPDATE tasks SET active_turn_id = ?1, updated_at_ms = ?2 WHERE id = ?3",
             params![turn_id, now, task_id],
         )?;
         event.task_id = Some(task_id.to_owned());
@@ -200,10 +219,8 @@ impl Store {
         completion: TurnCompletion,
         mut event: EventDraft,
     ) -> Result<(Task, Turn, NormalizedEvent), StoreError> {
-        let task_phase = match completion.phase {
-            TurnPhase::Completed => TaskPhase::Idle,
-            TurnPhase::Failed => TaskPhase::Failed,
-            TurnPhase::Interrupted => TaskPhase::Interrupted,
+        match completion.phase {
+            TurnPhase::Completed | TurnPhase::Failed | TurnPhase::Interrupted => {}
             phase => {
                 return Err(StoreError::InvalidTurnCompletion {
                     turn_id: turn_id.to_owned(),
@@ -213,15 +230,7 @@ impl Store {
         };
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        assert_task_phase(
-            &transaction,
-            task_id,
-            &[
-                TaskPhase::Active,
-                TaskPhase::WaitingForApproval,
-                TaskPhase::WaitingForInput,
-            ],
-        )?;
+        assert_task_lifecycle(&transaction, task_id, &[TaskLifecycle::Ready])?;
         let current = require_task(&transaction, task_id)?;
         if current.active_turn_id.as_deref() != Some(turn_id) {
             return Err(StoreError::InvalidTaskTransition {
@@ -255,9 +264,9 @@ impl Store {
         }
         let (error_code, error_message) = sanitized_error_columns(completion.error.as_ref());
         transaction.execute(
-            "UPDATE tasks SET phase = ?1, active_turn_id = NULL, last_error_code = ?2,
-                last_error_message = ?3, updated_at_ms = ?4 WHERE id = ?5",
-            params![task_phase.as_str(), error_code, error_message, now, task_id],
+            "UPDATE tasks SET active_turn_id = NULL, last_error_code = ?1,
+                last_error_message = ?2, updated_at_ms = ?3 WHERE id = ?4",
+            params![error_code, error_message, now, task_id],
         )?;
         event.task_id = Some(task_id.to_owned());
         event.turn_id = Some(turn_id.to_owned());
@@ -266,6 +275,50 @@ impl Store {
         let turn = require_turn(&transaction, turn_id)?;
         transaction.commit()?;
         Ok((task, turn, event))
+    }
+
+    pub fn observe_thread_status_with_event(
+        &self,
+        task_id: &str,
+        status: CodexThreadStatus,
+        runtime_generation: &str,
+        mut event: EventDraft,
+    ) -> Result<(Task, NormalizedEvent), StoreError> {
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = require_task(&transaction, task_id)?;
+        if current.codex_thread_id.is_none() {
+            return Err(StoreError::InvalidTaskTransition {
+                task_id: task_id.to_owned(),
+                expected: "a bound Codex thread".to_owned(),
+                actual: "no Codex thread".to_owned(),
+            });
+        }
+        let status_json =
+            serde_json::to_string(&status.canonicalized()).map_err(json_to_sql_error)?;
+        let now = now_ms();
+        transaction.execute(
+            "UPDATE tasks SET thread_status_json = ?1, thread_status_generation = ?2,
+                thread_status_observed_at_ms = ?3, thread_status_is_fresh = 1,
+                updated_at_ms = ?3 WHERE id = ?4",
+            params![status_json, runtime_generation, now, task_id],
+        )?;
+        event.task_id = Some(task_id.to_owned());
+        let event = insert_event(&transaction, event)?;
+        let task = require_task(&transaction, task_id)?;
+        transaction.commit()?;
+        Ok((task, event))
+    }
+
+    pub fn mark_thread_statuses_stale(&self) -> Result<usize, StoreError> {
+        let connection = self.lock()?;
+        connection
+            .execute(
+                "UPDATE tasks SET thread_status_is_fresh = 0
+                 WHERE thread_status_is_fresh = 1",
+                [],
+            )
+            .map_err(StoreError::from)
     }
 
     pub fn task_by_id(&self, id: &str) -> Result<Option<Task>, StoreError> {
@@ -310,10 +363,10 @@ impl Store {
         let profile_json = serde_json::to_string(profile).map_err(json_to_sql_error)?;
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        assert_task_phase(
+        assert_task_lifecycle(
             &transaction,
             task_id,
-            &[TaskPhase::Provisioning, TaskPhase::Starting],
+            &[TaskLifecycle::Provisioning, TaskLifecycle::Starting],
         )?;
         transaction.execute(
             "UPDATE tasks SET profile_json = ?1, updated_at_ms = ?2 WHERE id = ?3",
@@ -394,16 +447,14 @@ impl Store {
     pub fn reconcile_unfinished(&self) -> Result<Vec<NormalizedEvent>, StoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let unfinished = [
-            TaskPhase::Provisioning,
-            TaskPhase::Starting,
-            TaskPhase::Active,
-            TaskPhase::WaitingForApproval,
-            TaskPhase::WaitingForInput,
-        ];
+        transaction.execute(
+            "UPDATE tasks SET thread_status_is_fresh = 0
+             WHERE thread_status_is_fresh = 1",
+            [],
+        )?;
         let mut statement = transaction.prepare(&format!(
-            "{} WHERE phase IN ('provisioning', 'starting', 'active',
-                'waiting_for_approval', 'waiting_for_input') ORDER BY id",
+            "{} WHERE lifecycle IN ('provisioning', 'starting')
+                OR active_turn_id IS NOT NULL ORDER BY id",
             TASK_SELECT
         ))?;
         let tasks = statement
@@ -414,7 +465,6 @@ impl Store {
         let now = now_ms();
         let mut events = Vec::with_capacity(tasks.len());
         for task in tasks {
-            debug_assert!(unfinished.contains(&task.phase));
             transaction.execute(
                 "UPDATE turns SET phase = 'interrupted', completed_at_ms = ?1,
                     error_json = ?2
@@ -429,14 +479,28 @@ impl Store {
                     task.id,
                 ],
             )?;
+            let creation_failed = matches!(
+                task.lifecycle,
+                TaskLifecycle::Provisioning | TaskLifecycle::Starting
+            );
+            let next_lifecycle = if creation_failed {
+                TaskLifecycle::Failed
+            } else {
+                task.lifecycle
+            };
+            let message = if creation_failed {
+                "Task preparation was unfinished when cocod restarted"
+            } else {
+                "Turn state was unfinished when cocod restarted"
+            };
             transaction.execute(
-                "UPDATE tasks SET phase = 'interrupted', active_turn_id = NULL,
-                    last_error_code = 'DAEMON_RESTART',
-                    last_error_message = 'State was unfinished when cocod restarted',
-                    updated_at_ms = ?1 WHERE id = ?2",
-                params![now, task.id],
+                "UPDATE tasks SET lifecycle = ?1, active_turn_id = NULL,
+                    last_error_code = 'DAEMON_RESTART', last_error_message = ?2,
+                    updated_at_ms = ?3 WHERE id = ?4",
+                params![next_lifecycle.as_str(), message, now, task.id],
             )?;
-            let event_kind = if task.active_turn_id.is_some() {
+            let active_turn_id = task.active_turn_id.clone();
+            let event_kind = if active_turn_id.is_some() {
                 EventKind::TurnCompleted
             } else {
                 EventKind::AgentFailed
@@ -445,13 +509,14 @@ impl Store {
                 &transaction,
                 EventDraft {
                     task_id: Some(task.id),
-                    turn_id: task.active_turn_id,
+                    turn_id: active_turn_id.clone(),
                     kind: event_kind,
                     source: EventSource::Coco,
                     source_method: Some("startup.reconcile".to_owned()),
                     occurred_at_ms: None,
                     payload: json!({
-                        "status": "interrupted",
+                        "turnStatus": active_turn_id.as_ref().map(|_| "interrupted"),
+                        "lifecycle": next_lifecycle.as_str(),
                         "reason": "daemon_restart"
                     }),
                 },
@@ -462,22 +527,22 @@ impl Store {
     }
 }
 
-fn assert_task_phase(
+fn assert_task_lifecycle(
     connection: &Connection,
     task_id: &str,
-    expected: &[TaskPhase],
+    expected: &[TaskLifecycle],
 ) -> Result<(), StoreError> {
     let task = require_task(connection, task_id)?;
-    if expected.contains(&task.phase) {
+    if expected.contains(&task.lifecycle) {
         return Ok(());
     }
     Err(StoreError::InvalidTaskTransition {
         task_id: task_id.to_owned(),
         expected: expected
             .iter()
-            .map(|phase| phase.as_str())
+            .map(|lifecycle| lifecycle.as_str())
             .collect::<Vec<_>>()
             .join(" or "),
-        actual: task.phase.as_str().to_owned(),
+        actual: task.lifecycle.as_str().to_owned(),
     })
 }

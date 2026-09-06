@@ -377,18 +377,24 @@ its operation ID for a different root is detected.
 | `context_mode` | `fresh`, with `fork` and `handoff` reserved |
 | `context_json` | versioned context provenance, not conversation history |
 | `profile_json` | versioned immutable effective profile snapshot |
-| `phase` | current runtime phase from the product state machine |
+| `lifecycle` | CoCo-owned `provisioning`, `starting`, `ready`, `completed`, or `failed` |
+| `thread_status_json` | nullable exact native `ThreadStatus`, including every `activeFlag` |
+| `thread_status_generation` | App Server process generation that made the observation |
+| `thread_status_observed_at_ms` | local receipt time of the native observation |
+| `thread_status_is_fresh` | whether the observation belongs to the connected generation |
 | `branch_name` | required and unique with `repository_id` after allocation |
 | `base_sha` | complete immutable commit object ID |
 | `worktree_path` | globally unique canonical path after creation |
 | `codex_thread_id` | globally unique nullable binding during provisioning |
 | `parent_thread_id` | nullable context/audit relation; null for v0 fresh mode |
+| `active_turn_id` | nullable correlation to the one current v0 turn |
 | `last_error_code`, `last_error_message` | nullable sanitized terminal detail |
 | `created_at_ms`, `updated_at_ms`, `completed_at_ms` | lifecycle timestamps |
 
 Branch, base, path, and thread columns are nullable only while the creation
-saga has not reached their stage. Core validation rejects an `idle`, `active`,
-or waiting task missing any binding.
+saga has not reached their stage. A `ready` task requires the complete binding.
+`phase` and `waitReasons` are computed on read and deliberately have no task
+table columns.
 
 ### `turns`
 
@@ -485,50 +491,50 @@ Never publish a durable event before its transaction commits. A subscriber
 may receive a replayed event twice across reconnects and de-duplicates by
 event ID/cursor; it must never observe a committed state without its event.
 
-### Task state transitions
+### Task lifecycle and thread runtime
 
-The existing `TaskPhase` storage is a transitional implementation that mixes
-CoCo lifecycle with a lossy projection of Codex thread runtime. Before adding
-the decision-response workflow, separate these owners:
-
-- CoCo persists its own preparation/task lifecycle, including provisioning,
-  startup, explicit completion, and coordinator failures.
-- Codex's native `ThreadStatus` is retained as the thread-runtime truth:
-  `notLoaded`, `idle`, `systemError`, or `active` with the complete
-  `activeFlags` set. Preserve an observation generation and timestamp so a
-  disconnected or restarted daemon cannot present stale state as current.
-- Pending server requests retain actionable request identity, kind, native
-  options, blocking metadata, process generation, and resolution; their method
-  names do not directly mutate a guessed thread state.
-- The concise CLI/API phase and wait reasons are a derived projection of those
-  facts, not another independently writable state machine. Turn and Git state
-  remain separate facets.
-
-The transition table below describes the current flattened projection until
-that migration lands; it is not the target ownership boundary.
+Schema v3 separates state by owner. CoCo writes only the task lifecycle:
 
 | From | Trigger | To | Durable event/effect |
 | --- | --- | --- | --- |
 | absent | accepted `task.create` | `provisioning` | `task.created` |
 | `provisioning` | worktree verified | `starting` | `worktree.created` |
-| `starting` | thread bound and task prepared | `idle` | `agent.started` |
-| `active` | approval flag/request | `waiting_for_approval` | `approval.requested` |
-| `active` | user-input flag/request | `waiting_for_input` | pending request event |
-| waiting | one request resolved, other waits remain | waiting | `approval.resolved` or input response |
-| waiting | final wait clears | `active` | resolution event |
-| `active` or waiting | successful turn completion | `idle` | `turn.completed` |
-| `active` or waiting | failed turn/system error | `failed` | `agent.failed` |
-| `active` or waiting | interruption/connection loss after reconciliation | `interrupted` | `turn.completed` with interrupted status |
-| `idle` | accepted `turn.start` from CLI, MCP, or attached TUI | `active` | `message.received` when available, then `turn.started` |
-| any creation stage | unrecoverable saga error | `failed` | `agent.failed` with stage/artifacts |
+| `starting` | thread and initial native status bound | `ready` | `agent.started` |
+| `provisioning` or `starting` | unrecoverable saga error | `failed` | `agent.failed` with retained artifacts |
 
-`completed` has no incoming v0 transition. Do not treat `turn/completed` as
-`task.completed`. Failed-task retry semantics are also deferred; preserving
-the record is safer than silently replaying partially completed side effects.
+`completed` remains reserved for a future explicit task operation. A completed,
+failed, or interrupted turn does not mutate the task lifecycle; it updates the
+turn record and clears `active_turn_id`. A failed turn can therefore be retried
+when Codex subsequently reports the thread `idle`.
 
-Codex active flags are a set. The public summary phase applies this precedence:
-approval wait, user-input wait, active. Git facets never cause a task-phase
-transition.
+The thread-runtime truth is the exact `ThreadStatus` returned in
+`thread/start.thread.status` and later `thread/status/changed` notifications:
+`notLoaded`, `idle`, `systemError`, or `active` with the complete active-flag
+set. Each snapshot stores the current App Server generation and receipt time.
+All snapshots become stale on daemon startup or when the App Server event
+connection closes. A stale value remains available for diagnosis but is never
+presented as current.
+
+Server requests are a separate fact. The current adapter writes a sanitized
+`server_request.received` event but never changes runtime state based on the
+method name. The future pending-request model will add actionable correlation;
+it must preserve this separation.
+
+The public `phase` and `waitReasons` fields are computed on each storage read:
+
+1. a non-`ready` CoCo lifecycle projects directly to `provisioning`,
+   `starting`, `completed`, or `failed`;
+2. a missing or stale thread snapshot projects to `unavailable`;
+3. native `notLoaded` and `systemError` project without reinterpretation;
+4. native `active` projects approval wait before user-input wait, then plain
+   `active`, while retaining both known waits and every native flag;
+5. an accepted correlated active turn keeps the summary `active` during the
+   short interval in which the last fresh native snapshot is still `idle`;
+6. fresh native `idle` with no active turn projects to `idle`.
+
+Git facets never affect this projection. The database migration retains old
+v2 native-like phases as stale snapshots; it does not pretend that a status
+observed by an earlier App Server generation is current.
 
 ## Git adapter
 
@@ -617,8 +623,9 @@ The local 0.147.0 observation supports this minimal sequence:
    metadata.
 5. Send `thread/start` with `cwd`, model/profile values, approval policy,
    sandbox mode, instructions, and `ephemeral: false`.
-6. Verify the returned thread ID and canonical returned `cwd`, then persist the
-   binding and mark the prepared task `idle`.
+6. Verify the returned thread ID and canonical returned `cwd`, then atomically
+   persist the binding, initial native status/generation, and `ready`
+   lifecycle.
 7. On an explicit `send`, issue `turn/start` with thread ID, text input, client
    message ID, the same canonical `cwd`, and effective turn overrides.
 8. Correlate responses, notifications, and server-initiated requests by the
@@ -649,23 +656,22 @@ whose ID or canonical cwd conflicts with the task record.
 | App Server input observed in generated 0.147.0 types | CoCo handling |
 | --- | --- |
 | `thread/started` | bind/verify thread; `agent.started` |
-| `thread/status/changed` | update active/wait projection |
+| `thread/status/changed` | persist the complete native status and emit `thread.status.changed` |
 | `turn/started` | bind turn ID; `turn.started` |
 | `turn/plan/updated` | `plan.updated` |
 | `turn/diff/updated` | `diff.updated`; Git remains authoritative for `coco diff` |
 | `item/agentMessage/delta` | optional transient follow output |
 | completed agent `item/completed` | durable `agent.message.completed` |
-| `turn/completed` | update turn/task phase; `turn.completed` or `agent.failed` |
-| `error` / system-error status | sanitized `agent.failed` when terminal |
-| approval server requests | persist pending request, then `approval.requested` |
-| user-input server request | persist pending input and wait reason |
+| `turn/completed` | complete the correlated turn and clear `active_turn_id`; emit `turn.completed` |
+| non-retrying `error` | sanitized `agent.failed` event; native thread status remains separate |
+| any correlated server request | sanitized `server_request.received`; never infer status from its method |
 
 App Server notification emission can race a request response. For turns
 started through CoCo, an in-memory pending-thread marker prevents the
 `turn/started` notification from being mistaken for an external TUI turn until
 the response is persisted. A `turn/started` received outside such an operation
-creates the local turn binding for an idle task, allowing `status` to project
-work initiated in `jump`. Uncorrelated notifications are ignored and logged;
+creates the local turn binding for a `ready` task with no active turn, allowing
+`status` to project work initiated in `jump`. Uncorrelated notifications are ignored and logged;
 they are never attached to the most recent task by guesswork.
 
 ### Sandbox and approvals
@@ -739,18 +745,19 @@ Compensation is stateful, not destructive:
 Daemon startup order:
 
 1. Acquire a user-scoped singleton lock.
-2. Secure and open SQLite; run migrations.
-3. Start/initialize the authenticated loopback App Server, publish its private
+2. Secure and open SQLite; run migrations, stale prior-generation thread
+   snapshots, fail unfinished preparation, and interrupt unfinished local turn
+   records without changing a bound task's lifecycle.
+3. Start/initialize a new authenticated loopback App Server generation and
+   publish its private
    endpoint/token runtime files, and begin draining all events.
-4. Mark old process-generation pending requests orphaned.
-5. Reconcile nonterminal tasks against worktree bindings and App Server thread
-   state before accepting mutating RPCs for those tasks.
-6. Bind the local CLI socket and report ready.
+4. Bind the local CLI socket and report ready.
 
-Idle threads can be resumed lazily before `send`, provided `status` labels Codex
-connectivity truthfully. Tasks with a previously active turn become
-`interrupted` unless `thread/resume` proves a more precise terminal status.
-Recovery never translates absence of evidence into completion.
+Thread resume/reconciliation is not implemented yet. Existing bound tasks are
+therefore exposed as `unavailable` after a daemon restart and reject `send`;
+they are not mislabeled `idle`. A previously active local turn is recorded as
+interrupted, while its task remains `ready` for later recovery work. Recovery
+never translates absence of evidence into completion.
 
 On shutdown, stop accepting mutations, close watcher streams with their last
 cursor, interrupt or reconcile in-flight App Server requests according to its

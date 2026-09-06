@@ -5,14 +5,16 @@ use serde_json::{Value, json};
 use tracing::warn;
 
 use super::{Coordinator, CoordinatorError, validate_non_empty, validate_operation_id};
-use crate::domain::{Audit, ContextMode, EventKind, EventSource, Repository, Task, TaskPhase};
+use crate::domain::{
+    Audit, ContextMode, EventKind, EventSource, Repository, Task, TaskLifecycle, TaskPhase,
+};
 use crate::profile::{load_profile, with_effective_thread_settings};
 use crate::protocol::{
     AuditRecordParams, EventListParams, EventListResult, GitIncomplete, GitObservationError,
     GitUnavailable, RepositoryRegisterParams, TaskCreateParams, TaskDiffParams, TaskDiffResult,
     TaskGetParams, TaskGitStatus, TaskListParams, TaskResult, TaskStatusResult,
 };
-use crate::store::{AuditDraft, EventDraft, NewTask};
+use crate::store::{AuditDraft, EventDraft, NewTask, NewThreadBinding};
 
 const DEFAULT_DIFF_BYTES: usize = 4 * 1024 * 1024;
 const MAX_DIFF_BYTES: usize = 16 * 1024 * 1024;
@@ -90,10 +92,10 @@ impl Coordinator {
                 return Err(error);
             }
         };
-        self.store.transition_task_with_event(
+        self.store.transition_task_lifecycle_with_event(
             &task.id,
-            TaskPhase::Provisioning,
-            TaskPhase::Starting,
+            TaskLifecycle::Provisioning,
+            TaskLifecycle::Starting,
             None,
             EventDraft::task(
                 EventKind::WorktreeCreated,
@@ -124,10 +126,13 @@ impl Coordinator {
             .update_task_profile(&task.id, &effective_profile)?;
         let (task, _) = self.store.bind_thread_with_event(
             &task.id,
-            TaskPhase::Starting,
-            TaskPhase::Idle,
-            &started_thread.id,
-            None,
+            TaskLifecycle::Starting,
+            NewThreadBinding {
+                thread_id: started_thread.id.clone(),
+                parent_thread_id: None,
+                status: started_thread.status,
+                runtime_generation: self.runtime_generation.clone(),
+            },
             EventDraft::task(
                 EventKind::AgentStarted,
                 EventSource::Codex,

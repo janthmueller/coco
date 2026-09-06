@@ -163,7 +163,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     .await?;
 
     let listed = cli_json(&run_cli(&paths, &repository, &["ls", "--json"]).await?)?;
-    assert_eq!(listed["schemaVersion"], 1);
+    assert_eq!(listed["schemaVersion"], 2);
     let tasks = listed["tasks"]
         .as_array()
         .context("coco ls did not return a tasks array")?;
@@ -173,7 +173,11 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     );
     let task = &tasks[0];
     assert_eq!(task["name"], "process-smoke");
+    assert_eq!(task["lifecycle"], "ready");
     assert_eq!(task["phase"], "idle");
+    assert_eq!(task["waitReasons"], json!([]));
+    assert_eq!(task["threadRuntime"]["status"]["type"], "idle");
+    assert_eq!(task["threadRuntime"]["isFresh"], true);
     assert_eq!(task["codexThreadId"], THREAD_ID);
     ensure!(task.get("goal").is_none(), "retired goal field was exposed");
     let worktree = PathBuf::from(
@@ -280,7 +284,10 @@ async fn run_fake_app_server(
                 send_result(
                     &mut websocket,
                     &frame,
-                    json!({"thread": {"id": THREAD_ID}, "cwd": cwd}),
+                    json!({
+                        "thread": {"id": THREAD_ID, "status": {"type": "idle"}},
+                        "cwd": cwd
+                    }),
                 )
                 .await?;
             }

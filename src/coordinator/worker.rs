@@ -5,9 +5,12 @@ use async_trait::async_trait;
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::domain::CodexThreadStatus;
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct StartedThread {
     pub(crate) id: String,
+    pub(crate) status: CodexThreadStatus,
     pub(crate) response: Value,
 }
 
@@ -22,6 +25,8 @@ pub(crate) enum WorkerError {
     Runtime(Box<dyn StdError + Send + Sync>),
     #[error("Codex response is missing required field {0}")]
     InvalidResponse(&'static str),
+    #[error("Codex response contains an invalid native thread status: {0}")]
+    InvalidThreadStatus(String),
     #[error("Codex thread cwd mismatch: expected {expected}, received {actual}")]
     CwdMismatch { expected: PathBuf, actual: PathBuf },
 }
