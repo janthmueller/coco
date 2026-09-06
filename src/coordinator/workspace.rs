@@ -13,8 +13,9 @@ use crate::git::{GitRepository, WorktreeBinding, WorktreePlan};
 use crate::profile::{load_profile, with_effective_thread_settings};
 use crate::protocol::{
     AuditRecordParams, EventListParams, EventListResult, GitIncomplete, GitObservationError,
-    GitUnavailable, RepositoryRegisterParams, WorkspaceCreateParams, WorkspaceDiffParams,
-    WorkspaceDiffResult, WorkspaceGetParams, WorkspaceGitStatus, WorkspaceListParams,
+    GitUnavailable, RepositoryListParams, RepositoryRegisterParams, RepositoryScope,
+    RepositorySummary, WorkspaceCreateParams, WorkspaceDiffParams, WorkspaceDiffResult,
+    WorkspaceGetParams, WorkspaceGitStatus, WorkspaceListItem, WorkspaceListParams,
     WorkspaceResult, WorkspaceStatusResult,
 };
 use crate::store::{AuditDraft, EventDraft, NewThreadBinding, NewWorkspace};
@@ -39,6 +40,18 @@ impl Coordinator {
             updated_at_ms: now,
         })?;
         Ok(repository)
+    }
+
+    pub(crate) fn list_repositories(
+        &self,
+        _params: RepositoryListParams,
+    ) -> Result<Vec<RepositorySummary>, CoordinatorError> {
+        Ok(self
+            .store
+            .list_repositories()?
+            .iter()
+            .map(RepositorySummary::from)
+            .collect())
     }
 
     pub(crate) async fn create_workspace(
@@ -210,9 +223,14 @@ impl Coordinator {
     pub(crate) fn list_workspaces(
         &self,
         params: WorkspaceListParams,
-    ) -> Result<Vec<Workspace>, CoordinatorError> {
-        let (repository, _) = self.registered_repository_for_path(&params.repository_path)?;
-        let mut workspaces = self.store.list_workspaces(Some(&repository.id))?;
+    ) -> Result<Vec<WorkspaceListItem>, CoordinatorError> {
+        let repository_id = match &params.scope {
+            RepositoryScope::Repository { path } => {
+                Some(self.registered_repository_for_path(path)?.0.id)
+            }
+            RepositoryScope::AllRepositories => None,
+        };
+        let mut workspaces = self.store.list_workspaces(repository_id.as_deref())?;
         if let Some(phases) = params.phases {
             let phases = phases
                 .iter()
@@ -226,16 +244,18 @@ impl Coordinator {
                 .collect::<Result<Vec<_>, _>>()?;
             workspaces.retain(|workspace| phases.contains(&workspace.phase));
         }
-        Ok(workspaces)
+        workspaces
+            .into_iter()
+            .map(|workspace| self.workspace_list_item(workspace))
+            .collect()
     }
 
     pub(crate) fn get_workspace(
         &self,
         params: WorkspaceGetParams,
     ) -> Result<WorkspaceStatusResult, CoordinatorError> {
-        let (repository, git_repository) =
-            self.registered_repository_for_path(&params.repository_path)?;
-        let workspace = self.resolve_workspace(&repository, &params.workspace)?;
+        let workspace = self.resolve_workspace(&params.scope, &params.workspace)?;
+        let (_, git_repository) = self.git_repository_for_workspace(&workspace)?;
         let git = match workspace_git_binding(&workspace) {
             Some((worktree, branch, base)) => {
                 match self.git.observe(&git_repository, worktree, branch, base) {
@@ -270,8 +290,7 @@ impl Coordinator {
         &self,
         params: EventListParams,
     ) -> Result<EventListResult, CoordinatorError> {
-        let (repository, _) = self.registered_repository_for_path(&params.repository_path)?;
-        let workspace = self.resolve_workspace(&repository, &params.workspace)?;
+        let workspace = self.resolve_workspace(&params.scope, &params.workspace)?;
         let events = self
             .store
             .events_after(Some(&workspace.id), params.after_sequence)?;
@@ -289,8 +308,7 @@ impl Coordinator {
         &self,
         params: WorkspaceDiffParams,
     ) -> Result<WorkspaceDiffResult, CoordinatorError> {
-        let (repository, _) = self.registered_repository_for_path(&params.repository_path)?;
-        let workspace = self.resolve_workspace(&repository, &params.workspace)?;
+        let workspace = self.resolve_workspace(&params.scope, &params.workspace)?;
         let worktree = workspace
             .worktree_path
             .as_deref()

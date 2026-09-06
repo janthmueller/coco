@@ -21,16 +21,16 @@ pub(super) fn phase_label(phase: &str) -> &'static str {
 pub(super) fn versioned(value: Value) -> Value {
     match value {
         Value::Object(mut object) => {
-            object.insert("schemaVersion".into(), Value::from(3));
+            object.insert("schemaVersion".into(), Value::from(4));
             Value::Object(object)
         }
-        value => json!({ "schemaVersion": 3, "result": value }),
+        value => json!({ "schemaVersion": 4, "result": value }),
     }
 }
 
 pub(super) fn versioned_array(key: &str, value: Value) -> Value {
     let mut object = serde_json::Map::new();
-    object.insert("schemaVersion".to_owned(), Value::from(3));
+    object.insert("schemaVersion".to_owned(), Value::from(4));
     object.insert(key.to_owned(), value);
     Value::Object(object)
 }
@@ -69,7 +69,7 @@ pub(super) fn print_human(value: &Value) {
     }
 }
 
-pub(super) fn print_workspace_list(value: &Value) {
+pub(super) fn print_workspace_list(value: &Value, include_repository: bool) {
     let Some(workspaces) = value.as_array() else {
         println!("No workspaces.");
         return;
@@ -78,14 +78,52 @@ pub(super) fn print_workspace_list(value: &Value) {
         println!("No workspaces.");
         return;
     }
-    println!("ID\tNAME\tPHASE\tBRANCH");
+    if include_repository {
+        println!("ID\tNAME\tREPOSITORY\tPHASE\tBRANCH");
+    } else {
+        println!("ID\tNAME\tPHASE\tBRANCH");
+    }
     for workspace in workspaces {
+        if include_repository {
+            println!(
+                "{}\t{}\t{}\t{}\t{}",
+                text(workspace, "id"),
+                text(workspace, "name"),
+                workspace
+                    .pointer("/repository/rootPath")
+                    .map(compact)
+                    .unwrap_or_else(|| "-".into()),
+                text(workspace, "phase"),
+                text(workspace, "branchName")
+            );
+        } else {
+            println!(
+                "{}\t{}\t{}\t{}",
+                text(workspace, "id"),
+                text(workspace, "name"),
+                text(workspace, "phase"),
+                text(workspace, "branchName")
+            );
+        }
+    }
+}
+
+pub(super) fn print_repository_list(value: &Value) {
+    let Some(repositories) = value.as_array() else {
+        println!("No repositories.");
+        return;
+    };
+    if repositories.is_empty() {
+        println!("No repositories.");
+        return;
+    }
+    println!("ID\tNAME\tPATH");
+    for repository in repositories {
         println!(
-            "{}\t{}\t{}\t{}",
-            text(workspace, "id"),
-            text(workspace, "name"),
-            text(workspace, "phase"),
-            text(workspace, "branchName")
+            "{}\t{}\t{}",
+            text(repository, "id"),
+            text(repository, "displayName"),
+            text(repository, "rootPath")
         );
     }
 }

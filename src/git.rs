@@ -38,10 +38,12 @@ pub enum GitError {
     NotAWorktree(PathBuf),
     #[error("repository checkout is dirty: {0}")]
     DirtyRepository(PathBuf),
-    #[error("invalid workspace name `{0}`; use 1-63 lowercase ASCII letters, digits, or hyphens")]
+    #[error(
+        "invalid workspace name `{0}`; use 1-63 bytes of lowercase letters, digits, hyphens, and single slashes between components"
+    )]
     InvalidWorkspaceName(String),
-    #[error("branch already exists: {0}")]
-    BranchExists(String),
+    #[error("branch namespace collision: requested {requested}, existing {existing}")]
+    BranchCollision { requested: String, existing: String },
     #[error("worktree destination already exists (including symlinks): {0}")]
     DestinationExists(PathBuf),
     #[error("base commit is not a complete Git object ID: {0}")]

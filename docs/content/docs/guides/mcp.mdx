@@ -1,10 +1,10 @@
 ---
 title: Use CoCo through MCP
-description: Let an MCP-capable application inspect or continue tasks in one repository.
+description: Let an MCP-capable application inspect or continue workspaces in one repository.
 ---
 
 CoCo includes an MCP server for applications that should work with the same
-tasks as the CLI. Start `cocod`, then configure your MCP host to launch:
+workspaces as the CLI. Start `cocod`, then configure your MCP host to launch:
 
 ```bash
 coco-mcp --repository /absolute/path/to/project
@@ -19,11 +19,11 @@ coco mcp serve --repository /absolute/path/to/project
 The repository is fixed when the server starts. By default it offers only
 read-only tools:
 
-| Tool            | What it does                       |
-| --------------- | ---------------------------------- |
-| `tasks.list`    | List tasks in the repository       |
-| `agents.status` | Show the current state of one task |
-| `changes.diff`  | Show the changes made by one task  |
+| Tool                | What it does                            |
+| ------------------- | --------------------------------------- |
+| `workspaces.list`   | List workspaces in the repository       |
+| `workspaces.status` | Show the current state of one workspace |
+| `workspaces.diff`   | Show changes made by one workspace      |
 
 ## Allow messages
 
@@ -34,8 +34,9 @@ Codex turn:
 coco-mcp --repository /absolute/path/to/project --allow-send
 ```
 
-This adds `agents.send`. Any connected MCP host can then start the first or a
-later turn for a ready task, so keep the option disabled unless you need it.
+This adds `workspaces.send`. Any connected MCP host can then start the first or
+a later turn for a ready workspace, so keep the option disabled unless you need
+it.
 
-This MCP server controls CoCo tasks. Selecting which MCP servers are available
-inside an individual Codex task is not supported yet.
+This MCP server controls CoCo workspaces. Selecting which MCP servers are
+available inside an individual Codex workspace is not supported yet.

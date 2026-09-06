@@ -25,6 +25,7 @@ const PROCESS_TIMEOUT: Duration = Duration::from_secs(15);
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
 const THREAD_ID: &str = "thread-process-smoke";
 const TURN_ID: &str = "turn-process-smoke";
+const WORKSPACE_NAME: &str = "feat/process-smoke";
 
 struct CaptureAuthorization(Arc<Mutex<Vec<String>>>);
 
@@ -158,17 +159,29 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     assert_mode(&paths.database, 0o600)?;
 
     run_cli(&paths, &repository, &["repo", "add", "."]).await?;
+    let repositories = cli_json(&run_cli(&paths, &repository, &["repo", "list", "--json"]).await?)?;
+    assert_eq!(repositories["schemaVersion"], 4);
+    assert_eq!(
+        repositories["repositories"].as_array().map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(
+        repositories.pointer("/repositories/0/rootPath"),
+        Some(&Value::String(
+            repository.canonicalize()?.to_string_lossy().into_owned()
+        ))
+    );
     let failed_jump = run_cli_with_jump_exit(
         &paths,
         &repository,
         &[
             "create",
-            "process-smoke",
+            WORKSPACE_NAME,
             "--base",
             "HEAD",
-            "--send",
+            "-s",
             "Complete the process smoke test",
-            "--jump",
+            "-j",
         ],
         23,
     )
@@ -176,13 +189,13 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     let failed_jump_error = String::from_utf8_lossy(&failed_jump.stderr);
     ensure!(
         failed_jump_error.contains(
-            "workspace \"process-smoke\" was created and its initial turn was accepted, but the Codex terminal UI did not open"
+            "workspace \"feat/process-smoke\" was created and its initial turn was accepted, but the Codex terminal UI did not open"
         ),
         "create did not explain its retained state after jump failure: {failed_jump_error}"
     );
 
     let listed = cli_json(&run_cli(&paths, &repository, &["ls", "--json"]).await?)?;
-    assert_eq!(listed["schemaVersion"], 3);
+    assert_eq!(listed["schemaVersion"], 4);
     let workspaces = listed["workspaces"]
         .as_array()
         .context("coco ls did not return a workspaces array")?;
@@ -191,7 +204,8 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         "coco ls returned an unexpected workspace count"
     );
     let workspace = &workspaces[0];
-    assert_eq!(workspace["name"], "process-smoke");
+    assert_eq!(workspace["name"], WORKSPACE_NAME);
+    assert_eq!(workspace["repository"]["displayName"], "repository");
     assert_eq!(workspace["lifecycle"], "ready");
     assert_eq!(workspace["phase"], "active");
     assert_eq!(workspace["waitReasons"], json!([]));
@@ -221,7 +235,38 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     let active = workspace_status(&paths, &repository).await?;
     assert_eq!(active["workspace"]["phase"], "active");
 
-    run_cli(&paths, &repository, &["jump", "process-smoke"]).await?;
+    let repository_argument = repository.to_string_lossy().into_owned();
+    let explicitly_scoped = cli_json(
+        &run_cli(
+            &paths,
+            temporary.path(),
+            &[&repository_argument, "status", WORKSPACE_NAME, "--json"],
+        )
+        .await?,
+    )?;
+    assert_eq!(explicitly_scoped["workspace"]["id"], workspace["id"]);
+
+    let global_list = cli_json(&run_cli(&paths, temporary.path(), &["ls", "-a", "--json"]).await?)?;
+    assert_eq!(global_list["workspaces"].as_array().map(Vec::len), Some(1));
+    assert_eq!(
+        global_list.pointer("/workspaces/0/repository/rootPath"),
+        Some(&Value::String(
+            repository.canonicalize()?.to_string_lossy().into_owned()
+        ))
+    );
+
+    let workspace_id = workspace["id"].as_str().context("workspace had no ID")?;
+    let globally_resolved = cli_json(
+        &run_cli(
+            &paths,
+            temporary.path(),
+            &["status", workspace_id, "--json"],
+        )
+        .await?,
+    )?;
+    assert_eq!(globally_resolved["workspace"]["id"], workspace["id"]);
+
+    run_cli(&paths, &repository, &["jump", WORKSPACE_NAME]).await?;
     let jump_arguments = read_arguments(&paths.jump_args)?;
     verify_jump_arguments(&jump_arguments, &endpoint, &worktree)?;
     ensure!(
@@ -929,7 +974,7 @@ fn cli_json(output: &Output) -> Result<Value> {
 }
 
 async fn workspace_status(paths: &TestPaths, repository: &Path) -> Result<Value> {
-    cli_json(&run_cli(paths, repository, &["status", "process-smoke", "--json"]).await?)
+    cli_json(&run_cli(paths, repository, &["status", WORKSPACE_NAME, "--json"]).await?)
 }
 
 async fn wait_for_workspace_phase(
@@ -1014,7 +1059,7 @@ fn verify_codex_requests(requests: &[Value], worktree: &Path) -> Result<()> {
     );
     assert_eq!(
         thread_name.pointer("/params/name"),
-        Some(&json!("process-smoke"))
+        Some(&json!(WORKSPACE_NAME))
     );
 
     let turn_start = request(requests, "turn/start")?;

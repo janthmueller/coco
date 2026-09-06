@@ -42,6 +42,9 @@ impl RpcHandler for DaemonHandler {
             DaemonMethod::RepositoryRegister => {
                 execute(self.coordinator.register_repository(decode(params)?))
             }
+            DaemonMethod::RepositoryList => {
+                execute(self.coordinator.list_repositories(decode(params)?))
+            }
             DaemonMethod::WorkspaceCreate => execute(
                 self.coordinator
                     .create_workspace(decode::<WorkspaceCreateParams>(params)?)
@@ -111,6 +114,7 @@ where
 
 fn map_coordinator_error(source: CoordinatorError) -> RpcErrorPayload {
     let code = source.code();
+    let data = source.data();
     let message = match &source {
         CoordinatorError::Worker(error) => {
             error!(%error, "Codex operation failed");
@@ -126,5 +130,9 @@ fn map_coordinator_error(source: CoordinatorError) -> RpcErrorPayload {
         }
         _ => source.to_string(),
     };
-    RpcErrorPayload::new(code, message)
+    RpcErrorPayload {
+        code: code.to_owned(),
+        message,
+        data,
+    }
 }

@@ -10,7 +10,7 @@ const requiredPages = [
   "index.html",
   "docs/index.html",
   "docs/getting-started/index.html",
-  "docs/guides/tasks/index.html",
+  "docs/guides/workspaces/index.html",
   "docs/guides/execution-profiles/index.html",
   "docs/guides/mcp/index.html",
   "docs/reference/cli/index.html",
@@ -20,6 +20,7 @@ const requiredPages = [
 const removedInternalPages = [
   "docs/concepts/daemon-and-events/index.html",
   "docs/concepts/tasks-and-worktrees/index.html",
+  "docs/guides/tasks/index.html",
   "docs/contributing/index.html",
   "docs/integrations/control-mcp/index.html",
   "docs/integrations/worker-mcp-and-agentgateway/index.html",

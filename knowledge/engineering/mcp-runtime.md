@@ -35,8 +35,8 @@ deployment state and must not become a second control plane.
 CoCo uses MCP in two independent directions:
 
 1. **CoCo control MCP:** `coco mcp serve` exposes selected orchestration
-   operations such as `tasks.list` to an external MCP host. It is a thin client
-   of `cocod` and is part of v0.
+   operations such as `workspaces.list` to an external MCP host. It is a thin
+   client of `cocod` and is part of v0.
 2. **Worker tool MCP:** A Codex thread receives a selected set of external MCP
    servers and tools. The catalog and per-thread selection described here
    concern this direction and are not part of the v0 control-MCP adapter.
@@ -110,7 +110,7 @@ thread-start saga rather than silently weakening the tool set.
 
 ### Resume
 
-Resolve the existing binding by thread/task ID and explicitly reapply the same
+Resolve the existing binding by thread/workspace ID and explicitly reapply the same
 snapshot. Do not substitute the latest revision of a named profile. Refreshing
 credentials may produce a new token without changing the binding's grants.
 

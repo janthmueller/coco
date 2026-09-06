@@ -16,8 +16,8 @@ use uuid::Uuid;
 use crate::domain::AuditOutcome;
 use crate::paths::CocoPaths;
 use crate::protocol::{
-    AuditRecordParams, DaemonRequest, TurnStartParams, WorkspaceDiffParams, WorkspaceGetParams,
-    WorkspaceListParams,
+    AuditRecordParams, DaemonRequest, RepositoryScope, TurnStartParams, WorkspaceDiffParams,
+    WorkspaceGetParams, WorkspaceListParams,
 };
 use crate::rpc::{RpcClient, RpcClientError};
 
@@ -184,7 +184,7 @@ where
         self.call(
             WORKSPACES_LIST,
             WorkspaceListParams {
-                repository_path: self.repository.clone(),
+                scope: RepositoryScope::repository(self.repository.clone()),
                 phases: input.phases,
             },
             None,
@@ -198,7 +198,7 @@ where
         self.call(
             WORKSPACES_STATUS,
             WorkspaceGetParams {
-                repository_path: self.repository.clone(),
+                scope: RepositoryScope::repository(self.repository.clone()),
                 workspace: workspace.clone(),
             },
             Some(workspace),
@@ -212,7 +212,7 @@ where
         self.call(
             WORKSPACES_DIFF,
             WorkspaceDiffParams {
-                repository_path: self.repository.clone(),
+                scope: RepositoryScope::repository(self.repository.clone()),
                 workspace: workspace.clone(),
                 max_bytes: input.max_bytes,
             },
@@ -230,7 +230,7 @@ where
         self.call(
             WORKSPACES_SEND,
             TurnStartParams {
-                repository_path: self.repository.clone(),
+                scope: RepositoryScope::repository(self.repository.clone()),
                 workspace: workspace.clone(),
                 message: input.message,
                 operation_id: operation_id.clone(),
@@ -468,6 +468,7 @@ mod tests {
                 "createdAtMs": 1,
                 "updatedAtMs": 1,
             }),
+            DaemonMethod::RepositoryList => json!([]),
             DaemonMethod::WorkspaceCreate => json!({"workspace": fake_workspace()}),
             DaemonMethod::WorkspaceList => json!([]),
             DaemonMethod::WorkspaceGet => json!({
@@ -612,20 +613,23 @@ mod tests {
         assert_eq!(
             calls[0].1,
             json!({
-                "repositoryPath": "/fixed/repository",
+                "scope": {"kind": "repository", "path": "/fixed/repository"},
                 "phases": ["running", "idle"]
             })
         );
         assert_eq!(calls[2].0, "workspace.get");
         assert_eq!(
             calls[2].1,
-            json!({ "repositoryPath": "/fixed/repository", "workspace": "workspace-one" })
+            json!({
+                "scope": {"kind": "repository", "path": "/fixed/repository"},
+                "workspace": "workspace-one"
+            })
         );
         assert_eq!(calls[4].0, "workspace.diff");
         assert_eq!(
             calls[4].1,
             json!({
-                "repositoryPath": "/fixed/repository",
+                "scope": {"kind": "repository", "path": "/fixed/repository"},
                 "workspace": "workspace-two",
                 "maxBytes": 4_096
             })
@@ -634,7 +638,7 @@ mod tests {
         assert_eq!(
             calls[6].1,
             json!({
-                "repositoryPath": "/fixed/repository",
+                "scope": {"kind": "repository", "path": "/fixed/repository"},
                 "workspace": "workspace-three",
                 "message": "private prompt text",
                 "operationId": "operation-7"

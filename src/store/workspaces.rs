@@ -436,6 +436,18 @@ impl Store {
             .map_err(StoreError::from)
     }
 
+    pub fn workspaces_by_name(&self, name: &str) -> Result<Vec<Workspace>, StoreError> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(&format!(
+            "{} WHERE name = ?1 ORDER BY repository_id, id",
+            WORKSPACE_SELECT
+        ))?;
+        statement
+            .query_map([name], map_workspace)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::from)
+    }
+
     pub fn list_workspaces(
         &self,
         repository_id: Option<&str>,

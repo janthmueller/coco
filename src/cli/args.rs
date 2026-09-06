@@ -3,8 +3,19 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Debug, Parser)]
-#[command(name = "coco", version, about = "Coordinate isolated Codex work")]
+#[command(
+    name = "coco",
+    version,
+    about = "Coordinate isolated Codex work",
+    subcommand_precedence_over_arg = true
+)]
 pub struct Cli {
+    /// Use a registered repository other than the current directory.
+    #[arg(value_name = "REPOSITORY_PATH")]
+    pub(super) scope_path: Option<PathBuf>,
+    /// Search or list workspaces across every registered repository.
+    #[arg(long, short = 'a', global = true)]
+    pub(super) all_repos: bool,
     #[command(subcommand)]
     pub(super) command: Command,
 }
@@ -18,7 +29,7 @@ pub(super) enum Command {
     },
     /// Create a fresh Codex workspace in an isolated worktree.
     Create(CreateArgs),
-    /// List workspaces in the current repository.
+    /// List workspaces in the selected repository, or across all repositories.
     Ls {
         /// Emit stable, machine-readable JSON.
         #[arg(long)]
@@ -65,11 +76,17 @@ pub(super) enum RepoCommand {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
+    /// List every repository known to CoCo.
+    List {
+        /// Emit stable, machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Args)]
 pub(super) struct CreateArgs {
-    /// Short workspace name, also used to derive its branch and worktree.
+    /// Workspace name, such as fix/login, also used for its branch and worktree.
     pub(super) name: String,
     /// Git revision from which to prepare the workspace.
     #[arg(long, default_value = "HEAD")]
@@ -78,10 +95,10 @@ pub(super) struct CreateArgs {
     #[arg(long, default_value = "default")]
     pub(super) profile: String,
     /// Start the first turn with MESSAGE after creating the workspace.
-    #[arg(long, value_name = "MESSAGE", value_parser = non_empty_message)]
+    #[arg(long, short = 's', value_name = "MESSAGE", value_parser = non_empty_message)]
     pub(super) send: Option<String>,
     /// Open the workspace in the Codex terminal UI after creating it.
-    #[arg(long)]
+    #[arg(long, short = 'j')]
     pub(super) jump: bool,
 }
 

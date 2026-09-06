@@ -1,28 +1,28 @@
 ---
 title: CoCo
-description: Run several Codex tasks without mixing their files or losing track of their results.
+description: Run several Codex workspaces without mixing their files or losing track of their results.
 ---
 
-CoCo stands for **Codex Coordinator**. It gives every Codex task a separate Git
-worktree and keeps the task, conversation, and resulting changes together.
+CoCo stands for **Codex Coordinator**. A CoCo workspace keeps one Codex
+conversation together with its own Git worktree and branch.
 
-Use it when you want Codex to investigate or change several things in the same
-repository while your own checkout stays untouched.
+Use it when you want Codex to investigate or change several things at once
+without mixing their files or disturbing your own checkout.
 
 ## A typical workflow
 
 ```bash
 coco repo add .
 
-coco new fix-login --base main
-coco send fix-login "Fix the login redirect and run the relevant tests"
+coco create fix/login --base main
+coco send fix/login "Fix the login redirect and run the relevant tests"
 
-coco status fix-login --follow
+coco status fix/login --follow
 ```
 
-`new` prepares `coco/fix-login`, its separate checkout, and its Codex
-conversation. Nothing runs until `send`. You can later use `jump` to open that
-same conversation in the Codex terminal UI.
+`create` prepares `coco/fix/login`, its separate checkout, and its Codex
+conversation. Nothing runs until `send`. Use `jump` whenever you want to open
+that same conversation in the Codex terminal UI.
 
 <Callout type="warn" title="Early preview">
   CoCo currently installs from source and is intended for supervised local use.
@@ -32,17 +32,17 @@ same conversation in the Codex terminal UI.
 <Cards>
   <Card
     title="Get started"
-    description="Build CoCo and run your first isolated task."
+    description="Build CoCo and run your first isolated workspace."
     href="/docs/getting-started"
   />
   <Card
-    title="Work with tasks"
+    title="Work with workspaces"
     description="Prepare, start, follow, and enter Codex work."
-    href="/docs/guides/tasks"
+    href="/docs/guides/workspaces"
   />
   <Card
     title="Choose a Codex profile"
-    description="Apply different Codex settings when a task is prepared."
+    description="Apply different Codex settings when a workspace is prepared."
     href="/docs/guides/execution-profiles"
   />
   <Card

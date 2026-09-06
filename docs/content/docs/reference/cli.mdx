@@ -5,38 +5,57 @@ description: The CoCo commands available in the current preview.
 
 Run `coco --help` or `coco COMMAND --help` for the exact options in your build.
 
-| Command                       | Purpose                                       |
-| ----------------------------- | --------------------------------------------- |
-| `coco repo add [path]`        | Add a Git repository to CoCo                  |
-| `coco new <name> …`           | Prepare an isolated worktree and conversation |
-| `coco ls`                     | List tasks in the current repository          |
-| `coco status <task>`          | Show one task's current state                 |
-| `coco status <task> --follow` | Follow a task until it pauses or finishes     |
-| `coco send <task> <message>`  | Start the first or next turn                  |
-| `coco jump <task>`            | Open the task in the Codex terminal UI        |
-| `coco diff <task>`            | Show changes made by a task                   |
-| `coco mcp serve …`            | Expose CoCo to an MCP host                    |
+| Command                            | Purpose                                             |
+| ---------------------------------- | --------------------------------------------------- |
+| `coco repo add [path]`             | Add a Git repository to CoCo                        |
+| `coco repo list`                   | List added repositories                             |
+| `coco create <name> …`             | Prepare a separate worktree and conversation        |
+| `coco ls`                          | List workspaces in the selected repository          |
+| `coco status <workspace>`          | Show one workspace's current state                  |
+| `coco status <workspace> --follow` | Follow a workspace until it pauses or becomes ready |
+| `coco send <workspace> <message>`  | Start the first or next turn                        |
+| `coco jump <workspace>`            | Open the workspace in the Codex terminal UI         |
+| `coco diff <workspace>`            | Show changes made in the workspace                  |
+| `coco mcp serve …`                 | Expose CoCo to an MCP host                          |
 
-## Create a task
+## Create a workspace
 
 ```bash
-coco new <name> \
+coco create <name> \
   [--base <git-ref>] \
-  [--profile <name>]
+  [--profile <name>] \
+  [-s, --send <message>] \
+  [-j, --jump]
 ```
 
-Names contain lowercase letters, numbers, and hyphens. `--base` accepts a Git
-reference such as `HEAD`, `main`, or a commit hash and defaults to `HEAD`. The
-repository must be clean. Preparing the task does not send a message or start a
-turn.
+Names contain lowercase letters, numbers, and hyphens, with optional slashes
+between components, such as `fix/login`. `--base` defaults to `HEAD`. The
+repository must be clean. Without `--send`, creating a workspace does not start
+a turn.
+
+## Choose a repository
+
+Workspace commands use the repository containing your current directory. A
+leading path selects another added repository:
+
+```bash
+coco ../api ls
+coco ../api status fix/login
+```
+
+Use `coco --all-repos ls` (short: `coco -a ls`) for a combined list.
+`--all-repos` also lets
+`status`, `send`, `jump`, and `diff` resolve a name that is unique across all
+added repositories. Full workspace IDs always resolve globally.
 
 ## Machine-readable output
 
-Use `--json` with task listing and inspection:
+Use `--json` with repository or workspace listing and inspection:
 
 ```bash
+coco repo list --json
 coco ls --json
-coco status first-task --json
+coco status feat/first --json
 ```
 
 `status --follow` is human-oriented and cannot be combined with `--json`.

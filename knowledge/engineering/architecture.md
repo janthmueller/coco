@@ -40,7 +40,7 @@ status: draft
   domain socket on Linux/macOS and, once implemented, a Windows named pipe.
   The MCP adapter separately speaks MCP over stdio to its host.
 - The default Codex configuration or a named `[profiles.<name>]` overlay is
-  snapshotted per task; only `fresh` context is executable in v0.
+  snapshotted per workspace; only `fresh` context is executable in v0.
 
 ### Recommended
 
@@ -76,7 +76,7 @@ status: draft
 
 Only `cocod` may mutate managed state, create worktrees, or own the App Server
 process. CLI, Web, and MCP do not bypass daemon use cases. `coco jump` is the
-narrow exception at the presentation edge: it resolves the task through local
+narrow exception at the presentation edge: it resolves the workspace through local
 RPC, then attaches the official Codex TUI directly to the existing App Server
 and thread. SQLite is the durable source of CoCo metadata and normalized
 events; Git is authoritative for files, refs, and worktree condition; the App
@@ -120,11 +120,11 @@ daemon socket.
 Use narrow Rust traits and explicit owned state rather than global singletons:
 
 ```text
-TaskStore
-  registerRepository, findRepository, createTaskIntent
+WorkspaceStore
+  registerRepository, findRepository, createWorkspaceIntent
   bindWorktree, bindThread, createTurnIntent
-  transitionTask, transitionTurn, appendEvent
-  listTasks, getTask, listEvents, managePendingRequest
+  transitionWorkspace, transitionTurn, appendEvent
+  listWorkspaces, getWorkspace, listEvents
 
 GitPort
   inspectRepository, status, resolveCommit, validateBranch
@@ -141,18 +141,18 @@ Clock / IdGenerator
   injectable sources for deterministic tests and idempotency
 ```
 
-Core use cases are `RegisterRepository`, `ListRepositories`, `CreateTask`,
-`ListTasks`, `StatusTask`, `SendTurn`, `FollowTask`, `DiffTask`,
-`AuditControlCall`, and the required `DecideRequest` approval-resolution use
-case. MCP tools call these same use cases through daemon RPC rather than
-importing them directly.
+Core use cases are `RegisterRepository`, `ListRepositories`,
+`CreateWorkspace`, `ListWorkspaces`, `StatusWorkspace`, `SendTurn`,
+`FollowWorkspace`, `DiffWorkspace`, and `AuditControlCall`. The planned
+`DecideRequest` approval-resolution use case is not implemented. MCP tools call
+the shipped use cases through daemon RPC rather than importing them directly.
 
 ## Local filesystem layout
 
 Use XDG locations on Unix, with standard fallbacks:
 
 ```text
-${XDG_DATA_HOME:-~/.local/share}/coco/worktrees/<repository-id>/<task-name>/
+${XDG_DATA_HOME:-~/.local/share}/coco/worktrees/<repository-id>/<workspace-name>/
 ${XDG_DATA_HOME:-~/.local/share}/coco/coco.db
 ${XDG_DATA_HOME:-~/.local/share}/coco/cocod.lock
 ${XDG_RUNTIME_DIR}/coco/cocod.sock
@@ -171,7 +171,7 @@ writable directory without an owned `0700` parent.
 
 Canonicalize registered repository and generated worktree paths with
 filesystem real paths after creation. Never derive a filesystem path from an
-unvalidated task name; the opaque repository ID and strictly validated task
+unvalidated workspace name; the opaque repository ID and strictly validated workspace
 name form the directory components.
 
 ## Client-to-daemon protocol
@@ -188,15 +188,15 @@ Request:
 
 ```json
 {
-  "protocolVersion": 1,
-  "id": "01K...",
-  "method": "task.create",
-  "params": {},
-  "operationId": "01K...",
-  "client": {
-    "surface": "cli",
-    "instanceId": "01K...",
-    "label": "coco"
+  "id": "8d67...",
+  "method": "workspace.create",
+  "params": {
+    "repositoryPath": "/projects/app",
+    "name": "feat/login",
+    "baseRef": "HEAD",
+    "contextMode": "fresh",
+    "profile": "default",
+    "operationId": "d414..."
   }
 }
 ```
@@ -205,9 +205,7 @@ Unary response:
 
 ```json
 {
-  "protocolVersion": 1,
-  "id": "01K...",
-  "ok": true,
+  "id": "8d67...",
   "result": {}
 }
 ```
@@ -216,27 +214,17 @@ Failure response:
 
 ```json
 {
-  "protocolVersion": 1,
-  "id": "01K...",
-  "ok": false,
+  "id": "8d67...",
   "error": {
     "code": "DIRTY_SOURCE",
-    "message": "The registered source checkout has uncommitted changes.",
-    "details": {}
+    "message": "repository checkout is dirty: /projects/app"
   }
 }
 ```
 
-Subscription event:
-
-```json
-{
-  "protocolVersion": 1,
-  "subscriptionId": "01K...",
-  "cursor": 42,
-  "event": {}
-}
-```
+The current protocol has unary requests only. `event.list` provides durable
+cursor polling; a later subscription transport must preserve the same method
+and coordinator semantics.
 
 Methods for the handed-off commands are:
 
@@ -244,35 +232,35 @@ Methods for the handed-off commands are:
 | --- | --- | --- |
 | `repository.register` | `coco repo add` | not exposed |
 | `repository.list` | `coco repo list` | not exposed |
-| `task.create` | `coco new` | not exposed in v0 |
-| `task.list` | `coco ls` | `tasks.list` |
-| `task.get` | `coco status` and task resolution for `coco jump` | `agents.status` |
-| `turn.start` | `coco send` | `agents.send` when explicitly enabled |
+| `workspace.create` | `coco create` | not exposed in v0 |
+| `workspace.list` | `coco ls` | `workspaces.list` |
+| `workspace.get` | `coco status` and workspace resolution for `coco jump` | `workspaces.status` |
+| `turn.start` | `coco send` | `workspaces.send` when explicitly enabled |
 | `event.list` | `coco status --follow` polling | not exposed in v0 |
-| `task.diff` | `coco diff` | `changes.diff` |
+| `workspace.diff` | `coco diff` | `workspaces.diff` |
 | `approval.respond` | `coco decide <request-id>` (planned) | not exposed in v0 |
 
 Repository-aware CLI commands carry either one repository path or an explicit
 daemon-wide scope. An omitted path means `.`, and a supplied path may point
 inside a registered worktree; the daemon canonicalizes it through Git and
 resolves the stored common-directory identity. The client never combines a
-repository path and task name into one opaque selector.
+repository path and workspace name into one opaque selector.
 
-Full task IDs resolve globally. Human task names resolve within the selected
-repository, or across all repositories only when the client explicitly sends
-the `--all-repos` scope. The daemon owns global matching and returns every
-candidate repository for an ambiguous name; the CLI must not perform a
-read-then-guess lookup itself. A local miss may return bounded suggestions but
-must not silently retarget `send`, `jump`, or another command. There is no
-daemon-global mutable "selected repository"; a future GUI may keep a selection
-as client view state.
+Full workspace IDs resolve globally. Human workspace names resolve within the
+selected repository, or across all repositories only when the client
+explicitly sends the `--all-repos`/`-a` scope. The daemon owns global matching
+and returns bounded candidate IDs, names, and repository paths for an ambiguous
+name; the CLI must not perform a read-then-guess lookup itself. A local miss may
+return the same bounded suggestions but must not silently retarget `send`,
+`jump`, or another command. There is no daemon-global mutable "selected
+repository"; a future GUI may keep a selection as client view state.
 
-`operationId` is required for mutating methods and stored with the resulting
-task, turn, or request resolution. Repeating an ID with identical parameters
-returns the prior result. Reusing it with different parameters returns
-`IDEMPOTENCY_CONFLICT`. Client metadata is untrusted attribution, not an
-authorization claim; authorization derives from the secured local transport
-and explicitly enabled adapter capabilities.
+`operationId` is required inside mutating method parameters and stored with the
+resulting workspace or turn. Repeating an ID with identical parameters returns
+the prior result. Reusing it with different parameters returns
+`IDEMPOTENCY_CONFLICT`. Authorization derives from the secured local transport
+and explicitly enabled adapter capabilities; the current envelope carries no
+client identity claim.
 
 ### CoCo MCP adapter
 
@@ -285,13 +273,13 @@ the Codex App Server, or implements fallback orchestration.
 The default server advertises three read-only tools:
 
 ```text
-tasks.list
-agents.status
-changes.diff
+workspaces.list
+workspaces.status
+workspaces.diff
 ```
 
-Starting it with `--allow-send` additionally advertises `agents.send`. That
-tool requires task, message, and operation ID and delegates to `turn.start`.
+Starting it with `--allow-send` additionally advertises `workspaces.send`. That
+tool requires workspace, message, and operation ID and delegates to `turn.start`.
 The flag is an explicit operator capability grant; v0 exposes no approval,
 cleanup, repository-registration, arbitrary-command, A2A ask, or integration
 tool.
@@ -304,12 +292,12 @@ turn.
 
 Every tool request causes the daemon to write `control.call.started` and
 `control.call.completed` audit events, including adapter instance/client label,
-tool/method, optional task, operation ID, timestamps, outcome, and sanitized
+tool/method, optional workspace, operation ID, timestamps, outcome, and sanitized
 error. Audit payloads omit raw messages by default. A read call is audited even
 though it has no idempotency key.
 
 This adapter enables an operator-controlled MCP host to coordinate CoCo, but it
-is not the planned A2A router: tasks do not acquire sender identities, directly
+is not the planned A2A router: workspaces do not acquire sender identities, directly
 address other threads, await correlated responses, or gain delegated merge
 authority in v0.
 
@@ -318,25 +306,26 @@ authority in v0.
 Errors use stable machine codes while messages remain human-oriented:
 
 ```text
-INVALID_ARGUMENT
-PROTOCOL_VERSION_UNSUPPORTED
-DAEMON_UNAVAILABLE
-REPOSITORY_NOT_FOUND
+METHOD_NOT_FOUND
+INVALID_PARAMS
+UNSUPPORTED_CONTEXT
 REPOSITORY_NOT_REGISTERED
-DIRTY_SOURCE
-BASE_NOT_FOUND
-TASK_NOT_FOUND
-TASK_REFERENCE_AMBIGUOUS
-TASK_NAME_CONFLICT
-BRANCH_CONFLICT
-WORKTREE_PATH_CONFLICT
-TASK_BUSY
-TASK_NOT_RECOVERED
-WORKTREE_INVARIANT_FAILED
-CODEX_UNAVAILABLE
-CODEX_PROTOCOL_MISMATCH
-APPROVAL_NOT_PENDING
+WORKSPACE_EXISTS
+WORKSPACE_NOT_FOUND
+WORKSPACE_REFERENCE_AMBIGUOUS
 IDEMPOTENCY_CONFLICT
+INVALID_WORKSPACE_STATE
+INCOMPLETE_WORKSPACE
+PROFILE_CHANGED
+DIRTY_SOURCE
+INVALID_WORKSPACE_NAME
+WORKSPACE_COLLISION
+NOT_A_GIT_REPOSITORY
+GIT_ERROR
+NOT_FOUND
+PROFILE_NOT_FOUND
+INVALID_PROFILE
+CODEX_ERROR
 INTERNAL
 ```
 
@@ -347,27 +336,10 @@ or unredacted child-process stderr through structured details.
 
 SQLite uses foreign keys, WAL mode, an explicit busy timeout, and ordered
 migrations. `cocod` is the sole application writer. Store timestamps as UTC
-Unix milliseconds and JSON as validated text. IDs are opaque, sortable unique
-strings; no user meaning is encoded in them.
-
-### `operations`
-
-| Column | Constraint and meaning |
-| --- | --- |
-| `id` | client-supplied operation ID; primary key |
-| `method` | mutating daemon method |
-| `request_hash` | hash of canonical parameters for conflict detection; raw prompt text is not stored here |
-| `client_surface`, `client_instance_id`, `client_label` | audit attribution, not authority |
-| `status` | `started`, `succeeded`, `failed`, or `indeterminate` |
-| `result_ref_json` | bounded identifiers needed to replay a successful result |
-| `error_code` | nullable sanitized terminal error |
-| `started_at_ms`, `completed_at_ms` | lifecycle timestamps |
-
-Insert the operation before its first external side effect. Repeating the ID
-with the same method/hash returns or reconciles the stored outcome; another
-method/hash is `IDEMPOTENCY_CONFLICT`. Registration can remain naturally
-idempotent by canonical repository root, but still uses this table so reusing
-its operation ID for a different root is detected.
+Unix milliseconds and JSON as validated text. IDs are opaque UUIDs; no user
+meaning is encoded in them. Creation and turn-start operation IDs are stored
+directly on their resulting rows. There is no separate operations table in the
+current schema.
 
 ### `repositories`
 
@@ -377,17 +349,18 @@ its operation ID for a different root is detected.
 | `root_path` | unique canonical registered worktree root |
 | `git_common_dir` | canonical common Git directory observed at registration |
 | `display_name` | basename used for rendering only |
+| `is_linked_worktree` | whether registration occurred through a linked worktree |
 | `created_at_ms`, `updated_at_ms` | required timestamps |
 
-### `tasks`
+### `workspaces`
 
 | Column | Constraint and meaning |
 | --- | --- |
 | `id` | primary key |
-| `create_operation_id` | unique foreign key to the creation operation |
+| `create_operation_id` | unique client-generated creation idempotency key |
 | `repository_id` | required foreign key |
 | `name` | required; unique with `repository_id` |
-| `legacy_goal` | compatibility-only copy from the prerelease v1 schema; omitted from the domain/API and never written for new tasks |
+| `legacy_goal` | compatibility-only copy from the prerelease v1 schema; omitted from the domain/API and never written for new workspaces |
 | `context_mode` | `fresh`, with `fork` and `handoff` reserved |
 | `context_json` | versioned context provenance, not conversation history |
 | `profile_json` | versioned immutable effective profile snapshot |
@@ -406,21 +379,21 @@ its operation ID for a different root is detected.
 | `created_at_ms`, `updated_at_ms`, `completed_at_ms` | lifecycle timestamps |
 
 Branch, base, path, and thread columns are nullable only while the creation
-saga has not reached their stage. A `ready` task requires the complete binding.
-`phase` and `waitReasons` are computed on read and deliberately have no task
+saga has not reached their stage. A `ready` workspace requires the complete binding.
+`phase` and `waitReasons` are computed on read and deliberately have no workspace
 table columns.
 
-Repository display names are not selectors by themselves because unrelated
-paths may share a basename. CLI repository scope is a canonicalizable path or
-stable repository ID; a display name may be accepted only when it has exactly
-one registered match.
+Repository display names are not selectors because unrelated paths may share a
+basename. CLI repository scope is a canonicalizable path. The stable repository
+ID is returned for identity and correlation but is not currently a CLI path
+selector.
 
 ### `turns`
 
 | Column | Constraint and meaning |
 | --- | --- |
 | `id` | local primary key created before the App Server request |
-| `task_id` | required foreign key |
+| `workspace_id` | required foreign key |
 | `operation_id` | unique foreign key to the turn-start operation |
 | `client_message_id` | unique value forwarded to `turn/start` when supported |
 | `codex_turn_id` | globally unique, nullable until accepted |
@@ -439,7 +412,7 @@ choice rather than an accidental event payload.
 | --- | --- |
 | `sequence` | integer primary key/autoincrement; replay cursor |
 | `id` | globally unique event ID |
-| `task_id`, `turn_id` | optional task/local-turn foreign keys; null only for global control audit events |
+| `workspace_id`, `turn_id` | optional workspace/local-turn foreign keys; null when an event cannot be correlated |
 | `kind` | normalized, versioned CoCo event kind |
 | `source` | `coco`, `git`, or `codex` |
 | `source_method` | nullable original App Server method/internal action |
@@ -452,12 +425,19 @@ delta events through the in-memory publisher but do not persist every token or
 reasoning delta. Consumers use `sequence`, never timestamps, for ordering and
 replay.
 
-### `pending_requests`
+### `audit_events`
+
+Control-MCP calls use a separate append-only audit table with a monotonic
+sequence, opaque ID, source, action, optional workspace and operation IDs,
+outcome, sanitized JSON details, and occurrence time. Raw prompt text is not
+copied into this table.
+
+### Planned `pending_requests` (not implemented)
 
 | Column | Constraint and meaning |
 | --- | --- |
 | `id` | stable CoCo request ID shown to clients |
-| `task_id`, `turn_id` | required correlation |
+| `workspace_id`, `turn_id` | required correlation |
 | `app_server_instance_id` | identifies the child-process generation |
 | `app_request_id_json` | exact typed App Server request ID serialization |
 | `kind` | command approval, file approval, permissions, or user input |
@@ -465,14 +445,15 @@ replay.
 | `request_json`, `response_json` | versioned redacted audit payloads |
 | `created_at_ms`, `resolved_at_ms` | lifecycle timestamps |
 
-Enforce uniqueness across App Server instance and request ID. On connection
+This table belongs to the deferred `decide` design. When implemented, it must
+enforce uniqueness across App Server instance and request ID. On connection
 loss unresolved callbacks become `orphaned`; a response must never be sent to
 a new process generation under a recycled wire ID.
 
-### Deferred task annotations and external references
+### Deferred workspace annotations and external references
 
 Do not expose a generic `goal` or `metadata` field merely to hold unrelated
-values. A later task-annotation design may cover human notes and structured
+values. A later workspace-annotation design may cover human notes and structured
 references such as tickets, pull requests, or URLs, but it first needs explicit
 contracts for:
 
@@ -482,14 +463,14 @@ contracts for:
 - copy/inheritance behavior for fork, handoff, and detached-worktree promotion;
 - whether a value is ever projected into Codex context (default: never).
 
-Until that design exists, task creation accepts only operational fields. A
+Until that design exists, workspace creation accepts only operational fields. A
 prerelease v1 `goal` column is migrated to a hidden `legacy_goal` compatibility
-column so existing local data is not destroyed, but it is not part of the task
+column so existing local data is not destroyed, but it is not part of the workspace
 model or a foundation for the future schema.
 
 ### Schema additions to avoid initially
 
-Do not add profile CRUD, A2A messages, task dependencies, merge requests,
+Do not add profile CRUD, A2A messages, workspace dependencies, merge requests,
 Codex App Server pools, UI sessions, or a raw copy of all Codex history in the
 first migration. CoCo MCP call auditing uses normalized events and does not
 justify a parallel orchestration store. Add later concepts with real use cases
@@ -499,30 +480,31 @@ and migrations.
 
 All state transitions use a compare-and-set update inside `BEGIN IMMEDIATE`:
 
-1. Load and validate the operation plus current task/turn/pending-request
-   state.
+1. Load and validate the operation plus current workspace/turn state.
 2. Apply the operation and domain-state update.
 3. Insert the corresponding durable event.
 4. Commit.
-5. Publish the committed event to live subscribers.
+5. Return the committed state and cursor to the caller.
 
-Never publish a durable event before its transaction commits. A subscriber
-may receive a replayed event twice across reconnects and de-duplicates by
-event ID/cursor; it must never observe a committed state without its event.
+The current client consumes committed events through cursor-based polling. A
+future publisher must never publish a durable event before its transaction
+commits; reconnecting subscribers de-duplicate by event ID/cursor.
 
-### Task lifecycle and thread runtime
+### Workspace lifecycle and thread runtime
 
-Schema v3 separates state by owner. CoCo writes only the task lifecycle:
+Schema v3 introduced state ownership separation, and the current schema v4
+retains it while renaming the aggregate. CoCo writes only the workspace
+lifecycle:
 
 | From | Trigger | To | Durable event/effect |
 | --- | --- | --- | --- |
-| absent | accepted `task.create` | `provisioning` | `task.created` |
+| absent | accepted `workspace.create` | `provisioning` | `workspace.created` |
 | `provisioning` | worktree verified | `starting` | `worktree.created` |
 | `starting` | thread and initial native status bound | `ready` | `agent.started` |
 | `provisioning` or `starting` | unrecoverable saga error | `failed` | `agent.failed` with retained artifacts |
 
-`completed` remains reserved for a future explicit task operation. A completed,
-failed, or interrupted turn does not mutate the task lifecycle; it updates the
+`completed` remains reserved for a future explicit workspace operation. A completed,
+failed, or interrupted turn does not mutate the workspace lifecycle; it updates the
 turn record and clears `active_turn_id`. A failed turn can therefore be retried
 when Codex subsequently reports the thread `idle`.
 
@@ -565,13 +547,13 @@ category, not shell-expanded commands.
 
 - Obtain the top level and common Git directory from Git, then canonicalize.
 - Record whether the supplied checkout is itself a linked worktree.
-- Source cleanliness for `new` uses porcelain status including untracked
+- Source cleanliness for `create` uses porcelain status including untracked
   files. Dirty state in unrelated linked worktrees does not dirty the selected
   registered checkout.
 - Resolve the base as a commit object with the equivalent of
   `rev-parse --verify --end-of-options <ref>^{commit}` and persist its complete
   output.
-- Accept slash-separated task names such as `feat/login`, but validate every
+- Accept slash-separated workspace names such as `feat/login`, but validate every
   component before using it in a filesystem path: 1-63 total bytes, non-empty
   lowercase ASCII alphanumeric/`-` components, and alphanumeric component
   boundaries. Reject traversal, leading/trailing/repeated separators, and dot
@@ -598,13 +580,13 @@ branch and path but do not automatically remove either.
 
 The v0 adapter always creates a branch-backed worktree. A later creation mode
 will permit `git worktree add --detach` at the resolved `base_sha`, avoiding a
-repository branch for exploratory or disposable tasks while retaining full
+repository branch for exploratory or disposable workspaces while retaining full
 filesystem isolation.
 
 This is a Git-binding choice, not a Codex context mode. Its design must add an
 explicit persisted worktree mode, permit an absent branch binding, and define
 an atomic promote/handoff operation that creates and verifies a branch before
-changing the task projection. Diff semantics remain based on the immutable
+changing the workspace projection. Diff semantics remain based on the immutable
 `base_sha`. Cleanup remains explicit and recoverable.
 
 ### Inspection and diff
@@ -652,12 +634,12 @@ The local 0.147.0 observation supports this minimal sequence:
 3. Connect with `Authorization: Bearer <token>`, send `initialize`, await its
    response, and send the `initialized` notification.
 4. Publish the selected loopback URL in a separate user-only descriptor only
-   after initialization succeeds. Never persist the token in SQLite or task
+   after initialization succeeds. Never persist the token in SQLite or workspace
    metadata.
 5. Send `thread/start` with `cwd`, model/profile values, approval policy,
    sandbox mode, instructions, and `ephemeral: false`.
 6. Verify the returned thread ID and canonical returned `cwd`, then set the
-   native thread name to the CoCo task name with `thread/name/set` before
+   native thread name to the CoCo workspace name with `thread/name/set` before
    committing the binding. In Codex 0.147.0 an empty thread has a rollout path
    in the response but does not materialize that file until this durable,
    model-free metadata write; the pinned compatibility smoke verifies that the
@@ -669,7 +651,7 @@ The local 0.147.0 observation supports this minimal sequence:
 9. Correlate responses, notifications, and server-initiated requests by the
    generated protocol fields; map only understood semantics into CoCo events.
 
-`coco jump` reads the endpoint descriptor and token after resolving the task
+`coco jump` reads the endpoint descriptor and token after resolving the workspace
 through local RPC, then launches `codex resume <thread-id> --remote <url>
 --remote-auth-token-env <name> -C <worktree>`. The token is supplied only in
 the child environment. Because Codex currently documents WebSocket App Server
@@ -689,9 +671,9 @@ is inherited through the child environment rather than exposed in arguments.
 
 On daemon recovery use `thread/resume` by stored thread ID, supplying and then
 verifying the stored `cwd` and profile overrides. Reload a named profile only
-when its name, source path, and source hash still match the immutable task
+when its name, source path, and source hash still match the immutable workspace
 snapshot; never persist the full overlay merely to make recovery convenient.
-Never accept a resumed thread whose ID or canonical cwd conflicts with the task
+Never accept a resumed thread whose ID or canonical cwd conflicts with the workspace
 record.
 
 ### Minimum notification mapping
@@ -713,20 +695,20 @@ App Server notification emission can race a request response. For turns
 started through CoCo, an in-memory pending-thread marker prevents the
 `turn/started` notification from being mistaken for an external TUI turn until
 the response is persisted. A `turn/started` received outside such an operation
-creates the local turn binding for a `ready` task with no active turn, allowing
+creates the local turn binding for a `ready` workspace with no active turn, allowing
 `status` to project work initiated in `jump`. Uncorrelated notifications are ignored and logged;
-they are never attached to the most recent task by guesswork.
+they are never attached to the most recent workspace by guesswork.
 
 ### Sandbox and approvals
 
 The draft default is `workspace-write`, user-reviewed approvals, no network,
-and canonical task worktree as the only ordinary writable workspace. For the
+and canonical workspace worktree as the only ordinary writable workspace. For the
 observed protocol, apply the restrictive turn-level sandbox policy on every
 `turn/start`, not only a broad mode at `thread/start`, and verify returned
 effective settings when available.
 
 Native worktrees deliberately share objects and refs while retaining their own
-`HEAD`, index, and checked-out files. Ordinary worker commits on the task's
+`HEAD`, index, and checked-out files. Ordinary worker commits on the workspace's
 bound branch are supported; CoCo does not introduce a second Git database or a
 commit proxy. Do not add the entire common Git directory as an unconditional
 writable workspace. Let Codex's native command-approval flow mediate sandbox
@@ -771,28 +753,28 @@ messages, lifecycle, approvals, plans, and diff updates remain replayable.
 
 ```text
 CLI             cocod              SQLite             Git          App Server
- | task.create    |                   |                 |                |
+ | workspace.create    |                   |                 |                |
  |-------------->| validate/lock     |                 |                |
- |               | create intent --->| task+event      |                |
+ |               | create intent --->| workspace+event      |                |
  |               |------------------------------ worktree add -------->|
  |               | bind worktree --->|                 |                |
  |               |------------------------------------ thread/start --->|
  |               |<----------------------------------- thread id --------|
  |               |--------------------------------- thread/name/set --->|
- |               | bind idle task --->|                 |                |
+ |               | bind idle workspace --->|                 |                |
  |<--------------| prepared result     |                 |                |
 ```
 
 The diagram's Git arrow ends at Git, not the App Server; visual alignment is
 schematic. The repository lock spans validation and branch/worktree creation,
-then releases. A task-scoped lock serializes thread binding and turn starts.
+then releases. A workspace-scoped lock serializes thread binding and turn starts.
 
 Compensation is stateful, not destructive:
 
-- before a worktree exists, mark the task failed with stage/error;
+- before a worktree exists, mark the workspace failed with stage/error;
 - after worktree creation, preserve branch/path and record them;
 - after thread creation, persist the thread ID whenever known and mark the
-  task failed if binding the prepared idle state fails;
+  workspace failed if binding the prepared idle state fails;
 - on an uncertain App Server response, reconcile by operation/thread metadata
   where supported; never blindly issue a second thread start.
 
@@ -803,20 +785,20 @@ Daemon startup order:
 1. Acquire a user-scoped singleton lock.
 2. Secure and open SQLite; run migrations, stale prior-generation thread
    snapshots, fail unfinished preparation, and interrupt unfinished local turn
-   records without changing a bound task's lifecycle.
+   records without changing a bound workspace's lifecycle.
 3. Start/initialize a new authenticated loopback App Server generation,
    publish its private endpoint/token runtime files, and begin draining all
    events.
-4. For every persisted `ready` task without a fresh status from this
+4. For every persisted `ready` workspace without a fresh status from this
    generation, reload and validate its profile provenance, then call
    `thread/resume` with its stored thread ID, canonical worktree, and in-memory
    overlay. Persist the returned native status only after the returned thread
-   ID and `cwd` match. A task-level profile, binding, or resume failure leaves
-   only that task stale with a sanitized recovery error; other tasks continue.
+   ID and `cwd` match. A workspace-level profile, binding, or resume failure leaves
+   only that workspace stale with a sanitized recovery error; other workspaces continue.
 5. Bind the local CLI socket and report ready.
 
 A previously active local turn is recorded as interrupted before its thread is
-resumed, while its task remains `ready`. The new App Server restores the
+resumed, while its workspace remains `ready`. The new App Server restores the
 conversation and future-turn capability, not the killed turn execution.
 Recovery never translates absence of evidence into completion and never starts
 a replacement thread when resume fails.
@@ -830,7 +812,7 @@ process owned by this daemon. It does not delete worktrees or branches.
 
 - A repository-scoped in-process mutex serializes dirty/ref checks and
   worktree creation. Database uniqueness remains the cross-restart backstop.
-- A task-scoped mutex and compare-and-set phase update permit only one active
+- A workspace-scoped mutex and compare-and-set phase update permit only one active
   turn.
 - The App Server adapter multiplexes RPC requests with unique wire IDs and has
   one continuous WebSocket reader; callers never read the transport directly.
@@ -871,33 +853,33 @@ Each step remains runnable and testable:
 1. **Toolchain and process skeleton:** one Rust crate, generated Codex schema
    command, `cocod` foreground lifecycle, CLI connection/health request,
    secure XDG paths, and test runner.
-2. **Durable core:** initial SQLite migration, operations/repositories/tasks/
+2. **Durable core:** initial SQLite migration, operations/repositories/workspaces/
    turns/events, transition functions, idempotency, and daemon unary protocol.
 3. **Git registration:** implement `coco repo add`, repository resolution, dirty and
    base checks, temporary-repository integration tests.
-4. **First vertical proof:** implement `coco new` through worktree creation,
+4. **First vertical proof:** implement `coco create` through worktree creation,
    App Server initialization, thread preparation, idle binding persistence,
    status display, and failure injection.
 5. **Observation:** implement `ls`, one-shot/JSON `status`, durable event
    polling with `status --follow`, and recovery reconciliation.
 6. **Continued interaction:** implement idempotent first/later `send`, shared
-   App Server `jump`, externally started turn projection, task concurrency,
+   App Server `jump`, externally started turn projection, workspace concurrency,
    sequential-turn tests, and later App Server resume after restart.
 7. **Git inspection:** implement full status facets and `diff`, including
    untracked reporting and bounded output.
 8. **MCP adapter:** implement local stdio serving, repository-scoped read-only
-   `tasks.list`, `agents.status`, and `changes.diff`, opt-in idempotent
-   `agents.send`, error mapping, cancellation, and control-call auditing.
+   `workspaces.list`, `workspaces.status`, and `workspaces.diff`, opt-in idempotent
+   `workspaces.send`, error mapping, cancellation, and control-call auditing.
 9. **Interaction checkpoint:** correct native thread-state ownership and verify
    close-without-cancel plus reattachment through `jump`, then stop and review
    findings and all remaining priorities with the user. Pending-request display
    and response through `coco decide <request-id>` remains a candidate rather
    than an automatically scheduled next slice.
-10. **Workspace vocabulary migration:** rename the CoCo-owned `task` aggregate
-    across domain types, storage through a lossless migration, daemon protocol,
-    events, CLI/MCP schemas, tests, and documentation. Replace `new` with
-    `create` without conflating a workspace with its Git worktree, Codex thread,
-    or a future external ticket reference.
+10. **Workspace vocabulary migration:** rename the prerelease CoCo-owned `task`
+    aggregate across domain types, storage through a lossless migration, daemon
+    protocol, events, CLI/MCP schemas, tests, and documentation. Replace `new`
+    with `create` without conflating a workspace with its Git worktree, Codex
+    thread, or a future external ticket reference. Completed in schema v4.
 11. **Create convenience pipeline:** add composable `--send <message>` and
     `--jump` post-actions with the fixed order create, send, jump. Preserve a
     successfully created workspace or accepted turn when a later action fails,
@@ -907,9 +889,9 @@ Each step remains runnable and testable:
     branch advances, and retain the shared native Git model without a custom
     commit service.
 13. **Repository-scope ergonomics:** add `repo list`, optional leading-path
-    scope, `--all-repos`, global workspace-ID lookup, deterministic ambiguity
-    errors, and safe slash-separated workspace names without changing MCP's
-    fixed repository capability.
+    scope, `--all-repos`/`-a`, global workspace-ID lookup, deterministic
+    ambiguity errors, and safe slash-separated workspace names without changing
+    MCP's fixed repository capability. Completed in CLI JSON schema v4.
 14. **Remaining release hardening:** supported-version policy, filesystem
     permission tests, help/public docs, packaging, and clean-install test.
 

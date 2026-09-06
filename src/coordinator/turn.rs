@@ -43,10 +43,11 @@ impl Coordinator {
     ) -> Result<WorkspaceResult, CoordinatorError> {
         validate_non_empty("message", &params.message)?;
         validate_operation_id(&params.operation_id)?;
-        let (repository, _) = self.registered_repository_for_path(&params.repository_path)?;
+        let resolved = self.resolve_workspace(&params.scope, &params.workspace)?;
+        let repository = self.repository_by_id(&resolved.repository_id)?;
         let repository_lock = self.repository_lock(&repository.id).await;
         let _guard = repository_lock.lock().await;
-        let workspace = self.resolve_workspace(&repository, &params.workspace)?;
+        let workspace = self.resolve_workspace(&params.scope, &params.workspace)?;
         let client_message_id =
             message_fingerprint(&params.operation_id, &workspace.id, &params.message);
         if let Some(existing) = self.store.turn_by_operation_id(&params.operation_id)? {

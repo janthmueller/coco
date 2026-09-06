@@ -50,13 +50,13 @@ the default answer to large files; see the
 
 ## Measured baseline
 
-Measured on 2026-09-05 at commit `b9fb561` plus this documentation task:
+Measured on 2026-09-05 at commit `b9fb561` plus this documentation work:
 
 | Area | Finding |
 | --- | --- |
 | Rust size | 8,618 lines across library and binaries; approximately 6,584 production and 1,977 in-module test lines in the library |
 | Largest files | `coordinator.rs` 1,714; `store.rs` 1,617; `codex.rs` 1,535; `git.rs` 845 lines |
-| Long functions | Clippy flags `cli::run` (117), shared App Server spawn (127), task creation (115), and Codex notification projection (106) over its default 100-line threshold |
+| Long functions | Clippy flags `cli::run` (117), shared App Server spawn (127), workspace creation (115), and Codex notification projection (106) over its default 100-line threshold |
 | Other structural lints | The current code produces no `excessive_nesting`, `too_many_arguments`, or `type_complexity` findings when those lints are enabled |
 | Module graph | eleven flat, public top-level library modules; the observed top-level dependency graph is acyclic |
 | Boundary leaks | coordinator imports RPC envelopes/handler; CLI imports a Codex adapter DTO merely to discover the shared endpoint |
@@ -131,13 +131,13 @@ src/
   domain.rs                      # keep compact until its concepts truly split
   protocol.rs                    # typed daemon methods, DTOs, and error codes
   protocol/
-    task.rs
+    workspace.rs
     repository.rs
     event.rs
 
   coordinator.rs                 # Coordinator and stable application API
   coordinator/
-    task.rs                      # register/create/list/status/diff use cases
+    workspace.rs                 # register/create/list/status/diff use cases
     turn.rs                      # turn start and idempotency
     codex_events.rs              # App Server event projection
     error.rs
@@ -154,7 +154,7 @@ src/
   store/
     migrations.rs
     rows.rs                      # SQL row mapping only
-    tasks.rs
+    workspaces.rs
     events.rs
     tests.rs
 
@@ -220,7 +220,7 @@ does not invoke a model.
 1. Add a Rust GitHub Actions workflow for format, Clippy, and all tests using
    the pinned toolchain.
 2. Add one process-level test harness with a fake App Server executable. Cover
-   daemon startup, repository registration, task preparation, explicit send,
+   daemon startup, repository registration, workspace preparation, explicit send,
    status, and clean shutdown without a model call.
 3. Forbid unsafe code in CoCo unless a later platform adapter has a reviewed,
    narrowly scoped exception.
@@ -252,7 +252,7 @@ the dedicated handler.
 ### Phase 2 — split the hot modules
 
 The first coordinator slice completed on 2026-09-05: its production facade is
-about 150 lines, with task/repository commands, turn startup, Codex event
+about 150 lines, with workspace/repository commands, turn startup, Codex event
 projection, error policy, and the worker port in focused child modules. The
 concrete Codex-backed worker moved to `daemon/worker.rs`, so the coordinator's
 worker contract no longer imports the Codex client. On 2026-09-06, the shared
@@ -261,8 +261,8 @@ Coordinator fixture and its behavior tests moved unchanged into
 The first Store slice also completed on 2026-09-06: schema creation and the
 v1-to-v2 migration live in `store/migrations.rs`, while stable select lists and
 all SQLite-row-to-domain decoding live in `store/rows.rs`. Transactional write
-operations were then separated into `store/tasks.rs` and `store/events.rs`
-without weakening their atomic boundaries: task/turn operations pass their
+operations were then separated into `store/workspaces.rs` and `store/events.rs`
+without weakening their atomic boundaries: workspace/turn operations pass their
 existing `Transaction` into the shared event insert helper. Cross-module Store
 tests live in `store/tests.rs`; `store.rs` is now the connection, repository,
 shared-type, filesystem-safety, and facade layer.
@@ -281,7 +281,7 @@ The final physical split completed with the CLI: the facade now only parses
 and delegates, while Clap arguments, typed command execution, the status
 follow-loop, authenticated TUI jump, output rendering, and tests have focused
 child modules. The original `cli::run` size finding is gone. A final cleanup
-extracted shared App Server process startup, prepared-task persistence, and
+extracted shared App Server process startup, prepared-workspace persistence, and
 terminal-turn projection, removing every production `too_many_lines` finding.
 Both `too_many_lines` and the separately reviewed `excessive_nesting` lint are
 now denied package-wide. The single end-to-end process scenario has a local,
@@ -291,7 +291,7 @@ responsibility instead.
 Extract coherent child modules in this order:
 
 1. coordinator commands and Codex event projection;
-2. store migrations, row mapping, and task/event repositories;
+2. store migrations, row mapping, and workspace/event repositories;
 3. Codex process, JSONL, and WebSocket layers;
 4. Git command runner, worktree operations, and diff observation;
 5. CLI argument parsing, commands, and output.

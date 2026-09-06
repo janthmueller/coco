@@ -6,13 +6,13 @@ import { site } from "@/lib/site";
 const features = [
   {
     description:
-      "Each task works in a separate Git checkout, so your current branch stays untouched.",
+      "Each workspace uses a separate Git checkout, so your current branch stays untouched.",
     icon: GitBranch,
     title: "Keep changes separate",
   },
   {
     description:
-      "Prepare a task, send work when you are ready, and see its current state from the terminal.",
+      "Prepare a workspace, send work when you are ready, and see its current state from the terminal.",
     icon: Terminal,
     title: "Stay in control",
   },
@@ -33,10 +33,10 @@ export default function HomePage() {
             <span className="coco-eyebrow-dot" />
             Codex Coordinator · early preview
           </div>
-          <h1>Run Codex tasks side by side.</h1>
+          <h1>Run Codex workspaces side by side.</h1>
           <p className="coco-hero-copy">
-            CoCo gives every task its own Git worktree and keeps its Codex
-            conversation and changes together. Start another task without
+            CoCo gives every workspace its own Git worktree and keeps its Codex
+            conversation and changes together. Start another workspace without
             disturbing the branch you are using now.
           </p>
           <div className="coco-actions">
@@ -67,21 +67,21 @@ export default function HomePage() {
               {"\n\n"}
               <span className="coco-terminal-prompt">$ </span>
               <span className="coco-terminal-command">
-                coco new fix-login --base main
+                coco create fix/login --base main
               </span>
               {"\n\n"}
               <span className="coco-terminal-prompt">$ </span>
               <span className="coco-terminal-command">
-                coco send fix-login &quot;Fix the login redirect&quot;
+                coco send fix/login &quot;Fix the login redirect&quot;
               </span>
               {"\n"}
               <span className="coco-terminal-prompt">$ </span>
               <span className="coco-terminal-command">
-                coco status fix-login --follow
+                coco status fix/login --follow
               </span>
               {"\n"}
               <span className="coco-terminal-prompt">$ </span>
-              <span className="coco-terminal-command">coco jump fix-login</span>
+              <span className="coco-terminal-command">coco jump fix/login</span>
             </code>
           </pre>
         </div>
@@ -91,7 +91,7 @@ export default function HomePage() {
         <div className="coco-container">
           <div className="coco-section-heading">
             <p className="coco-section-kicker">A calmer parallel workflow</p>
-            <h2>Give each task its own place to work.</h2>
+            <h2>Give each workspace its own place to work.</h2>
             <p className="coco-section-lead">
               CoCo handles the separate checkout and remembers which Codex
               conversation belongs to it. You decide what to start, continue,

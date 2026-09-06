@@ -12,6 +12,7 @@ use crate::domain::{
 pub enum DaemonMethod {
     Health,
     RepositoryRegister,
+    RepositoryList,
     WorkspaceCreate,
     WorkspaceList,
     WorkspaceGet,
@@ -23,9 +24,10 @@ pub enum DaemonMethod {
 
 impl DaemonMethod {
     #[cfg(test)]
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Health,
         Self::RepositoryRegister,
+        Self::RepositoryList,
         Self::WorkspaceCreate,
         Self::WorkspaceList,
         Self::WorkspaceGet,
@@ -39,6 +41,7 @@ impl DaemonMethod {
         match self {
             Self::Health => "health",
             Self::RepositoryRegister => "repository.register",
+            Self::RepositoryList => "repository.list",
             Self::WorkspaceCreate => "workspace.create",
             Self::WorkspaceList => "workspace.list",
             Self::WorkspaceGet => "workspace.get",
@@ -53,6 +56,7 @@ impl DaemonMethod {
         match value {
             "health" => Some(Self::Health),
             "repository.register" => Some(Self::RepositoryRegister),
+            "repository.list" => Some(Self::RepositoryList),
             "workspace.create" => Some(Self::WorkspaceCreate),
             "workspace.list" => Some(Self::WorkspaceList),
             "workspace.get" => Some(Self::WorkspaceGet),
@@ -94,6 +98,23 @@ pub struct RepositoryRegisterParams {
     pub path: PathBuf,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RepositoryListParams {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum RepositoryScope {
+    Repository { path: PathBuf },
+    AllRepositories,
+}
+
+impl RepositoryScope {
+    pub fn repository(path: impl Into<PathBuf>) -> Self {
+        Self::Repository { path: path.into() }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkspaceCreateParams {
@@ -106,10 +127,10 @@ pub struct WorkspaceCreateParams {
     pub operation_id: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkspaceListParams {
-    pub repository_path: PathBuf,
+    pub scope: RepositoryScope,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phases: Option<Vec<String>>,
 }
@@ -117,14 +138,14 @@ pub struct WorkspaceListParams {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkspaceGetParams {
-    pub repository_path: PathBuf,
+    pub scope: RepositoryScope,
     pub workspace: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TurnStartParams {
-    pub repository_path: PathBuf,
+    pub scope: RepositoryScope,
     pub workspace: String,
     pub message: String,
     pub operation_id: String,
@@ -133,7 +154,7 @@ pub struct TurnStartParams {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EventListParams {
-    pub repository_path: PathBuf,
+    pub scope: RepositoryScope,
     pub workspace: String,
     #[serde(default)]
     pub after_sequence: i64,
@@ -142,7 +163,7 @@ pub struct EventListParams {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkspaceDiffParams {
-    pub repository_path: PathBuf,
+    pub scope: RepositoryScope,
     pub workspace: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_bytes: Option<u64>,
@@ -176,6 +197,32 @@ pub struct WorkspaceResult {
     pub turn_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex_turn_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RepositorySummary {
+    pub id: String,
+    pub display_name: String,
+    pub root_path: PathBuf,
+}
+
+impl From<&Repository> for RepositorySummary {
+    fn from(repository: &Repository) -> Self {
+        Self {
+            id: repository.id.clone(),
+            display_name: repository.display_name.clone(),
+            root_path: repository.root_path.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceListItem {
+    #[serde(flatten)]
+    pub workspace: Workspace,
+    pub repository: RepositorySummary,
 }
 
 impl WorkspaceResult {
@@ -261,8 +308,9 @@ macro_rules! daemon_request {
 
 daemon_request!(HealthParams, Health, HealthResult);
 daemon_request!(RepositoryRegisterParams, RepositoryRegister, Repository);
+daemon_request!(RepositoryListParams, RepositoryList, Vec<RepositorySummary>);
 daemon_request!(WorkspaceCreateParams, WorkspaceCreate, WorkspaceResult);
-daemon_request!(WorkspaceListParams, WorkspaceList, Vec<Workspace>);
+daemon_request!(WorkspaceListParams, WorkspaceList, Vec<WorkspaceListItem>);
 daemon_request!(WorkspaceGetParams, WorkspaceGet, WorkspaceStatusResult);
 daemon_request!(TurnStartParams, TurnStart, WorkspaceResult);
 daemon_request!(EventListParams, EventList, EventListResult);
@@ -286,6 +334,7 @@ mod tests {
             [
                 "health",
                 "repository.register",
+                "repository.list",
                 "workspace.create",
                 "workspace.list",
                 "workspace.get",
@@ -313,6 +362,11 @@ mod tests {
             json!({"path": "/repo"}),
         );
         assert_request(
+            RepositoryListParams {},
+            DaemonMethod::RepositoryList,
+            json!({}),
+        );
+        assert_request(
             WorkspaceCreateParams {
                 repository_path: PathBuf::from("/repo"),
                 name: "workspace".to_owned(),
@@ -331,32 +385,36 @@ mod tests {
                 "operationId": "create-1",
             }),
         );
+    }
+
+    #[test]
+    fn scoped_request_dtos_preserve_all_wire_field_names() {
         assert_request(
             WorkspaceListParams {
-                repository_path: PathBuf::from("/repo"),
+                scope: RepositoryScope::repository("/repo"),
                 phases: None,
             },
             DaemonMethod::WorkspaceList,
-            json!({"repositoryPath": "/repo"}),
+            json!({"scope": {"kind": "repository", "path": "/repo"}}),
         );
         assert_request(
             WorkspaceGetParams {
-                repository_path: PathBuf::from("/repo"),
+                scope: RepositoryScope::AllRepositories,
                 workspace: "workspace".to_owned(),
             },
             DaemonMethod::WorkspaceGet,
-            json!({"repositoryPath": "/repo", "workspace": "workspace"}),
+            json!({"scope": {"kind": "allRepositories"}, "workspace": "workspace"}),
         );
         assert_request(
             TurnStartParams {
-                repository_path: PathBuf::from("/repo"),
+                scope: RepositoryScope::repository("/repo"),
                 workspace: "workspace".to_owned(),
                 message: "continue".to_owned(),
                 operation_id: "send-1".to_owned(),
             },
             DaemonMethod::TurnStart,
             json!({
-                "repositoryPath": "/repo",
+                "scope": {"kind": "repository", "path": "/repo"},
                 "workspace": "workspace",
                 "message": "continue",
                 "operationId": "send-1",
@@ -364,21 +422,29 @@ mod tests {
         );
         assert_request(
             EventListParams {
-                repository_path: PathBuf::from("/repo"),
+                scope: RepositoryScope::repository("/repo"),
                 workspace: "workspace".to_owned(),
                 after_sequence: 7,
             },
             DaemonMethod::EventList,
-            json!({"repositoryPath": "/repo", "workspace": "workspace", "afterSequence": 7}),
+            json!({
+                "scope": {"kind": "repository", "path": "/repo"},
+                "workspace": "workspace",
+                "afterSequence": 7,
+            }),
         );
         assert_request(
             WorkspaceDiffParams {
-                repository_path: PathBuf::from("/repo"),
+                scope: RepositoryScope::repository("/repo"),
                 workspace: "workspace".to_owned(),
                 max_bytes: Some(4096),
             },
             DaemonMethod::WorkspaceDiff,
-            json!({"repositoryPath": "/repo", "workspace": "workspace", "maxBytes": 4096}),
+            json!({
+                "scope": {"kind": "repository", "path": "/repo"},
+                "workspace": "workspace",
+                "maxBytes": 4096,
+            }),
         );
         assert_request(
             AuditRecordParams {
@@ -436,8 +502,18 @@ mod tests {
             "createdAtMs": 1,
             "updatedAtMs": 2,
         }));
+        assert_response::<RepositoryListParams>(json!([{
+            "id": "repo-1",
+            "rootPath": "/repo",
+            "displayName": "repo",
+        }]));
         assert_response::<WorkspaceCreateParams>(json!({"workspace": workspace()}));
-        assert_response::<WorkspaceListParams>(json!([workspace()]));
+        let mut listed = workspace();
+        listed.as_object_mut().unwrap().insert(
+            "repository".to_owned(),
+            json!({"id": "repo-1", "displayName": "repo", "rootPath": "/repo"}),
+        );
+        assert_response::<WorkspaceListParams>(json!([listed]));
         assert_response::<WorkspaceGetParams>(json!({
             "workspace": workspace(),
             "git": {

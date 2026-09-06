@@ -8,8 +8,8 @@ use tracing::error;
 
 use crate::domain::{EventKind, EventSource, Repository, Workspace, WorkspaceLifecycle};
 use crate::git::{Git, GitRepository};
-use crate::protocol::WorkspaceResult;
-use crate::store::{EventDraft, Store};
+use crate::protocol::{RepositoryScope, RepositorySummary, WorkspaceListItem, WorkspaceResult};
+use crate::store::{EventDraft, Store, StoreError};
 
 const MAX_OPERATION_ID_BYTES: usize = 256;
 
@@ -20,7 +20,7 @@ mod turn;
 mod worker;
 mod workspace;
 
-pub(crate) use error::CoordinatorError;
+pub(crate) use error::{CoordinatorError, WorkspaceReferenceCandidate};
 pub(crate) use worker::{StartedThread, StartedTurn, WorkerError, WorkerRuntime};
 
 pub(crate) struct Coordinator {
@@ -71,6 +71,20 @@ impl Coordinator {
 
     fn resolve_workspace(
         &self,
+        scope: &RepositoryScope,
+        reference: &str,
+    ) -> Result<Workspace, CoordinatorError> {
+        match scope {
+            RepositoryScope::Repository { path } => {
+                let (repository, _) = self.registered_repository_for_path(path)?;
+                self.resolve_workspace_in_repository(&repository, reference)
+            }
+            RepositoryScope::AllRepositories => self.resolve_workspace_globally(reference),
+        }
+    }
+
+    fn resolve_workspace_in_repository(
+        &self,
         repository: &Repository,
         reference: &str,
     ) -> Result<Workspace, CoordinatorError> {
@@ -78,12 +92,86 @@ impl Coordinator {
             return if workspace.repository_id == repository.id {
                 Ok(workspace)
             } else {
-                Err(CoordinatorError::WorkspaceNotFound(reference.to_owned()))
+                Err(CoordinatorError::WorkspaceNotFound {
+                    reference: reference.to_owned(),
+                    candidates: Vec::new(),
+                })
             };
         }
+        if let Some(workspace) = self.store.workspace_by_name(&repository.id, reference)? {
+            return Ok(workspace);
+        }
+        let candidates = self.reference_candidates(self.store.workspaces_by_name(reference)?)?;
+        Err(CoordinatorError::WorkspaceNotFound {
+            reference: reference.to_owned(),
+            candidates,
+        })
+    }
+
+    fn resolve_workspace_globally(&self, reference: &str) -> Result<Workspace, CoordinatorError> {
+        if let Some(workspace) = self.store.workspace_by_id(reference)? {
+            return Ok(workspace);
+        }
+        let mut matches = self.store.workspaces_by_name(reference)?;
+        match matches.len() {
+            0 => Err(CoordinatorError::WorkspaceNotFound {
+                reference: reference.to_owned(),
+                candidates: Vec::new(),
+            }),
+            1 => Ok(matches.pop().expect("one workspace match")),
+            _ => Err(CoordinatorError::WorkspaceReferenceAmbiguous {
+                reference: reference.to_owned(),
+                candidates: self.reference_candidates(matches)?,
+            }),
+        }
+    }
+
+    fn reference_candidates(
+        &self,
+        workspaces: Vec<Workspace>,
+    ) -> Result<Vec<WorkspaceReferenceCandidate>, CoordinatorError> {
+        workspaces
+            .into_iter()
+            .take(8)
+            .map(|workspace| {
+                let repository = self.repository_by_id(&workspace.repository_id)?;
+                Ok(WorkspaceReferenceCandidate {
+                    workspace_id: workspace.id,
+                    workspace_name: workspace.name,
+                    repository_path: repository.root_path,
+                })
+            })
+            .collect()
+    }
+
+    fn repository_by_id(&self, repository_id: &str) -> Result<Repository, CoordinatorError> {
         self.store
-            .workspace_by_name(&repository.id, reference)?
-            .ok_or_else(|| CoordinatorError::WorkspaceNotFound(reference.to_owned()))
+            .repository_by_id(repository_id)?
+            .ok_or_else(|| StoreError::NotFound {
+                entity: "repository",
+                id: repository_id.to_owned(),
+            })
+            .map_err(CoordinatorError::from)
+    }
+
+    fn git_repository_for_workspace(
+        &self,
+        workspace: &Workspace,
+    ) -> Result<(Repository, GitRepository), CoordinatorError> {
+        let repository = self.repository_by_id(&workspace.repository_id)?;
+        let discovered = self.git.discover(&repository.root_path)?;
+        Ok((repository, discovered))
+    }
+
+    fn workspace_list_item(
+        &self,
+        workspace: Workspace,
+    ) -> Result<WorkspaceListItem, CoordinatorError> {
+        let repository = self.repository_by_id(&workspace.repository_id)?;
+        Ok(WorkspaceListItem {
+            workspace,
+            repository: RepositorySummary::from(&repository),
+        })
     }
 
     async fn repository_lock(&self, repository_id: &str) -> Arc<AsyncMutex<()>> {

@@ -13,19 +13,21 @@ status: stable
 - **Workspace vocabulary and creation UX**: Selected `workspace` as CoCo's
   durable aggregate around a repository binding, Git worktree, Codex thread,
   and configuration snapshot; external tickets remain optional references.
-  Scheduled the lossless `task`-to-`workspace` migration before further CLI
-  work, replaced `new` with `create`, and defined composable `--send`/`--jump`
+  Implemented the lossless `task`-to-`workspace` SQLite v4 migration, replaced
+  `new` with `create`, and shipped composable `--send`/`-s` and `--jump`/`-j`
   post-actions with create-send-jump ordering and non-destructive partial
   failure semantics.
 - **Multi-repository CLI contract**: Kept workspace names repository-scoped and
   opaque workspace IDs globally unique. Repository-aware commands default to
-  `.`, accept an explicit leading path, and use `--all-repos` for an intentional
-  daemon-wide list or unique name lookup; ambiguous names report every matching
-  repository and the CLI keeps no hidden selected-repository state.
+  `.`, accept an explicit leading path, and use `--all-repos`/`-a` for an
+  intentional daemon-wide list or unique name lookup. `repo list`, global ID
+  resolution, bounded local-miss suggestions, and deterministic ambiguity
+  reporting are implemented; the CLI keeps no hidden selected-repository
+  state.
 - **Conventional workspace names**: Selected safe slash-separated names such as
   `feat/login`, mapping to `coco/feat/login`, with component-level path/ref
-  validation and explicit Git ref-prefix collision handling required before
-  rollout.
+  validation, secure nested worktree directories, and explicit Git ref-prefix
+  collision handling now enforced before worktree creation.
 - **Native Git write policy**: Closed the shared-Git decision in favor of
   ordinary linked worktrees and Codex's native approvals. CoCo will not build a
   per-task Git database or commit proxy, nor grant the whole common Git

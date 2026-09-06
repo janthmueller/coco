@@ -1,0 +1,85 @@
+---
+title: Working with workspaces
+description: Prepare, start, follow, and enter isolated Codex work.
+---
+
+A workspace is one Codex conversation paired with its own Git worktree and
+branch. Your main checkout stays untouched while Codex works there.
+
+## Create a workspace
+
+Run this inside a repository already added to CoCo:
+
+```bash
+coco create fix/login --base main
+```
+
+The repository must be clean. Names can use lowercase letters, numbers,
+hyphens, and slashes. CoCo creates `coco/fix/login`, its worktree, and the
+Codex conversation. It does not start work yet.
+
+Use `-s` to send the first message immediately, `-j` to open the Codex terminal
+UI, or combine both:
+
+```bash
+coco create fix/login -s "Fix the login redirect" -j
+```
+
+## Start or continue work
+
+`send` starts the first turn. Use it again whenever the workspace is ready:
+
+```bash
+coco send fix/login "Fix the login redirect and run the relevant tests"
+coco send fix/login "Now add a regression test"
+```
+
+CoCo does not queue messages while a turn is active.
+
+## Check the current state
+
+```bash
+coco ls
+coco status fix/login
+coco status fix/login --follow
+```
+
+`--follow` shows activity until the workspace becomes ready, waits for you, or
+reports a problem. <kbd>Ctrl</kbd>+<kbd>C</kbd> stops following without stopping
+the Codex turn.
+
+## Enter the workspace
+
+```bash
+coco jump fix/login
+```
+
+This opens the existing conversation in its managed worktree. Use `/quit` or
+`/exit` to leave the terminal UI. Work already running continues; explicitly
+interrupting the turn in Codex still cancels it.
+
+## Work across repositories
+
+Commands use the repository containing your current directory by default. Put
+another path before the command to use that repository without changing
+directories:
+
+```bash
+coco ../api ls
+coco ../api jump fix/login
+```
+
+Use `--all-repos` (or `-a`) for a combined list or a globally unique workspace
+name:
+
+```bash
+coco --all-repos ls
+coco --all-repos status fix/login
+```
+
+The same name may exist in different repositories. If a global name is
+ambiguous, CoCo prints each match so you can retry with a repository path or
+the workspace ID. A full workspace ID works from any directory.
+
+CoCo currently leaves created branches and worktrees in place. It does not
+merge, delete, or clean them up automatically.

@@ -14,8 +14,9 @@ use crate::domain::{
     WorkspaceWaitReason,
 };
 use crate::protocol::{
-    EventListParams, RepositoryRegisterParams, TurnStartParams, WorkspaceCreateParams,
-    WorkspaceDiffParams, WorkspaceGetParams, WorkspaceGitStatus, WorkspaceListParams,
+    EventListParams, RepositoryRegisterParams, RepositoryScope, TurnStartParams,
+    WorkspaceCreateParams, WorkspaceDiffParams, WorkspaceGetParams, WorkspaceGitStatus,
+    WorkspaceListParams,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -478,7 +479,7 @@ async fn normalizes_codex_events_and_allows_an_idempotent_follow_up_turn() {
     let workspace = created.workspace;
 
     let first_send = TurnStartParams {
-        repository_path: fixture.source.clone(),
+        scope: RepositoryScope::repository(fixture.source.clone()),
         workspace: workspace.name.clone(),
         message: "Implement the requested behavior".to_owned(),
         operation_id: "send-operation-initial".to_owned(),
@@ -551,7 +552,7 @@ async fn normalizes_codex_events_and_allows_an_idempotent_follow_up_turn() {
     );
 
     let send = TurnStartParams {
-        repository_path: fixture.source.clone(),
+        scope: RepositoryScope::repository(fixture.source.clone()),
         workspace: workspace.name.clone(),
         message: "Run the final checks".to_owned(),
         operation_id: "send-operation-1".to_owned(),
@@ -811,7 +812,7 @@ async fn serves_repository_views_events_and_bounded_diffs() {
     let listed = fixture
         .coordinator
         .list_workspaces(WorkspaceListParams {
-            repository_path: fixture.source.clone(),
+            scope: RepositoryScope::repository(fixture.source.clone()),
             phases: Some(vec!["idle".to_owned()]),
         })
         .unwrap();
@@ -820,7 +821,7 @@ async fn serves_repository_views_events_and_bounded_diffs() {
     let shown = fixture
         .coordinator
         .get_workspace(WorkspaceGetParams {
-            repository_path: fixture.source.clone(),
+            scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
         })
         .unwrap();
@@ -832,7 +833,7 @@ async fn serves_repository_views_events_and_bounded_diffs() {
     let events = fixture
         .coordinator
         .list_events(EventListParams {
-            repository_path: fixture.source.clone(),
+            scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: "first-workspace".to_owned(),
             after_sequence: 0,
         })
@@ -842,12 +843,204 @@ async fn serves_repository_views_events_and_bounded_diffs() {
     let diff = fixture
         .coordinator
         .workspace_diff(WorkspaceDiffParams {
-            repository_path: fixture.source.clone(),
+            scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: "first-workspace".to_owned(),
             max_bytes: Some(16),
         })
         .unwrap();
     assert_eq!(diff.untracked_paths, [PathBuf::from("new.txt")]);
+}
+
+struct MultiRepositorySetup {
+    first_repository: Repository,
+    second_repository: Repository,
+    second_source: PathBuf,
+    first: Workspace,
+    second: Workspace,
+    unique: Workspace,
+}
+
+async fn prepare_multi_repository_workspaces(fixture: &Fixture) -> MultiRepositorySetup {
+    let first_repository = fixture.register().await;
+    let second_source = fixture._temp.path().join("source-two");
+    initialize_repository(&second_source);
+    let second_repository = fixture
+        .coordinator
+        .register_repository(RepositoryRegisterParams {
+            path: second_source.clone(),
+        })
+        .unwrap();
+
+    let first = fixture
+        .coordinator
+        .create_workspace(WorkspaceCreateParams {
+            repository_path: fixture.source.clone(),
+            name: "feat/shared".to_owned(),
+            base_ref: "HEAD".to_owned(),
+            context_mode: ContextMode::Fresh,
+            profile: "default".to_owned(),
+            operation_id: "create-first-shared".to_owned(),
+        })
+        .await
+        .unwrap()
+        .workspace;
+    let second = fixture
+        .coordinator
+        .create_workspace(WorkspaceCreateParams {
+            repository_path: second_source.clone(),
+            name: "feat/shared".to_owned(),
+            base_ref: "HEAD".to_owned(),
+            context_mode: ContextMode::Fresh,
+            profile: "default".to_owned(),
+            operation_id: "create-second-shared".to_owned(),
+        })
+        .await
+        .unwrap()
+        .workspace;
+    let unique = fixture
+        .coordinator
+        .create_workspace(WorkspaceCreateParams {
+            repository_path: second_source.clone(),
+            name: "fix/unique".to_owned(),
+            base_ref: "HEAD".to_owned(),
+            context_mode: ContextMode::Fresh,
+            profile: "default".to_owned(),
+            operation_id: "create-second-unique".to_owned(),
+        })
+        .await
+        .unwrap()
+        .workspace;
+
+    MultiRepositorySetup {
+        first_repository,
+        second_repository,
+        second_source,
+        first,
+        second,
+        unique,
+    }
+}
+
+#[tokio::test]
+async fn scopes_workspace_names_to_repositories_and_resolves_global_references() {
+    let fixture = Fixture::new(FakeWorker::default());
+    let MultiRepositorySetup {
+        first_repository,
+        second_repository,
+        second_source,
+        first,
+        second,
+        unique,
+    } = prepare_multi_repository_workspaces(&fixture).await;
+
+    let repositories = fixture
+        .coordinator
+        .list_repositories(crate::protocol::RepositoryListParams {})
+        .unwrap();
+    assert_eq!(repositories.len(), 2);
+    assert!(
+        repositories
+            .iter()
+            .any(|item| item.id == first_repository.id)
+    );
+    assert!(
+        repositories
+            .iter()
+            .any(|item| item.id == second_repository.id)
+    );
+
+    let listed = fixture
+        .coordinator
+        .list_workspaces(WorkspaceListParams {
+            scope: RepositoryScope::AllRepositories,
+            phases: None,
+        })
+        .unwrap();
+    assert_eq!(listed.len(), 3);
+    assert!(listed.iter().all(|item| {
+        item.repository.id == item.workspace.repository_id
+            && [fixture.source.as_path(), second_source.as_path()]
+                .contains(&item.repository.root_path.as_path())
+    }));
+
+    let local = fixture
+        .coordinator
+        .get_workspace(WorkspaceGetParams {
+            scope: RepositoryScope::repository(fixture.source.clone()),
+            workspace: "feat/shared".to_owned(),
+        })
+        .unwrap();
+    assert_eq!(local.workspace.id, first.id);
+
+    let global_id = fixture
+        .coordinator
+        .get_workspace(WorkspaceGetParams {
+            scope: RepositoryScope::AllRepositories,
+            workspace: second.id.clone(),
+        })
+        .unwrap();
+    assert_eq!(global_id.workspace.id, second.id);
+
+    let global_unique = fixture
+        .coordinator
+        .get_workspace(WorkspaceGetParams {
+            scope: RepositoryScope::AllRepositories,
+            workspace: unique.name.clone(),
+        })
+        .unwrap();
+    assert_eq!(global_unique.workspace.id, unique.id);
+
+    let ambiguous = fixture
+        .coordinator
+        .get_workspace(WorkspaceGetParams {
+            scope: RepositoryScope::AllRepositories,
+            workspace: "feat/shared".to_owned(),
+        })
+        .unwrap_err();
+    assert_error_match_count(&ambiguous, "WORKSPACE_REFERENCE_AMBIGUOUS", 2);
+    let CoordinatorError::WorkspaceReferenceAmbiguous { candidates, .. } = ambiguous else {
+        panic!("global duplicate name did not produce an ambiguity error");
+    };
+    assert_eq!(candidates.len(), 2);
+    assert!(candidates.iter().any(|item| item.workspace_id == first.id));
+    assert!(candidates.iter().any(|item| item.workspace_id == second.id));
+
+    let local_miss = fixture
+        .coordinator
+        .get_workspace(WorkspaceGetParams {
+            scope: RepositoryScope::repository(fixture.source.clone()),
+            workspace: unique.name.clone(),
+        })
+        .unwrap_err();
+    assert_error_match_count(&local_miss, "WORKSPACE_NOT_FOUND", 1);
+    let CoordinatorError::WorkspaceNotFound { candidates, .. } = local_miss else {
+        panic!("repository-local miss did not remain a not-found error");
+    };
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].workspace_id, unique.id);
+    assert_eq!(candidates[0].repository_path, second_source);
+}
+
+fn assert_error_match_count(error: &CoordinatorError, code: &str, expected: usize) {
+    assert_eq!(error.code(), code);
+    assert_eq!(
+        error
+            .data()
+            .and_then(|data| data["matches"].as_array().map(Vec::len)),
+        Some(expected)
+    );
+}
+
+fn initialize_repository(path: &Path) {
+    run_git(
+        path.parent().unwrap(),
+        &["init", "--initial-branch=main", path.to_str().unwrap()],
+    );
+    run_git(path, &["config", "user.name", "CoCo Tests"]);
+    run_git(path, &["config", "user.email", "coco@example.invalid"]);
+    fs::write(path.join("README.md"), "fixture\n").unwrap();
+    run_git(path, &["add", "README.md"]);
+    run_git(path, &["commit", "-m", "fixture"]);
 }
 
 fn run_git(cwd: &Path, args: &[&str]) {

@@ -193,6 +193,21 @@ pub(super) fn get_repository_by_root(
         .map_err(StoreError::from)
 }
 
+pub(super) fn get_repository_by_id(
+    connection: &Connection,
+    id: &str,
+) -> Result<Option<Repository>, StoreError> {
+    connection
+        .query_row(
+            "SELECT id, root_path, git_common_dir, display_name, is_linked_worktree,
+                created_at_ms, updated_at_ms FROM repositories WHERE id = ?1",
+            [id],
+            map_repository,
+        )
+        .optional()
+        .map_err(StoreError::from)
+}
+
 pub(super) fn get_repository_by_common_dir(
     connection: &Connection,
     path: &Path,

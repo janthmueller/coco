@@ -1,9 +1,9 @@
 ---
 title: Codex profiles
-description: Prepare a task with a named set of Codex settings.
+description: Prepare a workspace with a named set of Codex settings.
 ---
 
-Use a profile when one task needs different Codex settings, such as a different
+Use a profile when one workspace needs different Codex settings, such as a different
 reasoning effort, sandbox, or approval policy.
 
 ## Define a profile
@@ -19,16 +19,16 @@ sandbox_mode = "workspace-write"
 
 Use keys supported by your installed Codex version.
 
-## Use it for a task
+## Use it for a workspace
 
 ```bash
-coco new refactor-cache \
+coco create refactor/cache \
   --base main \
   --profile dev
 
-coco send refactor-cache "Refactor the cache and run its tests"
+coco send refactor/cache "Refactor the cache and run its tests"
 ```
 
 Without `--profile`, CoCo uses Codex's default configuration. The chosen
-profile applies when the task is created; changing the profile file later does
-not reconfigure an existing task.
+profile applies when the workspace is created; changing the profile file later
+does not reconfigure an existing workspace.

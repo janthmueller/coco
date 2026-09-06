@@ -6,7 +6,8 @@ use serde_json::json;
 
 use crate::paths::CocoPaths;
 
-use super::args::{Cli, Command};
+use super::args::{Cli, Command, RepoCommand};
+use super::commands::validate_scope_selection;
 use super::jump::{jump_command, load_jump_target};
 use super::output::phase_label;
 use super::status::follow_stops_at;
@@ -42,6 +43,20 @@ fn parses_workspace_creation_with_an_optional_profile() {
     assert_eq!(combined.send.as_deref(), Some("Fix the login flow"));
     assert!(combined.jump);
 
+    let jump_only = Cli::try_parse_from(["coco", "create", "review", "-j"]).unwrap();
+    let Command::Create(jump_only) = jump_only.command else {
+        panic!("create -j did not parse as the create command");
+    };
+    assert!(jump_only.send.is_none());
+    assert!(jump_only.jump);
+
+    let send_only = Cli::try_parse_from(["coco", "create", "review", "-s", "Review it"]).unwrap();
+    let Command::Create(send_only) = send_only.command else {
+        panic!("create -s did not parse as the create command");
+    };
+    assert_eq!(send_only.send.as_deref(), Some("Review it"));
+    assert!(!send_only.jump);
+
     assert!(Cli::try_parse_from(["coco", "create", "auth", "--goal", "work"]).is_err());
     assert!(Cli::try_parse_from(["coco", "create", "auth", "--context", "fresh"]).is_err());
     assert!(Cli::try_parse_from(["coco", "create", "auth", "--send", "  "]).is_err());
@@ -53,7 +68,41 @@ fn parses_workspace_creation_with_an_optional_profile() {
 fn repository_registration_is_a_nested_repo_command() {
     assert!(Cli::try_parse_from(["coco", "repo", "add"]).is_ok());
     assert!(Cli::try_parse_from(["coco", "repo", "add", "../source"]).is_ok());
+    let listed = Cli::try_parse_from(["coco", "repo", "list", "--json"]).unwrap();
+    assert!(matches!(
+        listed.command,
+        Command::Repo {
+            command: RepoCommand::List { json: true }
+        }
+    ));
     assert!(Cli::try_parse_from(["coco", "init"]).is_err());
+}
+
+#[test]
+fn parses_local_explicit_and_all_repository_scopes() {
+    let local = Cli::try_parse_from(["coco", "ls"]).unwrap();
+    assert!(local.scope_path.is_none());
+    assert!(!local.all_repos);
+
+    let explicit = Cli::try_parse_from(["coco", "../other", "status", "feat/login"]).unwrap();
+    assert_eq!(explicit.scope_path, Some(PathBuf::from("../other")));
+    assert!(!explicit.all_repos);
+
+    let global = Cli::try_parse_from(["coco", "-a", "ls"]).unwrap();
+    assert!(global.scope_path.is_none());
+    assert!(global.all_repos);
+
+    assert!(Cli::try_parse_from(["coco", "--all-repos", "status", "feat/login"]).is_ok());
+
+    let conflicting = Cli::try_parse_from(["coco", "--all-repos", "../other", "ls"]).unwrap();
+    assert!(
+        validate_scope_selection(conflicting.scope_path.is_some(), conflicting.all_repos).is_err()
+    );
+    assert!(Cli::try_parse_from(["coco", "ls", "--all-repos"]).is_ok());
+    let conflicting = Cli::try_parse_from(["coco", "../other", "ls", "-a"]).unwrap();
+    assert!(
+        validate_scope_selection(conflicting.scope_path.is_some(), conflicting.all_repos).is_err()
+    );
 }
 
 #[test]

@@ -4,7 +4,6 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use super::command::command_failed;
 use super::repository::{canonicalize, validate_object_id};
 use super::{Git, GitError, GitRepository, WorktreeBinding, WorktreePlan};
 
@@ -20,17 +19,18 @@ impl Git {
         validate_object_id(base_sha)?;
         let branch_name = format!("coco/{workspace_name}");
         self.validate_branch_name(repository, &branch_name)?;
+        if let Some(existing) = self.branch_namespace_collision(repository, &branch_name)? {
+            return Err(GitError::BranchCollision {
+                requested: branch_name,
+                existing,
+            });
+        }
 
         let worktrees_root = secure_directory(worktrees_root.as_ref())?;
         let repository_root = secure_directory(&worktrees_root.join(&repository.id))?;
-        let path = repository_root.join(workspace_name);
+        let path = workspace_path(&repository_root, workspace_name)?;
         if fs::symlink_metadata(&path).is_ok() {
             return Err(GitError::DestinationExists(path));
-        }
-        match self.branch_exists(repository, &branch_name) {
-            Ok(true) => return Err(GitError::BranchExists(branch_name)),
-            Ok(false) => {}
-            Err(error) => return Err(error),
         }
 
         Ok(WorktreePlan {
@@ -50,8 +50,11 @@ impl Git {
         if fs::symlink_metadata(&plan.path).is_ok() {
             return Err(GitError::DestinationExists(plan.path.clone()));
         }
-        if self.branch_exists(repository, &plan.branch_name)? {
-            return Err(GitError::BranchExists(plan.branch_name.clone()));
+        if let Some(existing) = self.branch_namespace_collision(repository, &plan.branch_name)? {
+            return Err(GitError::BranchCollision {
+                requested: plan.branch_name.clone(),
+                existing,
+            });
         }
         self.validate_branch_name(repository, &plan.branch_name)?;
         validate_object_id(&plan.base_sha)?;
@@ -152,34 +155,53 @@ impl Git {
         Ok(())
     }
 
-    fn branch_exists(
+    fn branch_namespace_collision(
         &self,
         repository: &GitRepository,
         branch_name: &str,
-    ) -> Result<bool, GitError> {
-        let reference = format!("refs/heads/{branch_name}");
-        let output = self.execute(
+    ) -> Result<Option<String>, GitError> {
+        let requested = format!("refs/heads/{branch_name}");
+        let refs = self.run_text(
             &repository.root_path,
-            "branch-exists",
+            "branch-list",
             [
-                OsString::from("rev-parse"),
-                OsString::from("--verify"),
-                OsString::from("--quiet"),
-                OsString::from("--end-of-options"),
-                OsString::from(reference),
+                OsString::from("for-each-ref"),
+                OsString::from("--format=%(refname)"),
+                OsString::from("refs/heads"),
             ],
         )?;
-        match output.status.code() {
-            Some(0) => Ok(true),
-            Some(1) => Ok(false),
-            _ => Err(command_failed("branch-exists", &output)),
-        }
+        Ok(refs.lines().find_map(|existing| {
+            let collides = existing == requested
+                || existing
+                    .strip_prefix(&requested)
+                    .is_some_and(|suffix| suffix.starts_with('/'))
+                || requested
+                    .strip_prefix(existing)
+                    .is_some_and(|suffix| suffix.starts_with('/'));
+            collides.then(|| {
+                existing
+                    .strip_prefix("refs/heads/")
+                    .unwrap_or(existing)
+                    .to_owned()
+            })
+        }))
     }
 }
 
 pub(super) fn validate_workspace_name(name: &str) -> Result<(), GitError> {
     let bytes = name.as_bytes();
-    let valid = (1..=63).contains(&bytes.len())
+    let valid =
+        (1..=63).contains(&bytes.len()) && name.split('/').all(valid_workspace_name_component);
+    if valid {
+        Ok(())
+    } else {
+        Err(GitError::InvalidWorkspaceName(name.to_owned()))
+    }
+}
+
+fn valid_workspace_name_component(component: &str) -> bool {
+    let bytes = component.as_bytes();
+    !bytes.is_empty()
         && bytes
             .iter()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || *byte == b'-')
@@ -188,12 +210,46 @@ pub(super) fn validate_workspace_name(name: &str) -> Result<(), GitError> {
             .is_some_and(|byte| byte.is_ascii_alphanumeric())
         && bytes
             .last()
-            .is_some_and(|byte| byte.is_ascii_alphanumeric());
-    if valid {
-        Ok(())
-    } else {
-        Err(GitError::InvalidWorkspaceName(name.to_owned()))
+            .is_some_and(|byte| byte.is_ascii_alphanumeric())
+}
+
+fn workspace_path(repository_root: &Path, workspace_name: &str) -> Result<PathBuf, GitError> {
+    let mut components = workspace_name.split('/').peekable();
+    let mut parent = repository_root.to_path_buf();
+    while let Some(component) = components.next() {
+        if components.peek().is_none() {
+            return Ok(parent.join(component));
+        }
+        parent = secure_child_directory(&parent, component)?;
     }
+    Err(GitError::InvalidWorkspaceName(workspace_name.to_owned()))
+}
+
+fn secure_child_directory(parent: &Path, component: &str) -> Result<PathBuf, GitError> {
+    let path = parent.join(component);
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
+        Ok(_) => return Err(GitError::DestinationExists(path)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir(&path).map_err(|source| GitError::Io {
+                path: path.clone(),
+                source,
+            })?;
+        }
+        Err(source) => return Err(GitError::Io { path, source }),
+    }
+    #[cfg(unix)]
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).map_err(|source| {
+        GitError::Io {
+            path: path.clone(),
+            source,
+        }
+    })?;
+    let canonical = canonicalize(&path)?;
+    if canonical != path {
+        return Err(GitError::DestinationExists(path));
+    }
+    Ok(canonical)
 }
 
 fn secure_directory(path: &Path) -> Result<PathBuf, GitError> {

@@ -6,21 +6,21 @@ description: What to expect from the early preview before using it on important 
 CoCo is ready for supervised local experiments, not unattended production use.
 
 - Installation is currently from source on Linux or macOS.
-- Keep the `cocod` command running while tasks are active.
+- Keep the `cocod` command running while workspaces are active.
 - The shared Codex connection relies on the Codex CLI's experimental remote
   App Server support. This preview is tested with `codex-cli 0.147.0`; another
   version may expose an incompatible command or protocol.
 - CoCo can show approval and user-input requests but cannot answer them yet. A
-  task that asks for either may remain blocked.
+  workspace that asks for either may remain blocked.
 - Prepared conversations reconnect after restarting `cocod`, but a turn that
   was running during the restart is marked interrupted and does not continue
   automatically.
-- There are no commands to cancel, complete, remove, merge, or clean up a task.
+- There are no commands to cancel, complete, remove, merge, or clean up a workspace.
   Created branches and worktrees remain on disk.
-- New tasks always use a fresh Codex conversation and create a `coco/<name>`
+- New workspaces always use a fresh Codex conversation and create a `coco/<name>`
   branch. Detached worktrees are not available.
-- CoCo's MCP server can inspect or continue existing tasks, but CoCo cannot yet
-  choose external MCP tools separately for each Codex task.
+- CoCo's MCP server can inspect or continue existing workspaces, but CoCo cannot yet
+  choose external MCP tools separately for each Codex workspace.
 
-Keep task worktrees available until you have reviewed their changes, and do not
+Keep workspace worktrees available until you have reviewed their changes, and do not
 depend on active work surviving a restart or on automatic cleanup.

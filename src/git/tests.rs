@@ -70,7 +70,7 @@ fn dirty_source_and_collisions_are_rejected() {
 
     assert!(matches!(
         git.plan_worktree(&repository, &fixture.worktrees, "collision", &base),
-        Err(GitError::DestinationExists(_))
+        Err(GitError::BranchCollision { .. })
     ));
     fs::write(fixture.source.join("untracked.txt"), "dirty\n").unwrap();
     assert!(matches!(
@@ -110,14 +110,94 @@ fn diff_and_observation_include_commits_and_untracked_paths() {
 }
 
 #[test]
-fn validates_workspace_names_without_accepting_path_syntax() {
+fn validates_workspace_names_with_safe_slash_components() {
     assert!(validate_workspace_name("workspace-42").is_ok());
-    for invalid in ["", "UPPER", "-leading", "trailing-", "path/name", "a_b"] {
+    assert!(validate_workspace_name("feat/login-42").is_ok());
+    assert!(validate_workspace_name("fix/api/v2").is_ok());
+    for invalid in [
+        "",
+        "UPPER",
+        "-leading",
+        "trailing-",
+        "/leading",
+        "trailing/",
+        "path//name",
+        "path/-name",
+        "path/name-",
+        ".",
+        "..",
+        "a_b",
+    ] {
         assert!(matches!(
             validate_workspace_name(invalid),
             Err(GitError::InvalidWorkspaceName(_))
         ));
     }
+    assert!(validate_workspace_name(&"a".repeat(64)).is_err());
+}
+
+#[test]
+fn creates_nested_workspace_paths_and_rejects_ref_prefix_collisions() {
+    let fixture = Fixture::new();
+    let git = Git::default();
+    let repository = git.discover(&fixture.source).unwrap();
+    let base = git.resolve_commit(&repository, "HEAD").unwrap();
+    let plan = git
+        .plan_worktree(&repository, &fixture.worktrees, "feat/login", &base)
+        .unwrap();
+    assert_eq!(
+        plan.path,
+        fixture
+            .worktrees
+            .join(&repository.id)
+            .join("feat")
+            .join("login")
+    );
+    let binding = git.create_worktree(&repository, &plan).unwrap();
+    assert_eq!(binding.branch_name, "coco/feat/login");
+
+    let error = git
+        .plan_worktree(&repository, &fixture.worktrees, "feat", &base)
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        GitError::BranchCollision { requested, existing }
+            if requested == "coco/feat" && existing == "coco/feat/login"
+    ));
+}
+
+#[test]
+fn rejects_an_unsafe_nested_workspace_parent() {
+    let fixture = Fixture::new();
+    let git = Git::default();
+    let repository = git.discover(&fixture.source).unwrap();
+    let base = git.resolve_commit(&repository, "HEAD").unwrap();
+    let repository_root = fixture.worktrees.join(&repository.id);
+    fs::create_dir_all(&repository_root).unwrap();
+    fs::write(repository_root.join("feat"), "not a directory").unwrap();
+
+    assert!(matches!(
+        git.plan_worktree(&repository, &fixture.worktrees, "feat/login", &base),
+        Err(GitError::DestinationExists(_))
+    ));
+}
+
+#[test]
+fn rejects_an_existing_branch_that_is_a_parent_of_the_requested_ref() {
+    let fixture = Fixture::new();
+    let git = Git::default();
+    let repository = git.discover(&fixture.source).unwrap();
+    let base = git.resolve_commit(&repository, "HEAD").unwrap();
+    run(&fixture.source, ["branch", "coco/chore"]);
+
+    let error = git
+        .plan_worktree(&repository, &fixture.worktrees, "chore/docs", &base)
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        GitError::BranchCollision { requested, existing }
+            if requested == "coco/chore/docs" && existing == "coco/chore"
+    ));
 }
 
 fn run<const N: usize>(cwd: &Path, args: [&str; N]) {

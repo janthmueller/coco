@@ -1,3 +1,4 @@
+use std::fmt;
 use std::io;
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -43,6 +44,40 @@ impl RpcErrorPayload {
             message: message.into(),
             data: None,
         }
+    }
+}
+
+impl fmt::Display for RpcErrorPayload {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}: {}", self.code, self.message)?;
+        let Some(matches) = self
+            .data
+            .as_ref()
+            .and_then(|data| data.get("matches"))
+            .and_then(Value::as_array)
+        else {
+            return Ok(());
+        };
+        if matches.is_empty() {
+            return Ok(());
+        }
+        write!(formatter, "\nmatching workspaces:")?;
+        for candidate in matches {
+            let name = candidate
+                .get("workspaceName")
+                .and_then(Value::as_str)
+                .unwrap_or("?");
+            let repository = candidate
+                .get("repositoryPath")
+                .and_then(Value::as_str)
+                .unwrap_or("?");
+            let id = candidate
+                .get("workspaceId")
+                .and_then(Value::as_str)
+                .unwrap_or("?");
+            write!(formatter, "\n  {repository}: {name} ({id})")?;
+        }
+        Ok(())
     }
 }
 
@@ -230,7 +265,7 @@ pub enum RpcClientError {
     MismatchedId { expected: String, actual: String },
     #[error("daemon response must contain exactly one of result or error")]
     MalformedResponse,
-    #[error("cocod returned {0:?}")]
+    #[error("{0}")]
     Remote(RpcErrorPayload),
     #[error(transparent)]
     Io(#[from] io::Error),
@@ -354,6 +389,27 @@ mod tests {
                 Err(RpcErrorPayload::new("METHOD_NOT_FOUND", method))
             }
         }
+    }
+
+    #[test]
+    fn renders_workspace_candidates_without_debug_json() {
+        let error = RpcErrorPayload {
+            code: "WORKSPACE_REFERENCE_AMBIGUOUS".to_owned(),
+            message: "workspace reference is ambiguous".to_owned(),
+            data: Some(serde_json::json!({
+                "matches": [{
+                    "workspaceId": "workspace-1",
+                    "workspaceName": "feat/login",
+                    "repositoryPath": "/projects/app",
+                }]
+            })),
+        };
+
+        assert_eq!(
+            error.to_string(),
+            "WORKSPACE_REFERENCE_AMBIGUOUS: workspace reference is ambiguous\n\
+             matching workspaces:\n  /projects/app: feat/login (workspace-1)"
+        );
     }
 
     #[tokio::test]

@@ -1,8 +1,9 @@
 # CoCo
 
-CoCo stands for **Codex Coordinator**. It lets you run several Codex tasks in
-one repository without mixing their files. Every task gets a separate Git
-worktree, while your current checkout stays untouched.
+CoCo stands for **Codex Coordinator**. It gives each Codex workspace a separate
+Git worktree and keeps the matching conversation with it. This lets several
+pieces of work move forward without mixing their files or disturbing your
+current checkout.
 
 > **Early preview:** CoCo is intended for supervised local use and currently
 > installs from source. Read the
@@ -13,12 +14,13 @@ worktree, while your current checkout stays untouched.
 
 ## What you can do
 
-- prepare Codex tasks in separate branches and worktrees without starting
+- prepare Codex workspaces in separate branches and worktrees without starting
   them immediately;
 - send work, follow its state, or enter the same conversation in the Codex
   terminal UI;
-- choose a named Codex profile when a task starts;
-- let MCP-capable applications inspect tasks, with sending disabled by
+- work across several registered repositories from one daemon;
+- choose a named Codex profile when a workspace starts;
+- let MCP-capable applications inspect workspaces, with sending disabled by
   default.
 
 ## Install from source
@@ -43,10 +45,10 @@ Then, from a clean Git repository with at least one commit:
 
 ```bash
 coco repo add .
-coco new first-task --base HEAD
-coco send first-task "Inspect the project and propose one focused improvement"
-coco status first-task --follow
-coco jump first-task
+coco create feat/first --base HEAD
+coco send feat/first "Inspect the project and propose one focused improvement"
+coco status feat/first --follow
+coco jump feat/first
 ```
 
 Continue with the

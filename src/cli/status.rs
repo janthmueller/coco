@@ -1,19 +1,18 @@
 use std::io::{self, IsTerminal, Write};
-use std::path::Path;
 use std::time::Duration;
 
 use anyhow::Result;
 use serde_json::Value;
 
 use crate::domain::EventKind;
-use crate::protocol::EventListParams;
+use crate::protocol::{EventListParams, RepositoryScope};
 use crate::rpc::RpcClient;
 
 use super::output::phase_label;
 
 pub(super) async fn follow_status(
     client: &RpcClient,
-    repository: &Path,
+    scope: RepositoryScope,
     workspace: &str,
 ) -> Result<()> {
     let mut after_sequence = 0_i64;
@@ -25,7 +24,7 @@ pub(super) async fn follow_status(
     loop {
         let response = client
             .request(EventListParams {
-                repository_path: repository.to_path_buf(),
+                scope: scope.clone(),
                 workspace: workspace.to_owned(),
                 after_sequence,
             })

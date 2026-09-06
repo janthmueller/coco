@@ -24,7 +24,9 @@ mod rows;
 mod workspaces;
 
 use migrations::migrate;
-use rows::{get_repository_by_common_dir, get_repository_by_root};
+use rows::{
+    get_repository_by_common_dir, get_repository_by_id, get_repository_by_root, map_repository,
+};
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -222,6 +224,24 @@ impl Store {
     pub fn repository_by_common_dir(&self, path: &Path) -> Result<Option<Repository>, StoreError> {
         let connection = self.lock()?;
         get_repository_by_common_dir(&connection, path)
+    }
+
+    pub fn repository_by_id(&self, id: &str) -> Result<Option<Repository>, StoreError> {
+        let connection = self.lock()?;
+        get_repository_by_id(&connection, id)
+    }
+
+    pub fn list_repositories(&self) -> Result<Vec<Repository>, StoreError> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(
+            "SELECT id, root_path, git_common_dir, display_name, is_linked_worktree,
+                created_at_ms, updated_at_ms FROM repositories
+             ORDER BY display_name, root_path, id",
+        )?;
+        statement
+            .query_map([], map_repository)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::from)
     }
 
     fn lock(&self) -> Result<MutexGuard<'_, Connection>, StoreError> {
