@@ -15,6 +15,7 @@ Run `coco --help` or `coco COMMAND --help` for the exact options in your build.
 | `coco status <workspace> --follow` | Follow a workspace until it pauses or becomes ready |
 | `coco send <workspace> <message>`  | Start the first or next turn                        |
 | `coco jump <workspace>`            | Open the workspace in the Codex terminal UI         |
+| `coco decide <decision-id>`        | Answer a pending approval or question               |
 | `coco diff <workspace>`            | Show changes made in the workspace                  |
 | `coco mcp serve …`                 | Expose CoCo to an MCP host                          |
 
@@ -59,6 +60,19 @@ coco status feat/first --json
 ```
 
 `status --follow` is human-oriented and cannot be combined with `--json`.
+
+## Answer a request
+
+When `status` shows that Codex is waiting, it also prints a decision ID. Open
+the request and choose from its numbered options:
+
+```bash
+coco decide <decision-id>
+```
+
+Decision IDs work from any directory and do not take a repository path or
+`--all-repos`. Secret answers are hidden while you type and are not retained by
+CoCo.
 
 ## MCP
 

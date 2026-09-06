@@ -3,6 +3,7 @@ use clap::Parser;
 
 mod args;
 mod commands;
+mod decision;
 mod jump;
 mod output;
 mod status;

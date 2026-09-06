@@ -63,4 +63,6 @@ pub(crate) trait WorkerRuntime: Send + Sync + 'static {
         client_message_id: &str,
         message: &str,
     ) -> Result<StartedTurn, WorkerError>;
+
+    async fn respond_to_request(&self, id: Value, result: Value) -> Result<(), WorkerError>;
 }

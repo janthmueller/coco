@@ -64,13 +64,6 @@ impl CodexClient {
 
     /// Explicitly answers a server-initiated request. Incoming requests are
     /// only emitted as events and are never answered automatically.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "reserved for the explicit approval-response workflow"
-        )
-    )]
     pub async fn respond(&self, id: RequestId, result: Value) -> Result<(), CodexError> {
         validate_request_id(&id)?;
         self.inner

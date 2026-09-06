@@ -21,10 +21,30 @@ impl Coordinator {
     }
 
     pub(crate) fn record_codex_disconnected(&self) -> Result<usize, StoreError> {
-        self.store.mark_thread_statuses_stale()
+        self.clear_file_change_previews();
+        let stale = self.store.mark_thread_statuses_stale()?;
+        self.store
+            .orphan_open_decisions(Some(&self.runtime_generation), "app_server_disconnected")?;
+        Ok(stale)
     }
 
     fn record_codex_notification(&self, method: &str, params: Value) -> Result<(), StoreError> {
+        if method == "serverRequest/resolved" {
+            let Some(thread_id) = params.get("threadId").and_then(Value::as_str) else {
+                warn!("ignoring serverRequest/resolved without a thread id");
+                return Ok(());
+            };
+            let Some(request_id) = params.get("requestId") else {
+                warn!("ignoring serverRequest/resolved without a request id");
+                return Ok(());
+            };
+            self.store.resolve_decision_by_native_request(
+                &self.runtime_generation,
+                thread_id,
+                request_id,
+            )?;
+            return Ok(());
+        }
         let Some(workspace) = self.workspace_for_codex_params(&params)? else {
             debug!(method, "ignoring uncorrelated Codex notification");
             return Ok(());
@@ -35,7 +55,16 @@ impl Coordinator {
         if method == "thread/status/changed" {
             return self.record_thread_status_changed(&workspace, &params);
         }
+        if (method == "item/started"
+            && params.pointer("/item/type").and_then(Value::as_str) == Some("fileChange"))
+            || method == "item/fileChange/patchUpdated"
+        {
+            self.cache_file_change_preview(&params);
+        }
         let turn = self.turn_for_codex_params(&workspace, &params)?;
+        if method == "item/completed" {
+            self.forget_file_change_preview(&params);
+        }
         match method {
             "turn/completed" => self.record_turn_completed(&workspace, turn.as_ref(), &params)?,
             "item/completed"
@@ -231,8 +260,10 @@ impl Coordinator {
             return Ok(());
         };
         let turn = self.turn_for_codex_params(&workspace, &params)?;
+        if self.capture_decision_request(id, method, &params, &workspace, turn.as_ref())? {
+            return Ok(());
+        }
         let payload = json!({
-            "requestId": id,
             "method": method,
             "reason": params.get("reason"),
         });

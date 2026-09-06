@@ -10,6 +10,14 @@ status: stable
 
 ## 2026-09-06
 
+- **Interactive decision closure**: Added SQLite schema v5 and the global
+  `coco decide <decision-id>` flow for native command approvals, file-change
+  approvals, and structured user input. Decisions retain exact private
+  generation/thread/request correlation, expose only bounded presentation
+  data, transition atomically through pending/submitted/resolved or orphaned,
+  and are never auto-approved or replayed after process loss. Secret answers
+  use a cross-platform no-echo prompt and are never stored; unsupported future
+  request shapes fail closed instead of delegating to a late `jump` client.
 - **Native Git approval proof**: Added and executed a model-consuming,
   explicitly opted-in Codex 0.147.0 test. Under the deterministic `untrusted`
   policy it accepts only one fully validated temporary file/add/commit command,

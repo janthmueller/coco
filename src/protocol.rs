@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::de::DeserializeOwned;
@@ -5,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::domain::{
-    Audit, AuditOutcome, ContextMode, GitObservation, NormalizedEvent, Repository, Turn, Workspace,
+    Audit, AuditOutcome, ContextMode, Decision, GitObservation, NormalizedEvent, Repository, Turn,
+    Workspace,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -19,12 +21,14 @@ pub enum DaemonMethod {
     TurnStart,
     EventList,
     WorkspaceDiff,
+    DecisionGet,
+    DecisionRespond,
     AuditRecord,
 }
 
 impl DaemonMethod {
     #[cfg(test)]
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
         Self::Health,
         Self::RepositoryRegister,
         Self::RepositoryList,
@@ -34,6 +38,8 @@ impl DaemonMethod {
         Self::TurnStart,
         Self::EventList,
         Self::WorkspaceDiff,
+        Self::DecisionGet,
+        Self::DecisionRespond,
         Self::AuditRecord,
     ];
 
@@ -48,6 +54,8 @@ impl DaemonMethod {
             Self::TurnStart => "turn.start",
             Self::EventList => "event.list",
             Self::WorkspaceDiff => "workspace.diff",
+            Self::DecisionGet => "decision.get",
+            Self::DecisionRespond => "decision.respond",
             Self::AuditRecord => "audit.record",
         }
     }
@@ -63,6 +71,8 @@ impl DaemonMethod {
             "turn.start" => Some(Self::TurnStart),
             "event.list" => Some(Self::EventList),
             "workspace.diff" => Some(Self::WorkspaceDiff),
+            "decision.get" => Some(Self::DecisionGet),
+            "decision.respond" => Some(Self::DecisionRespond),
             "audit.record" => Some(Self::AuditRecord),
             _ => None,
         }
@@ -167,6 +177,26 @@ pub struct WorkspaceDiffParams {
     pub workspace: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DecisionGetParams {
+    pub decision_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+pub enum DecisionSubmission {
+    Choice { choice: u32 },
+    Answers { answers: BTreeMap<String, String> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DecisionRespondParams {
+    pub decision_id: String,
+    pub submission: DecisionSubmission,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -277,6 +307,7 @@ pub struct GitIncomplete {
 pub struct WorkspaceStatusResult {
     pub workspace: Workspace,
     pub git: WorkspaceGitStatus,
+    pub open_decisions: Vec<Decision>,
     pub next_sequence: i64,
 }
 
@@ -285,7 +316,16 @@ pub struct WorkspaceStatusResult {
 pub struct EventListResult {
     pub workspace: Workspace,
     pub events: Vec<NormalizedEvent>,
+    pub open_decisions: Vec<Decision>,
     pub next_sequence: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DecisionResult {
+    pub decision: Decision,
+    pub workspace: Workspace,
+    pub repository: RepositorySummary,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -315,6 +355,8 @@ daemon_request!(WorkspaceGetParams, WorkspaceGet, WorkspaceStatusResult);
 daemon_request!(TurnStartParams, TurnStart, WorkspaceResult);
 daemon_request!(EventListParams, EventList, EventListResult);
 daemon_request!(WorkspaceDiffParams, WorkspaceDiff, WorkspaceDiffResult);
+daemon_request!(DecisionGetParams, DecisionGet, DecisionResult);
+daemon_request!(DecisionRespondParams, DecisionRespond, DecisionResult);
 daemon_request!(AuditRecordParams, AuditRecord, Audit);
 
 fn default_profile() -> String {
@@ -341,6 +383,8 @@ mod tests {
                 "turn.start",
                 "event.list",
                 "workspace.diff",
+                "decision.get",
+                "decision.respond",
                 "audit.record",
             ]
         );
@@ -447,6 +491,24 @@ mod tests {
             }),
         );
         assert_request(
+            DecisionGetParams {
+                decision_id: "decision-1".to_owned(),
+            },
+            DaemonMethod::DecisionGet,
+            json!({"decisionId": "decision-1"}),
+        );
+        assert_request(
+            DecisionRespondParams {
+                decision_id: "decision-1".to_owned(),
+                submission: DecisionSubmission::Choice { choice: 2 },
+            },
+            DaemonMethod::DecisionRespond,
+            json!({
+                "decisionId": "decision-1",
+                "submission": {"type": "choice", "choice": 2},
+            }),
+        );
+        assert_request(
             AuditRecordParams {
                 source: "mcp".to_owned(),
                 action: "workspaces.list".to_owned(),
@@ -529,6 +591,7 @@ mod tests {
                 "bindingValid": true,
                 "untrackedPaths": ["new.txt"],
             },
+            "openDecisions": [],
             "nextSequence": 3,
         }));
         assert_response::<TurnStartParams>(json!({
@@ -550,6 +613,7 @@ mod tests {
                 "recordedAtMs": 3,
                 "payload": {"threadId": "thread-1"},
             }],
+            "openDecisions": [],
             "nextSequence": 3,
         }));
         assert_response::<WorkspaceDiffParams>(json!({
@@ -557,6 +621,13 @@ mod tests {
             "patchTruncated": false,
             "untrackedPaths": ["new.txt"],
         }));
+        let decision_result = json!({
+            "decision": decision(),
+            "workspace": workspace(),
+            "repository": {"id": "repo-1", "displayName": "repo", "rootPath": "/repo"},
+        });
+        assert_response::<DecisionGetParams>(decision_result.clone());
+        assert_response::<DecisionRespondParams>(decision_result);
         assert_response::<AuditRecordParams>(json!({
             "sequence": 4,
             "id": "audit-4",
@@ -629,6 +700,24 @@ mod tests {
             "createdAtMs": 1,
             "updatedAtMs": 2,
             "completedAtMs": null,
+        })
+    }
+
+    fn decision() -> Value {
+        json!({
+            "id": "decision-1",
+            "workspaceId": "workspace-1",
+            "turnId": "turn-1",
+            "kind": "command_approval",
+            "state": "pending",
+            "prompt": {
+                "type": "approval",
+                "title": "Run command",
+                "command": "git status",
+                "changes": [],
+                "options": [{"label": "Approve once"}],
+            },
+            "receivedAtMs": 3,
         })
     }
 }

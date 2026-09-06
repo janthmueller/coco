@@ -143,9 +143,9 @@ Clock / IdGenerator
 
 Core use cases are `RegisterRepository`, `ListRepositories`,
 `CreateWorkspace`, `ListWorkspaces`, `StatusWorkspace`, `SendTurn`,
-`FollowWorkspace`, `DiffWorkspace`, and `AuditControlCall`. The planned
-`DecideRequest` approval-resolution use case is not implemented. MCP tools call
-the shipped use cases through daemon RPC rather than importing them directly.
+`FollowWorkspace`, `DiffWorkspace`, `GetDecision`, `RespondDecision`, and
+`AuditControlCall`. MCP tools call the shipped use cases through daemon RPC
+rather than importing them directly.
 
 ## Local filesystem layout
 
@@ -238,7 +238,8 @@ Methods for the handed-off commands are:
 | `turn.start` | `coco send` | `workspaces.send` when explicitly enabled |
 | `event.list` | `coco status --follow` polling | not exposed in v0 |
 | `workspace.diff` | `coco diff` | `workspaces.diff` |
-| `approval.respond` | `coco decide <request-id>` (planned) | not exposed in v0 |
+| `decision.get` | request lookup for `coco decide <decision-id>` | not exposed in v0 |
+| `decision.respond` | `coco decide <decision-id>` | not exposed in v0 |
 
 Repository-aware CLI commands carry either one repository path or an explicit
 daemon-wide scope. An omitted path means `.`, and a supplied path may point
@@ -458,23 +459,29 @@ sequence, opaque ID, source, action, optional workspace and operation IDs,
 outcome, sanitized JSON details, and occurrence time. Raw prompt text is not
 copied into this table.
 
-### Planned `pending_requests` (not implemented)
+### `decisions`
 
 | Column | Constraint and meaning |
 | --- | --- |
-| `id` | stable CoCo request ID shown to clients |
-| `workspace_id`, `turn_id` | required correlation |
-| `app_server_instance_id` | identifies the child-process generation |
-| `app_request_id_json` | exact typed App Server request ID serialization |
-| `kind` | command approval, file approval, permissions, or user input |
-| `status` | `pending`, `responded`, `declined`, `cancelled`, or `orphaned` |
-| `request_json`, `response_json` | versioned redacted audit payloads |
-| `created_at_ms`, `resolved_at_ms` | lifecycle timestamps |
+| `id` | stable CoCo decision ID shown to clients |
+| `workspace_id`, `turn_id` | workspace and nullable local-turn correlation |
+| `codex_thread_id`, `codex_turn_id` | exact native correlation |
+| `runtime_generation` | identifies the owning App Server process generation |
+| `native_request_id_json` | exact typed App Server request ID serialization; never projected publicly |
+| `method`, `kind` | native source method and supported command approval, file-change approval, or user input kind |
+| `state` | `pending`, `submitted`, `resolved`, or `orphaned` |
+| `prompt_json` | bounded presentation model containing no environment or credential fields |
+| `native_options_json` | exact private native approval values in display order |
+| `response_summary_json` | answer-free submission metadata; raw user-input answers are never persisted |
+| `received_at_ms`, `submitted_at_ms`, `resolved_at_ms` | lifecycle timestamps |
 
-This table belongs to the deferred `decide` design. When implemented, it must
-enforce uniqueness across App Server instance and request ID. On connection
-loss unresolved callbacks become `orphaned`; a response must never be sent to
-a new process generation under a recycled wire ID.
+Uniqueness spans App Server generation, native thread, and request ID. The
+public opaque ID is the only selector accepted by `coco decide`; the daemon
+loads the private correlation and exact offered response value. Submission is
+a compare-and-set from `pending` to `submitted` before the native write, so two
+clients cannot answer once each. `serverRequest/resolved` supplies final native
+confirmation. Connection loss, response-write failure, and daemon restart
+orphan unresolved rows; CoCo never sends one against a new process generation.
 
 ### Deferred workspace annotations and external references
 
@@ -518,9 +525,9 @@ commits; reconnecting subscribers de-duplicate by event ID/cursor.
 
 ### Workspace lifecycle and thread runtime
 
-Schema v3 introduced state ownership separation, and the current schema v4
-retains it while renaming the aggregate. CoCo writes only the workspace
-lifecycle:
+Schema v3 introduced state ownership separation, schema v4 renamed the
+aggregate, and schema v5 adds decisions without changing thread-state
+ownership. CoCo writes only the workspace lifecycle:
 
 | From | Trigger | To | Durable event/effect |
 | --- | --- | --- | --- |
@@ -542,10 +549,10 @@ All snapshots become stale on daemon startup or when the App Server event
 connection closes. A stale value remains available for diagnosis but is never
 presented as current.
 
-Server requests are a separate fact. The current adapter writes a sanitized
-`server_request.received` event but never changes runtime state based on the
-method name. The future pending-request model will add actionable correlation;
-it must preserve this separation.
+Server requests are a separate fact. Supported decision requests are persisted
+with actionable correlation and other requests produce a sanitized
+`server_request.received` event, but neither path changes runtime state based
+on the method name. Only native status observations determine wait flags.
 
 The public `phase` and `waitReasons` fields are computed on each storage read:
 
@@ -715,7 +722,9 @@ record.
 | completed agent `item/completed` | durable `agent.message.completed` |
 | `turn/completed` | complete the correlated turn and clear `active_turn_id`; emit `turn.completed` |
 | non-retrying `error` | sanitized `agent.failed` event; native thread status remains separate |
-| any correlated server request | sanitized `server_request.received`; never infer status from its method |
+| command/file-change approval or `requestUserInput` | persist a bounded `decision.requested` and private native correlation before presentation; never infer status from its method |
+| `serverRequest/resolved` | transition the matching current-generation decision to `resolved`; emit `decision.resolved` |
+| any other correlated server request | sanitized `server_request.received`; never infer status from its method |
 
 App Server notification emission can race a request response. For turns
 started through CoCo, an in-memory pending-thread marker prevents the
@@ -739,9 +748,11 @@ bound branch are supported; CoCo does not introduce a second Git database or a
 commit proxy. Do not add the entire common Git directory as an unconditional
 writable workspace. Let Codex's native command-approval flow mediate sandbox
 crossings, with the user's selected execution profile remaining authoritative.
-`coco jump` presents those decisions in the native TUI; daemon-originated turns
-need the same request persisted and answered through the general decision
-surface.
+An already attached native TUI can present requests from its own event stream.
+Starting `coco jump` after a request is already pending is not a replay
+mechanism: the pinned TUI only resolves request IDs delivered to that client.
+Daemon-originated turns therefore need the request persisted and answered
+through the general decision surface.
 
 The pinned live proof forces the native `untrusted` policy solely to make the
 approval boundary deterministic. Codex 0.147.0 then emits
@@ -913,9 +924,7 @@ Each step remains runnable and testable:
    `workspaces.send`, error mapping, cancellation, and control-call auditing.
 9. **Interaction checkpoint:** correct native thread-state ownership and verify
    close-without-cancel plus reattachment through `jump`, then stop and review
-   findings and all remaining priorities with the user. Pending-request display
-   and response through `coco decide <request-id>` remains a candidate rather
-   than an automatically scheduled next slice.
+   findings and all remaining priorities with the user.
 10. **Workspace vocabulary migration:** rename the prerelease CoCo-owned `task`
     aggregate across domain types, storage through a lossless migration, daemon
     protocol, events, CLI/MCP schemas, tests, and documentation. Replace `new`
@@ -932,8 +941,13 @@ Each step remains runnable and testable:
 13. **Repository-scope ergonomics:** add `repo list`, optional leading-path
     scope, `--all-repos`/`-a`, global workspace-ID lookup, deterministic
     ambiguity errors, and safe slash-separated workspace names without changing
-    MCP's fixed repository capability. Completed in CLI JSON schema v4.
-14. **Remaining release hardening:** supported-version policy, filesystem
+   MCP's fixed repository capability. Completed in CLI JSON schema v4.
+14. **Decision closure:** persist generation-bound native command/file-change
+    approvals and structured user-input requests, project them through status,
+    and answer an opaque ID through the numbered `coco decide` flow. Completed
+    in SQLite schema v5 and CLI JSON schema v5; the control MCP remains unable
+    to answer decisions.
+15. **Remaining release hardening:** supported-version policy, filesystem
     permission tests, help/public docs, packaging, and clean-install test.
 
 Do not split packages or build TUI/web scaffolding during these slices. The
@@ -942,12 +956,12 @@ implemented as a thin adapter in the same package.
 
 ## Open architecture decisions
 
-The following still need confirmation. Only decision-response closure gates a
-safe complete v0 rather than the initial proof slice:
+The following still need confirmation; decision-response closure no longer
+blocks a safe complete v0:
 
-1. If `decide` is selected at the post-`jump` planning checkpoint, the exact
-   non-interactive flags and which session-wide or policy-amendment choices to
-   expose beyond the first numbered interactive flow.
+1. Whether to add non-interactive `decide` flags or cursor-driven presentation;
+   the current flow deliberately presents every native option in order and
+   accepts a number.
 2. Exact Codex CLI version and compatibility range to pin in the
    development/release toolchain.
 3. When the selected Windows named-pipe local-IPC backend and Windows CI become

@@ -2,7 +2,8 @@ use serde_json::json;
 
 use super::*;
 use crate::domain::{
-    CodexThreadStatus, Workspace, WorkspaceLifecycle, WorkspacePhase, WorkspaceWaitReason,
+    CodexThreadStatus, DecisionApprovalPrompt, DecisionKind, DecisionOption, DecisionPrompt,
+    DecisionState, Turn, Workspace, WorkspaceLifecycle, WorkspacePhase, WorkspaceWaitReason,
 };
 
 fn repository(root: &Path) -> Repository {
@@ -66,6 +67,35 @@ fn ready_workspace(store: &Store, repository_id: &str, name: &str) -> Workspace 
         )
         .unwrap()
         .0
+}
+
+fn pending_command_decision(workspace: &Workspace, turn: &Turn) -> NewDecision {
+    NewDecision {
+        workspace_id: workspace.id.clone(),
+        turn_id: Some(turn.id.clone()),
+        codex_thread_id: workspace.codex_thread_id.clone().unwrap(),
+        codex_turn_id: turn.codex_turn_id.clone(),
+        runtime_generation: "runtime-test".to_owned(),
+        native_request_id: json!(17),
+        method: "item/commandExecution/requestApproval".to_owned(),
+        kind: DecisionKind::CommandApproval,
+        prompt: DecisionPrompt::Approval(Box::new(DecisionApprovalPrompt {
+            title: "Run a command".to_owned(),
+            reason: Some("test".to_owned()),
+            command: Some("git status".to_owned()),
+            cwd: Some(PathBuf::from("/tmp/worktree")),
+            network_host: None,
+            network_protocol: None,
+            grant_root: None,
+            additional_permissions: Vec::new(),
+            changes: Vec::new(),
+            options: vec![DecisionOption {
+                label: "Approve once".to_owned(),
+                description: None,
+            }],
+        })),
+        native_options: vec![json!("accept")],
+    }
 }
 
 fn legacy_v1_connection() -> Connection {
@@ -164,7 +194,7 @@ fn migrates_v1_tasks_to_workspaces_without_losing_data() {
     let version: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
     assert_eq!(workspace.lifecycle, WorkspaceLifecycle::Ready);
     assert_eq!(workspace.phase, WorkspacePhase::Unavailable);
     assert_eq!(
@@ -348,6 +378,121 @@ fn state_and_events_change_atomically() {
     assert_eq!(turn.phase, TurnPhase::Completed);
     assert_eq!(turn.completed_at_ms, Some(30));
     assert_eq!(store.events_after(Some(&workspace.id), 0).unwrap().len(), 5);
+}
+
+#[test]
+fn decisions_are_generation_bound_and_transition_atomically_with_events() {
+    let store = Store::in_memory().unwrap();
+    let repo = repository(Path::new("/tmp/source-decisions"));
+    store.register_repository(&repo).unwrap();
+    let workspace = ready_workspace(&store, &repo.id, "decisions");
+    let (_, turn, _) = store
+        .start_turn_with_event(
+            &workspace.id,
+            NewTurn {
+                operation_id: Some("decision-turn".to_owned()),
+                client_message_id: "decision-message".to_owned(),
+                codex_turn_id: Some("codex-decision-turn".to_owned()),
+                started_at_ms: Some(10),
+            },
+            EventDraft::workspace(EventKind::TurnStarted, EventSource::Codex, json!({})),
+        )
+        .unwrap();
+    let (stored, event) = store
+        .create_decision_with_event(
+            pending_command_decision(&workspace, &turn),
+            EventDraft::workspace(
+                EventKind::DecisionRequested,
+                EventSource::Codex,
+                json!({"kind": "command_approval"}),
+            ),
+        )
+        .unwrap();
+    assert_eq!(stored.decision.state, DecisionState::Pending);
+    assert_eq!(stored.native_request_id, json!(17));
+    assert_eq!(stored.native_options, [json!("accept")]);
+    assert_eq!(event.payload["decisionId"], stored.decision.id);
+    assert_eq!(
+        store
+            .open_decisions_for_workspace(&workspace.id)
+            .unwrap()
+            .len(),
+        1
+    );
+
+    assert!(matches!(
+        store.mark_decision_submitted(&stored.decision.id, "another-runtime", &json!({})),
+        Err(StoreError::DecisionGenerationMismatch { .. })
+    ));
+    let submitted = store
+        .mark_decision_submitted(
+            &stored.decision.id,
+            "runtime-test",
+            &json!({"choice": 1, "label": "Approve once"}),
+        )
+        .unwrap();
+    assert_eq!(submitted.decision.state, DecisionState::Submitted);
+    assert!(matches!(
+        store.mark_decision_submitted(&stored.decision.id, "runtime-test", &json!({})),
+        Err(StoreError::InvalidDecisionState { .. })
+    ));
+
+    let resolved = store
+        .resolve_decision_by_native_request("runtime-test", "thread-decisions", &json!(17))
+        .unwrap()
+        .unwrap();
+    assert_eq!(resolved.decision.state, DecisionState::Resolved);
+    assert!(
+        store
+            .open_decisions_for_workspace(&workspace.id)
+            .unwrap()
+            .is_empty()
+    );
+    let events = store.events_after(Some(&workspace.id), 0).unwrap();
+    assert_eq!(events[events.len() - 2].kind, EventKind::DecisionRequested);
+    assert_eq!(events.last().unwrap().kind, EventKind::DecisionResolved);
+}
+
+#[test]
+fn open_decisions_are_orphaned_without_replaying_native_requests() {
+    let store = Store::in_memory().unwrap();
+    let repo = repository(Path::new("/tmp/source-orphaned-decision"));
+    store.register_repository(&repo).unwrap();
+    let workspace = ready_workspace(&store, &repo.id, "orphaned-decision");
+    let (_, turn, _) = store
+        .start_turn_with_event(
+            &workspace.id,
+            NewTurn {
+                operation_id: Some("orphan-turn".to_owned()),
+                client_message_id: "orphan-message".to_owned(),
+                codex_turn_id: Some("codex-orphan-turn".to_owned()),
+                started_at_ms: None,
+            },
+            EventDraft::workspace(EventKind::TurnStarted, EventSource::Codex, json!({})),
+        )
+        .unwrap();
+    let (stored, _) = store
+        .create_decision_with_event(
+            pending_command_decision(&workspace, &turn),
+            EventDraft::workspace(EventKind::DecisionRequested, EventSource::Codex, json!({})),
+        )
+        .unwrap();
+
+    assert_eq!(
+        store
+            .orphan_open_decisions(Some("runtime-test"), "restart")
+            .unwrap(),
+        1
+    );
+    let orphaned = store.decision_by_id(&stored.decision.id).unwrap().unwrap();
+    assert_eq!(orphaned.decision.state, DecisionState::Orphaned);
+    assert!(
+        store
+            .open_decisions_for_workspace(&workspace.id)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(store.orphan_open_decisions(None, "again").unwrap(), 0);
 }
 
 #[test]

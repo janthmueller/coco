@@ -4,10 +4,10 @@ use super::StoreError;
 
 pub(super) fn migrate(connection: &Connection) -> Result<(), StoreError> {
     let mut version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if version > 4 {
+    if version > 5 {
         return Err(StoreError::UnsupportedSchema(version));
     }
-    if version == 4 {
+    if version == 5 {
         return Ok(());
     }
     if version == 1 {
@@ -19,11 +19,19 @@ pub(super) fn migrate(connection: &Connection) -> Result<(), StoreError> {
         version = 3;
     }
     if version == 3 {
-        return migrate_workspace_vocabulary(connection);
+        migrate_workspace_vocabulary(connection)?;
+        version = 4;
+    }
+    if version == 4 {
+        return migrate_pending_decisions(connection);
     }
     create_current_schema(connection)
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the complete initial schema is intentionally one atomic SQL batch"
+)]
 fn create_current_schema(connection: &Connection) -> Result<(), StoreError> {
     connection.execute_batch(
         "BEGIN IMMEDIATE;
@@ -93,6 +101,33 @@ fn create_current_schema(connection: &Connection) -> Result<(), StoreError> {
          );
          CREATE INDEX IF NOT EXISTS turns_workspace_idx
             ON turns(workspace_id, requested_at_ms);
+         CREATE TABLE IF NOT EXISTS decisions (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+            turn_id TEXT REFERENCES turns(id),
+            codex_thread_id TEXT NOT NULL,
+            codex_turn_id TEXT,
+            runtime_generation TEXT NOT NULL,
+            native_request_id_json TEXT NOT NULL CHECK (json_valid(native_request_id_json)),
+            method TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK (kind IN (
+                'command_approval', 'file_change_approval', 'user_input'
+            )),
+            state TEXT NOT NULL CHECK (state IN (
+                'pending', 'submitted', 'resolved', 'orphaned'
+            )),
+            prompt_json TEXT NOT NULL CHECK (json_valid(prompt_json)),
+            native_options_json TEXT NOT NULL CHECK (json_valid(native_options_json)),
+            response_summary_json TEXT CHECK (
+                response_summary_json IS NULL OR json_valid(response_summary_json)
+            ),
+            received_at_ms INTEGER NOT NULL,
+            submitted_at_ms INTEGER,
+            resolved_at_ms INTEGER,
+            UNIQUE(runtime_generation, codex_thread_id, native_request_id_json)
+         );
+         CREATE INDEX IF NOT EXISTS decisions_workspace_state_idx
+            ON decisions(workspace_id, state, received_at_ms);
          CREATE TABLE IF NOT EXISTS events (
             sequence INTEGER PRIMARY KEY AUTOINCREMENT,
             id TEXT NOT NULL UNIQUE,
@@ -120,9 +155,49 @@ fn create_current_schema(connection: &Connection) -> Result<(), StoreError> {
          );
          CREATE INDEX IF NOT EXISTS audit_workspace_sequence_idx
             ON audit_events(workspace_id, sequence);
-         PRAGMA user_version = 4;
+         PRAGMA user_version = 5;
          COMMIT;",
     )?;
+    Ok(())
+}
+
+fn migrate_pending_decisions(connection: &Connection) -> Result<(), StoreError> {
+    let migration = connection.execute_batch(
+        "BEGIN IMMEDIATE;
+         CREATE TABLE decisions (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+            turn_id TEXT REFERENCES turns(id),
+            codex_thread_id TEXT NOT NULL,
+            codex_turn_id TEXT,
+            runtime_generation TEXT NOT NULL,
+            native_request_id_json TEXT NOT NULL CHECK (json_valid(native_request_id_json)),
+            method TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK (kind IN (
+                'command_approval', 'file_change_approval', 'user_input'
+            )),
+            state TEXT NOT NULL CHECK (state IN (
+                'pending', 'submitted', 'resolved', 'orphaned'
+            )),
+            prompt_json TEXT NOT NULL CHECK (json_valid(prompt_json)),
+            native_options_json TEXT NOT NULL CHECK (json_valid(native_options_json)),
+            response_summary_json TEXT CHECK (
+                response_summary_json IS NULL OR json_valid(response_summary_json)
+            ),
+            received_at_ms INTEGER NOT NULL,
+            submitted_at_ms INTEGER,
+            resolved_at_ms INTEGER,
+            UNIQUE(runtime_generation, codex_thread_id, native_request_id_json)
+         );
+         CREATE INDEX decisions_workspace_state_idx
+            ON decisions(workspace_id, state, received_at_ms);
+         PRAGMA user_version = 5;
+         COMMIT;",
+    );
+    if migration.is_err() {
+        let _ = connection.execute_batch("ROLLBACK;");
+    }
+    migration?;
     Ok(())
 }
 

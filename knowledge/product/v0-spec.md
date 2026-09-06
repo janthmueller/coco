@@ -84,6 +84,9 @@ that the behavior is already implemented.
 - Native worktrees intentionally share their repository's Git object and ref
   storage. CoCo does not proxy ordinary worker commits or allocate a separate
   Git database per workspace.
+- Supported Codex approvals and structured user-input requests are persisted
+  as generation-bound decisions and answered only through an explicit
+  `coco decide` operation; CoCo never auto-approves them.
 - v0 has no publicly reachable network listener. Its App Server endpoint is
   capability-token protected and bound only to `127.0.0.1`.
 - v0 worktrees are branch-backed. A detached-worktree mode is a planned post-v0
@@ -122,7 +125,7 @@ release:
 - Make every mutating client request carry a client-generated operation ID.
   This lets the daemon reject or replay duplicate requests from CLI or MCP
   without creating a second branch, worktree, thread, or turn.
-- Add the minimal `coco decide <request-id>` response command before calling v0
+- Add the minimal `coco decide <decision-id>` response command before calling v0
   generally usable; merely displaying an approval can otherwise leave a turn
   permanently blocked.
 
@@ -131,7 +134,8 @@ release:
 An operator can register a Git checkout, prepare a workspace and Codex thread
 from an exact commit without starting work, send the first or a later turn,
 inspect or follow its current state, enter the same thread with the official
-Codex TUI, and inspect all workspace changes relative to the fixed base commit.
+Codex TUI, answer a supported approval or question, and inspect all workspace
+changes relative to the fixed base commit.
 A local MCP host can inspect the same workspace projections and, when the
 operator explicitly enables the capability, send a turn through the same
 daemon use case.
@@ -147,6 +151,8 @@ The smallest proof slice is successful when it demonstrates, end to end:
 6. A separate `send` starts a text turn in that thread.
 7. At least thread-started, turn-started, agent-message, and turn-completed or
    failure events reach a CLI client and durable state can be shown afterward.
+8. A supported native server request is persisted before presentation and an
+   explicit numbered response reaches that exact live request.
 
 The MCP adapter is required for the complete v0 but does not need to be in this
 first proof slice; it is added once the daemon methods it delegates to are
@@ -256,6 +262,7 @@ coco [<repository-path>] send <workspace> <message>
 coco --all-repos send <workspace> <message>
 coco [<repository-path>] jump <workspace>
 coco --all-repos jump <workspace>
+coco decide <decision-id>
 coco [<repository-path>] diff <workspace>
 coco --all-repos diff <workspace>
 coco mcp serve --repository <path> [--allow-send]
@@ -275,6 +282,10 @@ return `WORKSPACE_REFERENCE_AMBIGUOUS` with matching workspace IDs, names, and
 repository paths. A local miss never silently targets another repository, but
 the error points out global matches when they exist. CoCo does not encode a
 path and workspace name into a composite string.
+
+`decide` is intentionally not repository-scoped. It accepts only the globally
+unique opaque CoCo decision ID printed by `status`; a leading repository path
+or `--all-repos` is an error.
 
 All orchestration commands must use the daemon contract. The CLI must not open
 SQLite or operate worktrees. `jump` first resolves the workspace through the daemon,
@@ -343,7 +354,7 @@ must not create duplicate artifacts.
   `--all-repos` exposes the daemon-wide view and always includes repository
   identity in each human and JSON row.
 - Sort deterministically by most recent update, then workspace ID.
-- `--json` emits one schema-version-4 JSON document and no decorative stdout
+- `--json` emits one schema-version-5 JSON document and no decorative stdout
   text. Every row includes a compact repository identity.
 
 ### `coco status`
@@ -351,7 +362,9 @@ must not create duplicate artifacts.
 - Return the complete CoCo workspace projection: immutable Git binding, context
   mode, non-secret profile summary, Codex thread and active/latest turn IDs,
   runtime phase and wait reasons, Git facets, timestamps, last error, and
-  recent event cursor.
+  recent event cursor. It also includes current `pending` or `submitted`
+  decisions using opaque CoCo IDs and bounded presentation data; native App
+  Server request IDs are never exposed.
 - `--json` uses the same field meanings as the daemon protocol and includes a
   top-level schema version.
 - `--follow` polls durable events and renders the current phase until the workspace
@@ -386,6 +399,24 @@ must not create duplicate artifacts.
   started with `coco send`; exiting the TUI does not delete the workspace.
 - A normal `/quit` or `/exit` detaches the remote TUI without interrupting an
   active turn. Explicit interruption remains the separate cancel action.
+
+### `coco decide`
+
+- Resolve one globally unique opaque decision ID without repository scope.
+- Support native command-execution approval, file-change approval, and
+  structured `requestUserInput` requests. Unknown server-request families
+  remain observational and cannot be answered through this command.
+- Print bounded, redacted request details and the exact native options in their
+  supplied order, then accept a one-based number. Questions accept a listed
+  label or free text only when their native shape allows it.
+- Collect secret answers through a cross-platform no-echo terminal prompt;
+  never print or persist their values.
+- Compare-and-set the decision from `pending` to `submitted` before writing the
+  response, and accept final `resolved` confirmation only from the matching
+  App Server generation, thread, and native request ID. Never retry a submitted
+  or orphaned response against a replacement process.
+- Persist no raw user-input answer. The App Server response necessarily carries
+  it in memory, while SQLite retains only answer-free submission metadata.
 
 ### `coco diff`
 
@@ -500,6 +531,8 @@ agent.started
 message.received
 turn.started
 plan.updated
+decision.requested
+decision.resolved
 thread.status.changed
 server_request.received
 diff.updated
@@ -507,8 +540,6 @@ agent.message.completed
 turn.completed
 agent.failed
 workspace.completed        # reserved; not emitted by current v0 commands
-approval.requested    # reserved for the future pending-decision model
-approval.resolved     # reserved for the future pending-decision model
 control.call.started
 control.call.completed
 ```
@@ -533,9 +564,9 @@ inventing a normalized meaning.
 - The CoCo MCP server uses local stdio, is read-only unless the operator starts
   it with the send capability, and never bypasses daemon authorization or
   validation.
-- Correlated server requests remain visible as sanitized events and are never
-  auto-approved. Stable actionable request IDs and durable responses belong to
-  the deferred pending-decision model.
+- Supported correlated server requests become durable decisions and are never
+  auto-approved. Other request families remain visible only as sanitized
+  events. Native request IDs and response values stay private to the daemon.
 - Ordinary commits on a workspace's checked-out branch are supported worker
   behavior, not a separate CoCo transaction. CoCo does not make the whole
   shared Git common directory an ordinary writable workspace merely to enable
@@ -606,6 +637,9 @@ The following are intentionally outside v0:
   concurrent sends yield one accepted turn and one deterministic conflict.
 - `status --follow` can attach during a turn, reflects durable phase changes,
   and can detach without affecting the turn.
+- `status` exposes an opaque ID for supported pending decisions; `coco decide`
+  renders the offered choices, validates input, and sends exactly one response
+  to the originating live App Server request.
 - `ls --json` and `status --json` parse as JSON with stable version and status
   fields.
 - `jump` resumes the stored thread in the stored worktree through the shared
@@ -636,7 +670,9 @@ The following are intentionally outside v0:
 - Filesystem permission tests prove normal writes outside allowed roots are
   denied by the selected App Server/sandbox version.
 - Pending approval requests are persisted before presentation and resolutions
-  are correlated to the original App Server request.
+  are correlated to the original App Server generation, thread, turn, and
+  request. Restart and disconnect tests prove unresolved decisions become
+  orphaned rather than being replayed.
 - An explicit opt-in real-Codex test proves that a Git administrative write in
   a linked workspace worktree follows Codex's native approval path and that an
   accepted ordinary commit advances only the workspace's bound branch. The test
@@ -648,18 +684,10 @@ The following are intentionally outside v0:
 
 ## Open decisions and blockers
 
-No open decision blocks the storage/Git scaffold or a non-destructive App
-Server proof turn. Decision-response closure still blocks calling the complete
-v0 generally usable:
-
-1. **Decision response closure:** implement durable pending requests and
-   `coco decide <request-id>`. The first interactive flow prints Codex's native
-   choices as numbered options and accepts a number; structured user-input
-   requests may also accept free text where their native schema permits it.
-   Cursor navigation, exact non-interactive flags, and session-wide or policy-
-   amendment choices remain later design work. This remains necessary before
-   calling v0 generally usable. Its implementation priority is reconsidered
-   after the selected native Git-approval compatibility proof.
+Decision-response closure is implemented. Cursor navigation and exact
+non-interactive `decide` flags remain optional UX follow-ups; the shipped
+interactive flow preserves request-specific session and policy-amendment
+choices whenever Codex supplies them.
 
 The Git administrative-storage decision is closed: workspaces use ordinary native
 worktrees and may commit on their own branches through Codex's existing

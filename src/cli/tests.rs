@@ -112,6 +112,11 @@ fn exposes_status_follow_and_jump_without_the_old_overlapping_commands() {
     assert!(Cli::try_parse_from(["coco", "status", "auth", "--json"]).is_ok());
     assert!(Cli::try_parse_from(["coco", "status", "auth", "--follow", "--json"]).is_err());
     assert!(Cli::try_parse_from(["coco", "jump", "auth"]).is_ok());
+    let decide = Cli::try_parse_from(["coco", "decide", "decision-123"]).unwrap();
+    assert!(matches!(
+        decide.command,
+        Command::Decide { decision } if decision == "decision-123"
+    ));
     assert!(Cli::try_parse_from(["coco", "show", "auth"]).is_err());
     assert!(Cli::try_parse_from(["coco", "watch", "auth"]).is_err());
 }

@@ -279,9 +279,16 @@ impl Coordinator {
         };
         let events = self.store.events_after(Some(&workspace.id), 0)?;
         let next_sequence = events.last().map_or(0, |event| event.sequence);
+        let open_decisions = self
+            .store
+            .open_decisions_for_workspace(&workspace.id)?
+            .into_iter()
+            .map(|stored| stored.decision)
+            .collect();
         Ok(WorkspaceStatusResult {
             workspace,
             git,
+            open_decisions,
             next_sequence,
         })
     }
@@ -297,9 +304,16 @@ impl Coordinator {
         let next_sequence = events
             .last()
             .map_or(params.after_sequence, |event| event.sequence);
+        let open_decisions = self
+            .store
+            .open_decisions_for_workspace(&workspace.id)?
+            .into_iter()
+            .map(|stored| stored.decision)
+            .collect();
         Ok(EventListResult {
             workspace,
             events,
+            open_decisions,
             next_sequence,
         })
     }

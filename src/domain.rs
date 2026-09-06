@@ -306,6 +306,148 @@ pub struct Turn {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum DecisionKind {
+    CommandApproval,
+    FileChangeApproval,
+    UserInput,
+}
+
+impl DecisionKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::CommandApproval => "command_approval",
+            Self::FileChangeApproval => "file_change_approval",
+            Self::UserInput => "user_input",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "command_approval" => Some(Self::CommandApproval),
+            "file_change_approval" => Some(Self::FileChangeApproval),
+            "user_input" => Some(Self::UserInput),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DecisionState {
+    Pending,
+    Submitted,
+    Resolved,
+    Orphaned,
+}
+
+impl DecisionState {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Submitted => "submitted",
+            Self::Resolved => "resolved",
+            Self::Orphaned => "orphaned",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "pending" => Some(Self::Pending),
+            "submitted" => Some(Self::Submitted),
+            "resolved" => Some(Self::Resolved),
+            "orphaned" => Some(Self::Orphaned),
+            _ => None,
+        }
+    }
+
+    pub const fn is_open(self) -> bool {
+        matches!(self, Self::Pending | Self::Submitted)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DecisionOption {
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DecisionQuestion {
+    pub id: String,
+    pub header: String,
+    pub question: String,
+    pub options: Vec<DecisionOption>,
+    pub allows_other: bool,
+    pub is_secret: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DecisionFileChange {
+    pub path: PathBuf,
+    pub kind: String,
+    pub diff: String,
+    pub diff_truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DecisionPermission {
+    pub access: String,
+    pub target: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+pub enum DecisionPrompt {
+    Approval(Box<DecisionApprovalPrompt>),
+    UserInput { questions: Vec<DecisionQuestion> },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DecisionApprovalPrompt {
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network_host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network_protocol: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant_root: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub additional_permissions: Vec<DecisionPermission>,
+    pub changes: Vec<DecisionFileChange>,
+    pub options: Vec<DecisionOption>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Decision {
+    pub id: String,
+    pub workspace_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
+    pub kind: DecisionKind,
+    pub state: DecisionState,
+    pub prompt: DecisionPrompt,
+    pub received_at_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submitted_at_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum EventSource {
     Coco,
     Git,
@@ -349,6 +491,10 @@ pub enum EventKind {
     ApprovalRequested,
     #[serde(rename = "approval.resolved")]
     ApprovalResolved,
+    #[serde(rename = "decision.requested")]
+    DecisionRequested,
+    #[serde(rename = "decision.resolved")]
+    DecisionResolved,
     #[serde(rename = "thread.status.changed")]
     ThreadStatusChanged,
     #[serde(rename = "server_request.received")]
@@ -380,6 +526,8 @@ impl EventKind {
             Self::PlanUpdated => "plan.updated",
             Self::ApprovalRequested => "approval.requested",
             Self::ApprovalResolved => "approval.resolved",
+            Self::DecisionRequested => "decision.requested",
+            Self::DecisionResolved => "decision.resolved",
             Self::ThreadStatusChanged => "thread.status.changed",
             Self::ServerRequestReceived => "server_request.received",
             Self::DiffUpdated => "diff.updated",
@@ -402,6 +550,8 @@ impl EventKind {
             "plan.updated" => Some(Self::PlanUpdated),
             "approval.requested" => Some(Self::ApprovalRequested),
             "approval.resolved" => Some(Self::ApprovalResolved),
+            "decision.requested" => Some(Self::DecisionRequested),
+            "decision.resolved" => Some(Self::DecisionResolved),
             "thread.status.changed" => Some(Self::ThreadStatusChanged),
             "server_request.received" => Some(Self::ServerRequestReceived),
             "diff.updated" => Some(Self::DiffUpdated),

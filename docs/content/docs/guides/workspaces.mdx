@@ -48,6 +48,17 @@ coco status fix/login --follow
 reports a problem. <kbd>Ctrl</kbd>+<kbd>C</kbd> stops following without stopping
 the Codex turn.
 
+If Codex needs an approval or an answer, `status` shows a decision ID and the
+next command to run:
+
+```bash
+coco decide <decision-id>
+```
+
+Review the request, then enter the number beside your choice. Ordinary Codex
+questions can also ask for a short text answer. Secret answers are hidden while
+you type them.
+
 ## Enter the workspace
 
 ```bash

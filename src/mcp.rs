@@ -474,6 +474,7 @@ mod tests {
             DaemonMethod::WorkspaceGet => json!({
                 "workspace": fake_workspace(),
                 "git": {"observed": false, "reason": "test fixture"},
+                "openDecisions": [],
                 "nextSequence": 0,
             }),
             DaemonMethod::TurnStart => json!({
@@ -484,6 +485,7 @@ mod tests {
             DaemonMethod::EventList => json!({
                 "workspace": fake_workspace(),
                 "events": [],
+                "openDecisions": [],
                 "nextSequence": 0,
             }),
             DaemonMethod::WorkspaceDiff => json!({
@@ -491,6 +493,7 @@ mod tests {
                 "patchTruncated": false,
                 "untrackedPaths": [],
             }),
+            DaemonMethod::DecisionGet | DaemonMethod::DecisionRespond => json!(null),
             DaemonMethod::AuditRecord => json!({
                 "sequence": 1,
                 "id": "audit-test",

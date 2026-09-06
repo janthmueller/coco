@@ -16,8 +16,8 @@ current checkout.
 
 - prepare Codex workspaces in separate branches and worktrees without starting
   them immediately;
-- send work, follow its state, or enter the same conversation in the Codex
-  terminal UI;
+- send work, follow its state, answer approvals or questions, or enter the same
+  conversation in the Codex terminal UI;
 - work across several registered repositories from one daemon;
 - choose a named Codex profile when a workspace starts;
 - let MCP-capable applications inspect workspaces, with sending disabled by

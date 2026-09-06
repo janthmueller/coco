@@ -10,8 +10,9 @@ CoCo is ready for supervised local experiments, not unattended production use.
 - The shared Codex connection relies on the Codex CLI's experimental remote
   App Server support. This preview is tested with `codex-cli 0.147.0`; another
   version may expose an incompatible command or protocol.
-- CoCo can show approval and user-input requests but cannot answer them yet. A
-  workspace that asks for either may remain blocked.
+- `coco decide` handles command approvals, file-change approvals, and Codex
+  questions. New request types from a different Codex version may not yet be
+  supported.
 - Prepared conversations reconnect after restarting `cocod`, but a turn that
   was running during the restart is marked interrupted and does not continue
   automatically.

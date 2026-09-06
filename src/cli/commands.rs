@@ -13,6 +13,7 @@ use crate::protocol::{
 use crate::rpc::RpcClient;
 
 use super::args::{Cli, Command, CreateArgs, McpCommand, RepoCommand};
+use super::decision::decide;
 use super::jump::jump;
 use super::output::{
     print_diff, print_human, print_json, print_repository_list, print_status, print_workspace_list,
@@ -78,6 +79,10 @@ pub(super) async fn run(cli: Cli) -> Result<()> {
         }
         Command::Jump { workspace } => {
             jump_to_workspace(&paths, scope_for_reference(scope, &workspace), workspace).await
+        }
+        Command::Decide { decision } => {
+            reject_top_level_scope(has_explicit_scope, "decide")?;
+            decide(&paths, decision).await
         }
         Command::Diff { workspace } => {
             show_diff(&paths, scope_for_reference(scope, &workspace), workspace).await

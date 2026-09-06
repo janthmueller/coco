@@ -107,6 +107,13 @@ impl WorkerRuntime for CodexWorker {
             .to_owned();
         Ok(StartedTurn { id })
     }
+
+    async fn respond_to_request(&self, id: Value, result: Value) -> Result<(), WorkerError> {
+        self.client
+            .respond(id, result)
+            .await
+            .map_err(WorkerError::runtime)
+    }
 }
 
 fn decode_thread_response(

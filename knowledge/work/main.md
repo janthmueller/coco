@@ -187,12 +187,19 @@ architectural baseline for CoCo.
   - [x] Add multi-repository, ambiguity, explicit-scope, and process coverage.
   - [x] Reconcile canonical knowledge and public user documentation with the
     behavior that actually ships.
-- [ ] Deferred and unscheduled: durable pending decisions and
-  `coco decide <request-id>`. If selected at the post-`jump` review, the first
-  interactive UX should print native choices as numbered options and accept a
-  number; user-input requests may accept free text where the native schema
-  permits it. Preserve native option meaning and request correlation. Defer
-  cursor-driven selection and other TUI polish.
+- [x] Implement durable pending decisions and `coco decide <decision-id>` as
+  the selected next v0 slice.
+  - [x] Persist supported native decision requests before presentation, bound
+    to the exact App Server generation, thread, turn, and request ID.
+  - [x] Project pending decisions through workspace status without inventing
+    a second thread state machine.
+  - [x] Render native choices as numbered options and accept a number;
+    user-input requests may accept free text where the native schema permits
+    it. Defer cursor-driven selection and other TUI polish.
+  - [x] Resolve through the original live App Server request, handle stale or
+    already-resolved requests safely, and cover restart/orphan behavior.
+  - [x] Update public and canonical internal documentation only for behavior
+    proven by the completed implementation and tests.
 - [ ] Design workspace annotations and external references as a deliberate future
   feature. Decide typed versus free-form values, mutation/audit semantics,
   privacy and display rules, fork/handoff inheritance, and explicit projection
@@ -360,7 +367,7 @@ architectural baseline for CoCo.
   explicit interrupt remains the unambiguous cancel action. Contract-test this
   experimental upstream surface before relying on it in a release.
 - 2026-09-06 — Name the unified approval/user-input response command
-  `coco decide <request-id>`. Start with numbered native options and optional
+  `coco decide <decision-id>`. Start with numbered native options and optional
   free-text input; defer cursor navigation until the simpler workflow has
   proven insufficient. This records the preferred shape only, not the next
   scheduled implementation slice; priority is reconsidered after state and
@@ -443,9 +450,36 @@ architectural baseline for CoCo.
   native thread history into a new workspace; `handoff` starts a fresh thread
   from a bounded, reviewable artifact; `resume` remains continuation of the
   same thread. None of them implicitly copies dirty code.
+- 2026-09-06 — Use a separate opaque CoCo decision ID in public status and
+  `coco decide`; keep the native App Server request ID and exact response value
+  private. Persist `pending` before presentation, compare-and-set to
+  `submitted` before the response write, and accept `resolved` only from the
+  matching current-generation notification. Never replay an unresolved
+  callback into a replacement App Server process.
+- 2026-09-06 — Support command approvals, file-change approvals, and structured
+  user input through one numbered decision flow. Parse only fully understood
+  native choices and permission/file-change shapes; an unknown extension is
+  observational instead of enabling a blind approval. Secret answers use a
+  cross-platform no-echo terminal reader and are never persisted.
+- 2026-09-06 — Do not advertise `coco jump` as replay for an already pending
+  request. Codex 0.147.0's TUI retains only request IDs delivered through that
+  client's own event stream, so attaching later cannot reliably answer the
+  daemon's outstanding callback.
 
 ## Findings
 
+- Codex 0.147.0 represents a file update kind as a tagged object such as
+  `{"type":"update","move_path":null}`, not a bare string. Decision
+  presentation now parses that exact shape, preserves move targets, bounds the
+  aggregate patch, and neutralizes terminal control characters. Unknown
+  fields in approval choices, permission grants, or file-change objects fail
+  closed rather than being hidden behind an approval label.
+- A TUI attached after a server request is pending is not a safe response
+  fallback. The pinned Codex TUI correlates only request IDs delivered through
+  its own event stream, and the App Server exposes no pending-request replay
+  call. `coco decide` therefore reads `isSecret` answers through `rpassword`'s
+  cross-platform no-echo console path and sends them through the original
+  daemon connection without storing their values.
 - The context-transfer request was already present in the original handoff and
   in the stored `ContextMode::{Fresh,Fork,Handoff}` values. Native
   `thread/fork` accepts a source thread plus new `cwd` and configuration;
@@ -530,8 +564,9 @@ architectural baseline for CoCo.
 - The executable coordinator now serializes creation and turn-start operations
   per repository, resolves client paths back to a registered Git common
   directory, and treats Git/Codex effects as persisted saga steps.
-- App Server requests are surfaced as redacted durable events and are never
-  auto-approved. The approval response workflow remains intentionally open.
+- Supported App Server requests are now surfaced as durable, generation-bound
+  decisions and are never auto-approved. Unsupported request families remain
+  redacted observations rather than being guessed or answered blindly.
 - Rust modules can use nested directories without becoming separate Cargo
   packages. CoCo currently has one package, one library crate, and three binary
   crates; the flat module tree is normal but its largest files now mix enough
@@ -619,6 +654,24 @@ architectural baseline for CoCo.
 
 ## Verification
 
+- The completed decision slice passes 73 library tests plus the real
+  daemon/CLI fake-App-Server process smoke with one build job and one test
+  thread. The process test observes a native command approval, finds its opaque
+  decision ID through `status`, drives `coco decide` with a numbered choice,
+  verifies the exact original JSON-RPC response, receives native resolution,
+  and returns the workspace to active execution. The two explicitly opt-in
+  real-Codex/model tests compile and remain ignored.
+- Decision-focused tests cover structured policy choices, schema-shaped file
+  add/update/move data, bounded and control-safe presentation, unknown-field
+  rejection, additional filesystem/network permissions, secret no-echo input,
+  answer-free persistence, compare-and-set submission, native resolution,
+  generation mismatch, disconnect, and restart orphaning.
+- `cargo fmt --all -- --check`, all-target/all-feature Clippy with warnings
+  denied, `cargo machete`, and `git diff --check` pass. `nix run .#docs-check`
+  and both root plus `DOCS_BASE_PATH=/coco` static builds pass; the verifier
+  finds 88 files across eight public pages with client-side search and no
+  internal knowledge. `nix flake check . --no-write-lock-file --max-jobs 1`
+  also passes.
 - `git rev-parse --is-inside-work-tree` returned `true`.
 - `git branch --show-current` returned `main`.
 - `codex --version` reports the pinned `codex-cli 0.147.0`; its help exposes
@@ -791,19 +844,17 @@ architectural baseline for CoCo.
   recovery are corrected. Running turns still become interrupted if the daemon
   and its owned App Server stop; surviving that boundary would require a
   separately supervised App Server lifetime.
-- Keep the durable pending-request model and numbered `coco decide` flow
-  recorded. The completed Git-approval proof establishes the native
-  request/response contract and shows that choices are request-specific. Use
-  those findings in the next UX/design discussion; do not introduce another
-  state machine.
+- The generation-bound pending-decision model and numbered `coco decide` flow
+  are implemented for command/file approvals and structured user input. Keep
+  it separate from native thread status; consider non-interactive flags only
+  after real use demonstrates a need.
 - Keep context transfer under the existing reserved modes. Before implementing
   `fork` or `handoff`, agree the source selector and review UX, then test native
   `thread/fork`; do not treat this as generic workspace metadata or duplicate
   the source conversation into SQLite.
 - The workspace vocabulary/schema migration, create convenience pipeline,
-  multi-repository CLI slice, and native Git-approval proof are complete.
-  Reconfirm the pending-request/`decide` scope with the user before starting
-  that product slice.
+  multi-repository CLI slice, native Git-approval proof, and interactive
+  decision closure are complete.
 - Research Codex's native lifecycle extensibility before designing CoCo hooks.
   Keep the distinction between internal normalized events and executable user
   automation explicit; hooks must not silently inherit credentials or block

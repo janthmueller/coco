@@ -4,13 +4,13 @@ use rusqlite::types::Type;
 use rusqlite::{Connection, OptionalExtension, Row};
 use serde_json::Value;
 
-use super::{StoreError, path_text};
+use super::{StoreError, StoredDecision, path_text};
 #[cfg(test)]
 use crate::domain::{Audit, AuditOutcome};
 use crate::domain::{
-    CodexThreadStatus, ContextMode, EventKind, EventSource, NormalizedEvent, Repository,
-    ThreadRuntimeSnapshot, Turn, TurnPhase, Workspace, WorkspaceLifecycle,
-    derive_workspace_runtime,
+    CodexThreadStatus, ContextMode, Decision, DecisionKind, DecisionPrompt, DecisionState,
+    EventKind, EventSource, NormalizedEvent, Repository, ThreadRuntimeSnapshot, Turn, TurnPhase,
+    Workspace, WorkspaceLifecycle, derive_workspace_runtime,
 };
 
 pub(super) const WORKSPACE_SELECT: &str = "SELECT id, create_operation_id, repository_id, name,
@@ -24,6 +24,11 @@ pub(super) const TURN_SELECT: &str = "SELECT id, workspace_id, operation_id, cli
 
 pub(super) const EVENT_SELECT: &str = "SELECT sequence, id, workspace_id, turn_id, kind, source,
     source_method, occurred_at_ms, recorded_at_ms, payload_json FROM events";
+
+pub(super) const DECISION_SELECT: &str = "SELECT id, workspace_id, turn_id, codex_thread_id,
+    codex_turn_id, runtime_generation, native_request_id_json, method, kind, state,
+    prompt_json, native_options_json, received_at_ms, submitted_at_ms, resolved_at_ms
+    FROM decisions";
 
 #[cfg(test)]
 pub(super) const AUDIT_SELECT: &str =
@@ -127,6 +132,32 @@ pub(super) fn map_event(row: &Row<'_>) -> rusqlite::Result<NormalizedEvent> {
         occurred_at_ms: row.get(7)?,
         recorded_at_ms: row.get(8)?,
         payload: json_from_column(row, 9)?,
+    })
+}
+
+pub(super) fn map_stored_decision(row: &Row<'_>) -> rusqlite::Result<StoredDecision> {
+    let kind: String = row.get(8)?;
+    let state: String = row.get(9)?;
+    Ok(StoredDecision {
+        decision: Decision {
+            id: row.get(0)?,
+            workspace_id: row.get(1)?,
+            turn_id: row.get(2)?,
+            kind: DecisionKind::parse(&kind)
+                .ok_or_else(|| invalid_value(8, "decision kind", &kind))?,
+            state: DecisionState::parse(&state)
+                .ok_or_else(|| invalid_value(9, "decision state", &state))?,
+            prompt: json_from_column::<DecisionPrompt>(row, 10)?,
+            received_at_ms: row.get(12)?,
+            submitted_at_ms: row.get(13)?,
+            resolved_at_ms: row.get(14)?,
+        },
+        codex_thread_id: row.get(3)?,
+        codex_turn_id: row.get(4)?,
+        runtime_generation: row.get(5)?,
+        native_request_id: json_from_column::<Value>(row, 6)?,
+        method: row.get(7)?,
+        native_options: json_from_column::<Vec<Value>>(row, 11)?,
     })
 }
 

@@ -14,10 +14,11 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::domain::{
-    AuditOutcome, CodexThreadStatus, ContextMode, EventKind, EventSource, ProfileSnapshot,
-    Repository, TurnPhase,
+    AuditOutcome, CodexThreadStatus, ContextMode, Decision, DecisionKind, DecisionPrompt,
+    EventKind, EventSource, ProfileSnapshot, Repository, TurnPhase,
 };
 
+mod decisions;
 mod events;
 mod migrations;
 mod rows;
@@ -68,6 +69,10 @@ pub enum StoreError {
         turn_workspace_id: String,
         event_workspace_id: String,
     },
+    #[error("decision {decision_id} must be pending, but is {actual}")]
+    InvalidDecisionState { decision_id: String, actual: String },
+    #[error("decision {decision_id} belongs to another App Server generation")]
+    DecisionGenerationMismatch { decision_id: String },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -129,6 +134,31 @@ pub struct TurnCompletion {
     pub phase: TurnPhase,
     pub error: Option<Value>,
     pub completed_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NewDecision {
+    pub workspace_id: String,
+    pub turn_id: Option<String>,
+    pub codex_thread_id: String,
+    pub codex_turn_id: Option<String>,
+    pub runtime_generation: String,
+    pub native_request_id: Value,
+    pub method: String,
+    pub kind: DecisionKind,
+    pub prompt: DecisionPrompt,
+    pub native_options: Vec<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StoredDecision {
+    pub decision: Decision,
+    pub codex_thread_id: String,
+    pub codex_turn_id: Option<String>,
+    pub runtime_generation: String,
+    pub native_request_id: Value,
+    pub method: String,
+    pub native_options: Vec<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -48,10 +48,19 @@ pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<
     let reconciled = store
         .reconcile_unfinished()
         .context("could not reconcile unfinished workspaces")?;
+    let orphaned_decisions = store
+        .orphan_open_decisions(None, "daemon_restarted")
+        .context("could not reconcile pending decisions")?;
     if !reconciled.is_empty() {
         warn!(
             workspaces = reconciled.len(),
             "reconciled unfinished workspace preparation or turns after daemon restart"
+        );
+    }
+    if orphaned_decisions > 0 {
+        warn!(
+            decisions = orphaned_decisions,
+            "orphaned decisions from an earlier App Server generation"
         );
     }
 

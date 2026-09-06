@@ -132,6 +132,12 @@ async fn verify_generated_schemas(
     for relative in [
         "CommandExecutionRequestApprovalParams.json",
         "CommandExecutionRequestApprovalResponse.json",
+        "FileChangeRequestApprovalParams.json",
+        "FileChangeRequestApprovalResponse.json",
+        "ToolRequestUserInputParams.json",
+        "ToolRequestUserInputResponse.json",
+        "v2/FileChangePatchUpdatedNotification.json",
+        "v2/ItemStartedNotification.json",
         "v2/ThreadStartParams.json",
         "v2/ThreadStartResponse.json",
         "v2/ThreadForkParams.json",

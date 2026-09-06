@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail, ensure};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
+use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::{Child, Command};
 use tokio::sync::oneshot;
@@ -160,7 +161,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
 
     run_cli(&paths, &repository, &["repo", "add", "."]).await?;
     let repositories = cli_json(&run_cli(&paths, &repository, &["repo", "list", "--json"]).await?)?;
-    assert_eq!(repositories["schemaVersion"], 4);
+    assert_eq!(repositories["schemaVersion"], 5);
     assert_eq!(
         repositories["repositories"].as_array().map(Vec::len),
         Some(1)
@@ -195,7 +196,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     );
 
     let listed = cli_json(&run_cli(&paths, &repository, &["ls", "--json"]).await?)?;
-    assert_eq!(listed["schemaVersion"], 4);
+    assert_eq!(listed["schemaVersion"], 5);
     let workspaces = listed["workspaces"]
         .as_array()
         .context("coco ls did not return a workspaces array")?;
@@ -207,8 +208,13 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     assert_eq!(workspace["name"], WORKSPACE_NAME);
     assert_eq!(workspace["repository"]["displayName"], "repository");
     assert_eq!(workspace["lifecycle"], "ready");
-    assert_eq!(workspace["phase"], "active");
-    assert_eq!(workspace["waitReasons"], json!([]));
+    ensure!(
+        matches!(
+            workspace["phase"].as_str(),
+            Some("active" | "waiting_for_approval")
+        ),
+        "workspace exposed an unexpected phase while the approval arrived"
+    );
     ensure!(
         matches!(
             workspace["threadRuntime"]["status"]["type"].as_str(),
@@ -232,8 +238,34 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         "prepared workspace worktree does not exist"
     );
 
-    let active = workspace_status(&paths, &repository).await?;
-    assert_eq!(active["workspace"]["phase"], "active");
+    let waiting = wait_for_pending_decision(&paths, &repository).await?;
+    assert_eq!(waiting["workspace"]["phase"], "waiting_for_approval");
+    assert_eq!(waiting["workspace"]["waitReasons"], json!(["approval"]));
+    let decision_id = waiting
+        .pointer("/openDecisions/0/id")
+        .and_then(Value::as_str)
+        .context("status did not expose the pending decision ID")?
+        .to_owned();
+    ensure!(
+        waiting
+            .pointer("/openDecisions/0/nativeRequestId")
+            .is_none(),
+        "status leaked the native App Server request ID"
+    );
+    let human_status = run_cli(&paths, &repository, &["status", WORKSPACE_NAME]).await?;
+    ensure!(
+        String::from_utf8_lossy(&human_status.stdout)
+            .contains(&format!("next: coco decide {decision_id}")),
+        "human status did not show the decision command"
+    );
+    let decided =
+        run_cli_with_input(&paths, &repository, &["decide", &decision_id], b"1\n").await?;
+    ensure!(
+        String::from_utf8_lossy(&decided.stdout).contains("Response sent to Codex"),
+        "coco decide did not confirm the response"
+    );
+    let active = wait_for_workspace_phase(&paths, &repository, "active").await?;
+    assert_eq!(active["openDecisions"], json!([]));
 
     let repository_argument = repository.to_string_lossy().into_owned();
     let explicitly_scoped = cli_json(
@@ -557,7 +589,7 @@ async fn handle_daemon_connection(
                 let completion = completion
                     .take()
                     .context("received more than one turn/start request")?;
-                complete_fake_turn(&mut websocket, &frame, completion).await?;
+                complete_fake_turn(&mut websocket, &frame, completion, &observed_requests).await?;
             }
             Some(other) => bail!("unexpected App Server method {other:?}"),
             None => bail!("received an App Server frame without a method: {frame}"),
@@ -570,6 +602,7 @@ async fn complete_fake_turn(
     websocket: &mut WebSocketStream<TcpStream>,
     request: &Value,
     completion: oneshot::Receiver<()>,
+    observed_requests: &Arc<Mutex<Vec<Value>>>,
 ) -> Result<()> {
     send_result(websocket, request, json!({"turn": {"id": TURN_ID}})).await?;
     send_json(
@@ -594,6 +627,7 @@ async fn complete_fake_turn(
         }),
     )
     .await?;
+    complete_fake_approval(websocket, request, observed_requests).await?;
     completion
         .await
         .context("test stopped before allowing turn completion")?;
@@ -635,6 +669,90 @@ async fn complete_fake_turn(
         }),
     )
     .await
+}
+
+async fn complete_fake_approval(
+    websocket: &mut WebSocketStream<TcpStream>,
+    turn_request: &Value,
+    observed_requests: &Arc<Mutex<Vec<Value>>>,
+) -> Result<()> {
+    send_json(
+        websocket,
+        json!({
+            "id": 900,
+            "method": "item/commandExecution/requestApproval",
+            "params": {
+                "threadId": THREAD_ID,
+                "turnId": TURN_ID,
+                "itemId": "command-process-smoke",
+                "startedAtMs": 10,
+                "command": "git status --short",
+                "cwd": turn_request.pointer("/params/cwd"),
+                "reason": "Verify the worktree before continuing",
+                "availableDecisions": ["accept", "decline"]
+            }
+        }),
+    )
+    .await?;
+    send_json(
+        websocket,
+        json!({
+            "method": "thread/status/changed",
+            "params": {
+                "threadId": THREAD_ID,
+                "status": {"type": "active", "activeFlags": ["waitingOnApproval"]}
+            }
+        }),
+    )
+    .await?;
+    let response = await_daemon_response(websocket, json!(900)).await?;
+    observed_requests
+        .lock()
+        .expect("request capture mutex was poisoned")
+        .push(response.clone());
+    assert_eq!(response["result"], json!({"decision": "accept"}));
+    send_json(
+        websocket,
+        json!({
+            "method": "serverRequest/resolved",
+            "params": {"threadId": THREAD_ID, "requestId": 900}
+        }),
+    )
+    .await?;
+    send_json(
+        websocket,
+        json!({
+            "method": "thread/status/changed",
+            "params": {
+                "threadId": THREAD_ID,
+                "status": {"type": "active", "activeFlags": []}
+            }
+        }),
+    )
+    .await
+}
+
+async fn await_daemon_response(
+    websocket: &mut WebSocketStream<TcpStream>,
+    expected_id: Value,
+) -> Result<Value> {
+    while let Some(message) = websocket.next().await {
+        let frame = match message? {
+            Message::Text(text) => serde_json::from_str::<Value>(&text)?,
+            Message::Binary(bytes) => serde_json::from_slice::<Value>(&bytes)?,
+            Message::Ping(payload) => {
+                websocket.send(Message::Pong(payload)).await?;
+                continue;
+            }
+            Message::Pong(_) | Message::Frame(_) => continue,
+            Message::Close(_) => bail!("daemon closed before answering a server request"),
+        };
+        if frame.get("id") == Some(&expected_id) {
+            return Ok(frame);
+        }
+        bail!("unexpected daemon frame while awaiting a server response: {frame}");
+    }
+    bail!("daemon disconnected before answering a server request")
 }
 
 async fn handle_remote_connection(
@@ -948,6 +1066,41 @@ async fn run_cli_with_jump_exit(
     Ok(output)
 }
 
+async fn run_cli_with_input(
+    paths: &TestPaths,
+    repository: &Path,
+    arguments: &[&str],
+    input: &[u8],
+) -> Result<Output> {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_coco"));
+    paths.apply(&mut command);
+    command
+        .args(arguments)
+        .current_dir(repository)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = command.spawn().context("could not start coco decide")?;
+    child
+        .stdin
+        .take()
+        .context("coco decide had no stdin")?
+        .write_all(input)
+        .await?;
+    let output = timeout(PROCESS_TIMEOUT, child.wait_with_output())
+        .await
+        .context("coco decide timed out")??;
+    ensure!(
+        output.status.success(),
+        "coco {} failed:\nstdout: {}\nstderr: {}",
+        arguments.join(" "),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(output)
+}
+
 async fn capture_cli(
     paths: &TestPaths,
     repository: &Path,
@@ -990,6 +1143,30 @@ async fn wait_for_workspace_phase(
         }
         if Instant::now() >= deadline {
             bail!("workspace did not reach phase {expected:?}: {status}");
+        }
+        sleep(POLL_INTERVAL).await;
+    }
+}
+
+async fn wait_for_pending_decision(paths: &TestPaths, repository: &Path) -> Result<Value> {
+    let deadline = Instant::now() + PROCESS_TIMEOUT;
+    loop {
+        let status = workspace_status(paths, repository).await?;
+        if status
+            .get("openDecisions")
+            .and_then(Value::as_array)
+            .is_some_and(|decisions| {
+                decisions
+                    .iter()
+                    .any(|decision| decision.get("state") == Some(&json!("pending")))
+            })
+            && status.pointer("/workspace/phase").and_then(Value::as_str)
+                == Some("waiting_for_approval")
+        {
+            return Ok(status);
+        }
+        if Instant::now() >= deadline {
+            bail!("workspace did not expose a pending decision: {status}");
         }
         sleep(POLL_INTERVAL).await;
     }

@@ -60,6 +60,11 @@ pub(super) enum Command {
         /// Workspace name or ID.
         workspace: String,
     },
+    /// Answer a pending Codex approval or question.
+    Decide {
+        /// Decision ID shown by `coco status`.
+        decision: String,
+    },
     /// Show all tracked and untracked changes from the immutable base.
     Diff { workspace: String },
     /// Run CoCo as a local MCP server.

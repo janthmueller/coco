@@ -8,8 +8,9 @@ use tracing::error;
 
 use crate::coordinator::{Coordinator, CoordinatorError};
 use crate::protocol::{
-    AuditRecordParams, DaemonMethod, EventListParams, HealthParams, HealthResult, TurnStartParams,
-    WorkspaceCreateParams, WorkspaceDiffParams, WorkspaceGetParams, WorkspaceListParams,
+    AuditRecordParams, DaemonMethod, DecisionGetParams, DecisionRespondParams, EventListParams,
+    HealthParams, HealthResult, TurnStartParams, WorkspaceCreateParams, WorkspaceDiffParams,
+    WorkspaceGetParams, WorkspaceListParams,
 };
 use crate::rpc::{RpcErrorPayload, RpcHandler};
 
@@ -74,6 +75,16 @@ impl RpcHandler for DaemonHandler {
             >(
                 params
             )?)),
+            DaemonMethod::DecisionGet => execute(self.coordinator.get_decision(decode::<
+                DecisionGetParams,
+            >(
+                params
+            )?)),
+            DaemonMethod::DecisionRespond => execute(
+                self.coordinator
+                    .respond_decision(decode::<DecisionRespondParams>(params)?)
+                    .await,
+            ),
             DaemonMethod::AuditRecord => execute(self.coordinator.record_audit(decode::<
                 AuditRecordParams,
             >(

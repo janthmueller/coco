@@ -327,9 +327,9 @@ The required review trigger ran on 2026-09-06 after commit `567140a`.
   therefore rejected again.
 - Hiding the implementation modules exposed fourteen previously masked
   dead-code findings. Unused accessors/builders were removed, test fixtures
-  became test-only, and the explicit Codex response methods retain a local
-  reason because the planned approval workflow will need them. The normal
-  warning-denied build is clean.
+  became test-only, and the explicit Codex response seam now carries the
+  generation-bound decision workflow. The normal warning-denied build is
+  clean.
 - Generated library documentation contains exactly the three executable entry
   points and no internal module API. A future native client remains the first
   likely reason to extract `coco-protocol` as a separate package.

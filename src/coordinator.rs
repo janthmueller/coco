@@ -6,7 +6,9 @@ use serde_json::json;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::error;
 
-use crate::domain::{EventKind, EventSource, Repository, Workspace, WorkspaceLifecycle};
+use crate::domain::{
+    DecisionFileChange, EventKind, EventSource, Repository, Workspace, WorkspaceLifecycle,
+};
 use crate::git::{Git, GitRepository};
 use crate::protocol::{RepositoryScope, RepositorySummary, WorkspaceListItem, WorkspaceResult};
 use crate::store::{EventDraft, Store, StoreError};
@@ -14,6 +16,7 @@ use crate::store::{EventDraft, Store, StoreError};
 const MAX_OPERATION_ID_BYTES: usize = 256;
 
 mod codex_events;
+mod decision;
 mod error;
 mod recovery;
 mod turn;
@@ -32,6 +35,7 @@ pub(crate) struct Coordinator {
     runtime_generation: String,
     repository_locks: AsyncMutex<HashMap<String, Arc<AsyncMutex<()>>>>,
     pending_turn_threads: StdMutex<HashSet<String>>,
+    file_change_previews: StdMutex<HashMap<(String, String), Vec<DecisionFileChange>>>,
 }
 
 impl Coordinator {
@@ -52,6 +56,7 @@ impl Coordinator {
             runtime_generation,
             repository_locks: AsyncMutex::new(HashMap::new()),
             pending_turn_threads: StdMutex::new(HashSet::new()),
+            file_change_previews: StdMutex::new(HashMap::new()),
         }
     }
 

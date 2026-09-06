@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::process::Command;
 use std::sync::Mutex as StdMutex;
@@ -10,13 +11,13 @@ use super::turn::PendingTurnGuard;
 use super::*;
 use crate::codex::CodexEvent;
 use crate::domain::{
-    CodexThreadStatus, ContextMode, Workspace, WorkspaceLifecycle, WorkspacePhase,
-    WorkspaceWaitReason,
+    CodexThreadStatus, ContextMode, DecisionKind, DecisionPrompt, DecisionState, Workspace,
+    WorkspaceLifecycle, WorkspacePhase, WorkspaceWaitReason,
 };
 use crate::protocol::{
-    EventListParams, RepositoryRegisterParams, RepositoryScope, TurnStartParams,
-    WorkspaceCreateParams, WorkspaceDiffParams, WorkspaceGetParams, WorkspaceGitStatus,
-    WorkspaceListParams,
+    DecisionGetParams, DecisionRespondParams, DecisionSubmission, EventListParams,
+    RepositoryRegisterParams, RepositoryScope, TurnStartParams, WorkspaceCreateParams,
+    WorkspaceDiffParams, WorkspaceGetParams, WorkspaceGitStatus, WorkspaceListParams,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -36,6 +37,10 @@ enum WorkerCall {
         cwd: PathBuf,
         client_message_id: String,
         message: String,
+    },
+    Response {
+        id: Value,
+        result: Value,
     },
 }
 
@@ -156,6 +161,14 @@ impl WorkerRuntime for FakeWorker {
         Ok(StartedTurn {
             id: format!("turn-{sequence}"),
         })
+    }
+
+    async fn respond_to_request(&self, id: Value, result: Value) -> Result<(), WorkerError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(WorkerCall::Response { id, result });
+        Ok(())
     }
 }
 
@@ -488,36 +501,7 @@ async fn normalizes_codex_events_and_allows_an_idempotent_follow_up_turn() {
     assert_eq!(first_started.codex_turn_id.as_deref(), Some("turn-1"));
     assert_eq!(first_started.workspace.phase, WorkspacePhase::Active);
 
-    fixture
-        .coordinator
-        .record_codex_event(CodexEvent::ServerRequest {
-            id: json!(17),
-            method: "item/commandExecution/requestApproval".to_owned(),
-            params: json!({
-                "threadId": "thread-1",
-                "turnId": "turn-1",
-                "reason": "needs network",
-                "environment": {"TOKEN": "must-not-persist"},
-            }),
-        })
-        .unwrap();
-    assert_eq!(
-        fixture
-            .store
-            .workspace_by_id(&workspace.id)
-            .unwrap()
-            .unwrap()
-            .phase,
-        WorkspacePhase::Active
-    );
-    let request = fixture
-        .store
-        .events_after(Some(&workspace.id), 0)
-        .unwrap()
-        .pop()
-        .unwrap();
-    assert_eq!(request.kind, EventKind::ServerRequestReceived);
-    assert!(!request.payload.to_string().contains("must-not-persist"));
+    record_and_approve_command(&fixture, &workspace).await;
 
     fixture
         .coordinator
@@ -559,11 +543,11 @@ async fn normalizes_codex_events_and_allows_an_idempotent_follow_up_turn() {
     };
     let started = fixture.coordinator.start_turn(send.clone()).await.unwrap();
     assert_eq!(started.codex_turn_id.as_deref(), Some("turn-2"));
-    assert_eq!(fixture.worker.calls().len(), 3);
+    assert_eq!(fixture.worker.calls().len(), 4);
 
     let replay = fixture.coordinator.start_turn(send.clone()).await.unwrap();
     assert_eq!(replay.turn_id, started.turn_id);
-    assert_eq!(fixture.worker.calls().len(), 3);
+    assert_eq!(fixture.worker.calls().len(), 4);
 
     let mut conflict = send;
     conflict.message = "A different retry".to_owned();
@@ -571,6 +555,263 @@ async fn normalizes_codex_events_and_allows_an_idempotent_follow_up_turn() {
         fixture.coordinator.start_turn(conflict).await,
         Err(CoordinatorError::IdempotencyConflict)
     ));
+}
+
+async fn record_and_approve_command(fixture: &Fixture, workspace: &Workspace) {
+    fixture
+        .coordinator
+        .record_codex_event(CodexEvent::ServerRequest {
+            id: json!(17),
+            method: "item/commandExecution/requestApproval".to_owned(),
+            params: json!({
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "reason": "needs network",
+                "additionalPermissions": {
+                    "fileSystem": {"write": ["/shared/cache"]},
+                    "network": {"enabled": true}
+                },
+                "environment": {"TOKEN": "must-not-persist"},
+            }),
+        })
+        .unwrap();
+    let request = fixture
+        .store
+        .events_after(Some(&workspace.id), 0)
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(request.kind, EventKind::DecisionRequested);
+    assert!(!request.payload.to_string().contains("must-not-persist"));
+    assert!(!request.payload.to_string().contains("17"));
+    let status = fixture
+        .coordinator
+        .get_workspace(WorkspaceGetParams {
+            scope: RepositoryScope::repository(fixture.source.clone()),
+            workspace: workspace.id.clone(),
+        })
+        .unwrap();
+    let decision = status.open_decisions.first().unwrap();
+    assert_eq!(decision.state, DecisionState::Pending);
+    assert!(
+        !serde_json::to_string(decision)
+            .unwrap()
+            .contains("must-not-persist")
+    );
+    assert!(
+        serde_json::to_string(decision)
+            .unwrap()
+            .contains("/shared/cache")
+    );
+    assert!(matches!(decision.prompt, DecisionPrompt::Approval(_)));
+    let submitted = fixture
+        .coordinator
+        .respond_decision(DecisionRespondParams {
+            decision_id: decision.id.clone(),
+            submission: DecisionSubmission::Choice { choice: 1 },
+        })
+        .await
+        .unwrap();
+    assert_eq!(submitted.decision.state, DecisionState::Submitted);
+    assert!(matches!(
+        fixture.worker.calls().last(),
+        Some(WorkerCall::Response { id, result })
+            if id == &json!(17) && result == &json!({"decision": "accept"})
+    ));
+    fixture
+        .coordinator
+        .record_codex_event(CodexEvent::Notification {
+            method: "serverRequest/resolved".to_owned(),
+            params: json!({"threadId": "thread-1", "requestId": 17}),
+        })
+        .unwrap();
+    assert!(
+        fixture
+            .store
+            .open_decisions_for_workspace(&workspace.id)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn forwards_validated_user_input_without_exposing_answer_values() {
+    let fixture = Fixture::new(FakeWorker::default());
+    fixture.register().await;
+    let workspace = fixture
+        .coordinator
+        .create_workspace(fixture.create_params())
+        .await
+        .unwrap()
+        .workspace;
+    fixture
+        .coordinator
+        .start_turn(TurnStartParams {
+            scope: RepositoryScope::repository(fixture.source.clone()),
+            workspace: workspace.id.clone(),
+            message: "Ask me a question".to_owned(),
+            operation_id: "question-turn".to_owned(),
+        })
+        .await
+        .unwrap();
+    fixture
+        .coordinator
+        .record_codex_event(CodexEvent::ServerRequest {
+            id: json!("native-question-1"),
+            method: "item/tool/requestUserInput".to_owned(),
+            params: json!({
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "question-item",
+                "isBlocking": true,
+                "questions": [{
+                    "id": "strategy",
+                    "header": "Strategy",
+                    "question": "Which strategy should Codex use?",
+                    "options": [
+                        {"label": "Safe", "description": "Prefer safety"},
+                        {"label": "Fast", "description": "Prefer speed"}
+                    ],
+                    "isOther": true,
+                    "isSecret": false
+                }]
+            }),
+        })
+        .unwrap();
+    let status = fixture
+        .coordinator
+        .get_workspace(WorkspaceGetParams {
+            scope: RepositoryScope::repository(fixture.source.clone()),
+            workspace: workspace.id.clone(),
+        })
+        .unwrap();
+    let decision = status.open_decisions.first().unwrap();
+    assert_eq!(decision.kind, DecisionKind::UserInput);
+    let decision_id = decision.id.clone();
+    let calls_before = fixture.worker.calls().len();
+
+    let invalid = fixture
+        .coordinator
+        .respond_decision(DecisionRespondParams {
+            decision_id: decision_id.clone(),
+            submission: DecisionSubmission::Answers {
+                answers: BTreeMap::from([("strategy".to_owned(), "  ".to_owned())]),
+            },
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(invalid.code(), "INVALID_PARAMS");
+    assert_eq!(fixture.worker.calls().len(), calls_before);
+
+    let private_answer = "A private custom strategy".to_owned();
+    fixture
+        .coordinator
+        .respond_decision(DecisionRespondParams {
+            decision_id: decision_id.clone(),
+            submission: DecisionSubmission::Answers {
+                answers: BTreeMap::from([("strategy".to_owned(), private_answer.clone())]),
+            },
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        fixture.worker.calls().last(),
+        Some(WorkerCall::Response { id, result })
+            if id == &json!("native-question-1")
+                && result == &json!({
+                    "answers": {"strategy": {"answers": ["A private custom strategy"]}}
+                })
+    ));
+    let submitted = fixture
+        .coordinator
+        .get_decision(DecisionGetParams { decision_id })
+        .unwrap();
+    assert_eq!(submitted.decision.state, DecisionState::Submitted);
+    assert!(
+        !serde_json::to_string(&submitted)
+            .unwrap()
+            .contains(&private_answer)
+    );
+}
+
+#[tokio::test]
+async fn presents_bounded_file_changes_and_orphans_them_on_disconnect() {
+    let fixture = Fixture::new(FakeWorker::default());
+    fixture.register().await;
+    let workspace = fixture
+        .coordinator
+        .create_workspace(fixture.create_params())
+        .await
+        .unwrap()
+        .workspace;
+    fixture
+        .coordinator
+        .start_turn(TurnStartParams {
+            scope: RepositoryScope::repository(fixture.source.clone()),
+            workspace: workspace.id.clone(),
+            message: "Change a file".to_owned(),
+            operation_id: "file-turn".to_owned(),
+        })
+        .await
+        .unwrap();
+    fixture
+        .coordinator
+        .record_codex_event(CodexEvent::Notification {
+            method: "item/started".to_owned(),
+            params: json!({
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "startedAtMs": 20,
+                "item": {
+                    "id": "file-item",
+                    "type": "fileChange",
+                    "status": "inProgress",
+                    "changes": [{
+                        "path": "src/main.rs",
+                        "kind": {"type": "update", "move_path": null},
+                        "diff": "@@ -1 +1 @@\n-old\n+new\n"
+                    }]
+                }
+            }),
+        })
+        .unwrap();
+    fixture
+        .coordinator
+        .record_codex_event(CodexEvent::ServerRequest {
+            id: json!(18),
+            method: "item/fileChange/requestApproval".to_owned(),
+            params: json!({
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "file-item",
+                "startedAtMs": 21,
+                "reason": "Apply the patch"
+            }),
+        })
+        .unwrap();
+    let status = fixture
+        .coordinator
+        .get_workspace(WorkspaceGetParams {
+            scope: RepositoryScope::repository(fixture.source.clone()),
+            workspace: workspace.id.clone(),
+        })
+        .unwrap();
+    let decision = status.open_decisions.first().unwrap();
+    let DecisionPrompt::Approval(prompt) = &decision.prompt else {
+        panic!("file approval was not projected as an approval")
+    };
+    assert_eq!(prompt.changes.len(), 1);
+    assert_eq!(prompt.changes[0].path, PathBuf::from("src/main.rs"));
+    assert_eq!(prompt.changes[0].kind, "update");
+    assert!(prompt.changes[0].diff.contains("+new"));
+    let decision_id = decision.id.clone();
+
+    assert_eq!(fixture.coordinator.record_codex_disconnected().unwrap(), 1);
+    let orphaned = fixture
+        .coordinator
+        .get_decision(DecisionGetParams { decision_id })
+        .unwrap();
+    assert_eq!(orphaned.decision.state, DecisionState::Orphaned);
 }
 
 fn record_thread_status(fixture: &Fixture, status: Value) {

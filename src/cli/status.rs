@@ -8,7 +8,7 @@ use crate::domain::EventKind;
 use crate::protocol::{EventListParams, RepositoryScope};
 use crate::rpc::RpcClient;
 
-use super::output::phase_label;
+use super::output::{phase_label, print_decision_hints};
 
 pub(super) async fn follow_status(
     client: &RpcClient,
@@ -45,10 +45,17 @@ pub(super) async fn follow_status(
             println!("{name}: {}", phase_label(phase));
         }
         last_phase = Some(phase.to_owned());
-        if follow_stops_at(phase) {
+        if follow_stops_at(phase) || !response.open_decisions.is_empty() {
             if interactive {
                 clear_status_line()?;
                 println!("{name}: {}", phase_label(phase));
+            }
+            let decisions = serde_json::to_value(&response.open_decisions)?;
+            print_decision_hints(decisions.as_array().map(Vec::as_slice).unwrap_or_default());
+            if response.open_decisions.is_empty()
+                && matches!(phase, "waiting_for_approval" | "waiting_for_input")
+            {
+                println!("blocked: this Codex request is not supported by coco decide");
             }
             if let Some(message) = last_message {
                 println!("\n{message}");

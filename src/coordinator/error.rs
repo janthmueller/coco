@@ -81,6 +81,8 @@ impl CoordinatorError {
             Self::Git(_) => "GIT_ERROR",
             Self::Store(StoreError::NotFound { .. }) => "NOT_FOUND",
             Self::Store(StoreError::InvalidWorkspaceTransition { .. }) => "INVALID_WORKSPACE_STATE",
+            Self::Store(StoreError::InvalidDecisionState { .. }) => "INVALID_DECISION_STATE",
+            Self::Store(StoreError::DecisionGenerationMismatch { .. }) => "STALE_DECISION",
             Self::Store(_) => "INTERNAL",
             Self::Profile(ProfileError::NotFound { .. }) => "PROFILE_NOT_FOUND",
             Self::Profile(_) => "INVALID_PROFILE",
