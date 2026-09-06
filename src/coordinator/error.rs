@@ -29,6 +29,8 @@ pub(crate) enum CoordinatorError {
     },
     #[error("task has no bound {0}")]
     IncompleteTask(&'static str),
+    #[error("profile {0:?} changed since this task was created")]
+    ProfileChanged(String),
     #[error(transparent)]
     Git(#[from] GitError),
     #[error(transparent)]
@@ -50,6 +52,7 @@ impl CoordinatorError {
             Self::IdempotencyConflict => "IDEMPOTENCY_CONFLICT",
             Self::InvalidTaskState { .. } => "INVALID_TASK_STATE",
             Self::IncompleteTask(_) => "INCOMPLETE_TASK",
+            Self::ProfileChanged(_) => "PROFILE_CHANGED",
             Self::Git(GitError::DirtyRepository(_)) => "DIRTY_SOURCE",
             Self::Git(GitError::InvalidTaskName(_)) => "INVALID_TASK_NAME",
             Self::Git(GitError::BranchExists(_) | GitError::DestinationExists(_)) => {

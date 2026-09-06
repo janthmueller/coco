@@ -650,8 +650,11 @@ executes the built `coco jump` launcher and verifies that the capability token
 is inherited through the child environment rather than exposed in arguments.
 
 On daemon recovery use `thread/resume` by stored thread ID, supplying and then
-verifying the stored `cwd` and profile overrides. Never accept a resumed thread
-whose ID or canonical cwd conflicts with the task record.
+verifying the stored `cwd` and profile overrides. Reload a named profile only
+when its name, source path, and source hash still match the immutable task
+snapshot; never persist the full overlay merely to make recovery convenient.
+Never accept a resumed thread whose ID or canonical cwd conflicts with the task
+record.
 
 ### Minimum notification mapping
 
@@ -750,16 +753,22 @@ Daemon startup order:
 2. Secure and open SQLite; run migrations, stale prior-generation thread
    snapshots, fail unfinished preparation, and interrupt unfinished local turn
    records without changing a bound task's lifecycle.
-3. Start/initialize a new authenticated loopback App Server generation and
-   publish its private
-   endpoint/token runtime files, and begin draining all events.
-4. Bind the local CLI socket and report ready.
+3. Start/initialize a new authenticated loopback App Server generation,
+   publish its private endpoint/token runtime files, and begin draining all
+   events.
+4. For every persisted `ready` task without a fresh status from this
+   generation, reload and validate its profile provenance, then call
+   `thread/resume` with its stored thread ID, canonical worktree, and in-memory
+   overlay. Persist the returned native status only after the returned thread
+   ID and `cwd` match. A task-level profile, binding, or resume failure leaves
+   only that task stale with a sanitized recovery error; other tasks continue.
+5. Bind the local CLI socket and report ready.
 
-Thread resume/reconciliation is not implemented yet. Existing bound tasks are
-therefore exposed as `unavailable` after a daemon restart and reject `send`;
-they are not mislabeled `idle`. A previously active local turn is recorded as
-interrupted, while its task remains `ready` for later recovery work. Recovery
-never translates absence of evidence into completion.
+A previously active local turn is recorded as interrupted before its thread is
+resumed, while its task remains `ready`. The new App Server restores the
+conversation and future-turn capability, not the killed turn execution.
+Recovery never translates absence of evidence into completion and never starts
+a replacement thread when resume fails.
 
 On shutdown, stop accepting mutations, close watcher streams with their last
 cursor, interrupt or reconcile in-flight App Server requests according to its

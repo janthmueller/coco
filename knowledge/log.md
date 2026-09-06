@@ -10,6 +10,11 @@ status: stable
 
 ## 2026-09-06
 
+- **Daemon thread recovery**: A fresh `cocod` now resumes each persisted
+  `ready` Codex thread with its verified ID, worktree, and unchanged in-memory
+  profile overlay. Successful responses refresh native status; profile drift
+  or one resume failure leaves only that task unavailable, while unfinished
+  turns remain truthfully interrupted.
 - **TUI detach contract**: Locked down `coco jump` as an attachment to the
   existing Codex thread: both `/quit`/`/exit` and abrupt remote-client loss
   leave active work running under daemon observation, while explicit Codex

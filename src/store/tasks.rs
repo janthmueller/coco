@@ -300,8 +300,37 @@ impl Store {
         transaction.execute(
             "UPDATE tasks SET thread_status_json = ?1, thread_status_generation = ?2,
                 thread_status_observed_at_ms = ?3, thread_status_is_fresh = 1,
+                last_error_code = CASE
+                    WHEN last_error_code = 'THREAD_RECOVERY_FAILED' THEN NULL
+                    ELSE last_error_code END,
+                last_error_message = CASE
+                    WHEN last_error_code = 'THREAD_RECOVERY_FAILED' THEN NULL
+                    ELSE last_error_message END,
                 updated_at_ms = ?3 WHERE id = ?4",
             params![status_json, runtime_generation, now, task_id],
+        )?;
+        event.task_id = Some(task_id.to_owned());
+        let event = insert_event(&transaction, event)?;
+        let task = require_task(&transaction, task_id)?;
+        transaction.commit()?;
+        Ok((task, event))
+    }
+
+    pub fn record_thread_recovery_failure_with_event(
+        &self,
+        task_id: &str,
+        error_code: &str,
+        error_message: &str,
+        mut event: EventDraft,
+    ) -> Result<(Task, NormalizedEvent), StoreError> {
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        assert_task_lifecycle(&transaction, task_id, &[TaskLifecycle::Ready])?;
+        let now = now_ms();
+        transaction.execute(
+            "UPDATE tasks SET thread_status_is_fresh = 0, last_error_code = ?1,
+                last_error_message = ?2, updated_at_ms = ?3 WHERE id = ?4",
+            params![error_code, error_message, now, task_id],
         )?;
         event.task_id = Some(task_id.to_owned());
         let event = insert_event(&transaction, event)?;

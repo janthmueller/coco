@@ -15,6 +15,7 @@ const MAX_OPERATION_ID_BYTES: usize = 256;
 
 mod codex_events;
 mod error;
+mod recovery;
 mod task;
 mod turn;
 mod worker;

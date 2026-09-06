@@ -34,36 +34,35 @@ impl WorkerRuntime for CodexWorker {
             )
             .await
             .map_err(WorkerError::runtime)?;
-        let id = response
-            .pointer("/thread/id")
-            .and_then(Value::as_str)
-            .ok_or(WorkerError::InvalidResponse("thread.id"))?
-            .to_owned();
-        let status = response
-            .pointer("/thread/status")
-            .cloned()
-            .ok_or(WorkerError::InvalidResponse("thread.status"))
-            .and_then(|status| {
-                serde_json::from_value::<CodexThreadStatus>(status)
-                    .map(CodexThreadStatus::canonicalized)
-                    .map_err(|error| WorkerError::InvalidThreadStatus(error.to_string()))
-            })?;
-        let returned_cwd = response
-            .get("cwd")
-            .and_then(Value::as_str)
-            .ok_or(WorkerError::InvalidResponse("cwd"))
-            .map(PathBuf::from)?;
-        if returned_cwd != cwd {
-            return Err(WorkerError::CwdMismatch {
-                expected: cwd.to_owned(),
-                actual: returned_cwd,
+        decode_thread_response(response, cwd)
+    }
+
+    async fn resume_thread(
+        &self,
+        thread_id: &str,
+        cwd: &Path,
+        config: Value,
+    ) -> Result<StartedThread, WorkerError> {
+        let response = self
+            .client
+            .request(
+                "thread/resume",
+                json!({
+                    "threadId": thread_id,
+                    "cwd": cwd,
+                    "config": config,
+                }),
+            )
+            .await
+            .map_err(WorkerError::runtime)?;
+        let resumed = decode_thread_response(response, cwd)?;
+        if resumed.id != thread_id {
+            return Err(WorkerError::ThreadIdMismatch {
+                expected: thread_id.to_owned(),
+                actual: resumed.id,
             });
         }
-        Ok(StartedThread {
-            id,
-            status,
-            response,
-        })
+        Ok(resumed)
     }
 
     async fn start_turn(
@@ -93,4 +92,41 @@ impl WorkerRuntime for CodexWorker {
             .to_owned();
         Ok(StartedTurn { id })
     }
+}
+
+fn decode_thread_response(
+    response: Value,
+    expected_cwd: &Path,
+) -> Result<StartedThread, WorkerError> {
+    let id = response
+        .pointer("/thread/id")
+        .and_then(Value::as_str)
+        .ok_or(WorkerError::InvalidResponse("thread.id"))?
+        .to_owned();
+    let status = response
+        .pointer("/thread/status")
+        .cloned()
+        .ok_or(WorkerError::InvalidResponse("thread.status"))
+        .and_then(|status| {
+            serde_json::from_value::<CodexThreadStatus>(status)
+                .map(CodexThreadStatus::canonicalized)
+                .map_err(|error| WorkerError::InvalidThreadStatus(error.to_string()))
+        })?;
+    let cwd = response
+        .get("cwd")
+        .and_then(Value::as_str)
+        .ok_or(WorkerError::InvalidResponse("cwd"))
+        .map(PathBuf::from)?;
+    if cwd != expected_cwd {
+        return Err(WorkerError::CwdMismatch {
+            expected: expected_cwd.to_owned(),
+            actual: cwd,
+        });
+    }
+    Ok(StartedThread {
+        id,
+        status,
+        cwd,
+        response,
+    })
 }

@@ -106,17 +106,12 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     let paths = TestPaths::new(temporary.path());
     let repository = temporary.path().join("repository");
     let daemon_log = temporary.path().join("cocod.log");
+    let recovery_log = temporary.path().join("cocod-recovery.log");
 
     prepare_repository(&repository)?;
     write_fake_codex(&paths.fake_codex)?;
 
-    let mut daemon_command = Command::new(env!("CARGO_BIN_EXE_cocod"));
-    paths.apply(&mut daemon_command);
-    daemon_command
-        .stdout(Stdio::null())
-        .stderr(Stdio::from(fs::File::create(&daemon_log)?))
-        .kill_on_drop(true);
-    let mut daemon = daemon_command.spawn().context("could not start cocod")?;
+    let mut daemon = spawn_daemon(&paths, &daemon_log)?;
 
     wait_for_file(&paths.codex_args, &mut daemon, &daemon_log).await?;
     let arguments = read_arguments(&paths.codex_args)?;
@@ -230,6 +225,10 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         .map_err(|_| anyhow::anyhow!("fake App Server stopped before turn completion"))?;
     let completed = wait_for_task_phase(&paths, &repository, "idle").await?;
     assert_eq!(completed["task"]["activeTurnId"], Value::Null);
+    let initial_generation = completed["task"]["threadRuntime"]["runtimeGeneration"]
+        .as_str()
+        .context("task had no initial runtime generation")?
+        .to_owned();
 
     interrupt(&daemon).await?;
     let daemon_status = timeout(PROCESS_TIMEOUT, daemon.wait())
@@ -248,15 +247,17 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     server_result?;
 
     let expected_authorization = format!("Bearer {capability_token}");
-    let authorizations = observed_authorization
-        .lock()
-        .expect("authorization capture mutex was poisoned");
-    assert_eq!(authorizations.len(), 3);
-    assert!(
-        authorizations
-            .iter()
-            .all(|authorization| authorization == &expected_authorization)
-    );
+    {
+        let authorizations = observed_authorization
+            .lock()
+            .expect("authorization capture mutex was poisoned");
+        assert_eq!(authorizations.len(), 3);
+        assert!(
+            authorizations
+                .iter()
+                .all(|authorization| authorization == &expected_authorization)
+        );
+    }
     verify_codex_requests(
         &observed_requests
             .lock()
@@ -272,6 +273,80 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         ensure!(
             !runtime_file.exists(),
             "runtime file was not removed: {}",
+            runtime_file.display()
+        );
+    }
+
+    fs::remove_file(&paths.codex_args)?;
+    let mut recovered_daemon = spawn_daemon(&paths, &recovery_log)?;
+    wait_for_file(&paths.codex_args, &mut recovered_daemon, &recovery_log).await?;
+    let recovery_arguments = read_arguments(&paths.codex_args)?;
+    let recovery_endpoint = verify_app_server_arguments(&recovery_arguments, &paths.token)?;
+    let recovery_capability_token = fs::read_to_string(&paths.token)?;
+    ensure!(
+        recovery_capability_token.len() == 64,
+        "recovery App Server capability token had an unexpected length"
+    );
+    assert_mode(&paths.token, 0o600)?;
+    let recovery_address = recovery_endpoint
+        .strip_prefix("ws://")
+        .context("recovery App Server endpoint was not a ws:// URL")?
+        .parse::<SocketAddr>()
+        .context("recovery App Server endpoint had an invalid socket address")?;
+    let recovery_listener = TcpListener::bind(recovery_address)
+        .await
+        .context("could not bind the recovery App Server")?;
+    let recovery_authorization = Arc::new(Mutex::new(Vec::new()));
+    let recovery_requests = Arc::new(Mutex::new(Vec::new()));
+    let recovery_server = tokio::spawn(run_fake_recovery_server(
+        recovery_listener,
+        Arc::clone(&recovery_authorization),
+        Arc::clone(&recovery_requests),
+        worktree.clone(),
+    ));
+
+    wait_for_file(&paths.socket, &mut recovered_daemon, &recovery_log).await?;
+    let recovered = task_status(&paths, &repository).await?;
+    assert_eq!(recovered["task"]["phase"], "idle");
+    assert_eq!(recovered["task"]["threadRuntime"]["isFresh"], true);
+    assert_ne!(
+        recovered["task"]["threadRuntime"]["runtimeGeneration"],
+        initial_generation
+    );
+    assert_eq!(recovered["task"]["codexThreadId"], THREAD_ID);
+
+    interrupt(&recovered_daemon).await?;
+    let recovered_daemon_status = timeout(PROCESS_TIMEOUT, recovered_daemon.wait())
+        .await
+        .context("recovered cocod did not stop after SIGINT")??;
+    ensure!(
+        recovered_daemon_status.success(),
+        "recovered cocod exited with {recovered_daemon_status}: {}",
+        read_log(&recovery_log)
+    );
+    let recovery_server_result = timeout(PROCESS_TIMEOUT, recovery_server)
+        .await
+        .context("recovery App Server did not stop")?
+        .context("recovery App Server task panicked")?;
+    recovery_server_result?;
+    verify_recovery_requests(
+        &recovery_requests
+            .lock()
+            .expect("recovery request capture mutex was poisoned"),
+        &worktree,
+    )?;
+    let recovery_authorizations = recovery_authorization
+        .lock()
+        .expect("recovery authorization capture mutex was poisoned");
+    assert_eq!(recovery_authorizations.len(), 1);
+    assert_eq!(
+        recovery_authorizations[0],
+        format!("Bearer {recovery_capability_token}")
+    );
+    for runtime_file in [&paths.socket, &paths.endpoint, &paths.token] {
+        ensure!(
+            !runtime_file.exists(),
+            "recovery runtime file was not removed: {}",
             runtime_file.display()
         );
     }
@@ -315,6 +390,55 @@ async fn run_fake_app_server(
     };
 
     tokio::try_join!(daemon, remote_clients)?;
+    Ok(())
+}
+
+async fn run_fake_recovery_server(
+    listener: TcpListener,
+    observed_authorization: Arc<Mutex<Vec<String>>>,
+    observed_requests: Arc<Mutex<Vec<Value>>>,
+    expected_cwd: PathBuf,
+) -> Result<()> {
+    let (stream, peer) = listener.accept().await?;
+    ensure!(
+        peer.ip().is_loopback(),
+        "recovered cocod connected from a non-loopback peer"
+    );
+    let mut websocket =
+        accept_hdr_async(stream, CaptureAuthorization(observed_authorization)).await?;
+    while let Some(message) = websocket.next().await {
+        let frame = match message? {
+            Message::Text(text) => serde_json::from_str::<Value>(&text)?,
+            Message::Binary(bytes) => serde_json::from_slice::<Value>(&bytes)?,
+            Message::Close(_) => return Ok(()),
+            Message::Ping(payload) => {
+                websocket.send(Message::Pong(payload)).await?;
+                continue;
+            }
+            Message::Pong(_) | Message::Frame(_) => continue,
+        };
+        observed_requests
+            .lock()
+            .expect("recovery request capture mutex was poisoned")
+            .push(frame.clone());
+        match frame.get("method").and_then(Value::as_str) {
+            Some("initialize") => send_result(&mut websocket, &frame, json!({})).await?,
+            Some("initialized") => {}
+            Some("thread/resume") => {
+                send_result(
+                    &mut websocket,
+                    &frame,
+                    json!({
+                        "thread": {"id": THREAD_ID, "status": {"type": "idle"}},
+                        "cwd": expected_cwd,
+                    }),
+                )
+                .await?;
+            }
+            Some(other) => bail!("unexpected recovery App Server method {other:?}"),
+            None => bail!("received a recovery frame without a method: {frame}"),
+        }
+    }
     Ok(())
 }
 
@@ -713,6 +837,17 @@ fn verify_jump_arguments(arguments: &[String], endpoint: &str, worktree: &Path) 
     Ok(())
 }
 
+fn spawn_daemon(paths: &TestPaths, log: &Path) -> Result<Child> {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_cocod"));
+    paths.apply(&mut command);
+    command
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(fs::File::create(log)?))
+        .kill_on_drop(true)
+        .spawn()
+        .context("could not start cocod")
+}
+
 async fn run_cli(paths: &TestPaths, repository: &Path, arguments: &[&str]) -> Result<Output> {
     let mut command = Command::new(env!("CARGO_BIN_EXE_coco"));
     paths.apply(&mut command);
@@ -830,6 +965,26 @@ fn verify_codex_requests(requests: &[Value], worktree: &Path) -> Result<()> {
             .and_then(Value::as_str)
             .is_some_and(|value| value.starts_with("coco-")),
         "turn/start had no CoCo message id"
+    );
+    Ok(())
+}
+
+fn verify_recovery_requests(requests: &[Value], worktree: &Path) -> Result<()> {
+    let methods = requests
+        .iter()
+        .filter_map(|request| request.get("method").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    assert_eq!(methods, ["initialize", "initialized", "thread/resume"]);
+    let resume = request(requests, "thread/resume")?;
+    assert_eq!(resume.pointer("/params/threadId"), Some(&json!(THREAD_ID)));
+    assert_eq!(
+        resume.pointer("/params/cwd"),
+        Some(&json!(worktree.to_string_lossy()))
+    );
+    assert_eq!(resume.pointer("/params/config"), Some(&json!({})));
+    ensure!(
+        request(requests, "thread/start").is_err(),
+        "recovery created a replacement thread"
     );
     Ok(())
 }

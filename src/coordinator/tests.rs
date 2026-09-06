@@ -23,6 +23,11 @@ enum WorkerCall {
         cwd: PathBuf,
         config: Value,
     },
+    Resume {
+        thread_id: String,
+        cwd: PathBuf,
+        config: Value,
+    },
     Turn {
         thread_id: String,
         cwd: PathBuf,
@@ -35,6 +40,7 @@ enum WorkerCall {
 struct FakeWorker {
     calls: StdMutex<Vec<WorkerCall>>,
     fail_thread_start: bool,
+    fail_resume_thread: Option<String>,
 }
 
 impl FakeWorker {
@@ -42,6 +48,15 @@ impl FakeWorker {
         Self {
             calls: StdMutex::new(Vec::new()),
             fail_thread_start: true,
+            fail_resume_thread: None,
+        }
+    }
+
+    fn failing_resume(thread_id: &str) -> Self {
+        Self {
+            calls: StdMutex::new(Vec::new()),
+            fail_thread_start: false,
+            fail_resume_thread: Some(thread_id.to_owned()),
         }
     }
 
@@ -71,6 +86,7 @@ impl WorkerRuntime for FakeWorker {
         Ok(StartedThread {
             id: id.clone(),
             status: CodexThreadStatus::Idle,
+            cwd: cwd.to_owned(),
             response: json!({
                 "thread": {"id": id, "status": {"type": "idle"}},
                 "cwd": cwd,
@@ -79,6 +95,33 @@ impl WorkerRuntime for FakeWorker {
                 "approvalPolicy": "on-request",
                 "approvalsReviewer": "user",
                 "sandbox": "workspace-write",
+            }),
+        })
+    }
+
+    async fn resume_thread(
+        &self,
+        thread_id: &str,
+        cwd: &Path,
+        config: Value,
+    ) -> Result<StartedThread, WorkerError> {
+        self.calls.lock().unwrap().push(WorkerCall::Resume {
+            thread_id: thread_id.to_owned(),
+            cwd: cwd.to_owned(),
+            config,
+        });
+        if self.fail_resume_thread.as_deref() == Some(thread_id) {
+            return Err(WorkerError::runtime(std::io::Error::other(
+                "injected resume failure",
+            )));
+        }
+        Ok(StartedThread {
+            id: thread_id.to_owned(),
+            status: CodexThreadStatus::Idle,
+            cwd: cwd.to_owned(),
+            response: json!({
+                "thread": {"id": thread_id, "status": {"type": "idle"}},
+                "cwd": cwd,
             }),
         })
     }
@@ -111,6 +154,7 @@ struct Fixture {
     _temp: TempDir,
     source: PathBuf,
     worktrees: PathBuf,
+    codex_home: PathBuf,
     store: Arc<Store>,
     worker: Arc<FakeWorker>,
     coordinator: Coordinator,
@@ -139,13 +183,14 @@ impl Fixture {
             Git::default(),
             worker.clone(),
             worktrees.clone(),
-            codex_home,
+            codex_home.clone(),
             "runtime-test".to_owned(),
         );
         Self {
             _temp: temp,
             source,
             worktrees,
+            codex_home,
             store,
             worker,
             coordinator,
@@ -169,6 +214,21 @@ impl Fixture {
             profile: "default".to_owned(),
             operation_id: "create-operation-1".to_owned(),
         }
+    }
+
+    fn recovery_coordinator(
+        &self,
+        worker: Arc<FakeWorker>,
+        runtime_generation: &str,
+    ) -> Coordinator {
+        Coordinator::new(
+            Arc::clone(&self.store),
+            Git::default(),
+            worker,
+            self.worktrees.clone(),
+            self.codex_home.clone(),
+            runtime_generation.to_owned(),
+        )
     }
 }
 
@@ -230,6 +290,153 @@ async fn prepares_an_idle_task_without_starting_a_turn_and_replays_operation_ids
             EventKind::AgentStarted,
         ]
     );
+}
+
+#[tokio::test]
+async fn recovers_a_ready_thread_with_its_stored_worktree_and_profile() {
+    let fixture = Fixture::new(FakeWorker::default());
+    fixture.register().await;
+    let created = fixture
+        .coordinator
+        .create_task(fixture.create_params())
+        .await
+        .unwrap();
+    let task = created.task;
+    assert!(fixture.store.reconcile_unfinished().unwrap().is_empty());
+    assert_eq!(
+        fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
+        TaskPhase::Unavailable
+    );
+
+    let worker = Arc::new(FakeWorker::default());
+    let coordinator = fixture.recovery_coordinator(worker.clone(), "runtime-recovered");
+    let report = coordinator.recover_ready_threads().await.unwrap();
+    assert_eq!(report.attempted, 1);
+    assert_eq!(report.recovered, 1);
+    assert_eq!(report.failed, 0);
+
+    let recovered = fixture.store.task_by_id(&task.id).unwrap().unwrap();
+    assert_eq!(recovered.phase, TaskPhase::Idle);
+    let runtime = recovered.thread_runtime.unwrap();
+    assert!(runtime.is_fresh);
+    assert_eq!(runtime.runtime_generation, "runtime-recovered");
+    assert_eq!(runtime.status, CodexThreadStatus::Idle);
+    assert_eq!(
+        worker.calls(),
+        [WorkerCall::Resume {
+            thread_id: "thread-1".to_owned(),
+            cwd: task.worktree_path.unwrap(),
+            config: json!({}),
+        }]
+    );
+    let event = fixture
+        .store
+        .events_after(Some(&task.id), 0)
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(event.kind, EventKind::ThreadStatusChanged);
+    assert_eq!(event.source_method.as_deref(), Some("thread/resume"));
+    assert_eq!(event.payload["reason"], "daemon_recovery");
+}
+
+#[tokio::test]
+async fn isolates_resume_failure_and_retries_only_the_unavailable_thread() {
+    let fixture = Fixture::new(FakeWorker::default());
+    fixture.register().await;
+    let first = fixture
+        .coordinator
+        .create_task(fixture.create_params())
+        .await
+        .unwrap()
+        .task;
+    let mut second_params = fixture.create_params();
+    second_params.name = "second-task".to_owned();
+    second_params.operation_id = "create-operation-2".to_owned();
+    let second = fixture
+        .coordinator
+        .create_task(second_params)
+        .await
+        .unwrap()
+        .task;
+    fixture.store.reconcile_unfinished().unwrap();
+
+    let failing_worker = Arc::new(FakeWorker::failing_resume("thread-1"));
+    let coordinator = fixture.recovery_coordinator(failing_worker.clone(), "runtime-recovered");
+    let report = coordinator.recover_ready_threads().await.unwrap();
+    assert_eq!(report.attempted, 2);
+    assert_eq!(report.recovered, 1);
+    assert_eq!(report.failed, 1);
+
+    let unavailable = fixture.store.task_by_id(&first.id).unwrap().unwrap();
+    assert_eq!(unavailable.phase, TaskPhase::Unavailable);
+    assert_eq!(
+        unavailable.last_error_code.as_deref(),
+        Some("THREAD_RECOVERY_FAILED")
+    );
+    assert_eq!(
+        unavailable.last_error_message.as_deref(),
+        Some("Codex could not resume the stored thread")
+    );
+    let recovered = fixture.store.task_by_id(&second.id).unwrap().unwrap();
+    assert_eq!(recovered.phase, TaskPhase::Idle);
+    assert!(recovered.thread_runtime.unwrap().is_fresh);
+
+    let retry_worker = Arc::new(FakeWorker::default());
+    let retry = fixture.recovery_coordinator(retry_worker.clone(), "runtime-recovered");
+    let retry_report = retry.recover_ready_threads().await.unwrap();
+    assert_eq!(retry_report.attempted, 1);
+    assert_eq!(retry_report.recovered, 1);
+    assert_eq!(retry_report.failed, 0);
+    let retried = fixture.store.task_by_id(&first.id).unwrap().unwrap();
+    assert_eq!(retried.phase, TaskPhase::Idle);
+    assert_eq!(retried.last_error_code, None);
+    assert_eq!(retried.last_error_message, None);
+    assert_eq!(retry_worker.calls().len(), 1);
+}
+
+#[tokio::test]
+async fn refuses_to_resume_when_the_named_profile_changed() {
+    let fixture = Fixture::new(FakeWorker::default());
+    fixture.register().await;
+    fs::create_dir_all(&fixture.codex_home).unwrap();
+    fs::write(
+        fixture.codex_home.join("config.toml"),
+        "[profiles.dev]\nmodel = \"gpt-before\"\n",
+    )
+    .unwrap();
+    let mut params = fixture.create_params();
+    params.profile = "dev".to_owned();
+    let task = fixture.coordinator.create_task(params).await.unwrap().task;
+    fixture.store.reconcile_unfinished().unwrap();
+    fs::write(
+        fixture.codex_home.join("config.toml"),
+        "[profiles.dev]\nmodel = \"gpt-after\"\n",
+    )
+    .unwrap();
+
+    let worker = Arc::new(FakeWorker::default());
+    let coordinator = fixture.recovery_coordinator(worker.clone(), "runtime-recovered");
+    let report = coordinator.recover_ready_threads().await.unwrap();
+    assert_eq!(report.attempted, 1);
+    assert_eq!(report.recovered, 0);
+    assert_eq!(report.failed, 1);
+    assert!(worker.calls().is_empty());
+    let unavailable = fixture.store.task_by_id(&task.id).unwrap().unwrap();
+    assert_eq!(unavailable.phase, TaskPhase::Unavailable);
+    assert_eq!(
+        unavailable.last_error_message.as_deref(),
+        Some("The task profile changed after the thread was created")
+    );
+    let failure = fixture
+        .store
+        .events_after(Some(&task.id), 0)
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(failure.kind, EventKind::AgentFailed);
+    assert_eq!(failure.payload["causeCode"], "PROFILE_CHANGED");
+    assert!(!failure.payload.to_string().contains("gpt-after"));
 }
 
 #[tokio::test]

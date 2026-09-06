@@ -109,11 +109,27 @@ architectural baseline for CoCo.
     and prove its disconnect does not end daemon observation or the turn.
   - [x] Cover the child-process exit contract and document the shipped user
     behavior without exposing App Server internals publicly.
-- [ ] After the state-model and `jump` slices, stop implementation and review
+- [x] After the state-model and `jump` slices, stop implementation and review
   all findings and open work with the user. Reprioritize daemon recovery,
   cross-platform IPC, Git write policy, decision handling, hooks, MCP
   isolation, detached worktrees, and release work before selecting the next
   slice.
+- [x] Recover persisted `ready` tasks after daemon restart by resuming their
+  existing Codex threads with the stored worktree and unchanged profile
+  overlay. Refresh native status only from a validated response, isolate
+  per-task failures, and retain truthful interruption of unfinished turns.
+  - [x] Extend the worker/store seams without leaking Codex JSON into the
+    coordinator or weakening the profile secret boundary.
+  - [x] Cover successful recovery, profile drift, isolated resume failure, and
+    daemon-level restart in automated tests.
+  - [x] Update public restart guidance and canonical recovery semantics, then
+    create a dedicated checkpoint commit.
+- [ ] Add an explicit opt-in compatibility smoke test against the installed,
+  pinned Codex executable. Verify the reported version, generated resume
+  schema, authenticated WebSocket startup, persistent thread creation, and
+  resume through a fresh App Server process without consuming a model turn.
+- [ ] After recovery and compatibility are complete, stop and discuss the Git
+  administrative write policy with the user before implementing it.
 - [ ] Deferred and unscheduled: durable pending decisions and
   `coco decide <request-id>`. If selected at the post-`jump` review, the first
   interactive UX should print native choices as numbered options and accept a
@@ -305,6 +321,11 @@ architectural baseline for CoCo.
   attachment, not as ownership of the turn. Normal unsubscribe and unexpected
   transport loss must leave the daemon connection and active turn intact;
   cancellation requires Codex's separate explicit interrupt operation.
+- 2026-09-06 — Implement the first recovery level without claiming process
+  survival: a new App Server resumes persisted `ready` threads after validating
+  their ID, worktree, and immutable named-profile provenance. Turns unfinished
+  at daemon loss remain interrupted; making an active turn survive an App
+  Server crash would require a separately supervised worker lifetime.
 
 ## Findings
 
@@ -427,6 +448,10 @@ architectural baseline for CoCo.
   transport abruptly, and the original daemon connection still receives the
   terminal turn events. The built `coco jump` path is exercised separately in
   the same scenario to lock down its command, worktree, and secret boundary.
+- Recovery can use the same persisted Codex thread through a completely new
+  App Server process. A response supplies the only fresh native status for the
+  new runtime generation; unsuccessful tasks remain unavailable and do not
+  prevent the daemon from recovering other threads.
 
 ## Verification
 
@@ -525,6 +550,14 @@ architectural baseline for CoCo.
   `nix run .#docs-build`, and `nix flake check . --no-write-lock-file
   --max-jobs 1` pass. The static verifier again finds 88 files across eight
   public pages.
+- After adding daemon recovery, the complete resource-limited suite passes all
+  55 library tests and the expanded process smoke test. The latter shuts down
+  `cocod`, starts a fresh daemon and fake App Server against the same database,
+  verifies an authenticated `thread/resume` with the stored ID/worktree/config,
+  and observes a fresh `idle` snapshot without `thread/start`. All-target and
+  all-feature Clippy with warnings denied, rustfmt, `cargo machete`,
+  `nix run .#docs-check`, `nix run .#docs-build`, and
+  `nix flake check . --no-write-lock-file --max-jobs 1` pass.
 
 ## Open questions and handoff
 
@@ -533,14 +566,16 @@ architectural baseline for CoCo.
 - Agentgateway is deliberately not scheduled. Reconsider it only when
   federation, centralized credential custody, independent enforcement, or
   gateway observability becomes an actual requirement.
-- Thread-runtime ownership and `jump` exit/reattach behavior are corrected.
-  Stop here, report the findings, and reprioritize all open work with the user
-  before beginning another feature.
+- Thread-runtime ownership, `jump` exit/reattach behavior, and prepared-thread
+  recovery are corrected. Running turns still become interrupted if the daemon
+  and its owned App Server stop; surviving that boundary would require a
+  separately supervised App Server lifetime.
 - Keep the durable pending-request model and numbered `coco decide` flow
   recorded but unscheduled. If it is selected later, do not let it introduce
   another state machine.
-- Add daemon recovery through `thread/resume`; the first slice conservatively
-  marks in-flight work interrupted after daemon loss.
+- Add the explicit real-Codex compatibility smoke, then stop and discuss Git
+  administrative write policy with the user before implementing more product
+  behavior.
 - Research Codex's native lifecycle extensibility before designing CoCo hooks.
   Keep the distinction between internal normalized events and executable user
   automation explicit; hooks must not silently inherit credentials or block

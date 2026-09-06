@@ -11,6 +11,7 @@ use crate::domain::CodexThreadStatus;
 pub(crate) struct StartedThread {
     pub(crate) id: String,
     pub(crate) status: CodexThreadStatus,
+    pub(crate) cwd: PathBuf,
     pub(crate) response: Value,
 }
 
@@ -27,6 +28,8 @@ pub(crate) enum WorkerError {
     InvalidResponse(&'static str),
     #[error("Codex response contains an invalid native thread status: {0}")]
     InvalidThreadStatus(String),
+    #[error("Codex thread ID mismatch: expected {expected}, received {actual}")]
+    ThreadIdMismatch { expected: String, actual: String },
     #[error("Codex thread cwd mismatch: expected {expected}, received {actual}")]
     CwdMismatch { expected: PathBuf, actual: PathBuf },
 }
@@ -40,6 +43,13 @@ impl WorkerError {
 #[async_trait]
 pub(crate) trait WorkerRuntime: Send + Sync + 'static {
     async fn start_thread(&self, cwd: &Path, config: Value) -> Result<StartedThread, WorkerError>;
+
+    async fn resume_thread(
+        &self,
+        thread_id: &str,
+        cwd: &Path,
+        config: Value,
+    ) -> Result<StartedThread, WorkerError>;
 
     async fn start_turn(
         &self,

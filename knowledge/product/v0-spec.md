@@ -452,11 +452,13 @@ inventing a normalized meaning.
   through interpolated shell strings.
 - No lifecycle path uses `git reset --hard`, automatic stash, forced branch
   deletion, or automatic worktree deletion.
-- Task and event records survive daemon or App Server restarts. Current v0
-  recovery marks the old native snapshot stale and an unfinished local turn
-  interrupted while preserving the bound task as `ready`; the derived phase
-  remains `unavailable` until native resume support refreshes it. It must not
-  report guessed success.
+- Task and event records survive daemon or App Server restarts. Recovery marks
+  the old native snapshot stale, records an unfinished local turn as
+  interrupted, and resumes each persisted `ready` thread through the new App
+  Server generation. A validated response refreshes native status; an
+  individual failure remains `unavailable` with a sanitized error and does not
+  stop recovery of other tasks. It must not report guessed success or create a
+  replacement thread.
 
 ## Non-goals
 
@@ -488,9 +490,13 @@ The following are intentionally outside v0:
   all fail before an unintended second worktree or thread is created.
 - Injected failures after each saga stage leave a diagnosable `failed` task and
   never delete the external artifacts automatically.
-- Restarting the daemon preserves list/status output, marks old thread-runtime
-  observations unavailable, and truthfully records an in-flight turn as
-  interrupted without misclassifying the whole task as failed.
+- Restarting the daemon preserves list/status output, resumes bound `ready`
+  threads with their stored worktree and unchanged profile overlay, refreshes
+  their current-generation native status, and truthfully records an in-flight
+  turn as interrupted without misclassifying the whole task as failed.
+- Recovery rejects changed named profiles and mismatched returned thread IDs or
+  working directories. One failed resume remains diagnosable and does not
+  prevent other bound tasks or the daemon from becoming available.
 
 ### Interaction and observation
 

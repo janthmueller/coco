@@ -68,6 +68,22 @@ pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<
         runtime_generation,
     ));
     let event_task = tokio::spawn(pump_codex_events(Arc::clone(&coordinator), events));
+    let recovery = match coordinator.recover_ready_threads().await {
+        Ok(recovery) => recovery,
+        Err(source) => {
+            let _ = codex.close().await;
+            let _ = event_task.await;
+            return Err(source).context("could not recover persisted Codex threads");
+        }
+    };
+    if recovery.attempted > 0 {
+        info!(
+            attempted = recovery.attempted,
+            recovered = recovery.recovered,
+            failed = recovery.failed,
+            "finished persisted thread recovery"
+        );
+    }
 
     let handler: Arc<dyn RpcHandler> = Arc::new(DaemonHandler::new(Arc::clone(&coordinator)));
     let server = match RpcServer::bind(&paths.socket_path, handler).await {

@@ -12,7 +12,9 @@ CoCo is ready for supervised local experiments, not unattended production use.
   version may expose an incompatible command or protocol.
 - CoCo can show approval and user-input requests but cannot answer them yet. A
   task that asks for either may remain blocked.
-- Active work is not automatically resumed after restarting `cocod`.
+- Prepared conversations reconnect after restarting `cocod`, but a turn that
+  was running during the restart is marked interrupted and does not continue
+  automatically.
 - There are no commands to cancel, complete, remove, merge, or clean up a task.
   Created branches and worktrees remain on disk.
 - New tasks always use a fresh Codex conversation and create a `coco/<name>`
@@ -21,4 +23,4 @@ CoCo is ready for supervised local experiments, not unattended production use.
   choose external MCP tools separately for each Codex task.
 
 Keep task worktrees available until you have reviewed their changes, and do not
-depend on automatic recovery or cleanup.
+depend on active work surviving a restart or on automatic cleanup.
