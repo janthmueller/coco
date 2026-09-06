@@ -10,6 +10,9 @@ status: stable
 
 ## 2026-09-06
 
+- **CLI module boundary**: Reduced the public CLI facade to parsing and
+  delegation, and separated Clap arguments, typed command handlers, status
+  following, authenticated TUI jump, output rendering, and contract tests.
 - **Git adapter layers**: Centralized bounded, environment-hardened Git process
   execution and split repository identity, worktree lifecycle, diff
   observation, and native-Git tests out of the public adapter facade.

@@ -72,12 +72,12 @@ architectural baseline for CoCo.
   safety-net commit before moving modules.
 - [x] Implement the typed daemon seam and remove coordinator-to-RPC and
   CLI-to-Codex dependency leaks.
-- [ ] Split the measured hot modules without mixing in product behavior.
+- [x] Split the measured hot modules without mixing in product behavior.
   - [x] Coordinator responsibilities and tests.
   - [x] Store migrations, rows, transactions, events, and tests.
   - [x] Codex process, JSONL, WebSocket, and tests.
   - [x] Git command, repository, worktree, diff, and tests.
-  - [ ] CLI arguments, commands, output, and tests.
+  - [x] CLI arguments, commands, output, and tests.
 - [ ] Design task annotations and external references as a deliberate future
   feature. Decide typed versus free-form values, mutation/audit semantics,
   privacy and display rules, fork/handoff inheritance, and explicit projection
@@ -220,6 +220,10 @@ architectural baseline for CoCo.
   then separate repository identity, worktree mutation, and diff observation
   as policy modules. Re-export the existing task-name validator and retain all
   public methods on `Git`, so callers do not inherit the internal layout.
+- 2026-09-06 — Keep `cli.rs` as the public parse-and-delegate entry point.
+  Separate Clap definitions, typed command handlers, status following, TUI
+  jump setup, output formatting, and contract tests without changing command
+  names, JSON schema, human output, or process behavior.
 
 ## Findings
 
@@ -298,6 +302,12 @@ architectural baseline for CoCo.
   observer, and 135-line native-Git test fixture. Only the command module
   touches `std::process::Command` in production; all child modules remain
   private.
+- The completed CLI split leaves a 17-line facade, 90-line argument module,
+  155-line typed command module, 94-line status follower, 102-line jump module,
+  151-line output module, and 109-line test module. A targeted Clippy
+  measurement confirms the old 117-line dispatcher is gone; three existing
+  production functions and two integration-style tests still exceed the
+  default 100-line threshold, so the lint is not enabled yet.
 
 ## Verification
 
@@ -353,6 +363,12 @@ architectural baseline for CoCo.
   Clippy and `cargo machete` gates remain clean. The resource-limited
   `nix flake check . --no-write-lock-file` run also passes against the staged
   Git source.
+- After separating CLI parsing, command execution, status, jump, output, and
+  tests, all five CLI tests, all 48 library tests, and the process test pass
+  with one build job and one test thread; the normal all-target/all-feature
+  Clippy gate and `cargo machete` remain clean. The resource-limited
+  `nix flake check . --no-write-lock-file` run also passes against the staged
+  Git source.
 - The documentation TypeScript, Oxlint, and Prettier checks pass. Both the
   root and `/coco` builds export 88 static files across eight pages with static
   search, valid local links, no server artifact, and no internal knowledge.
@@ -377,7 +393,9 @@ architectural baseline for CoCo.
   worker turn, and an ordinary cancel must remain unambiguous and observable.
 - When the public site is scheduled, validate its production export under the
   GitHub Pages project subpath before enabling deployment from `main`.
-- Complete Phase 2 from `knowledge/engineering/rust-architecture.md`: map the
-  remaining `cli.rs` argument, command execution, rendering, follow-loop, and
-  test responsibilities, then extract them without changing commands, output,
-  exit behavior, or protocol DTO usage.
+- Complete Phase 2 from `knowledge/engineering/rust-architecture.md`: reduce
+  the remaining production `too_many_lines` findings in shared App Server
+  startup, task creation, and Codex notification projection. Review the two
+  integration-style test findings separately, then enable the selected lint
+  only with narrow, reasoned test exceptions where splitting would obscure a
+  single scenario.

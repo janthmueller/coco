@@ -277,6 +277,12 @@ that spawns Git and bounds stdout/stderr; repository identity, worktree
 lifecycle, and diff/observation policy live in their corresponding child
 modules. `git.rs` retains the error and public data types plus adapter
 construction, and the unchanged native-Git fixture lives in `git/tests.rs`.
+The final physical split completed with the CLI: the facade now only parses
+and delegates, while Clap arguments, typed command execution, the status
+follow-loop, authenticated TUI jump, output rendering, and tests have focused
+child modules. The original `cli::run` size finding is gone. Phase 2 still
+needs the three remaining production `too_many_lines` findings reduced before
+that lint can become a project gate.
 
 Extract coherent child modules in this order:
 

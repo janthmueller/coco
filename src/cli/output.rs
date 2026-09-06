@@ -1,0 +1,151 @@
+use anyhow::Result;
+use serde_json::{Value, json};
+
+pub(super) fn phase_label(phase: &str) -> &'static str {
+    match phase {
+        "provisioning" => "Preparing worktree",
+        "starting" => "Starting Codex",
+        "active" => "Working",
+        "waiting_for_approval" => "Waiting for approval",
+        "waiting_for_input" => "Waiting for input",
+        "idle" => "Ready",
+        "completed" => "Completed",
+        "failed" => "Failed",
+        "interrupted" => "Interrupted",
+        _ => "Unknown",
+    }
+}
+
+pub(super) fn versioned(value: Value) -> Value {
+    match value {
+        Value::Object(mut object) => {
+            object.insert("schemaVersion".into(), Value::from(1));
+            Value::Object(object)
+        }
+        value => json!({ "schemaVersion": 1, "result": value }),
+    }
+}
+
+pub(super) fn versioned_array(key: &str, value: Value) -> Value {
+    let mut object = serde_json::Map::new();
+    object.insert("schemaVersion".to_owned(), Value::from(1));
+    object.insert(key.to_owned(), value);
+    Value::Object(object)
+}
+
+pub(super) fn print_json(value: Value) -> Result<()> {
+    println!("{}", serde_json::to_string(&value)?);
+    Ok(())
+}
+
+pub(super) fn print_human(value: &Value) {
+    if let Some(task) = value.get("task") {
+        print_human(task);
+        if let Some(turn_id) = value.get("turnId").and_then(Value::as_str) {
+            println!("turn: {turn_id}");
+        }
+        return;
+    }
+    if let Some(object) = value.as_object() {
+        for key in [
+            "id",
+            "name",
+            "phase",
+            "rootPath",
+            "worktreePath",
+            "branchName",
+            "baseSha",
+            "codexThreadId",
+            "profile",
+        ] {
+            if let Some(entry) = object.get(key) {
+                println!("{}: {}", human_key(key), compact(entry));
+            }
+        }
+    } else {
+        println!("{}", compact(value));
+    }
+}
+
+pub(super) fn print_task_list(value: &Value) {
+    let Some(tasks) = value.as_array() else {
+        println!("No tasks.");
+        return;
+    };
+    if tasks.is_empty() {
+        println!("No tasks.");
+        return;
+    }
+    println!("ID\tNAME\tPHASE\tBRANCH");
+    for task in tasks {
+        println!(
+            "{}\t{}\t{}\t{}",
+            text(task, "id"),
+            text(task, "name"),
+            text(task, "phase"),
+            text(task, "branchName")
+        );
+    }
+}
+
+pub(super) fn print_status(value: &Value) {
+    let task = value.get("task").unwrap_or(value);
+    let name = task.get("name").and_then(Value::as_str).unwrap_or("task");
+    let phase = task
+        .get("phase")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    println!("{name}: {}", phase_label(phase));
+    if let Some(worktree) = task.get("worktreePath").and_then(Value::as_str) {
+        println!("worktree: {worktree}");
+    }
+    if let Some(message) = task.get("lastErrorMessage").and_then(Value::as_str) {
+        println!("error: {message}");
+    }
+}
+
+pub(super) fn print_diff(value: &Value) {
+    let patch = value.get("patch").and_then(Value::as_str).unwrap_or("");
+    if !patch.is_empty() {
+        print!("{patch}");
+        if !patch.ends_with('\n') {
+            println!();
+        }
+    }
+    let untracked = value
+        .get("untrackedPaths")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    if !untracked.is_empty() {
+        println!("Untracked:");
+        for path in untracked {
+            println!("{}", compact(path));
+        }
+    }
+    if patch.is_empty() && untracked.is_empty() {
+        println!("No changes.");
+    }
+}
+
+fn text(value: &Value, key: &str) -> String {
+    value.get(key).map(compact).unwrap_or_else(|| "-".into())
+}
+
+fn compact(value: &Value) -> String {
+    value
+        .as_str()
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| value.to_string())
+}
+
+fn human_key(value: &str) -> String {
+    let mut output = String::new();
+    for (index, character) in value.chars().enumerate() {
+        if index > 0 && character.is_uppercase() {
+            output.push('_');
+        }
+        output.extend(character.to_lowercase());
+    }
+    output
+}
