@@ -36,6 +36,13 @@ that the behavior is already implemented.
 - That observed protocol is version-specific. Generated schemas from the
   selected Codex executable, rather than this prose, are authoritative for
   field names and wire payloads.
+- An explicit model-consuming test against `codex-cli 0.147.0` confirms that
+  an `untrusted`, workspace-write turn in a native linked worktree produces
+  `item/commandExecution/requestApproval` for the Git administrative write.
+  Accepting the exact request advances only the linked workspace branch and is
+  followed by `serverRequest/resolved`, completed command, and completed-turn
+  events. Under `on-request`, asking for escalation remains model-discretionary
+  after a sandbox failure, so that policy is not a deterministic test trigger.
 
 ### Confirmed product and architecture decisions
 
@@ -189,6 +196,28 @@ remains authoritative for conversation contents and Codex-native status.
 These dimensions must not be inferred from one another. Forking context does
 not imply copying uncommitted files, and sharing a base SHA does not imply
 sharing conversation history.
+
+The original product handoff already reserves three context-transfer modes;
+they are one deferred feature, not a second metadata mechanism:
+
+- `fresh` creates a new thread without inherited conversation history. The
+  first turn supplies the work instruction; provenance still records the
+  selected code base and any explicitly supplied source material.
+- `fork` uses Codex's native `thread/fork` from a selected workspace thread,
+  preserving its history while binding the new thread to the newly prepared
+  worktree and effective configuration. The transition must explicitly tell
+  the agent that `cwd`, branch, and base commit may differ.
+- `handoff` asks the source agent for a compact, reviewable transfer artifact,
+  then starts a fresh thread with that artifact rather than copying the full
+  conversation. The artifact covers objective, confirmed decisions, relevant
+  observations, current code state, open questions, risks, next steps, base
+  commit, and important paths.
+
+`thread/resume` is not a context mode: it reconnects the same thread. Before
+`fork` or `handoff` ships, CoCo still needs a source-selector contract,
+redaction and size limits, immutable provenance, failure/retry semantics, and
+a pinned test of native `thread/fork`. Git remains the authority for code;
+context transfer never implies copying uncommitted files.
 
 ### Required invariants
 
@@ -611,8 +640,8 @@ The following are intentionally outside v0:
 - An explicit opt-in real-Codex test proves that a Git administrative write in
   a linked workspace worktree follows Codex's native approval path and that an
   accepted ordinary commit advances only the workspace's bound branch. The test
-  must not broaden the common Git directory into an unconditional writable
-  root.
+  uses an exact command allowlist and does not broaden the common Git directory
+  into an unconditional writable root.
 - The daemon socket, SQLite file, App Server endpoint descriptor, and
   capability token are user-only. The sole network port is authenticated and
   bound to IPv4 loopback.

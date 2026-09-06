@@ -20,6 +20,9 @@ use super::{
     CodexClient, CodexError, CodexEvent, STDERR_TAIL_BYTES, SharedAppServerOptions, StderrTail,
 };
 
+#[cfg(unix)]
+mod real_git_approval;
+
 async fn client_pair(
     max_message_bytes: usize,
 ) -> (

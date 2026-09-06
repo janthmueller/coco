@@ -130,12 +130,20 @@ async fn verify_generated_schemas(
 
     let committed = Path::new(env!("CARGO_MANIFEST_DIR")).join("schema/codex-app-server");
     for relative in [
+        "CommandExecutionRequestApprovalParams.json",
+        "CommandExecutionRequestApprovalResponse.json",
         "v2/ThreadStartParams.json",
         "v2/ThreadStartResponse.json",
+        "v2/ThreadForkParams.json",
+        "v2/ThreadForkResponse.json",
         "v2/ThreadResumeParams.json",
         "v2/ThreadResumeResponse.json",
         "v2/ThreadSetNameParams.json",
         "v2/ThreadSetNameResponse.json",
+        "v2/TurnStartParams.json",
+        "v2/TurnStartResponse.json",
+        "v2/ServerRequestResolvedNotification.json",
+        "v2/TurnCompletedNotification.json",
     ] {
         let actual = fs::read(generated.join(relative))?;
         let expected = fs::read(committed.join(relative))?;

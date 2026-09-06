@@ -10,6 +10,17 @@ status: stable
 
 ## 2026-09-06
 
+- **Native Git approval proof**: Added and executed a model-consuming,
+  explicitly opted-in Codex 0.147.0 test. Under the deterministic `untrusted`
+  policy it accepts only one fully validated temporary file/add/commit command,
+  observes native request resolution and terminal events, and proves that only
+  the linked workspace branch advances. `on-request` remains intentionally
+  model-discretionary after a sandbox denial.
+- **Context-transfer modes reaffirmed**: Consolidated the original `fresh`,
+  `fork`, and `handoff` plan instead of adding another metadata concept.
+  `fork` will derive full history through native `thread/fork`; `handoff` will
+  start fresh from a bounded, reviewable transfer artifact; neither mode
+  copies uncommitted code implicitly.
 - **Workspace vocabulary and creation UX**: Selected `workspace` as CoCo's
   durable aggregate around a repository binding, Git worktree, Codex thread,
   and configuration snapshot; external tickets remain optional references.
@@ -31,8 +42,8 @@ status: stable
 - **Native Git write policy**: Closed the shared-Git decision in favor of
   ordinary linked worktrees and Codex's native approvals. CoCo will not build a
   per-task Git database or commit proxy, nor grant the whole common Git
-  directory as an unconditional writable root; a pinned opt-in approval/commit
-  proof is the next selected slice.
+  directory as an unconditional writable root; the pinned opt-in
+  approval/commit proof now passes.
 - **Pinned Codex compatibility**: Added an explicit opt-in process smoke test
   for Codex 0.147.0 covering generated schemas, authenticated startup,
   model-free persistent thread preparation, and resume through a fresh App

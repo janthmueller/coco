@@ -388,6 +388,32 @@ basename. CLI repository scope is a canonicalizable path. The stable repository
 ID is returned for identity and correlation but is not currently a CLI path
 selector.
 
+### Deferred context transfer
+
+The existing `fresh`, `fork`, and `handoff` values describe context provenance,
+not different ways to copy code or attach arbitrary workspace metadata.
+`resume` is deliberately outside this enum because it reconnects the same
+Codex thread rather than creating a workspace with derived context.
+
+- `fresh` is the only implemented mode and creates a new thread.
+- `fork` should call native `thread/fork` with the selected source thread and
+  the new canonical `cwd` and configuration. Record both source workspace and
+  `parent_thread_id`; add an explicit boundary message describing the new
+  worktree, branch, and base SHA so inherited history cannot make the agent
+  assume it still operates in the source checkout.
+- `handoff` should create a fresh thread from a versioned, human-reviewable
+  artifact produced for the transition. The artifact contains the objective,
+  confirmed decisions, observations, code state, open questions, risks, next
+  steps, base SHA, and important paths, but not an unbounded transcript.
+
+The future design must select a source by stable workspace ID, define source
+lifecycle requirements, redaction and byte limits, immutable hashes and
+provenance, regeneration/idempotency behavior, and what happens if the source
+agent cannot produce a handoff. Native `turn/start.additionalContext` is a
+possible delivery field for the structured artifact, not yet a selected
+storage or wire contract. No mode implicitly transfers dirty files; Git state
+and model context remain independent dimensions.
+
 ### `turns`
 
 | Column | Constraint and meaning |
@@ -717,12 +743,27 @@ crossings, with the user's selected execution profile remaining authoritative.
 need the same request persisted and answered through the general decision
 surface.
 
+The pinned live proof forces the native `untrusted` policy solely to make the
+approval boundary deterministic. Codex 0.147.0 then emits
+`item/commandExecution/requestApproval` with thread, turn, item, cwd, ordered
+`availableDecisions`, parsed `commandActions`, and a proposed argv policy
+amendment. CoCo's client can answer the original request ID with
+`{"decision":"accept"}`; the server emits `serverRequest/resolved`, completes
+the command and turn, and the test verifies exactly one commit on the bound
+workspace branch while the source branch stays fixed. The allowlist validates
+the shell argv, display form, and parsed inner action before responding.
+
+This does not mean every user profile must prompt for every commit. With
+`on-request`, the model may stop after a sandbox denial instead of requesting
+escalation; with a more permissive profile, no prompt may be needed. Preserve
+the selected profile and forward the exact native choices rather than inventing
+a CoCo approval policy.
+
 After an approved Git-changing operation, observe the worktree again and
 verify its common directory, checked-out branch, and registered binding. A
-drift is diagnosable state, never grounds for an automatic reset. Before this
-contract is considered release-ready, an opt-in pinned-Codex test must prove
-the linked-worktree approval/commit path without granting broad permanent Git
-write access.
+drift is diagnosable state, never grounds for an automatic reset. The opt-in
+pinned-Codex test now proves this linked-worktree approval/commit path without
+granting broad permanent Git write access.
 
 When the App Server sends a request, persist it before notifying watchers. A
 response uses the exact original process generation and request ID. On daemon

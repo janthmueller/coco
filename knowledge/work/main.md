@@ -164,10 +164,18 @@ architectural baseline for CoCo.
     workspace and accepted initial turn active, with a truthful CLI error.
   - [x] Complete the requested command-versus-flag UX review with the user and
     add the agreed independent `-s`/`-j` short options.
-- [ ] Then prove with pinned real Codex that an ordinary `git add`/`git commit`
+- [x] Prove with pinned real Codex that an ordinary `git add`/`git commit`
   in a linked workspace worktree follows the native approval protocol and
   advances only the bound workspace branch without a blanket writable Git
   common directory.
+  - [x] Add an explicit opt-in test that requests one exact, allowlisted
+    file/add/commit command, observes and answers Codex's native command
+    approval, and never auto-approves an unexpected request.
+  - [x] Verify that only the bound workspace branch advances, the source
+    branch stays fixed, the linked worktree is clean, and the App Server emits
+    the matching request-resolution and terminal turn events.
+  - [x] Extend the pinned schema compatibility set, run all non-networked
+    gates, and record the separately authorized live proof.
 - [x] Implement the confirmed multi-repository CLI ergonomics: `repo list`,
   optional leading-path scope, `--all-repos`/`-a`, global workspace-ID lookup,
   helpful local-miss/ambiguity diagnostics, and slash-separated workspace
@@ -189,6 +197,12 @@ architectural baseline for CoCo.
   feature. Decide typed versus free-form values, mutation/audit semantics,
   privacy and display rules, fork/handoff inheritance, and explicit projection
   into Codex before adding any CLI or RPC field.
+- [ ] Design explicit context transfer between workspaces and agents. Keep it
+  distinct from repository state and free-form metadata; compare native Codex
+  thread fork/resume plus `additionalContext` with a CoCo-owned, reviewable
+  handoff artifact. Define provenance, source selection, redaction, freshness,
+  size limits, and whether the source conversation remains linked before
+  enabling the reserved `fork` or `handoff` context modes.
 - [ ] Design user-configurable lifecycle hooks as a separate future feature.
   Before defining CoCo hooks, inventory the pinned Codex CLI and App Server's
   native hooks, notifications, and lifecycle events so CoCo can expose or
@@ -418,9 +432,36 @@ architectural baseline for CoCo.
   `coco <repository-path> <command> <name>` or a globally resolved workspace
   ID. Treat the scope switch as a global CLI option so it works both before
   and after a subcommand. Do not add a path/name composite selector.
+- 2026-09-06 — Exercise Git approvals with Codex's native `untrusted` policy
+  in the compatibility proof. `on-request` deliberately leaves escalation to
+  the model and therefore cannot deterministically prove the callback. Never
+  broaden the Git common directory or approve a model-rendered string alone;
+  require exact agreement among executable argv, displayed command, parsed
+  action, thread, turn, cwd, and the fixed test allowlist.
+- 2026-09-06 — Preserve the original context-mode distinction rather than
+  introducing a second context-transfer feature. `fork` inherits complete
+  native thread history into a new workspace; `handoff` starts a fresh thread
+  from a bounded, reviewable artifact; `resume` remains continuation of the
+  same thread. None of them implicitly copies dirty code.
 
 ## Findings
 
+- The context-transfer request was already present in the original handoff and
+  in the stored `ContextMode::{Fresh,Fork,Handoff}` values. Native
+  `thread/fork` accepts a source thread plus new `cwd` and configuration;
+  `turn/start.additionalContext` could deliver a structured handoff, but its
+  persistence and wire role remain deliberately unselected until design.
+- The real approval request uses a shell-rendered `command`, a parsed inner
+  `commandActions` entry, and a proposed argv amendment. Its ordered
+  `availableDecisions` are request-specific—the observed request offered
+  `accept`, an exec-policy amendment, and `cancel`—so a future `decide` client
+  must render what Codex supplied rather than assume a fixed menu.
+- With `on-request`, the same sandboxed compound command can write its ordinary
+  workspace file, fail at `git add`, and finish without asking to escalate.
+  With `untrusted`, the pinned App Server reliably requests approval before
+  execution. Accepting the exact callback advances only the linked workspace
+  branch by one commit, leaves `main` fixed, and finishes with a clean
+  worktree.
 - Repository scope now travels as a typed daemon value rather than being
   inferred independently in clients. The control-MCP adapter always constructs
   a fixed single-repository scope; only CLI callers can request the explicit
@@ -722,6 +763,22 @@ architectural baseline for CoCo.
   verifies all eight pages, search assets, and GitHub Pages subpath routing.
   `nix flake check . --no-write-lock-file --max-jobs 1` also passes against the
   staged source.
+- The native Git proof command
+  `COCO_RUN_REAL_GIT_APPROVAL=1 CARGO_BUILD_JOBS=1 cargo test --locked codex::tests::real_git_approval::pinned_codex_approves_a_commit_only_on_the_linked_workspace_branch -- --ignored --exact --nocapture`
+  passes against `codex-cli 0.147.0` with explicit authorization. It consumes
+  one model turn, approves only the exact validated temporary command, observes
+  `serverRequest/resolved` plus completed command/turn events, advances only
+  `coco/approval-proof` by one commit, leaves `main` fixed, and leaves the
+  linked worktree clean. Earlier diagnostic runs safely cancelled an
+  unexpected display wrapper and established why `on-request` is not a
+  deterministic trigger.
+- The expanded model-free real-Codex compatibility smoke passes and now compares
+  command-approval request/response, server-request resolution, turn start and
+  completion, and thread-fork schemas in addition to start/resume/name. The
+  complete normal suite passes 62 library tests with the live test ignored,
+  plus the daemon/CLI process smoke. Rustfmt, all-target/all-feature Clippy with
+  warnings denied, `cargo machete`, and `git diff --check` pass. The staged
+  source also passes `nix flake check . --no-write-lock-file --max-jobs 1`.
 
 ## Open questions and handoff
 
@@ -735,13 +792,18 @@ architectural baseline for CoCo.
   and its owned App Server stop; surviving that boundary would require a
   separately supervised App Server lifetime.
 - Keep the durable pending-request model and numbered `coco decide` flow
-  recorded. The selected Git-approval proof should establish the native
-  request/response contract before scheduling that general implementation; do
-  not let it introduce another state machine.
-- The workspace vocabulary/schema migration, create convenience pipeline, and
-  multi-repository CLI slice are complete. Reprioritize the remaining work with
-  the user before starting another product slice; the native Git-approval proof
-  remains a bounded candidate rather than an implicit next implementation.
+  recorded. The completed Git-approval proof establishes the native
+  request/response contract and shows that choices are request-specific. Use
+  those findings in the next UX/design discussion; do not introduce another
+  state machine.
+- Keep context transfer under the existing reserved modes. Before implementing
+  `fork` or `handoff`, agree the source selector and review UX, then test native
+  `thread/fork`; do not treat this as generic workspace metadata or duplicate
+  the source conversation into SQLite.
+- The workspace vocabulary/schema migration, create convenience pipeline,
+  multi-repository CLI slice, and native Git-approval proof are complete.
+  Reconfirm the pending-request/`decide` scope with the user before starting
+  that product slice.
 - Research Codex's native lifecycle extensibility before designing CoCo hooks.
   Keep the distinction between internal normalized events and executable user
   automation explicit; hooks must not silently inherit credentials or block
