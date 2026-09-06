@@ -81,6 +81,10 @@ that the behavior is already implemented.
   first turn, `--jump` opens its Codex TUI, and the two options compose in the
   fixed order create, send, jump. Failure of a later post-action does not roll
   back a successfully created workspace or accepted turn.
+- `coco create --fork-from <workspace>` creates a same-repository child from
+  the source workspace's committed code and native Codex history. The source
+  must be idle and clean; optional `--compact` applies only to the child and
+  completes before `--send` or `--jump` runs.
 - Native worktrees intentionally share their repository's Git object and ref
   storage. CoCo does not proxy ordinary worker commits or allocate a separate
   Git database per workspace.
@@ -101,9 +105,9 @@ release:
 - The current executable supports a single local operator on Linux and macOS.
   Its daemon protocol uses a Unix domain socket; native Windows support will
   use the same protocol and coordinator behind a named-pipe transport.
-- `fresh` is the only context mode accepted by `coco create` in v0. `fork` and
-  `handoff` remain reserved domain values and return a clear unsupported-mode
-  error until their transfer contracts are implemented.
+- `fresh` and same-repository `fork` are executable context modes.
+  `handoff` remains reserved and returns a clear unsupported-mode error until
+  its transfer-artifact contract is deliberately designed.
 - v0 uses Codex's base configuration by default and accepts a named
   `[profiles.<name>]` overlay from `$CODEX_HOME/config.toml`. The applied,
   non-secret effective settings are snapshotted onto each workspace; profile CRUD is
@@ -213,16 +217,31 @@ they are one deferred feature, not a second metadata mechanism:
   preserving its history while binding the new thread to the newly prepared
   worktree and effective configuration. The transition must explicitly tell
   the agent that `cwd`, branch, and base commit may differ.
-- `handoff` asks the source agent for a compact, reviewable transfer artifact,
-  then starts a fresh thread with that artifact rather than copying the full
-  conversation. The artifact covers objective, confirmed decisions, relevant
-  observations, current code state, open questions, risks, next steps, base
-  commit, and important paths.
+- `handoff` starts a fresh thread from bounded, reviewable transfer material
+  rather than copying the full conversation. The material may be authored by
+  an agent, supplied as an existing Markdown document or CLI input, or refer
+  to an already-associated external record such as a ticket. Generated
+  material may include a plan, but generation is deliberately separate from
+  attaching and consuming the handoff. Its exact artifact and reference model
+  remains open.
+
+The first context-transfer delivery implements `fork` only. Its source must be
+an idle, clean workspace in the same repository. The destination worktree
+starts from the source worktree's committed `HEAD`; uncommitted files are
+never copied. An explicit compact modifier runs `thread/compact/start` on the
+new child thread, never on the source, and must finish before an initial
+message can be sent. Compaction is recorded as fork provenance rather than a
+fourth context mode and is never enabled automatically.
+
+`handoff` remains unimplemented until its relationship to plans, existing
+documents, direct operator input, and external references is designed. A
+successful native-fork implementation is not evidence that those artifact
+semantics have been settled.
 
 `thread/resume` is not a context mode: it reconnects the same thread. Before
-`fork` or `handoff` ships, CoCo still needs a source-selector contract,
-redaction and size limits, immutable provenance, failure/retry semantics, and
-a pinned test of native `thread/fork`. Git remains the authority for code;
+`handoff` ships, CoCo still needs redaction and size limits, immutable
+provenance for its artifacts, authoring and review UX, artifact/reference
+semantics, and failure/retry behavior. Git remains the authority for code;
 context transfer never implies copying uncommitted files.
 
 ### Required invariants
@@ -312,18 +331,24 @@ does not duplicate thread or turn orchestration.
 
 ### `coco create`
 
-`--base` defaults to `HEAD`. Optional `--profile <name>` applies the matching
-Codex profile table to only this new thread; omitting it keeps the App Server's
-base configuration. By default creation accepts no instruction or open-ended
+`--base` defaults to `HEAD` for a fresh workspace. Optional `--profile <name>`
+applies the matching Codex profile table only to the new thread; omitting it
+keeps the App Server's base configuration. `--fork-from <workspace>` instead
+selects an idle, clean source workspace in the same repository, derives code
+from that worktree's committed `HEAD`, and calls native `thread/fork` to carry
+its conversation history. It conflicts with an explicit `--base`.
+`--compact` is valid only with `--fork-from` and compacts the child before
+creation returns. By default creation accepts no instruction or open-ended
 metadata field. `--send`/`-s` starts the first turn after preparation;
-`--jump`/`-j` then opens the same thread in the Codex TUI. The only executable
-context mode remains `fresh` and is selected internally. Creation must execute
+`--jump`/`-j` then opens the same thread in the Codex TUI. Creation must execute
 as a recoverable saga:
 
-1. Resolve the registered source checkout from CLI context.
-2. Under a repository-scoped lock, reject a dirty source checkout.
-3. Resolve `<ref>^{commit}` to a complete object ID and retain that SHA, never
-   the moving ref, as `base_sha`.
+1. Resolve the registered destination repository from CLI context.
+2. Under a repository-scoped lock, resolve context provenance. A fresh create
+   requires the selected checkout to be clean and resolves `<ref>^{commit}`.
+   A fork resolves its source name or ID within the same repository, requires
+   an idle and clean source, and resolves that worktree's `HEAD`.
+3. Retain the resolved complete object ID, never a moving ref, as `base_sha`.
 4. Validate every workspace-name component and `coco/<name>` with Git; reject
    existing workspace, branch-namespace, or destination-path collisions. For
    example, `feat` and `feat/login` cannot coexist when their Git refs would
@@ -331,14 +356,18 @@ as a recoverable saga:
 5. Persist a `provisioning` workspace and `workspace.created` event before
    external side effects.
 6. Create `coco/<name>` and its worktree at the exact base SHA.
-7. Start a non-ephemeral Codex thread with canonical `cwd` equal to the workspace
-   worktree and with the snapshotted worker profile.
+7. Start a non-ephemeral Codex thread for fresh context, or fork the selected
+   source thread. In both cases canonical `cwd` equals the destination worktree
+   and the snapshotted worker profile applies to the destination.
 8. Verify the returned binding and set the Codex thread name to the workspace
    name; for the pinned App Server this model-free metadata write also makes an
    empty prepared thread resumable after process restart.
-9. Atomically persist the returned thread ID and move the workspace to `idle`.
-10. Return the prepared workspace without starting a turn unless `--send` was
-    supplied. If requested, start the turn and then run `jump`; a failure in a
+9. Atomically persist the returned thread ID and, for a fork, its parent thread
+   and immutable source-workspace/HEAD provenance.
+10. When requested, compact only the child and wait for its native terminal
+    compaction events before moving the workspace to `idle`.
+11. Return the prepared workspace without starting a user turn unless `--send`
+    was supplied. If requested, start the turn and then run `jump`; a failure in a
     later action must not roll back an earlier successful action.
 
 If a post-worktree step fails, CoCo must mark the workspace `failed`, record the
@@ -603,7 +632,8 @@ The following are intentionally outside v0:
   Agentgateway integration; the future boundary is documented, but
   Agentgateway is not currently planned;
 - a custom CoCo MCP proxy or gateway;
-- fully implemented `fork` and `handoff` context modes;
+- cross-repository forks, transfer of dirty files, and the `handoff` context
+  mode;
 - user-defined workspace annotations or external ticket/PR references;
 - a monorepo/package split for hypothetical future clients.
 
@@ -616,6 +646,10 @@ The following are intentionally outside v0:
   worktree, thread ID, and thread `cwd` agree.
 - Dirty source, invalid base, duplicate name/branch, and existing destination
   all fail before an unintended second worktree or thread is created.
+- A native-fork integration test proves the destination starts at the clean,
+  idle source workspace's committed `HEAD`, binds the returned child thread and
+  parent thread, and invokes optional compaction only on that child before it
+  becomes ready.
 - Injected failures after each saga stage leave a diagnosable `failed` workspace and
   never delete the external artifacts automatically.
 - Restarting the daemon preserves list/status output, resumes bound `ready`

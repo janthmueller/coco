@@ -27,7 +27,7 @@ pub(super) enum Command {
         #[command(subcommand)]
         command: RepoCommand,
     },
-    /// Create a fresh Codex workspace in an isolated worktree.
+    /// Create a Codex workspace in an isolated worktree.
     Create(CreateArgs),
     /// List workspaces in the selected repository, or across all repositories.
     Ls {
@@ -94,8 +94,14 @@ pub(super) struct CreateArgs {
     /// Workspace name, such as fix/login, also used for its branch and worktree.
     pub(super) name: String,
     /// Git revision from which to prepare the workspace.
-    #[arg(long, default_value = "HEAD")]
+    #[arg(long, default_value = "HEAD", conflicts_with = "fork_from")]
     pub(super) base: String,
+    /// Fork committed code and Codex history from an idle workspace in this repository.
+    #[arg(long, value_name = "WORKSPACE")]
+    pub(super) fork_from: Option<String>,
+    /// Compact the new fork before accepting its first message.
+    #[arg(long, requires = "fork_from")]
+    pub(super) compact: bool,
     /// Apply `[profiles.<PROFILE>]` from `$CODEX_HOME/config.toml` to the thread.
     #[arg(long, default_value = "default")]
     pub(super) profile: String,

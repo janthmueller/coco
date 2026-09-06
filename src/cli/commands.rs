@@ -154,17 +154,26 @@ async fn create_workspace(paths: &CocoPaths, cwd: PathBuf, args: CreateArgs) -> 
     let CreateArgs {
         name,
         base,
+        fork_from,
+        compact,
         profile,
         send: initial_message,
         jump: should_jump,
     } = args;
+    let context_mode = if fork_from.is_some() {
+        ContextMode::Fork
+    } else {
+        ContextMode::Fresh
+    };
     let client = RpcClient::new(paths.socket_path.clone());
     let mut result: WorkspaceResult = client
         .request(WorkspaceCreateParams {
             repository_path: cwd.clone(),
             name: name.clone(),
             base_ref: base,
-            context_mode: ContextMode::Fresh,
+            context_mode,
+            fork_from,
+            compact,
             profile,
             operation_id: Uuid::new_v4().to_string(),
         })

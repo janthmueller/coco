@@ -57,6 +57,7 @@ fn ready_workspace(store: &Store, repository_id: &str, name: &str) -> Workspace 
         .bind_thread_with_event(
             &workspace.id,
             WorkspaceLifecycle::Starting,
+            WorkspaceLifecycle::Ready,
             NewThreadBinding {
                 thread_id: format!("thread-{name}"),
                 parent_thread_id: None,
@@ -317,6 +318,7 @@ fn state_and_events_change_atomically() {
         .bind_thread_with_event(
             &workspace.id,
             WorkspaceLifecycle::Starting,
+            WorkspaceLifecycle::Ready,
             NewThreadBinding {
                 thread_id: "thread-1".to_owned(),
                 parent_thread_id: None,
@@ -585,6 +587,7 @@ fn native_thread_status_is_persisted_losslessly_and_can_be_staled() {
         .bind_thread_with_event(
             &workspace.id,
             WorkspaceLifecycle::Starting,
+            WorkspaceLifecycle::Ready,
             NewThreadBinding {
                 thread_id: "thread-runtime".to_owned(),
                 parent_thread_id: None,
@@ -699,6 +702,7 @@ fn restart_reconciliation_marks_inflight_state_interrupted() {
             .bind_thread_with_event(
                 &workspace.id,
                 WorkspaceLifecycle::Starting,
+                WorkspaceLifecycle::Ready,
                 NewThreadBinding {
                     thread_id: "thread-restart".to_owned(),
                     parent_thread_id: None,

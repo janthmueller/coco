@@ -10,6 +10,22 @@ status: stable
 
 ## 2026-09-06
 
+- **Native workspace fork delivered**: Added same-repository
+  `coco create --fork-from <workspace> [--compact]`. The destination derives
+  from an idle, clean source workspace's committed `HEAD` and native Codex
+  history; compaction applies explicitly to the child and finishes before an
+  initial send or jump. Immutable provenance, destination binding context,
+  failure retention, exact App Server calls, and static user docs are covered.
+  Compaction remains fork provenance rather than a fourth context mode, while
+  handoff stays deferred until its plan and artifact/reference model is
+  designed.
+- **Handoff design kept open**: Separated producing transfer material from
+  attaching and consuming it. A future handoff may be agent-authored, supplied
+  as Markdown or CLI input, or incorporate an external ticket/reference and
+  optional plan; it is not fixed to one automatic summary prompt. Recorded
+  that an ephemeral thread fork sharing `cwd` does not isolate filesystem
+  writes, so safe generation must remain read-only and persist returned text
+  outside the source checkout, or use a separate throwaway worktree.
 - **Interactive decision closure**: Added SQLite schema v5 and the global
   `coco decide <decision-id>` flow for native command approvals, file-change
   approvals, and structured user input. Decisions retain exact private

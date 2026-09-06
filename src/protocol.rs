@@ -132,6 +132,10 @@ pub struct WorkspaceCreateParams {
     pub name: String,
     pub base_ref: String,
     pub context_mode: ContextMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork_from: Option<String>,
+    #[serde(default)]
+    pub compact: bool,
     #[serde(default = "default_profile")]
     pub profile: String,
     pub operation_id: String,
@@ -416,6 +420,8 @@ mod tests {
                 name: "workspace".to_owned(),
                 base_ref: "HEAD".to_owned(),
                 context_mode: ContextMode::Fresh,
+                fork_from: None,
+                compact: false,
                 profile: "dev".to_owned(),
                 operation_id: "create-1".to_owned(),
             },
@@ -425,8 +431,32 @@ mod tests {
                 "name": "workspace",
                 "baseRef": "HEAD",
                 "contextMode": "fresh",
+                "compact": false,
                 "profile": "dev",
                 "operationId": "create-1",
+            }),
+        );
+        assert_request(
+            WorkspaceCreateParams {
+                repository_path: PathBuf::from("/repo"),
+                name: "child".to_owned(),
+                base_ref: "HEAD".to_owned(),
+                context_mode: ContextMode::Fork,
+                fork_from: Some("source".to_owned()),
+                compact: true,
+                profile: "default".to_owned(),
+                operation_id: "create-fork".to_owned(),
+            },
+            DaemonMethod::WorkspaceCreate,
+            json!({
+                "repositoryPath": "/repo",
+                "name": "child",
+                "baseRef": "HEAD",
+                "contextMode": "fork",
+                "forkFrom": "source",
+                "compact": true,
+                "profile": "default",
+                "operationId": "create-fork",
             }),
         );
     }
@@ -539,6 +569,8 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(params.profile, "default");
+        assert_eq!(params.fork_from, None);
+        assert!(!params.compact);
     }
 
     #[test]

@@ -39,17 +39,42 @@ impl WorkerRuntime for CodexWorker {
             .await
             .map_err(WorkerError::runtime)?;
         let started = decode_thread_response(response, cwd)?;
-        self.client
+        self.set_thread_name(&started.id, name).await?;
+        Ok(started)
+    }
+
+    async fn fork_thread(
+        &self,
+        name: &str,
+        source_thread_id: &str,
+        cwd: &Path,
+        config: Value,
+    ) -> Result<StartedThread, WorkerError> {
+        let response = self
+            .client
             .request(
-                "thread/name/set",
+                "thread/fork",
                 json!({
-                    "threadId": started.id,
-                    "name": name,
+                    "threadId": source_thread_id,
+                    "cwd": cwd,
+                    "config": config,
+                    "ephemeral": false,
+                    "deferGoalContinuation": true,
                 }),
             )
             .await
             .map_err(WorkerError::runtime)?;
+        let started = decode_thread_response(response, cwd)?;
+        self.set_thread_name(&started.id, name).await?;
         Ok(started)
+    }
+
+    async fn compact_thread(&self, thread_id: &str) -> Result<(), WorkerError> {
+        self.client
+            .request("thread/compact/start", json!({"threadId": thread_id}))
+            .await
+            .map_err(WorkerError::runtime)?;
+        Ok(())
     }
 
     async fn resume_thread(
@@ -86,18 +111,20 @@ impl WorkerRuntime for CodexWorker {
         cwd: &Path,
         client_message_id: &str,
         message: &str,
+        additional_context: Option<Value>,
     ) -> Result<StartedTurn, WorkerError> {
+        let mut params = json!({
+            "threadId": thread_id,
+            "cwd": cwd,
+            "clientUserMessageId": client_message_id,
+            "input": [{"type": "text", "text": message}],
+        });
+        if let Some(additional_context) = additional_context {
+            params["additionalContext"] = additional_context;
+        }
         let response = self
             .client
-            .request(
-                "turn/start",
-                json!({
-                    "threadId": thread_id,
-                    "cwd": cwd,
-                    "clientUserMessageId": client_message_id,
-                    "input": [{"type": "text", "text": message}],
-                }),
-            )
+            .request("turn/start", params)
             .await
             .map_err(WorkerError::runtime)?;
         let id = response
@@ -113,6 +140,22 @@ impl WorkerRuntime for CodexWorker {
             .respond(id, result)
             .await
             .map_err(WorkerError::runtime)
+    }
+}
+
+impl CodexWorker {
+    async fn set_thread_name(&self, thread_id: &str, name: &str) -> Result<(), WorkerError> {
+        self.client
+            .request(
+                "thread/name/set",
+                json!({
+                    "threadId": thread_id,
+                    "name": name,
+                }),
+            )
+            .await
+            .map_err(WorkerError::runtime)?;
+        Ok(())
     }
 }
 

@@ -49,6 +49,10 @@ pub(crate) enum CoordinatorError {
     IncompleteWorkspace(&'static str),
     #[error("profile {0:?} changed since this workspace was created")]
     ProfileChanged(String),
+    #[error("Codex thread compaction failed: {0}")]
+    CompactionFailed(String),
+    #[error("Codex thread compaction did not finish within 15 minutes")]
+    CompactionTimedOut,
     #[error(transparent)]
     Git(#[from] GitError),
     #[error(transparent)]
@@ -72,6 +76,8 @@ impl CoordinatorError {
             Self::InvalidWorkspaceState { .. } => "INVALID_WORKSPACE_STATE",
             Self::IncompleteWorkspace(_) => "INCOMPLETE_WORKSPACE",
             Self::ProfileChanged(_) => "PROFILE_CHANGED",
+            Self::CompactionFailed(_) => "CODEX_COMPACTION_FAILED",
+            Self::CompactionTimedOut => "CODEX_COMPACTION_TIMEOUT",
             Self::Git(GitError::DirtyRepository(_)) => "DIRTY_SOURCE",
             Self::Git(GitError::InvalidWorkspaceName(_)) => "INVALID_WORKSPACE_NAME",
             Self::Git(GitError::BranchCollision { .. } | GitError::DestinationExists(_)) => {

@@ -362,7 +362,7 @@ current schema.
 | `repository_id` | required foreign key |
 | `name` | required; unique with `repository_id` |
 | `legacy_goal` | compatibility-only copy from the prerelease v1 schema; omitted from the domain/API and never written for new workspaces |
-| `context_mode` | `fresh`, with `fork` and `handoff` reserved |
+| `context_mode` | implemented `fresh` or `fork`, with `handoff` reserved |
 | `context_json` | versioned context provenance, not conversation history |
 | `profile_json` | versioned immutable effective profile snapshot |
 | `lifecycle` | CoCo-owned `provisioning`, `starting`, `ready`, `completed`, or `failed` |
@@ -374,7 +374,7 @@ current schema.
 | `base_sha` | complete immutable commit object ID |
 | `worktree_path` | globally unique canonical path after creation |
 | `codex_thread_id` | globally unique nullable binding during provisioning |
-| `parent_thread_id` | nullable context/audit relation; null for v0 fresh mode |
+| `parent_thread_id` | source thread for a native fork; null for fresh context |
 | `active_turn_id` | nullable correlation to the one current v0 turn |
 | `last_error_code`, `last_error_message` | nullable sanitized terminal detail |
 | `created_at_ms`, `updated_at_ms`, `completed_at_ms` | lifecycle timestamps |
@@ -389,31 +389,57 @@ basename. CLI repository scope is a canonicalizable path. The stable repository
 ID is returned for identity and correlation but is not currently a CLI path
 selector.
 
-### Deferred context transfer
+### Context transfer
 
 The existing `fresh`, `fork`, and `handoff` values describe context provenance,
 not different ways to copy code or attach arbitrary workspace metadata.
 `resume` is deliberately outside this enum because it reconnects the same
 Codex thread rather than creating a workspace with derived context.
 
-- `fresh` is the only implemented mode and creates a new thread.
-- `fork` should call native `thread/fork` with the selected source thread and
-  the new canonical `cwd` and configuration. Record both source workspace and
-  `parent_thread_id`; add an explicit boundary message describing the new
-  worktree, branch, and base SHA so inherited history cannot make the agent
-  assume it still operates in the source checkout.
-- `handoff` should create a fresh thread from a versioned, human-reviewable
-  artifact produced for the transition. The artifact contains the objective,
-  confirmed decisions, observations, code state, open questions, risks, next
-  steps, base SHA, and important paths, but not an unbounded transcript.
+- `fresh` creates a new thread.
+- `fork` calls native `thread/fork` with the selected source thread and the new
+  canonical `cwd` and configuration. CoCo records source-workspace provenance
+  and `parent_thread_id`. Every CoCo-started turn on a fork also supplies an
+  application `additionalContext` entry containing the destination worktree,
+  branch, base SHA, and source relation so inherited history cannot make the
+  agent assume it still operates in the source checkout. `coco jump` separately
+  starts the official TUI with that worktree as `-C`.
+- `handoff` should create a fresh thread from bounded, human-reviewable
+  transfer material without requiring one authoring mechanism. A source may
+  be an agent-authored artifact, existing Markdown, direct operator input, or
+  a snapshotted or linked external reference. A plan can be part of the
+  material without becoming mandatory handoff structure. Producing, reviewing,
+  storing, attaching, and consuming the material are separate operations.
 
-The future design must select a source by stable workspace ID, define source
-lifecycle requirements, redaction and byte limits, immutable hashes and
-provenance, regeneration/idempotency behavior, and what happens if the source
-agent cannot produce a handoff. Native `turn/start.additionalContext` is a
-possible delivery field for the structured artifact, not yet a selected
-storage or wire contract. No mode implicitly transfers dirty files; Git state
-and model context remain independent dimensions.
+The implemented first slice supports same-repository native forks from an
+idle source whose worktree is clean. It resolves the destination base from the
+source worktree's committed `HEAD`, creates the new worktree, then calls
+`thread/fork` with the new canonical `cwd` and target configuration. The
+source thread and worktree are not mutated. A caller may explicitly request
+compaction; in that case CoCo calls `thread/compact/start` only on the returned
+child thread and waits for its terminal compaction lifecycle before exposing
+the workspace as ready or accepting an initial turn. Compaction is a modifier
+stored in the fork descriptor, not a new `ContextMode`, and must not be
+selected heuristically. A failed compact step preserves the prepared
+workspace for diagnosis and reports creation failure consistently with other
+post-worktree failures.
+
+The future handoff design must define redaction and byte limits, immutable
+hashes and provenance, regeneration/idempotency behavior, reference freshness,
+and what happens when material is unavailable or cannot be generated. One
+possible generated flow is a read-only ephemeral `thread/fork` at a completed
+source turn, followed by a dedicated authoring prompt whose final response CoCo
+saves outside the source worktree. A thread fork alone is not filesystem
+isolation: if it retains the same `cwd`, file writes would still affect the
+source worktree. Generating an actual file therefore requires either a separate
+throwaway Git worktree or CoCo-owned persistence of returned text.
+
+Native `turn/start.additionalContext` is a possible delivery field for a
+snapshotted artifact, not yet a selected storage or wire contract. A destination
+that receives only a handoff starts a fresh Codex thread; using native
+`thread/fork` for that destination would also inherit the full conversation and
+therefore has different semantics. No mode implicitly transfers dirty files;
+Git state and model context remain independent dimensions.
 
 ### `turns`
 

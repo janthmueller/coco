@@ -204,12 +204,22 @@ architectural baseline for CoCo.
   feature. Decide typed versus free-form values, mutation/audit semantics,
   privacy and display rules, fork/handoff inheritance, and explicit projection
   into Codex before adding any CLI or RPC field.
-- [ ] Design explicit context transfer between workspaces and agents. Keep it
-  distinct from repository state and free-form metadata; compare native Codex
-  thread fork/resume plus `additionalContext` with a CoCo-owned, reviewable
-  handoff artifact. Define provenance, source selection, redaction, freshness,
-  size limits, and whether the source conversation remains linked before
-  enabling the reserved `fork` or `handoff` context modes.
+- [x] Implement the agreed first context-transfer slice: native same-repository
+  workspace fork from an idle, clean source at its committed `HEAD`, with
+  optional explicit compaction of the child before any initial send.
+  - [x] Add typed CLI/RPC source selection and record immutable fork
+    provenance without adding a fourth context mode.
+  - [x] Bind native `thread/fork` to the destination worktree and configuration.
+  - [x] Wait for child-only `thread/compact/start` completion and cover ordering,
+    failure retention, idempotency, and recovery.
+  - [x] Pin the relevant Codex schemas, update public docs for shipped behavior,
+    run the full gates, and create a checkpoint commit.
+- [ ] Keep handoff deferred as a separate artifact-design task. Treat authoring
+  and consumption independently; consider agent-generated material, existing
+  Markdown, direct CLI input, ticket or other external references, and an
+  optional plan without fixing one automatic prompt. Define provenance,
+  redaction, freshness, size limits, review/edit behavior, and reference
+  semantics before enabling `handoff`.
 - [ ] Design user-configurable lifecycle hooks as a separate future feature.
   Before defining CoCo hooks, inventory the pinned Codex CLI and App Server's
   native hooks, notifications, and lifecycle events so CoCo can expose or
@@ -450,6 +460,12 @@ architectural baseline for CoCo.
   native thread history into a new workspace; `handoff` starts a fresh thread
   from a bounded, reviewable artifact; `resume` remains continuation of the
   same thread. None of them implicitly copies dirty code.
+- 2026-09-06 — Deliver native fork before handoff. The first fork is restricted
+  to an idle, clean source in the same repository and bases the destination on
+  the source worktree's committed `HEAD`. Optional compaction applies only to
+  the new child, must complete before `--send`, and is stored as a fork
+  modifier rather than a fourth context mode. Handoff stays deferred until its
+  plan, document, CLI-input, and external-reference model is settled.
 - 2026-09-06 — Use a separate opaque CoCo decision ID in public status and
   `coco decide`; keep the native App Server request ID and exact response value
   private. Persist `pending` before presentation, compare-and-set to
@@ -483,8 +499,28 @@ architectural baseline for CoCo.
 - The context-transfer request was already present in the original handoff and
   in the stored `ContextMode::{Fresh,Fork,Handoff}` values. Native
   `thread/fork` accepts a source thread plus new `cwd` and configuration;
-  `turn/start.additionalContext` could deliver a structured handoff, but its
-  persistence and wire role remain deliberately unselected until design.
+  CoCo now uses `turn/start.additionalContext` to repeat the destination Git
+  binding on its own turns after a native fork. Whether the same field should
+  deliver a future structured handoff remains deliberately unselected.
+- Native `thread/fork` can retain a source goal and automatically continue it.
+  CoCo sets `deferGoalContinuation: true` so `coco create` preserves the
+  established prepare-without-starting contract. It passes the destination
+  worktree and selected profile directly to the child, persists the returned
+  child/source relation, and never mutates the source thread or worktree.
+- `thread/compact/start` acknowledges before compaction finishes. CoCo therefore
+  keeps the child lifecycle at `starting`, consumes its compaction-only
+  `turn/started`, `contextCompaction` item, and terminal `turn/completed`
+  notifications without creating a user turn, and exposes `ready` only after
+  successful completion. A request error, terminal failure, disconnect, or
+  timeout leaves the child thread and worktree bound to a failed workspace for
+  diagnosis.
+- Handoff is an artifact boundary, not necessarily an automatic summary. Its
+  producer may be an agent prompt, an existing Markdown document, direct CLI
+  input, or an external reference, while its destination consumes a reviewed
+  snapshot in a fresh thread. A safe generated variant could prompt a read-only
+  ephemeral source-thread fork and persist its final message outside the
+  source checkout. Merely forking a thread does not isolate file writes when
+  both threads use the same worktree.
 - The real approval request uses a shell-rendered `command`, a parsed inner
   `commandActions` entry, and a proposed argv amendment. Its ordered
   `availableDecisions` are request-specific—the observed request offered
@@ -832,6 +868,16 @@ architectural baseline for CoCo.
   plus the daemon/CLI process smoke. Rustfmt, all-target/all-feature Clippy with
   warnings denied, `cargo machete`, and `git diff --check` pass. The staged
   source also passes `nix flake check . --no-write-lock-file --max-jobs 1`.
+- The native-fork slice passes all 81 library tests (80 passed and one explicitly
+  model-consuming test ignored), both daemon/CLI process smokes, and the
+  separately enabled model-free real-Codex 0.147.0 compatibility test. Coverage
+  proves source `HEAD` selection, dirty/active rejection, immutable provenance,
+  replay idempotency, child-only compaction ordering and failure retention,
+  destination `additionalContext`, and the exact App Server requests. Rustfmt,
+  all-target/all-feature Clippy with warnings denied, `cargo machete`, docs
+  TypeScript/Oxlint/Prettier, the fully static 88-file/eight-page export,
+  `git diff --check`, and `nix flake check . --no-write-lock-file --max-jobs 1`
+  pass.
 
 ## Open questions and handoff
 
@@ -849,9 +895,11 @@ architectural baseline for CoCo.
   it separate from native thread status; consider non-interactive flags only
   after real use demonstrates a need.
 - Keep context transfer under the existing reserved modes. Before implementing
-  `fork` or `handoff`, agree the source selector and review UX, then test native
-  `thread/fork`; do not treat this as generic workspace metadata or duplicate
-  the source conversation into SQLite.
+  `handoff`, agree its artifact/reference model, optional relationship to a
+  plan, authoring inputs, and review UX; do not treat it as generic workspace
+  metadata or duplicate the source conversation into SQLite. Native fork plus
+  explicit child compaction is complete; handoff remains a separate design
+  task rather than the next implicit coding step.
 - The workspace vocabulary/schema migration, create convenience pipeline,
   multi-repository CLI slice, native Git-approval proof, and interactive
   decision closure are complete.

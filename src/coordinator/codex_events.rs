@@ -22,6 +22,7 @@ impl Coordinator {
 
     pub(crate) fn record_codex_disconnected(&self) -> Result<usize, StoreError> {
         self.clear_file_change_previews();
+        self.fail_pending_compactions();
         let stale = self.store.mark_thread_statuses_stale()?;
         self.store
             .orphan_open_decisions(Some(&self.runtime_generation), "app_server_disconnected")?;
@@ -49,6 +50,9 @@ impl Coordinator {
             debug!(method, "ignoring uncorrelated Codex notification");
             return Ok(());
         };
+        if self.observe_pending_compaction(method, &params) {
+            return Ok(());
+        }
         if method == "turn/started" {
             return self.record_external_turn_started(&workspace, &params);
         }

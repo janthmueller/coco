@@ -497,6 +497,8 @@ pub enum EventKind {
     DecisionResolved,
     #[serde(rename = "thread.status.changed")]
     ThreadStatusChanged,
+    #[serde(rename = "context.compacted")]
+    ContextCompacted,
     #[serde(rename = "server_request.received")]
     ServerRequestReceived,
     #[serde(rename = "diff.updated")]
@@ -529,6 +531,7 @@ impl EventKind {
             Self::DecisionRequested => "decision.requested",
             Self::DecisionResolved => "decision.resolved",
             Self::ThreadStatusChanged => "thread.status.changed",
+            Self::ContextCompacted => "context.compacted",
             Self::ServerRequestReceived => "server_request.received",
             Self::DiffUpdated => "diff.updated",
             Self::AgentMessageCompleted => "agent.message.completed",
@@ -553,6 +556,7 @@ impl EventKind {
             "decision.requested" => Some(Self::DecisionRequested),
             "decision.resolved" => Some(Self::DecisionResolved),
             "thread.status.changed" => Some(Self::ThreadStatusChanged),
+            "context.compacted" => Some(Self::ContextCompacted),
             "server_request.received" => Some(Self::ServerRequestReceived),
             "diff.updated" => Some(Self::DiffUpdated),
             "agent.message.completed" => Some(Self::AgentMessageCompleted),

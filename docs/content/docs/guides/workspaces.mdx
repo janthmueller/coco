@@ -25,6 +25,30 @@ UI, or combine both:
 coco create fix/login -s "Fix the login redirect" -j
 ```
 
+## Continue from another workspace
+
+Create a child workspace when you want to keep another workspace's Codex
+conversation and committed code:
+
+```bash
+coco create review/login --fork-from fix/login
+```
+
+The source must be ready and have no uncommitted changes. The child starts at
+the source workspace's latest commit; uncommitted files are never copied. Both
+workspaces remain separate after creation.
+
+For a long conversation, `--compact` asks Codex to shorten the copied context
+before the child becomes ready:
+
+```bash
+coco create review/login --fork-from fix/login --compact \
+  -s "Review the completed login changes"
+```
+
+Compaction is optional. When combined with `--send` or `--jump`, it finishes
+before those actions run.
+
 ## Start or continue work
 
 `send` starts the first turn. Use it again whenever the workspace is ready:

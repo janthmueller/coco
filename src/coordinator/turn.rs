@@ -86,9 +86,16 @@ impl Coordinator {
             }),
         })?;
         let _pending_turn = PendingTurnGuard::new(&self.pending_turn_threads, thread_id);
+        let additional_context = workspace_transition_context(&workspace);
         let started = self
             .worker
-            .start_turn(thread_id, worktree, &client_message_id, &params.message)
+            .start_turn(
+                thread_id,
+                worktree,
+                &client_message_id,
+                &params.message,
+                additional_context,
+            )
             .await?;
         let (workspace, turn, _) = self.store.start_turn_with_event(
             &workspace.id,
@@ -106,6 +113,29 @@ impl Coordinator {
         )?;
         Ok(workspace_and_turn_response(workspace, &turn))
     }
+}
+
+fn workspace_transition_context(workspace: &Workspace) -> Option<serde_json::Value> {
+    (workspace.context_mode == crate::domain::ContextMode::Fork).then(|| {
+        let value = json!({
+            "message": "CoCo forked this conversation into a different Git workspace. Work only in the destination binding below.",
+            "workspaceId": workspace.id,
+            "workspaceName": workspace.name,
+            "worktreePath": workspace.worktree_path,
+            "branchName": workspace.branch_name,
+            "baseSha": workspace.base_sha,
+            "sourceWorkspaceId": workspace.context.get("sourceWorkspaceId"),
+            "sourceWorkspaceName": workspace.context.get("sourceWorkspaceName"),
+            "sourceThreadId": workspace.parent_thread_id,
+        })
+        .to_string();
+        json!({
+            "coco.workspace-binding": {
+                "kind": "application",
+                "value": value,
+            }
+        })
+    })
 }
 
 fn message_fingerprint(operation_id: &str, workspace_id: &str, message: &str) -> String {

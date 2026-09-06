@@ -18,8 +18,10 @@ CoCo is ready for supervised local experiments, not unattended production use.
   automatically.
 - There are no commands to cancel, complete, remove, merge, or clean up a workspace.
   Created branches and worktrees remain on disk.
-- New workspaces always use a fresh Codex conversation and create a `coco/<name>`
-  branch. Detached worktrees are not available.
+- Workspace forks currently require a ready, clean source in the same repository
+  and copy only committed code. Creating a reviewed handoff from a document or
+  ticket is not available. New workspaces always create a `coco/<name>` branch;
+  detached worktrees are not available.
 - CoCo's MCP server can inspect or continue existing workspaces, but CoCo cannot yet
   choose external MCP tools separately for each Codex workspace.
 

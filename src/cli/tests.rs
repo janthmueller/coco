@@ -65,6 +65,46 @@ fn parses_workspace_creation_with_an_optional_profile() {
 }
 
 #[test]
+fn parses_native_workspace_forks_and_requires_an_explicit_source_for_compaction() {
+    let fork = Cli::try_parse_from([
+        "coco",
+        "create",
+        "review/follow-up",
+        "--fork-from",
+        "feat/source",
+        "--compact",
+        "-s",
+        "Continue from the review",
+    ])
+    .unwrap();
+    let Command::Create(fork) = fork.command else {
+        panic!("workspace fork did not parse as create");
+    };
+    assert_eq!(fork.base, "HEAD");
+    assert_eq!(fork.fork_from.as_deref(), Some("feat/source"));
+    assert!(fork.compact);
+    assert_eq!(fork.send.as_deref(), Some("Continue from the review"));
+
+    assert!(
+        Cli::try_parse_from(["coco", "create", "child", "--compact"]).is_err(),
+        "compaction without a fork source must be rejected"
+    );
+    assert!(
+        Cli::try_parse_from([
+            "coco",
+            "create",
+            "child",
+            "--fork-from",
+            "source",
+            "--base",
+            "main",
+        ])
+        .is_err(),
+        "a fork must derive its base from the source workspace"
+    );
+}
+
+#[test]
 fn repository_registration_is_a_nested_repo_command() {
     assert!(Cli::try_parse_from(["coco", "repo", "add"]).is_ok());
     assert!(Cli::try_parse_from(["coco", "repo", "add", "../source"]).is_ok());

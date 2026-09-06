@@ -49,6 +49,18 @@ pub(crate) trait WorkerRuntime: Send + Sync + 'static {
         config: Value,
     ) -> Result<StartedThread, WorkerError>;
 
+    async fn fork_thread(
+        &self,
+        name: &str,
+        source_thread_id: &str,
+        cwd: &Path,
+        config: Value,
+    ) -> Result<StartedThread, WorkerError>;
+
+    /// Requests compaction. Completion is observed through App Server events
+    /// by the coordinator rather than inferred from this immediate response.
+    async fn compact_thread(&self, thread_id: &str) -> Result<(), WorkerError>;
+
     async fn resume_thread(
         &self,
         thread_id: &str,
@@ -62,6 +74,7 @@ pub(crate) trait WorkerRuntime: Send + Sync + 'static {
         cwd: &Path,
         client_message_id: &str,
         message: &str,
+        additional_context: Option<Value>,
     ) -> Result<StartedTurn, WorkerError>;
 
     async fn respond_to_request(&self, id: Value, result: Value) -> Result<(), WorkerError>;

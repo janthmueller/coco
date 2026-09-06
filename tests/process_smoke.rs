@@ -27,6 +27,11 @@ const POLL_INTERVAL: Duration = Duration::from_millis(25);
 const THREAD_ID: &str = "thread-process-smoke";
 const TURN_ID: &str = "turn-process-smoke";
 const WORKSPACE_NAME: &str = "feat/process-smoke";
+const FORK_SOURCE_THREAD_ID: &str = "thread-fork-source";
+const FORK_CHILD_THREAD_ID: &str = "thread-fork-child";
+const FORK_SOURCE_WORKSPACE: &str = "feat/fork-source";
+const FORK_CHILD_WORKSPACE: &str = "review/fork-child";
+const FORK_CHILD_MESSAGE: &str = "Review the inherited work";
 
 struct CaptureAuthorization(Arc<Mutex<Vec<String>>>);
 
@@ -452,6 +457,104 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn real_daemon_and_cli_create_a_compacted_native_fork() -> Result<()> {
+    let temporary = tempfile::tempdir()?;
+    let paths = TestPaths::new(temporary.path());
+    let repository = temporary.path().join("repository");
+    let daemon_log = temporary.path().join("cocod-fork.log");
+    prepare_repository(&repository)?;
+    write_fake_codex(&paths.fake_codex)?;
+
+    let mut daemon = spawn_daemon(&paths, &daemon_log)?;
+    wait_for_file(&paths.codex_args, &mut daemon, &daemon_log).await?;
+    let arguments = read_arguments(&paths.codex_args)?;
+    let endpoint = verify_app_server_arguments(&arguments, &paths.token)?;
+    let capability_token = fs::read_to_string(&paths.token)?;
+    let address = endpoint
+        .strip_prefix("ws://")
+        .context("fork App Server endpoint was not a ws:// URL")?
+        .parse::<SocketAddr>()
+        .context("fork App Server endpoint had an invalid socket address")?;
+    let listener = TcpListener::bind(address).await?;
+    let observed_authorization = Arc::new(Mutex::new(Vec::new()));
+    let observed_requests = Arc::new(Mutex::new(Vec::new()));
+    let app_server = tokio::spawn(run_fake_fork_server(
+        listener,
+        Arc::clone(&observed_authorization),
+        Arc::clone(&observed_requests),
+    ));
+
+    wait_for_file(&paths.socket, &mut daemon, &daemon_log).await?;
+    run_cli(&paths, &repository, &["repo", "add", "."]).await?;
+    run_cli(&paths, &repository, &["create", FORK_SOURCE_WORKSPACE]).await?;
+    run_cli(
+        &paths,
+        &repository,
+        &[
+            "create",
+            FORK_CHILD_WORKSPACE,
+            "--fork-from",
+            FORK_SOURCE_WORKSPACE,
+            "--compact",
+            "--send",
+            FORK_CHILD_MESSAGE,
+        ],
+    )
+    .await?;
+
+    let child = cli_json(
+        &run_cli(
+            &paths,
+            &repository,
+            &["status", FORK_CHILD_WORKSPACE, "--json"],
+        )
+        .await?,
+    )?;
+    assert_eq!(child["workspace"]["phase"], "active");
+    assert_eq!(child["workspace"]["contextMode"], "fork");
+    assert_eq!(child["workspace"]["context"]["compact"], true);
+    assert_eq!(
+        child["workspace"]["context"]["sourceWorkspaceName"],
+        FORK_SOURCE_WORKSPACE
+    );
+    assert_eq!(child["workspace"]["parentThreadId"], FORK_SOURCE_THREAD_ID);
+    assert_eq!(child["workspace"]["codexThreadId"], FORK_CHILD_THREAD_ID);
+    let child_worktree = PathBuf::from(
+        child["workspace"]["worktreePath"]
+            .as_str()
+            .context("forked workspace had no worktree path")?,
+    );
+    ensure!(child_worktree.is_dir(), "forked worktree does not exist");
+
+    interrupt(&daemon).await?;
+    let daemon_status = timeout(PROCESS_TIMEOUT, daemon.wait())
+        .await
+        .context("cocod did not stop after fork smoke test")??;
+    ensure!(
+        daemon_status.success(),
+        "cocod exited with {daemon_status}: {}",
+        read_log(&daemon_log)
+    );
+    timeout(PROCESS_TIMEOUT, app_server)
+        .await
+        .context("fork App Server did not stop")?
+        .context("fork App Server panicked")??;
+
+    verify_fork_requests(
+        &observed_requests
+            .lock()
+            .expect("fork request capture mutex was poisoned"),
+        &child_worktree,
+    )?;
+    let authorizations = observed_authorization
+        .lock()
+        .expect("fork authorization capture mutex was poisoned");
+    assert_eq!(authorizations.len(), 1);
+    assert_eq!(authorizations[0], format!("Bearer {capability_token}"));
+    Ok(())
+}
+
 async fn run_fake_app_server(
     listener: TcpListener,
     observed_authorization: Arc<Mutex<Vec<String>>>,
@@ -489,6 +592,111 @@ async fn run_fake_app_server(
     };
 
     tokio::try_join!(daemon, remote_clients)?;
+    Ok(())
+}
+
+async fn run_fake_fork_server(
+    listener: TcpListener,
+    observed_authorization: Arc<Mutex<Vec<String>>>,
+    observed_requests: Arc<Mutex<Vec<Value>>>,
+) -> Result<()> {
+    let (stream, peer) = listener.accept().await?;
+    ensure!(
+        peer.ip().is_loopback(),
+        "cocod fork connection was not local"
+    );
+    let mut websocket =
+        accept_hdr_async(stream, CaptureAuthorization(observed_authorization)).await?;
+    while let Some(message) = websocket.next().await {
+        let frame = match message? {
+            Message::Text(text) => serde_json::from_str::<Value>(&text)?,
+            Message::Binary(bytes) => serde_json::from_slice::<Value>(&bytes)?,
+            Message::Close(_) => return Ok(()),
+            Message::Ping(payload) => {
+                websocket.send(Message::Pong(payload)).await?;
+                continue;
+            }
+            Message::Pong(_) | Message::Frame(_) => continue,
+        };
+        observed_requests
+            .lock()
+            .expect("fork request capture mutex was poisoned")
+            .push(frame.clone());
+        match frame.get("method").and_then(Value::as_str) {
+            Some("initialize") => send_result(&mut websocket, &frame, json!({})).await?,
+            Some("initialized") => {}
+            Some("thread/start") => {
+                let cwd = frame.pointer("/params/cwd").cloned().unwrap_or(Value::Null);
+                send_result(
+                    &mut websocket,
+                    &frame,
+                    json!({
+                        "thread": {
+                            "id": FORK_SOURCE_THREAD_ID,
+                            "status": {"type": "idle"}
+                        },
+                        "cwd": cwd,
+                    }),
+                )
+                .await?;
+            }
+            Some("thread/name/set") => send_result(&mut websocket, &frame, json!({})).await?,
+            Some("thread/fork") => {
+                let cwd = frame.pointer("/params/cwd").cloned().unwrap_or(Value::Null);
+                send_result(
+                    &mut websocket,
+                    &frame,
+                    json!({
+                        "thread": {
+                            "id": FORK_CHILD_THREAD_ID,
+                            "status": {"type": "idle"}
+                        },
+                        "cwd": cwd,
+                    }),
+                )
+                .await?;
+            }
+            Some("thread/compact/start") => {
+                send_result(&mut websocket, &frame, json!({})).await?;
+                for notification in [
+                    json!({
+                        "method": "turn/started",
+                        "params": {
+                            "threadId": FORK_CHILD_THREAD_ID,
+                            "turn": {"id": "turn-fork-compact", "status": "inProgress"}
+                        }
+                    }),
+                    json!({
+                        "method": "item/completed",
+                        "params": {
+                            "threadId": FORK_CHILD_THREAD_ID,
+                            "turnId": "turn-fork-compact",
+                            "item": {"id": "item-fork-compact", "type": "contextCompaction"}
+                        }
+                    }),
+                    json!({
+                        "method": "turn/completed",
+                        "params": {
+                            "threadId": FORK_CHILD_THREAD_ID,
+                            "turn": {"id": "turn-fork-compact", "status": "completed"}
+                        }
+                    }),
+                ] {
+                    send_json(&mut websocket, notification).await?;
+                }
+            }
+            Some("turn/start") => {
+                send_result(
+                    &mut websocket,
+                    &frame,
+                    json!({"turn": {"id": "turn-fork-child"}}),
+                )
+                .await?;
+            }
+            Some(other) => bail!("unexpected fork App Server method {other:?}"),
+            None => bail!("received a fork App Server frame without a method: {frame}"),
+        }
+    }
     Ok(())
 }
 
@@ -1256,6 +1464,66 @@ fn verify_codex_requests(requests: &[Value], worktree: &Path) -> Result<()> {
             .is_some_and(|value| value.starts_with("coco-")),
         "turn/start had no CoCo message id"
     );
+    Ok(())
+}
+
+fn verify_fork_requests(requests: &[Value], child_worktree: &Path) -> Result<()> {
+    let methods = requests
+        .iter()
+        .filter_map(|frame| frame.get("method").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        methods,
+        [
+            "initialize",
+            "initialized",
+            "thread/start",
+            "thread/name/set",
+            "thread/fork",
+            "thread/name/set",
+            "thread/compact/start",
+            "turn/start",
+        ]
+    );
+    let fork = request(requests, "thread/fork")?;
+    assert_eq!(
+        fork.pointer("/params/threadId"),
+        Some(&json!(FORK_SOURCE_THREAD_ID))
+    );
+    assert_eq!(
+        fork.pointer("/params/cwd"),
+        Some(&json!(child_worktree.to_string_lossy()))
+    );
+    assert_eq!(fork.pointer("/params/config"), Some(&json!({})));
+    assert_eq!(fork.pointer("/params/ephemeral"), Some(&json!(false)));
+    assert_eq!(
+        fork.pointer("/params/deferGoalContinuation"),
+        Some(&json!(true))
+    );
+    assert_eq!(
+        request(requests, "thread/compact/start")?.pointer("/params/threadId"),
+        Some(&json!(FORK_CHILD_THREAD_ID))
+    );
+    let turn = request(requests, "turn/start")?;
+    assert_eq!(
+        turn.pointer("/params/threadId"),
+        Some(&json!(FORK_CHILD_THREAD_ID))
+    );
+    assert_eq!(
+        turn.pointer("/params/cwd"),
+        Some(&json!(child_worktree.to_string_lossy()))
+    );
+    assert_eq!(
+        turn.pointer("/params/input/0/text"),
+        Some(&json!(FORK_CHILD_MESSAGE))
+    );
+    let binding = turn
+        .pointer("/params/additionalContext/coco.workspace-binding/value")
+        .and_then(Value::as_str)
+        .context("forked turn had no CoCo workspace binding")?;
+    let binding: Value = serde_json::from_str(binding)?;
+    assert_eq!(binding["worktreePath"], json!(child_worktree));
+    assert_eq!(binding["sourceWorkspaceName"], FORK_SOURCE_WORKSPACE);
     Ok(())
 }
 

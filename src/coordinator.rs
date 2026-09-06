@@ -16,6 +16,7 @@ use crate::store::{EventDraft, Store, StoreError};
 const MAX_OPERATION_ID_BYTES: usize = 256;
 
 mod codex_events;
+mod context;
 mod decision;
 mod error;
 mod recovery;
@@ -35,6 +36,7 @@ pub(crate) struct Coordinator {
     runtime_generation: String,
     repository_locks: AsyncMutex<HashMap<String, Arc<AsyncMutex<()>>>>,
     pending_turn_threads: StdMutex<HashSet<String>>,
+    pending_compactions: StdMutex<HashMap<String, context::PendingCompaction>>,
     file_change_previews: StdMutex<HashMap<(String, String), Vec<DecisionFileChange>>>,
 }
 
@@ -56,6 +58,7 @@ impl Coordinator {
             runtime_generation,
             repository_locks: AsyncMutex::new(HashMap::new()),
             pending_turn_threads: StdMutex::new(HashSet::new()),
+            pending_compactions: StdMutex::new(HashMap::new()),
             file_change_previews: StdMutex::new(HashMap::new()),
         }
     }

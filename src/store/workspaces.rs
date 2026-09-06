@@ -127,6 +127,7 @@ impl Store {
         &self,
         workspace_id: &str,
         expected: WorkspaceLifecycle,
+        next: WorkspaceLifecycle,
         binding: NewThreadBinding,
         mut event: EventDraft,
     ) -> Result<(Workspace, NormalizedEvent), StoreError> {
@@ -138,12 +139,13 @@ impl Store {
         let now = now_ms();
         transaction.execute(
             "UPDATE workspaces SET codex_thread_id = ?1, parent_thread_id = ?2,
-                lifecycle = 'ready', thread_status_json = ?3,
-                thread_status_generation = ?4, thread_status_observed_at_ms = ?5,
-                thread_status_is_fresh = 1, updated_at_ms = ?5 WHERE id = ?6",
+                lifecycle = ?3, thread_status_json = ?4,
+                thread_status_generation = ?5, thread_status_observed_at_ms = ?6,
+                thread_status_is_fresh = 1, updated_at_ms = ?6 WHERE id = ?7",
             params![
                 binding.thread_id,
                 binding.parent_thread_id,
+                next.as_str(),
                 status_json,
                 binding.runtime_generation,
                 now,

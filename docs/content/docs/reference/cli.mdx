@@ -24,15 +24,22 @@ Run `coco --help` or `coco COMMAND --help` for the exact options in your build.
 ```bash
 coco create <name> \
   [--base <git-ref>] \
+  [--fork-from <workspace>] \
+  [--compact] \
   [--profile <name>] \
   [-s, --send <message>] \
   [-j, --jump]
 ```
 
 Names contain lowercase letters, numbers, and hyphens, with optional slashes
-between components, such as `fix/login`. `--base` defaults to `HEAD`. The
-repository must be clean. Without `--send`, creating a workspace does not start
-a turn.
+between components, such as `fix/login`. `--base` defaults to `HEAD`. For a
+fresh workspace, the selected checkout must be clean. Without `--send`,
+creating a workspace does not start a turn.
+
+Use `--fork-from` instead of `--base` to create from a ready, clean workspace
+in the same repository. The new workspace receives that workspace's Codex
+conversation and committed code, but not uncommitted files. Add `--compact` to
+shorten the copied context before the new workspace becomes ready.
 
 ## Choose a repository
 

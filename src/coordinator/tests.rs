@@ -32,11 +32,21 @@ enum WorkerCall {
         cwd: PathBuf,
         config: Value,
     },
+    Fork {
+        name: String,
+        source_thread_id: String,
+        cwd: PathBuf,
+        config: Value,
+    },
+    Compact {
+        thread_id: String,
+    },
     Turn {
         thread_id: String,
         cwd: PathBuf,
         client_message_id: String,
         message: String,
+        additional_context: Option<Value>,
     },
     Response {
         id: Value,
@@ -49,6 +59,7 @@ struct FakeWorker {
     calls: StdMutex<Vec<WorkerCall>>,
     fail_thread_start: bool,
     fail_resume_thread: Option<String>,
+    fail_compact: bool,
 }
 
 impl FakeWorker {
@@ -57,6 +68,7 @@ impl FakeWorker {
             calls: StdMutex::new(Vec::new()),
             fail_thread_start: true,
             fail_resume_thread: None,
+            fail_compact: false,
         }
     }
 
@@ -65,6 +77,16 @@ impl FakeWorker {
             calls: StdMutex::new(Vec::new()),
             fail_thread_start: false,
             fail_resume_thread: Some(thread_id.to_owned()),
+            fail_compact: false,
+        }
+    }
+
+    fn failing_compact() -> Self {
+        Self {
+            calls: StdMutex::new(Vec::new()),
+            fail_thread_start: false,
+            fail_resume_thread: None,
+            fail_compact: true,
         }
     }
 
@@ -140,12 +162,60 @@ impl WorkerRuntime for FakeWorker {
         })
     }
 
+    async fn fork_thread(
+        &self,
+        name: &str,
+        source_thread_id: &str,
+        cwd: &Path,
+        config: Value,
+    ) -> Result<StartedThread, WorkerError> {
+        let mut calls = self.calls.lock().unwrap();
+        calls.push(WorkerCall::Fork {
+            name: name.to_owned(),
+            source_thread_id: source_thread_id.to_owned(),
+            cwd: cwd.to_owned(),
+            config,
+        });
+        let sequence = calls
+            .iter()
+            .filter(|call| matches!(call, WorkerCall::Fork { .. }))
+            .count();
+        let id = format!("fork-thread-{sequence}");
+        Ok(StartedThread {
+            id: id.clone(),
+            status: CodexThreadStatus::Idle,
+            cwd: cwd.to_owned(),
+            response: json!({
+                "thread": {"id": id, "status": {"type": "idle"}},
+                "cwd": cwd,
+                "model": "gpt-test",
+                "modelProvider": "test-provider",
+                "approvalPolicy": "on-request",
+                "approvalsReviewer": "user",
+                "sandbox": "workspace-write",
+            }),
+        })
+    }
+
+    async fn compact_thread(&self, thread_id: &str) -> Result<(), WorkerError> {
+        self.calls.lock().unwrap().push(WorkerCall::Compact {
+            thread_id: thread_id.to_owned(),
+        });
+        if self.fail_compact {
+            return Err(WorkerError::runtime(std::io::Error::other(
+                "injected compaction failure",
+            )));
+        }
+        Ok(())
+    }
+
     async fn start_turn(
         &self,
         thread_id: &str,
         cwd: &Path,
         client_message_id: &str,
         message: &str,
+        additional_context: Option<Value>,
     ) -> Result<StartedTurn, WorkerError> {
         let mut calls = self.calls.lock().unwrap();
         calls.push(WorkerCall::Turn {
@@ -153,6 +223,7 @@ impl WorkerRuntime for FakeWorker {
             cwd: cwd.to_owned(),
             client_message_id: client_message_id.to_owned(),
             message: message.to_owned(),
+            additional_context,
         });
         let sequence = calls
             .iter()
@@ -233,8 +304,23 @@ impl Fixture {
             name: "first-workspace".to_owned(),
             base_ref: "HEAD".to_owned(),
             context_mode: ContextMode::Fresh,
+            fork_from: None,
+            compact: false,
             profile: "default".to_owned(),
             operation_id: "create-operation-1".to_owned(),
+        }
+    }
+
+    fn fork_params(&self, source: &Workspace, name: &str, compact: bool) -> WorkspaceCreateParams {
+        WorkspaceCreateParams {
+            repository_path: self.source.clone(),
+            name: name.to_owned(),
+            base_ref: "HEAD".to_owned(),
+            context_mode: ContextMode::Fork,
+            fork_from: Some(source.name.clone()),
+            compact,
+            profile: "default".to_owned(),
+            operation_id: format!("create-{name}"),
         }
     }
 
@@ -313,6 +399,374 @@ async fn prepares_an_idle_workspace_without_starting_a_turn_and_replays_operatio
             EventKind::AgentStarted,
         ]
     );
+}
+
+#[tokio::test]
+async fn forks_committed_code_and_codex_history_from_an_idle_workspace() {
+    let fixture = Fixture::new(FakeWorker::default());
+    fixture.register().await;
+    let source = fixture
+        .coordinator
+        .create_workspace(fixture.create_params())
+        .await
+        .unwrap()
+        .workspace;
+    let source_worktree = source.worktree_path.as_deref().unwrap();
+    fs::write(source_worktree.join("source-commit.txt"), "from source\n").unwrap();
+    run_git(source_worktree, &["add", "source-commit.txt"]);
+    run_git(
+        source_worktree,
+        &["commit", "-m", "source workspace commit"],
+    );
+    let source_head = git_output(source_worktree, &["rev-parse", "HEAD"]);
+    assert_ne!(
+        source_head,
+        git_output(&fixture.source, &["rev-parse", "HEAD"])
+    );
+
+    let fork_params = fixture.fork_params(&source, "forked-workspace", false);
+    let created = fixture
+        .coordinator
+        .create_workspace(fork_params.clone())
+        .await
+        .unwrap();
+    let workspace = created.workspace;
+    let target_worktree = workspace.worktree_path.as_deref().unwrap();
+
+    assert_eq!(workspace.lifecycle, WorkspaceLifecycle::Ready);
+    assert_eq!(workspace.phase, WorkspacePhase::Idle);
+    assert_eq!(workspace.context_mode, ContextMode::Fork);
+    assert_eq!(workspace.base_sha.as_deref(), Some(source_head.as_str()));
+    assert_eq!(workspace.parent_thread_id, source.codex_thread_id);
+    assert_eq!(workspace.codex_thread_id.as_deref(), Some("fork-thread-1"));
+    assert_eq!(workspace.context["mode"], "fork");
+    assert_eq!(workspace.context["forkFrom"], source.name);
+    assert_eq!(workspace.context["sourceWorkspaceId"], source.id);
+    assert_eq!(workspace.context["sourceHeadSha"], source_head);
+    assert_eq!(workspace.context["compact"], false);
+    assert_eq!(
+        git_output(target_worktree, &["rev-parse", "HEAD"]),
+        source_head
+    );
+    assert_eq!(
+        fs::read_to_string(target_worktree.join("source-commit.txt")).unwrap(),
+        "from source\n"
+    );
+    assert!(matches!(
+        fixture.worker.calls().as_slice(),
+        [WorkerCall::Thread { .. }, WorkerCall::Fork {
+            source_thread_id,
+            cwd,
+            config,
+            ..
+        }] if source_thread_id == "thread-1" && cwd == target_worktree && config == &json!({})
+    ));
+    let replay = fixture
+        .coordinator
+        .create_workspace(fork_params)
+        .await
+        .unwrap();
+    assert_eq!(replay.workspace.id, workspace.id);
+    assert_eq!(fixture.worker.calls().len(), 2);
+}
+
+#[tokio::test]
+async fn rejects_a_dirty_or_active_fork_source_before_allocating_a_child() {
+    let dirty_fixture = Fixture::new(FakeWorker::default());
+    let repository = dirty_fixture.register().await;
+    let source = dirty_fixture
+        .coordinator
+        .create_workspace(dirty_fixture.create_params())
+        .await
+        .unwrap()
+        .workspace;
+    fs::write(
+        source.worktree_path.as_deref().unwrap().join("dirty.txt"),
+        "not committed\n",
+    )
+    .unwrap();
+
+    assert!(matches!(
+        dirty_fixture
+            .coordinator
+            .create_workspace(dirty_fixture.fork_params(&source, "dirty-child", false))
+            .await,
+        Err(CoordinatorError::Git(
+            crate::git::GitError::DirtyRepository(_)
+        ))
+    ));
+    assert!(
+        dirty_fixture
+            .store
+            .workspace_by_name(&repository.id, "dirty-child")
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(dirty_fixture.worker.calls().len(), 1);
+
+    let active_fixture = Fixture::new(FakeWorker::default());
+    active_fixture.register().await;
+    let source = active_fixture
+        .coordinator
+        .create_workspace(active_fixture.create_params())
+        .await
+        .unwrap()
+        .workspace;
+    active_fixture
+        .coordinator
+        .start_turn(TurnStartParams {
+            scope: RepositoryScope::repository(active_fixture.source.clone()),
+            workspace: source.name.clone(),
+            message: "keep working".to_owned(),
+            operation_id: "activate-source".to_owned(),
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        active_fixture
+            .coordinator
+            .create_workspace(active_fixture.fork_params(&source, "active-child", false))
+            .await,
+        Err(CoordinatorError::InvalidWorkspaceState {
+            expected: "an idle source workspace",
+            actual: WorkspacePhase::Active,
+        })
+    ));
+    assert_eq!(active_fixture.worker.calls().len(), 2);
+}
+
+#[tokio::test]
+async fn compacts_only_the_child_before_it_accepts_a_message() {
+    let fixture = Fixture::new(FakeWorker::default());
+    fixture.register().await;
+    let source = fixture
+        .coordinator
+        .create_workspace(fixture.create_params())
+        .await
+        .unwrap()
+        .workspace;
+    let create =
+        fixture
+            .coordinator
+            .create_workspace(fixture.fork_params(&source, "compact-child", true));
+    let complete_compaction = complete_fake_compaction(&fixture, "fork-thread-1");
+    let (created, ()) = tokio::join!(create, complete_compaction);
+    let workspace = created.unwrap().workspace;
+
+    assert_eq!(workspace.lifecycle, WorkspaceLifecycle::Ready);
+    assert_eq!(workspace.phase, WorkspacePhase::Idle);
+    assert_eq!(workspace.context["compact"], true);
+    assert!(matches!(
+        fixture.worker.calls().as_slice(),
+        [
+            WorkerCall::Thread { .. },
+            WorkerCall::Fork { .. },
+            WorkerCall::Compact { thread_id },
+        ] if thread_id == "fork-thread-1"
+    ));
+    let events = fixture.store.events_after(Some(&workspace.id), 0).unwrap();
+    assert_eq!(
+        events.iter().map(|event| event.kind).collect::<Vec<_>>(),
+        [
+            EventKind::WorkspaceCreated,
+            EventKind::WorktreeCreated,
+            EventKind::AgentStarted,
+            EventKind::ContextCompacted,
+        ]
+    );
+
+    fixture
+        .coordinator
+        .start_turn(TurnStartParams {
+            scope: RepositoryScope::repository(fixture.source.clone()),
+            workspace: workspace.id.clone(),
+            message: "continue in the child".to_owned(),
+            operation_id: "send-after-compact".to_owned(),
+        })
+        .await
+        .unwrap();
+    let calls = fixture.worker.calls();
+    let WorkerCall::Turn {
+        additional_context: Some(additional_context),
+        ..
+    } = calls.last().unwrap()
+    else {
+        panic!("forked turn did not receive the workspace boundary context");
+    };
+    let binding = additional_context["coco.workspace-binding"]["value"]
+        .as_str()
+        .and_then(|value| serde_json::from_str::<Value>(value).ok())
+        .expect("workspace boundary context was not valid JSON");
+    assert_eq!(binding["workspaceId"], workspace.id);
+    assert_eq!(binding["worktreePath"], json!(workspace.worktree_path));
+    assert_eq!(binding["sourceWorkspaceId"], source.id);
+}
+
+async fn complete_fake_compaction(fixture: &Fixture, thread_id: &str) {
+    wait_for_compaction_request(fixture).await;
+    for event in [
+        CodexEvent::Notification {
+            method: "turn/started".to_owned(),
+            params: json!({
+                "threadId": thread_id,
+                "turn": {"id": "compact-turn", "status": "inProgress"},
+            }),
+        },
+        CodexEvent::Notification {
+            method: "item/completed".to_owned(),
+            params: json!({
+                "threadId": thread_id,
+                "turnId": "compact-turn",
+                "item": {"id": "compact-item", "type": "contextCompaction"},
+            }),
+        },
+        CodexEvent::Notification {
+            method: "turn/completed".to_owned(),
+            params: json!({
+                "threadId": thread_id,
+                "turn": {"id": "compact-turn", "status": "completed"},
+            }),
+        },
+    ] {
+        fixture.coordinator.record_codex_event(event).unwrap();
+    }
+}
+
+async fn wait_for_compaction_request(fixture: &Fixture) {
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            if fixture
+                .worker
+                .calls()
+                .iter()
+                .any(|call| matches!(call, WorkerCall::Compact { .. }))
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("coordinator did not request child compaction");
+}
+
+#[tokio::test]
+async fn retains_a_bound_failed_child_when_compaction_cannot_start() {
+    let fixture = Fixture::new(FakeWorker::failing_compact());
+    let repository = fixture.register().await;
+    let source = fixture
+        .coordinator
+        .create_workspace(fixture.create_params())
+        .await
+        .unwrap()
+        .workspace;
+
+    assert!(matches!(
+        fixture
+            .coordinator
+            .create_workspace(fixture.fork_params(&source, "failed-compact", true))
+            .await,
+        Err(CoordinatorError::CompactionFailed(_))
+    ));
+    let failed = fixture
+        .store
+        .workspace_by_name(&repository.id, "failed-compact")
+        .unwrap()
+        .unwrap();
+    assert_eq!(failed.lifecycle, WorkspaceLifecycle::Failed);
+    assert_eq!(failed.phase, WorkspacePhase::Failed);
+    assert_eq!(
+        failed.last_error_code.as_deref(),
+        Some("CODEX_COMPACTION_FAILED")
+    );
+    assert_eq!(failed.codex_thread_id.as_deref(), Some("fork-thread-1"));
+    assert_eq!(failed.parent_thread_id, source.codex_thread_id);
+    assert!(failed.worktree_path.unwrap().is_dir());
+}
+
+#[tokio::test]
+async fn retains_a_bound_failed_child_when_native_compaction_fails() {
+    let fixture = Fixture::new(FakeWorker::default());
+    let repository = fixture.register().await;
+    let source = fixture
+        .coordinator
+        .create_workspace(fixture.create_params())
+        .await
+        .unwrap()
+        .workspace;
+    let create = fixture.coordinator.create_workspace(fixture.fork_params(
+        &source,
+        "failed-native-compact",
+        true,
+    ));
+    let fail_compaction = async {
+        wait_for_compaction_request(&fixture).await;
+        for event in [
+            CodexEvent::Notification {
+                method: "turn/started".to_owned(),
+                params: json!({
+                    "threadId": "fork-thread-1",
+                    "turn": {"id": "failed-compact-turn", "status": "inProgress"},
+                }),
+            },
+            CodexEvent::Notification {
+                method: "turn/completed".to_owned(),
+                params: json!({
+                    "threadId": "fork-thread-1",
+                    "turn": {"id": "failed-compact-turn", "status": "failed"},
+                }),
+            },
+        ] {
+            fixture.coordinator.record_codex_event(event).unwrap();
+        }
+    };
+    let (result, ()) = tokio::join!(create, fail_compaction);
+    assert!(matches!(result, Err(CoordinatorError::CompactionFailed(_))));
+
+    let failed = fixture
+        .store
+        .workspace_by_name(&repository.id, "failed-native-compact")
+        .unwrap()
+        .unwrap();
+    assert_eq!(failed.lifecycle, WorkspaceLifecycle::Failed);
+    assert_eq!(failed.codex_thread_id.as_deref(), Some("fork-thread-1"));
+    assert!(failed.worktree_path.unwrap().is_dir());
+}
+
+#[tokio::test]
+async fn rejects_incoherent_or_unimplemented_context_requests() {
+    let fixture = Fixture::new(FakeWorker::default());
+    fixture.register().await;
+
+    let mut fresh_with_fork = fixture.create_params();
+    fresh_with_fork.fork_from = Some("source".to_owned());
+    assert!(matches!(
+        fixture.coordinator.create_workspace(fresh_with_fork).await,
+        Err(CoordinatorError::InvalidParams(_))
+    ));
+
+    let mut missing_source = fixture.create_params();
+    missing_source.context_mode = ContextMode::Fork;
+    assert!(matches!(
+        fixture.coordinator.create_workspace(missing_source).await,
+        Err(CoordinatorError::InvalidParams(_))
+    ));
+
+    let mut blank_source = fixture.create_params();
+    blank_source.context_mode = ContextMode::Fork;
+    blank_source.fork_from = Some("  ".to_owned());
+    assert!(matches!(
+        fixture.coordinator.create_workspace(blank_source).await,
+        Err(CoordinatorError::InvalidParams(_))
+    ));
+
+    let mut handoff = fixture.create_params();
+    handoff.context_mode = ContextMode::Handoff;
+    assert!(matches!(
+        fixture.coordinator.create_workspace(handoff).await,
+        Err(CoordinatorError::UnsupportedContext(mode)) if mode == "handoff"
+    ));
+    assert!(fixture.worker.calls().is_empty());
 }
 
 #[tokio::test]
@@ -1119,6 +1573,8 @@ async fn prepare_multi_repository_workspaces(fixture: &Fixture) -> MultiReposito
             name: "feat/shared".to_owned(),
             base_ref: "HEAD".to_owned(),
             context_mode: ContextMode::Fresh,
+            fork_from: None,
+            compact: false,
             profile: "default".to_owned(),
             operation_id: "create-first-shared".to_owned(),
         })
@@ -1132,6 +1588,8 @@ async fn prepare_multi_repository_workspaces(fixture: &Fixture) -> MultiReposito
             name: "feat/shared".to_owned(),
             base_ref: "HEAD".to_owned(),
             context_mode: ContextMode::Fresh,
+            fork_from: None,
+            compact: false,
             profile: "default".to_owned(),
             operation_id: "create-second-shared".to_owned(),
         })
@@ -1145,6 +1603,8 @@ async fn prepare_multi_repository_workspaces(fixture: &Fixture) -> MultiReposito
             name: "fix/unique".to_owned(),
             base_ref: "HEAD".to_owned(),
             context_mode: ContextMode::Fresh,
+            fork_from: None,
+            compact: false,
             profile: "default".to_owned(),
             operation_id: "create-second-unique".to_owned(),
         })
@@ -1298,4 +1758,21 @@ fn run_git(cwd: &Path, args: &[&str]) {
         args,
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+fn git_output(cwd: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .current_dir(cwd)
+        .args(args)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("LC_ALL", "C")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
 }
