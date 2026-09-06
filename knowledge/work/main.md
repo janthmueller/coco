@@ -224,6 +224,18 @@ architectural baseline for CoCo.
   - [x] Preserve the effective model across daemon recovery, cover the exact
     wire contract, and update public/internal documentation for shipped
     behavior.
+- [ ] Review whether the current product is ready for a first public release,
+  distinguishing a supervised alpha from a stable or production-ready claim.
+  - [x] Port Wuf's tested-revision semantic-release pattern to the Rust
+    package: Conventional Commits, alpha versions, synchronized Cargo metadata,
+    generated changelog, tag, and GitHub Release.
+  - [ ] Build and smoke-test release archives for all currently supported host
+    platforms before allowing a release, without claiming Windows support.
+  - [x] Keep automatic publication opt-in until the remaining public-release
+    blockers are deliberately resolved. The user selected MIT and supplied a
+    local crates.io token for secure GitHub-secret upload; never record it.
+  - [ ] Run the complete sequential verification gates and record the final
+    release recommendation.
 - [ ] Keep handoff deferred as a separate artifact-design task. Treat authoring
   and consumption independently; consider agent-generated material, existing
   Markdown, direct CLI input, ticket or other external references, and an
@@ -497,9 +509,30 @@ architectural baseline for CoCo.
   request. Codex 0.147.0's TUI retains only request IDs delivered through that
   client's own event stream, so attaching later cannot reliably answer the
   daemon's outstanding callback.
+- 2026-09-06 — Retain CoCo as the product, repository, library, and executable
+  identity while publishing the single Cargo package as
+  `codex-coordinator`; the shorter registry name is already owned by an
+  unrelated project. License the project under MIT and keep the first release
+  on an explicitly enabled alpha channel.
+- 2026-09-06 — Make dependency policy part of the release gate. Deny known
+  advisories, unknown registry or Git sources, wildcard requirements, and
+  licenses outside the reviewed set; report ecosystem duplicate versions for
+  review without pretending all transitive duplicates can currently be
+  eliminated.
 
 ## Findings
 
+- The implementation is suitable for a first supervised developer alpha once
+  the public GitHub run proves native Linux/macOS packaging and Pages
+  deployment. It is not a stable or production-ready release: Windows IPC is
+  absent, Codex compatibility is pinned to 0.147.0, the daemon still requires
+  explicit supervision, active turns do not survive daemon/App Server loss,
+  and workspace cleanup/completion/merge remain outside the current surface.
+- The reviewed dependency policy finds no advisory, source, license, wildcard,
+  or explicit-ban violation. It reports eight pairs of transitive duplicate
+  versions, primarily the WebSocket SHA-1 path versus direct SHA-2 and normal
+  ecosystem version transitions; none currently represents an actionable
+  safety failure.
 - The pinned App Server's `model/list` is cursor-paginated and distinguishes a
   catalog entry's stable `id`, exact thread selector `model`, display metadata,
   default marker, reasoning choices, modalities, and personality support.
@@ -712,6 +745,22 @@ architectural baseline for CoCo.
 
 ## Verification
 
+- Release preparation passes `actionlint` for every workflow, the version-sync
+  script's three unit tests, Python Semantic Release's no-operation version
+  calculation to `0.1.0-alpha.1`, `cargo publish --locked --dry-run`, and
+  inspection of the resulting 56-file package boundary. The package verifies
+  as `codex-coordinator` and contains only production Rust source, Cargo
+  metadata, README, and MIT license.
+- The release-readiness run passes Rustfmt, all-target/all-feature Clippy with
+  warnings denied, all 85 library tests (84 passed, one explicitly
+  model-consuming test ignored), both process smokes, `cargo machete`, and the
+  reviewed `cargo deny` policy. The socket-dependent suite required execution
+  outside the restricted sandbox and then passed without failures.
+- Documentation TypeScript, Oxlint, and Prettier checks pass. A production
+  `DOCS_BASE_PATH=/coco` build verifies 88 static files, eight pages, local
+  search, project-subpath routing, and the public-only boundary. The complete
+  `nix flake check . --no-write-lock-file --max-jobs 1` passes locally; native
+  macOS archive and hosted Pages proof remain pending the first GitHub run.
 - The model-selection slice passes all 85 library tests (84 passed and the
   model-consuming approval proof ignored), both daemon/CLI process smokes, and
   the separately enabled turn-free real-Codex 0.147.0 compatibility test. The
@@ -918,6 +967,11 @@ architectural baseline for CoCo.
 
 ## Open questions and handoff
 
+- Release code and local gates are prepared. Create and push the public
+  `janthmueller/coco` repository, store the registry credential only in its
+  protected `crates.io` environment, keep `COCO_RELEASE_ENABLED=false`, and
+  require the first hosted Rust, macOS binary smoke, and Pages runs to pass
+  before deciding whether to publish the irreversible first alpha.
 - Prove native Codex per-thread MCP isolation across start, resume, and fork
   before scheduling the registry feature.
 - Agentgateway is deliberately not scheduled. Reconsider it only when

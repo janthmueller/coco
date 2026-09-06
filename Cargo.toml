@@ -1,10 +1,17 @@
 [package]
-name = "coco"
+name = "codex-coordinator"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.98.1"
 description = "Local Codex agent orchestration"
-publish = false
+license = "MIT"
+repository = "https://github.com/janthmueller/coco"
+homepage = "https://janthmueller.github.io/coco/"
+readme = "README.md"
+keywords = ["codex", "agents", "orchestration", "worktree", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+publish = ["crates-io"]
+include = ["/src/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE"]
 
 [lints.rust]
 unsafe_code = "forbid"
@@ -14,6 +21,7 @@ excessive_nesting = "deny"
 too_many_lines = "deny"
 
 [lib]
+name = "coco"
 path = "src/lib.rs"
 
 [[bin]]

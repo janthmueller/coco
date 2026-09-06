@@ -24,5 +24,7 @@ result-*
 *.sqlite-wal
 
 *.profraw
+__pycache__/
+*.py[cod]
 .DS_Store
 *.log

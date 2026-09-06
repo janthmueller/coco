@@ -38,9 +38,9 @@ but the terms differ:
 | module | namespace and privacy boundary inside a crate | module or package namespace |
 | workspace | related Cargo packages sharing lockfile and build output | monorepo containing multiple distributions |
 
-The current package already builds four crates: the `coco` library plus the
-`coco`, `cocod`, and `coco-mcp` binary crates. Files such as `src/codex.rs` may
-declare children stored at `src/codex/process.rs` and
+The current `codex-coordinator` package already builds four crates: the `coco`
+library plus the `coco`, `cocod`, and `coco-mcp` binary crates. Files such as
+`src/codex.rs` may declare children stored at `src/codex/process.rs` and
 `src/codex/websocket.rs`; no additional `Cargo.toml` is needed. This is the
 modern file layout described by the
 [Rust Book](https://doc.rust-lang.org/book/ch07-05-separating-modules-into-different-files.html).
@@ -198,10 +198,12 @@ empty taxonomy directories make navigation worse.
 
 ## Intentional public API
 
-The package is `publish = false`; its library exists primarily so three binary
-crates can share code. `lib.rs` should expose only stable executable entry
-points and, where needed, protocol types used by future clients. Everything
-else should prefer private or `pub(crate)` visibility.
+The package is published as `codex-coordinator` so Cargo can install the three
+product binaries together. Its `coco` library exists primarily so those binary
+crates can share code; publication does not make that deliberately narrow
+library facade a promised general-purpose SDK. `lib.rs` should expose only
+stable executable entry points and, where needed, protocol types used by future
+clients. Everything else should prefer private or `pub(crate)` visibility.
 
 This end state is now implemented: Rustdoc exposes only
 `run_cli_from_env`, `run_daemon_from_env`, and `run_mcp_from_env`; all twelve
@@ -369,7 +371,7 @@ Nix development shell/check apps, not in application dependencies.
 | selected `too_many_lines` and `excessive_nesting` lints | actionable structural pressure | denied package-wide; exceptions must be local and reasoned |
 | `cargo test --all-targets` | behavior and contract safety | required on every change |
 | `cargo machete` | fast unused direct-dependency detection | required; document justified false positives |
-| `cargo deny` | advisories, sources, licenses, and duplicate/banned crates | required after policy/config review; do not use an unreviewed generated config |
+| `cargo deny` | advisories, sources, licenses, and duplicate/banned crates | required; the reviewed root policy denies advisories, unknown sources, unapproved licenses, and wildcard requirements while reporting duplicate versions |
 | `cargo tree --duplicates` | explain dependency duplication | review report; not a blanket pass/fail gate |
 | `cargo llvm-cov` | reveal untested boundaries | scheduled/reporting first; do not invent an initial percentage gate |
 | `cargo mutants` | prove important state/migration tests detect faults | scheduled and targeted at critical modules, not every commit |

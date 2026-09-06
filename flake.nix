@@ -43,6 +43,7 @@
 
         cargoRuntimeInputs = [
           rustToolchain
+          pkgs.cargo-deny
           pkgs.cargo-machete
           pkgs.git
           pkgs.procps
@@ -105,6 +106,14 @@
           exec cargo machete "$@"
         '';
 
+        policy = cargoCommand "policy" ''
+          exec cargo deny check "$@"
+        '';
+
+        package = cargoCommand "package" ''
+          exec cargo publish --locked --dry-run "$@"
+        '';
+
         run-coco = cargoCommand "run-coco" ''
           exec cargo run --locked --bin coco -- "$@"
         '';
@@ -146,6 +155,8 @@
             fmt
             clippy
             deps
+            policy
+            package
             run-coco
             run-cocod
             mcp
@@ -163,25 +174,34 @@
               nativeBuildInputs = [
                 rustToolchain
                 pkgs.actionlint
+                pkgs.cargo-deny
                 pkgs.cargo-machete
                 pkgs.git
                 pkgs.jq
                 pkgs.nodejs_24
                 pkgs.pnpm
                 pkgs.pkg-config
+                pkgs.python3
                 pkgs.sqlite
               ];
               cargoManifest = ./Cargo.toml;
               cargoLock = ./Cargo.lock;
+              licenseFile = ./LICENSE;
+              publicReadme = ./README.md;
               toolchainManifest = ./rust-toolchain.toml;
               docsManifest = ./docs/package.json;
-              rustWorkflow = ./.github/workflows/rust.yml;
+              workflowDirectory = ./.github/workflows;
+              releaseConfig = ./releaserc.toml;
+              releaseVersionSync = ./.github/scripts/sync_cargo_lock.py;
+              releaseVersionTests = ./.github/scripts/test_sync_cargo_lock.py;
             }
             ''
               metadata_project="$TMPDIR/coco-metadata"
               mkdir -p "$metadata_project/src/bin"
               cp "$cargoManifest" "$metadata_project/Cargo.toml"
               cp "$cargoLock" "$metadata_project/Cargo.lock"
+              cp "$licenseFile" "$metadata_project/LICENSE"
+              cp "$publicReadme" "$metadata_project/README.md"
               touch "$metadata_project/src/lib.rs"
               touch "$metadata_project/src/bin/coco.rs"
               touch "$metadata_project/src/bin/cocod.rs"
@@ -198,9 +218,13 @@
 
               jq -e '
                 (.packages | length) == 1
-                and (.packages[0].name == "coco")
+                and (.packages[0].name == "codex-coordinator")
                 and (.packages[0].edition == "2024")
                 and (.packages[0].rust_version == "1.98.1")
+                and (.packages[0].license == "MIT")
+                and (.packages[0].repository == "https://github.com/janthmueller/coco")
+                and (.packages[0].homepage == "https://janthmueller.github.io/coco/")
+                and (.packages[0].publish == ["crates-io"])
                 and any(.packages[0].targets[]; .name == "coco" and .kind == ["lib"])
                 and any(.packages[0].targets[]; .name == "coco" and .kind == ["bin"])
                 and any(.packages[0].targets[]; .name == "cocod" and .kind == ["bin"])
@@ -219,8 +243,12 @@
               cargo --version >/dev/null
               rustfmt --version >/dev/null
               cargo clippy --version >/dev/null
+              cargo deny --version >/dev/null
               cargo machete --version >/dev/null
-              actionlint "$rustWorkflow"
+              actionlint "$workflowDirectory"/*.yml
+              COCO_RELEASE_SCRIPT="$releaseVersionSync" python3 "$releaseVersionTests"
+              grep -F 'version_toml = ["Cargo.toml:package.version"]' "$releaseConfig" >/dev/null
+              grep -F 'assets = ["Cargo.lock"]' "$releaseConfig" >/dev/null
               rust-analyzer --version >/dev/null
               pkg-config --version >/dev/null
               sqlite3 --version >/dev/null
@@ -242,6 +270,8 @@
           fmt = app fmt "Check CoCo Rust formatting";
           clippy = app clippy "Lint all CoCo Rust targets";
           deps = app deps "Check CoCo for unused direct Rust dependencies";
+          policy = app policy "Check CoCo dependency advisories, licenses, sources, and bans";
+          package = app package "Verify the CoCo crates.io package";
           run-coco = app run-coco "Run the CoCo CLI";
           run-cocod = app run-cocod "Run the CoCo daemon";
           mcp = app mcp "Run the CoCo MCP stdio server";
@@ -264,6 +294,7 @@
           packages = [
             rustToolchain
             pkgs.actionlint
+            pkgs.cargo-deny
             pkgs.cargo-machete
             pkgs.git
             pkgs.jq
@@ -271,6 +302,7 @@
             pkgs.nodejs_24
             pkgs.pnpm
             pkgs.pkg-config
+            pkgs.python3
             pkgs.sqlite
           ];
 

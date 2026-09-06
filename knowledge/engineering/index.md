@@ -16,6 +16,9 @@ agents.
 - [Rust source architecture and code health](rust-architecture.md) - Records
   the measured module/coupling baseline, target source layout, crate-split
   criteria, refactor phases, and enforceable hygiene tooling.
+- [Release process](release.md) - Defines semantic versioning, the tested-main
+  release guard, Cargo version synchronization, alpha tags, and native binary
+  archives.
 - [MCP catalog and worker runtime boundary](mcp-runtime.md) - Separates CoCo's
   control MCP server from worker-facing MCP tools and records native Codex as
   the initial runtime with Agentgateway as a deferred optional adapter.

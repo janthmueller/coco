@@ -4,23 +4,33 @@ on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/rust.yml'
+      - '.github/**'
+      - 'CHANGELOG.md'
       - 'src/**'
       - 'tests/**'
       - 'Cargo.lock'
       - 'Cargo.toml'
+      - 'LICENSE'
+      - 'README.md'
+      - 'deny.toml'
       - 'flake.lock'
       - 'flake.nix'
+      - 'releaserc.toml'
       - 'rust-toolchain.toml'
   pull_request:
     paths:
-      - '.github/workflows/rust.yml'
+      - '.github/**'
+      - 'CHANGELOG.md'
       - 'src/**'
       - 'tests/**'
       - 'Cargo.lock'
       - 'Cargo.toml'
+      - 'LICENSE'
+      - 'README.md'
+      - 'deny.toml'
       - 'flake.lock'
       - 'flake.nix'
+      - 'releaserc.toml'
       - 'rust-toolchain.toml'
   workflow_dispatch:
 
@@ -37,10 +47,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v31
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
         with:
           github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -56,5 +66,21 @@ jobs:
       - name: Check unused dependencies
         run: nix run .#deps
 
+      - name: Check dependency policy
+        run: nix run .#policy
+
+      - name: Verify the crates.io package
+        run: nix run .#package
+
       - name: Check the development flake
         run: nix flake check
+
+  binary-smoke:
+    needs: check
+    uses: ./.github/workflows/binaries.yml
+    with:
+      tag: v0.0.0
+      checkout_ref: ${{ github.sha }}
+      upload: false
+    permissions:
+      contents: read

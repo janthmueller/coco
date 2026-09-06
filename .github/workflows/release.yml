@@ -1,0 +1,137 @@
+name: Release
+
+on:
+  workflow_run:
+    workflows: ["Rust"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    if: >
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (
+        vars.COCO_RELEASE_ENABLED == 'true' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main'
+      )
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      target_sha: ${{ steps.check.outputs.target_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Require the tested commit to remain current
+        id: check
+        env:
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "target_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git fetch origin main
+          CURRENT_SHA="$(git rev-parse origin/main)"
+          if [ "$TESTED_SHA" = "$CURRENT_SHA" ]; then
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "target_sha=$TESTED_SHA" >> "$GITHUB_OUTPUT"
+          else
+            echo "Tested SHA $TESTED_SHA is no longer current main ($CURRENT_SHA); skipping release."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  release:
+    needs: guard
+    if: needs.guard.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    outputs:
+      released: ${{ steps.release.outputs.released }}
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.guard.outputs.target_sha }}
+
+      - name: Prepare the tested main revision
+        env:
+          TARGET_SHA: ${{ needs.guard.outputs.target_sha }}
+        run: |
+          git switch -C main "$TARGET_SHA"
+          git branch --set-upstream-to=origin/main main
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+
+      - name: Require successful tests for a manual release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA="$(git rev-parse HEAD)"
+          CONCLUSION="$(gh run list --workflow rust.yml --commit "$SHA" --status completed --limit 1 --json conclusion --jq '.[0].conclusion // ""')"
+          test "$CONCLUSION" = success
+
+      - name: Version and publish alpha release
+        id: release
+        uses: python-semantic-release/python-semantic-release@39dd2052f2ce8282a5d932c31d58a2ca06d2550e # v10.6.1
+        with:
+          config_file: releaserc.toml
+          github_token: ${{ secrets.GH_PAT || github.token }}
+          git_committer_name: github-actions[bot]
+          git_committer_email: github-actions[bot]@users.noreply.github.com
+          prerelease: true
+          prerelease_token: alpha
+
+  binaries:
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    uses: ./.github/workflows/binaries.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+    permissions:
+      contents: write
+
+  crates-io:
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: crates.io
+      url: https://crates.io/crates/codex-coordinator
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.release.outputs.tag }}
+
+      - name: Install the pinned Rust toolchain
+        shell: bash
+        run: |
+          TOOLCHAIN="$(sed -n 's/^channel = "\([^"]*\)"$/\1/p' rust-toolchain.toml)"
+          test -n "$TOOLCHAIN"
+          rustup toolchain install "$TOOLCHAIN" --profile minimal
+
+      - name: Publish codex-coordinator to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --locked

@@ -1,0 +1,121 @@
+name: Build binaries
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Existing release tag
+        required: true
+        type: string
+      checkout_ref:
+        description: Source ref to build instead of the release tag
+        required: false
+        default: ""
+        type: string
+      upload:
+        description: Attach archives to the named GitHub release
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            asset-name: coco-linux-ubuntu-22.04
+          - os: macos-15
+            asset-name: coco-macos-15
+    steps:
+      - name: Select source and artifact identity
+        shell: bash
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+          CHECKOUT_REF: ${{ inputs.checkout_ref }}
+          UPLOAD_RELEASE: ${{ inputs.upload }}
+        run: |
+          if [[ ! "$REQUESTED_TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z]+)*$ ]]; then
+            echo "Expected a semantic-version release tag, got: $REQUESTED_TAG" >&2
+            exit 2
+          fi
+          if [ "$UPLOAD_RELEASE" = true ] && [ -n "$CHECKOUT_REF" ]; then
+            echo "checkout_ref may be used only for non-uploading test builds" >&2
+            exit 2
+          fi
+          echo "RELEASE_TAG=$REQUESTED_TAG" >> "$GITHUB_ENV"
+          RAW_ARCH="$(uname -m)"
+          case "$RAW_ARCH" in
+            x86_64|amd64) BINARY_ARCH=x86_64 ;;
+            aarch64|arm64) BINARY_ARCH=arm64 ;;
+            *) BINARY_ARCH="$RAW_ARCH" ;;
+          esac
+          echo "BINARY_ARCH=$BINARY_ARCH" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.checkout_ref || inputs.tag }}
+
+      - name: Verify uploaded source matches the release tag
+        if: inputs.upload
+        shell: bash
+        run: |
+          TAG_SHA="$(git rev-parse "${RELEASE_TAG}^{commit}")"
+          HEAD_SHA="$(git rev-parse HEAD)"
+          test "$HEAD_SHA" = "$TAG_SHA"
+
+      - name: Install the pinned Rust toolchain
+        shell: bash
+        run: |
+          TOOLCHAIN="$(sed -n 's/^channel = "\([^"]*\)"$/\1/p' rust-toolchain.toml)"
+          test -n "$TOOLCHAIN"
+          rustup toolchain install "$TOOLCHAIN" --profile minimal
+          rustc --version
+          cargo --version
+
+      - name: Build release binaries
+        run: cargo build --locked --release --bins
+
+      - name: Smoke-test version and help output
+        shell: bash
+        env:
+          UPLOAD_RELEASE: ${{ inputs.upload }}
+        run: |
+          if [ "$UPLOAD_RELEASE" = true ]; then
+            EXPECTED_VERSION="${RELEASE_TAG#v}"
+          else
+            EXPECTED_VERSION="$(target/release/coco --version | awk '{print $2}')"
+          fi
+          for binary in coco cocod coco-mcp; do
+            test "$("target/release/$binary" --version)" = "$binary $EXPECTED_VERSION"
+            "target/release/$binary" --help > /dev/null
+          done
+
+      - name: Package binaries
+        id: package
+        shell: bash
+        run: |
+          BUNDLE_NAME="${{ matrix.asset-name }}-${BINARY_ARCH}-${RELEASE_TAG}"
+          BUNDLE_DIR="dist/$BUNDLE_NAME"
+          ARCHIVE="dist/$BUNDLE_NAME.tar.gz"
+          mkdir -p "$BUNDLE_DIR"
+          cp target/release/coco target/release/cocod target/release/coco-mcp "$BUNDLE_DIR/"
+          cp LICENSE README.md "$BUNDLE_DIR/"
+          tar -czf "$ARCHIVE" -C dist "$BUNDLE_NAME"
+          CHECKSUM="$ARCHIVE.sha256"
+          shasum -a 256 "$ARCHIVE" > "$CHECKSUM"
+          echo "archive=$ARCHIVE" >> "$GITHUB_OUTPUT"
+          echo "checksum=$CHECKSUM" >> "$GITHUB_OUTPUT"
+
+      - name: Attach binaries to GitHub release
+        if: inputs.upload
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.checksum }}
+          fail_on_unmatched_files: true
