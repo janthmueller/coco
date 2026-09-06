@@ -195,6 +195,11 @@ architectural baseline for CoCo.
   behavior tests together in `coordinator/tests.rs`. Their value is testing
   orchestration across task, turn, event, Git, and store boundaries; splitting
   individual cases across production modules would duplicate the fixture.
+- 2026-09-06 — Split Store code along persistence responsibilities rather than
+  SQL statement size. Schema creation/upgrades belong to `store/migrations.rs`;
+  stable select lists and fallible SQLite-row decoding belong to
+  `store/rows.rs`. Keep multi-record task/turn/event writes together until the
+  next slice can preserve their existing transaction scope explicitly.
 
 ## Findings
 
@@ -256,6 +261,9 @@ architectural baseline for CoCo.
   320 lines, and the turn, error, and worker-port modules are smaller focused
   units. Its shared integration-style unit fixture now lives separately in
   `coordinator/tests.rs`.
+- `store.rs` fell from roughly 1,617 to 1,339 lines after extracting 155 lines
+  of migration policy and 145 lines of row decoding. No transaction was moved
+  or split in this first persistence step.
 
 ## Verification
 
@@ -294,6 +302,9 @@ architectural baseline for CoCo.
 - Moving the unchanged Coordinator test body to `coordinator/tests.rs` keeps
   all 48 library tests and the process test green; an old/new content diff
   contains only two rustfmt line-wrap changes, and Clippy remains clean.
+- After extracting Store migrations and row mapping, all 48 library tests and
+  the process test pass sequentially; Clippy with warnings denied and
+  `cargo machete` remain clean.
 - The documentation TypeScript, Oxlint, and Prettier checks pass. Both the
   root and `/coco` builds export 88 static files across eight pages with static
   search, valid local links, no server artifact, and no internal knowledge.
@@ -319,6 +330,6 @@ architectural baseline for CoCo.
 - When the public site is scheduled, validate its production export under the
   GitHub Pages project subpath before enabling deployment from `main`.
 - Continue Phase 2 from `knowledge/engineering/rust-architecture.md`: map the
-  Store's transaction boundaries, then extract migrations and row mapping
-  before task/event repositories. Preserve the typed daemon boundary and avoid
-  product behavior changes.
+  Store's transaction ownership and extract task/turn plus event/audit
+  repositories without splitting the current atomic state-and-event writes.
+  Preserve the typed daemon boundary and avoid product behavior changes.

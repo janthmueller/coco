@@ -10,6 +10,10 @@ status: stable
 
 ## 2026-09-06
 
+- **Store migration and row boundaries**: Extracted schema upgrades and legacy
+  migration policy into `store/migrations.rs`, and centralized stable select
+  lists plus SQLite row decoding in `store/rows.rs`; transactional writes and
+  public behavior remain unchanged.
 - **Coordinator test boundary**: Moved the shared fake worker, fixture, and
   cross-use-case orchestration tests out of the production facade and into
   `coordinator/tests.rs` without changing assertions or behavior.

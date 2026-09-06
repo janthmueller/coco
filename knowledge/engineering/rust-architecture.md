@@ -258,6 +258,11 @@ concrete Codex-backed worker moved to `daemon/worker.rs`, so the coordinator's
 worker contract no longer imports the Codex client. On 2026-09-06, the shared
 Coordinator fixture and its behavior tests moved unchanged into
 `coordinator/tests.rs`, leaving `coordinator.rs` as a production-only facade.
+The first Store slice also completed on 2026-09-06: schema creation and the
+v1-to-v2 migration live in `store/migrations.rs`, while stable select lists and
+all SQLite-row-to-domain decoding live in `store/rows.rs`. Transactional write
+operations remain together until they can be separated without weakening
+their atomic boundaries.
 
 Extract coherent child modules in this order:
 
