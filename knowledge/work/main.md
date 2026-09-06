@@ -94,17 +94,22 @@ architectural baseline for CoCo.
   `/exit` sends `thread/unsubscribe` and closes only the remote client
   WebSocket; it does not send `turn/interrupt`. The App Server keeps an active
   thread loaded, and `cocod` remains its independent subscriber.
-- [ ] Harden `coco jump`'s close-without-cancel contract before implementing
-  `decide`. Add a pinned contract/smoke test for normal TUI exit and abrupt
+- [ ] Harden `coco jump`'s close-without-cancel contract after the state-model
+  correction. Add a pinned contract/smoke test for normal TUI exit and abrupt
   transport loss while a turn is active, prove daemon event projection keeps
   running, and make the UX distinction explicit: leaving the TUI detaches;
   an explicit Codex interrupt cancels the turn.
-- [ ] Implement durable pending decisions and `coco decide <request-id>` only
-  after the state and `jump` work above. The first interactive UX prints the
-  native choices as numbered options and accepts a number; user-input requests
-  may accept free text where the native schema permits it. Preserve native
-  option meaning and request correlation. Defer cursor-driven selection and
-  other TUI polish.
+- [ ] After the state-model and `jump` slices, stop implementation and review
+  all findings and open work with the user. Reprioritize daemon recovery,
+  cross-platform IPC, Git write policy, decision handling, hooks, MCP
+  isolation, detached worktrees, and release work before selecting the next
+  slice.
+- [ ] Deferred and unscheduled: durable pending decisions and
+  `coco decide <request-id>`. If selected at the post-`jump` review, the first
+  interactive UX should print native choices as numbered options and accept a
+  number; user-input requests may accept free text where the native schema
+  permits it. Preserve native option meaning and request correlation. Defer
+  cursor-driven selection and other TUI polish.
 - [ ] Design task annotations and external references as a deliberate future
   feature. Decide typed versus free-form values, mutation/audit semantics,
   privacy and display rules, fork/handoff inheritance, and explicit projection
@@ -268,7 +273,12 @@ architectural baseline for CoCo.
 - 2026-09-06 — Name the unified approval/user-input response command
   `coco decide <request-id>`. Start with numbered native options and optional
   free-text input; defer cursor navigation until the simpler workflow has
-  proven insufficient.
+  proven insufficient. This records the preferred shape only, not the next
+  scheduled implementation slice; priority is reconsidered after state and
+  `jump` work.
+- 2026-09-06 — Put an explicit planning checkpoint after the thread-state and
+  `jump` slices. Report their findings and reprioritize the remaining backlog
+  with the user instead of automatically continuing into `decide`.
 
 ## Findings
 
@@ -379,8 +389,9 @@ architectural baseline for CoCo.
 - The tagged 0.147.0 TUI and app-server-client sources were inspected for the
   exact exit path: normal exit unsubscribes and closes the client connection,
   while the explicit turn-interrupt request is separate.
-- `git diff --check` passes for the state-ownership, `jump`, and `decide`
-  planning updates; no production code changed in this research slice.
+- `git diff --check` passes for the state-ownership, `jump`, deferred `decide`,
+  and post-`jump` planning-checkpoint updates; no production code changed in
+  this research slice.
 - All expected local documentation targets exist.
 - Every non-index knowledge document has the required frontmatter and a
   non-empty `type`.
@@ -459,9 +470,12 @@ architectural baseline for CoCo.
 - Agentgateway is deliberately not scheduled. Reconsider it only when
   federation, centralized credential custody, independent enforcement, or
   gateway observability becomes an actual requirement.
-- Correct thread-runtime state ownership first, then lock down `jump` exit and
-  reattach behavior, then add the durable pending-request model and numbered
-  `coco decide` flow. Do not let `decide` introduce another state machine.
+- Correct thread-runtime state ownership first and then lock down `jump` exit
+  and reattach behavior. Stop there, report findings, and reprioritize all open
+  work with the user before beginning another feature.
+- Keep the durable pending-request model and numbered `coco decide` flow
+  recorded but unscheduled. If it is selected later, do not let it introduce
+  another state machine.
 - Add daemon recovery through `thread/resume`; the first slice conservatively
   marks in-flight work interrupted after daemon loss.
 - Research Codex's native lifecycle extensibility before designing CoCo hooks.

@@ -521,7 +521,9 @@ generally usable:
    choices as numbered options and accepts a number; structured user-input
    requests may also accept free text where their native schema permits it.
    Cursor navigation, exact non-interactive flags, and session-wide or policy-
-   amendment choices remain later design work.
+   amendment choices remain later design work. This remains necessary before
+   calling v0 generally usable, but it is intentionally unscheduled until the
+   post-state/post-`jump` priority review.
 2. **Git administrative write scope:** a linked worktree stores objects and
    refs in the repository's shared Git directory. Decide whether v0 workers
    may commit. If they may, integration tests must establish the minimum safe

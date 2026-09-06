@@ -813,10 +813,11 @@ Each step remains runnable and testable:
 8. **MCP adapter:** implement local stdio serving, repository-scoped read-only
    `tasks.list`, `agents.status`, and `changes.diff`, opt-in idempotent
    `agents.send`, error mapping, cancellation, and control-call auditing.
-9. **Interaction closure:** correct native thread-state ownership, verify
-   close-without-cancel and reattachment through `jump`, then implement pending
-   request display/response/audit through numbered `coco decide <request-id>`
-   choices before declaring v0 generally usable.
+9. **Interaction checkpoint:** correct native thread-state ownership and verify
+   close-without-cancel plus reattachment through `jump`, then stop and review
+   findings and all remaining priorities with the user. Pending-request display
+   and response through `coco decide <request-id>` remains a candidate rather
+   than an automatically scheduled next slice.
 10. **Release hardening:** real Codex smoke test, supported-version check,
    filesystem permission tests, help/public docs, packaging, and clean-install
    test.
@@ -830,8 +831,9 @@ implemented as a thin adapter in the same package.
 The following need confirmation, but only the first two gate a safe complete
 v0 rather than the initial proof slice:
 
-1. The exact non-interactive `decide` flags and which session-wide or policy-
-   amendment choices to expose beyond the first numbered interactive flow.
+1. If `decide` is selected at the post-`jump` planning checkpoint, the exact
+   non-interactive flags and which session-wide or policy-amendment choices to
+   expose beyond the first numbered interactive flow.
 2. Whether worker turns may write shared Git administrative storage to commit,
    and the minimum sandbox roots if so.
 3. Exact Codex CLI version and compatibility range to pin in the
