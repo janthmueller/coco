@@ -1,10 +1,10 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use rusqlite::Row;
 use rusqlite::types::Type;
+use rusqlite::{Connection, OptionalExtension, Row};
 use serde_json::Value;
 
-use super::StoreError;
+use super::{StoreError, path_text};
 use crate::domain::{
     Audit, AuditOutcome, ContextMode, EventKind, EventSource, NormalizedEvent, Repository, Task,
     TaskPhase, Turn, TurnPhase,
@@ -142,4 +142,83 @@ fn invalid_value(index: usize, field: &'static str, value: &str) -> rusqlite::Er
             value: value.to_owned(),
         }),
     )
+}
+
+pub(super) fn get_repository_by_id(
+    connection: &Connection,
+    id: &str,
+) -> Result<Option<Repository>, StoreError> {
+    connection
+        .query_row(
+            "SELECT id, root_path, git_common_dir, display_name, is_linked_worktree,
+                created_at_ms, updated_at_ms FROM repositories WHERE id = ?1",
+            [id],
+            map_repository,
+        )
+        .optional()
+        .map_err(StoreError::from)
+}
+
+pub(super) fn get_repository_by_root(
+    connection: &Connection,
+    path: &Path,
+) -> Result<Option<Repository>, StoreError> {
+    connection
+        .query_row(
+            "SELECT id, root_path, git_common_dir, display_name, is_linked_worktree,
+                created_at_ms, updated_at_ms FROM repositories WHERE root_path = ?1",
+            [path_text(path)?],
+            map_repository,
+        )
+        .optional()
+        .map_err(StoreError::from)
+}
+
+pub(super) fn get_repository_by_common_dir(
+    connection: &Connection,
+    path: &Path,
+) -> Result<Option<Repository>, StoreError> {
+    connection
+        .query_row(
+            "SELECT id, root_path, git_common_dir, display_name, is_linked_worktree,
+                created_at_ms, updated_at_ms FROM repositories WHERE git_common_dir = ?1",
+            [path_text(path)?],
+            map_repository,
+        )
+        .optional()
+        .map_err(StoreError::from)
+}
+
+pub(super) fn get_task_by_id(
+    connection: &Connection,
+    id: &str,
+) -> Result<Option<Task>, StoreError> {
+    connection
+        .query_row(&format!("{} WHERE id = ?1", TASK_SELECT), [id], map_task)
+        .optional()
+        .map_err(StoreError::from)
+}
+
+pub(super) fn require_task(connection: &Connection, id: &str) -> Result<Task, StoreError> {
+    get_task_by_id(connection, id)?.ok_or_else(|| StoreError::NotFound {
+        entity: "task",
+        id: id.to_owned(),
+    })
+}
+
+pub(super) fn get_turn_by_id(
+    connection: &Connection,
+    id: &str,
+) -> Result<Option<Turn>, StoreError> {
+    connection
+        .query_row(&format!("{} WHERE id = ?1", TURN_SELECT), [id], map_turn)
+        .optional()
+        .map_err(StoreError::from)
+}
+
+pub(super) fn require_turn(connection: &Connection, id: &str) -> Result<Turn, StoreError> {
+    get_turn_by_id(connection, id)?.ok_or_else(|| StoreError::NotFound {
+        entity: "turn",
+        id: id.to_owned(),
+    })
 }

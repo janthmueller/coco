@@ -261,8 +261,11 @@ Coordinator fixture and its behavior tests moved unchanged into
 The first Store slice also completed on 2026-09-06: schema creation and the
 v1-to-v2 migration live in `store/migrations.rs`, while stable select lists and
 all SQLite-row-to-domain decoding live in `store/rows.rs`. Transactional write
-operations remain together until they can be separated without weakening
-their atomic boundaries.
+operations were then separated into `store/tasks.rs` and `store/events.rs`
+without weakening their atomic boundaries: task/turn operations pass their
+existing `Transaction` into the shared event insert helper. Cross-module Store
+tests live in `store/tests.rs`; `store.rs` is now the connection, repository,
+shared-type, filesystem-safety, and facade layer.
 
 Extract coherent child modules in this order:
 

@@ -200,6 +200,12 @@ architectural baseline for CoCo.
   stable select lists and fallible SQLite-row decoding belong to
   `store/rows.rs`. Keep multi-record task/turn/event writes together until the
   next slice can preserve their existing transaction scope explicitly.
+- 2026-09-06 — Keep Task/Turn state writes in `store/tasks.rs` and Event/Audit
+  persistence in `store/events.rs`, but share the caller-owned SQLite
+  transaction for state-plus-event operations. Centralize read lookups in
+  `store/rows.rs` so the sibling modules do not depend on each other in both
+  directions. Keep the cross-module atomicity/recovery fixture in
+  `store/tests.rs`.
 
 ## Findings
 
@@ -264,6 +270,11 @@ architectural baseline for CoCo.
 - `store.rs` fell from roughly 1,617 to 1,339 lines after extracting 155 lines
   of migration policy and 145 lines of row decoding. No transaction was moved
   or split in this first persistence step.
+- The completed Store split leaves a roughly 315-line facade, 483-line
+  Task/Turn transaction module, 157-line Event/Audit module, 224-line query and
+  row-mapping module, 155-line migration module, and 333-line shared test
+  module. The parent no longer mixes schema SQL, row decoding, lifecycle
+  transactions, event persistence, and tests.
 
 ## Verification
 
@@ -305,6 +316,9 @@ architectural baseline for CoCo.
 - After extracting Store migrations and row mapping, all 48 library tests and
   the process test pass sequentially; Clippy with warnings denied and
   `cargo machete` remain clean.
+- After completing the Store transaction/event split and moving its tests, all
+  48 library tests plus the process test pass again with one build job and one
+  test thread; the all-target/all-feature Clippy gate is warning-free.
 - The documentation TypeScript, Oxlint, and Prettier checks pass. Both the
   root and `/coco` builds export 88 static files across eight pages with static
   search, valid local links, no server artifact, and no internal knowledge.
@@ -330,6 +344,6 @@ architectural baseline for CoCo.
 - When the public site is scheduled, validate its production export under the
   GitHub Pages project subpath before enabling deployment from `main`.
 - Continue Phase 2 from `knowledge/engineering/rust-architecture.md`: map the
-  Store's transaction ownership and extract task/turn plus event/audit
-  repositories without splitting the current atomic state-and-event writes.
-  Preserve the typed daemon boundary and avoid product behavior changes.
+  Codex adapter's process lifecycle, JSONL correlation, and authenticated
+  WebSocket responsibilities, then extract those boundaries without changing
+  App Server behavior. Preserve the typed daemon and WorkerRuntime boundaries.

@@ -10,6 +10,10 @@ status: stable
 
 ## 2026-09-06
 
+- **Store transaction modules**: Split Task/Turn lifecycle operations from
+  Event/Audit persistence, placed shared read lookups with row decoding, and
+  moved cross-module persistence tests out of the facade while preserving the
+  exact SQLite transaction used for atomic state-plus-event changes.
 - **Store migration and row boundaries**: Extracted schema upgrades and legacy
   migration policy into `store/migrations.rs`, and centralized stable select
   lists plus SQLite row decoding in `store/rows.rs`; transactional writes and
