@@ -1119,10 +1119,9 @@ architectural baseline for CoCo.
   it to a demonstrable headless multi-repository control-plane workflow; if the
   latter is selected, test the first Codex release containing PRs 42652, 43069,
   and 43120 before revising public positioning or publishing an alpha.
-- After this checkpoint is pushed, map issues explicitly linked from those
-  three upstream PRs separately from merely similar requests. Draft any useful
-  upstream comment for user review first; do not post promotional or duplicate
-  material automatically.
+- The user withdrew the follow-up issue search and upstream-comment idea after
+  the private checkpoint was completed. Do not pursue or post either unless
+  explicitly requested again.
 - Prove native Codex per-thread MCP isolation across start, resume, and fork
   before scheduling the registry feature.
 - Agentgateway is deliberately not scheduled. Reconsider it only when
