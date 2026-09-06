@@ -43,6 +43,7 @@ pub(super) enum Command {
         message: String,
     },
     /// Open the task's existing Codex thread in its managed worktree.
+    /// Leaving with /quit or /exit does not cancel active work.
     Jump {
         /// Task name or ID.
         task: String,

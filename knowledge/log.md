@@ -10,6 +10,10 @@ status: stable
 
 ## 2026-09-06
 
+- **TUI detach contract**: Locked down `coco jump` as an attachment to the
+  existing Codex thread: both `/quit`/`/exit` and abrupt remote-client loss
+  leave active work running under daemon observation, while explicit Codex
+  interruption remains the separate cancellation action.
 - **Runtime-state ownership**: Migrated SQLite to schema v3, separated the
   CoCo task lifecycle from exact generation-aware Codex thread status and turn
   state, made public phase/wait reasons read-time projections, and stopped

@@ -644,8 +644,10 @@ send `turn/interrupt`. App Server documents that a last-subscriber thread is
 retained while it still has activity, and in CoCo the daemon remains a second
 subscriber regardless. Therefore `/quit` and `/exit` are detach operations for
 `coco jump`; explicit Codex interruption remains cancellation. A contract test
-must cover normal exit, abrupt client loss, continued daemon observation, and
-reattachment because this upstream transport is experimental.
+therefore covers normal exit, abrupt client loss, continued daemon observation,
+and reattachment because this upstream transport is experimental. It also
+executes the built `coco jump` launcher and verifies that the capability token
+is inherited through the child environment rather than exposed in arguments.
 
 On daemon recovery use `thread/resume` by stored thread ID, supplying and then
 verifying the stored `cwd` and profile overrides. Never accept a resumed thread

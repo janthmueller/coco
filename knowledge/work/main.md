@@ -100,14 +100,14 @@ architectural baseline for CoCo.
   `/exit` sends `thread/unsubscribe` and closes only the remote client
   WebSocket; it does not send `turn/interrupt`. The App Server keeps an active
   thread loaded, and `cocod` remains its independent subscriber.
-- [ ] Harden `coco jump`'s close-without-cancel contract after the state-model
+- [x] Harden `coco jump`'s close-without-cancel contract after the state-model
   correction. Add a pinned contract/smoke test for normal TUI exit and abrupt
   transport loss while a turn is active, prove daemon event projection keeps
   running, and make the UX distinction explicit: leaving the TUI detaches;
   an explicit Codex interrupt cancels the turn.
-  - [ ] Exercise a second authenticated remote client in the process harness
+  - [x] Exercise a second authenticated remote client in the process harness
     and prove its disconnect does not end daemon observation or the turn.
-  - [ ] Cover the child-process exit contract and document the shipped user
+  - [x] Cover the child-process exit contract and document the shipped user
     behavior without exposing App Server internals publicly.
 - [ ] After the state-model and `jump` slices, stop implementation and review
   all findings and open work with the user. Reprioritize daemon recovery,
@@ -301,6 +301,10 @@ architectural baseline for CoCo.
   is deliberately implemented. Only `thread/start.thread.status` and
   `thread/status/changed` may refresh native runtime state; request method
   names never do.
+- 2026-09-06 — Treat a successfully launched remote TUI as an ordinary client
+  attachment, not as ownership of the turn. Normal unsubscribe and unexpected
+  transport loss must leave the daemon connection and active turn intact;
+  cancellation requires Codex's separate explicit interrupt operation.
 
 ## Findings
 
@@ -417,6 +421,12 @@ architectural baseline for CoCo.
   masked dead-code warnings; removing unused helpers, limiting fixtures to test
   builds, and retaining only the reasoned approval-response seam leaves a
   warning-free build and exactly three Rustdoc-visible entry points.
+- The process harness can model independent authenticated App Server clients
+  without launching an interactive terminal: one remote client performs the
+  normal resume/unsubscribe path, a later client reattaches and drops its
+  transport abruptly, and the original daemon connection still receives the
+  terminal turn events. The built `coco jump` path is exercised separately in
+  the same scenario to lock down its command, worktree, and secret boundary.
 
 ## Verification
 
@@ -506,6 +516,15 @@ architectural baseline for CoCo.
   rustfmt, and `cargo machete` pass. `nix run .#docs-check` and
   `nix run .#docs-build` pass; the latter verifies 88 static files across eight
   public pages.
+- After hardening `jump`, the complete resource-limited suite again passes all
+  52 library tests and the process smoke test. The smoke test runs the built
+  launcher, then exercises authenticated normal unsubscribe and abrupt loss as
+  two independent remote clients while the turn stays active; the daemon still
+  receives completion and projects `idle`. All-target/all-feature Clippy with
+  warnings denied, rustfmt, `cargo machete`, `nix run .#docs-check`,
+  `nix run .#docs-build`, and `nix flake check . --no-write-lock-file
+  --max-jobs 1` pass. The static verifier again finds 88 files across eight
+  public pages.
 
 ## Open questions and handoff
 
@@ -514,9 +533,9 @@ architectural baseline for CoCo.
 - Agentgateway is deliberately not scheduled. Reconsider it only when
   federation, centralized credential custody, independent enforcement, or
   gateway observability becomes an actual requirement.
-- Thread-runtime ownership is corrected. Lock down `jump` exit and reattach
-  behavior next, then stop, report findings, and reprioritize all open work
-  with the user before beginning another feature.
+- Thread-runtime ownership and `jump` exit/reattach behavior are corrected.
+  Stop here, report the findings, and reprioritize all open work with the user
+  before beginning another feature.
 - Keep the durable pending-request model and numbered `coco decide` flow
   recorded but unscheduled. If it is selected later, do not let it introduce
   another state machine.
@@ -526,9 +545,6 @@ architectural baseline for CoCo.
   Keep the distinction between internal normalized events and executable user
   automation explicit; hooks must not silently inherit credentials or block
   coordinator state transitions without a deliberate policy.
-- Add a pinned remote-TUI contract test for `jump`: normal exit and connection
-  loss must leave the daemon-owned turn running and observable, while explicit
-  interruption must remain unambiguous and observable.
 - When the public site is scheduled, validate its production export under the
   GitHub Pages project subpath before enabling deployment from `main`.
 - Phase 2 and its review are complete. Do not split a workspace now. If

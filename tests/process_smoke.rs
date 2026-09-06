@@ -15,17 +15,18 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::process::{Child, Command};
 use tokio::sync::oneshot;
 use tokio::time::{sleep, timeout};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::handshake::server::Callback;
 use tokio_tungstenite::tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tokio_tungstenite::tungstenite::{Message, http::header::AUTHORIZATION};
-use tokio_tungstenite::{WebSocketStream, accept_hdr_async};
+use tokio_tungstenite::{WebSocketStream, accept_hdr_async, client_async};
 
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(15);
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
 const THREAD_ID: &str = "thread-process-smoke";
 const TURN_ID: &str = "turn-process-smoke";
 
-struct CaptureAuthorization(Arc<Mutex<Option<String>>>);
+struct CaptureAuthorization(Arc<Mutex<Vec<String>>>);
 
 impl Callback for CaptureAuthorization {
     fn on_request(self, request: &Request, response: Response) -> Result<Response, ErrorResponse> {
@@ -34,10 +35,12 @@ impl Callback for CaptureAuthorization {
             .get(AUTHORIZATION)
             .and_then(|value| value.to_str().ok())
             .map(ToOwned::to_owned);
-        *self
-            .0
-            .lock()
-            .expect("authorization capture mutex was poisoned") = value;
+        if let Some(value) = value {
+            self.0
+                .lock()
+                .expect("authorization capture mutex was poisoned")
+                .push(value);
+        }
         Ok(response)
     }
 }
@@ -54,6 +57,7 @@ struct TestPaths {
     codex_home: PathBuf,
     fake_codex: PathBuf,
     codex_args: PathBuf,
+    jump_args: PathBuf,
 }
 
 impl TestPaths {
@@ -70,6 +74,7 @@ impl TestPaths {
             codex_home: root.join("codex-home"),
             fake_codex: root.join("fake-codex"),
             codex_args: root.join("fake-codex.args"),
+            jump_args: root.join("fake-jump.args"),
             data_dir,
         }
     }
@@ -86,6 +91,7 @@ impl TestPaths {
             .env("CODEX_HOME", &self.codex_home)
             .env("COCO_CODEX_BINARY", &self.fake_codex)
             .env("COCO_TEST_CODEX_ARGS", &self.codex_args)
+            .env("COCO_TEST_JUMP_ARGS", &self.jump_args)
             .env("RUST_LOG", "warn");
     }
 }
@@ -138,13 +144,15 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     let listener = TcpListener::bind(address)
         .await
         .context("could not bind the fake App Server")?;
-    let observed_authorization = Arc::new(Mutex::new(None));
+    let observed_authorization = Arc::new(Mutex::new(Vec::new()));
     let observed_requests = Arc::new(Mutex::new(Vec::new()));
+    let observed_remote_requests = Arc::new(Mutex::new(Vec::new()));
     let (complete_sender, complete_receiver) = oneshot::channel();
     let app_server = tokio::spawn(run_fake_app_server(
         listener,
         Arc::clone(&observed_authorization),
         Arc::clone(&observed_requests),
+        Arc::clone(&observed_remote_requests),
         complete_receiver,
     ));
 
@@ -196,6 +204,27 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     let active = task_status(&paths, &repository).await?;
     assert_eq!(active["task"]["phase"], "active");
 
+    run_cli(&paths, &repository, &["jump", "process-smoke"]).await?;
+    let jump_arguments = read_arguments(&paths.jump_args)?;
+    verify_jump_arguments(&jump_arguments, &endpoint, &worktree)?;
+    ensure!(
+        !jump_arguments
+            .iter()
+            .any(|argument| argument == capability_token.trim()),
+        "jump exposed the capability token in its arguments"
+    );
+
+    remote_tui_session(&endpoint, capability_token.trim(), true).await?;
+    assert_eq!(
+        task_status(&paths, &repository).await?["task"]["phase"],
+        "active"
+    );
+    remote_tui_session(&endpoint, capability_token.trim(), false).await?;
+    assert_eq!(
+        task_status(&paths, &repository).await?["task"]["phase"],
+        "active"
+    );
+
     complete_sender
         .send(())
         .map_err(|_| anyhow::anyhow!("fake App Server stopped before turn completion"))?;
@@ -219,18 +248,25 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     server_result?;
 
     let expected_authorization = format!("Bearer {capability_token}");
-    assert_eq!(
-        observed_authorization
-            .lock()
-            .expect("authorization capture mutex was poisoned")
-            .as_deref(),
-        Some(expected_authorization.as_str())
+    let authorizations = observed_authorization
+        .lock()
+        .expect("authorization capture mutex was poisoned");
+    assert_eq!(authorizations.len(), 3);
+    assert!(
+        authorizations
+            .iter()
+            .all(|authorization| authorization == &expected_authorization)
     );
     verify_codex_requests(
         &observed_requests
             .lock()
             .expect("request capture mutex was poisoned"),
         &worktree,
+    )?;
+    verify_remote_tui_requests(
+        &observed_remote_requests
+            .lock()
+            .expect("remote request capture mutex was poisoned"),
     )?;
     for runtime_file in [&paths.socket, &paths.endpoint, &paths.token] {
         ensure!(
@@ -244,8 +280,9 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
 
 async fn run_fake_app_server(
     listener: TcpListener,
-    observed_authorization: Arc<Mutex<Option<String>>>,
+    observed_authorization: Arc<Mutex<Vec<String>>>,
     observed_requests: Arc<Mutex<Vec<Value>>>,
+    observed_remote_requests: Arc<Mutex<Vec<Value>>>,
     completion: oneshot::Receiver<()>,
 ) -> Result<()> {
     let (stream, peer) = listener.accept().await?;
@@ -253,8 +290,39 @@ async fn run_fake_app_server(
         peer.ip().is_loopback(),
         "cocod connected from a non-loopback peer"
     );
-    let mut websocket =
-        accept_hdr_async(stream, CaptureAuthorization(observed_authorization)).await?;
+    let websocket = accept_hdr_async(
+        stream,
+        CaptureAuthorization(Arc::clone(&observed_authorization)),
+    )
+    .await?;
+
+    let daemon = handle_daemon_connection(websocket, observed_requests, completion);
+    let remote_clients = async {
+        for _ in 0..2 {
+            let (stream, peer) = listener.accept().await?;
+            ensure!(
+                peer.ip().is_loopback(),
+                "remote TUI connected from a non-loopback peer"
+            );
+            let websocket = accept_hdr_async(
+                stream,
+                CaptureAuthorization(Arc::clone(&observed_authorization)),
+            )
+            .await?;
+            handle_remote_connection(websocket, Arc::clone(&observed_remote_requests)).await?;
+        }
+        Ok::<(), anyhow::Error>(())
+    };
+
+    tokio::try_join!(daemon, remote_clients)?;
+    Ok(())
+}
+
+async fn handle_daemon_connection(
+    mut websocket: WebSocketStream<TcpStream>,
+    observed_requests: Arc<Mutex<Vec<Value>>>,
+    completion: oneshot::Receiver<()>,
+) -> Result<()> {
     let mut completion = Some(completion);
 
     while let Some(message) = websocket.next().await {
@@ -292,53 +360,133 @@ async fn run_fake_app_server(
                 .await?;
             }
             Some("turn/start") => {
-                send_result(&mut websocket, &frame, json!({"turn": {"id": TURN_ID}})).await?;
-                completion
+                let completion = completion
                     .take()
-                    .context("received more than one turn/start request")?
-                    .await
-                    .context("test stopped before allowing turn completion")?;
-                send_json(
+                    .context("received more than one turn/start request")?;
+                complete_fake_turn(&mut websocket, &frame, completion).await?;
+            }
+            Some(other) => bail!("unexpected App Server method {other:?}"),
+            None => bail!("received an App Server frame without a method: {frame}"),
+        }
+    }
+    Ok(())
+}
+
+async fn complete_fake_turn(
+    websocket: &mut WebSocketStream<TcpStream>,
+    request: &Value,
+    completion: oneshot::Receiver<()>,
+) -> Result<()> {
+    send_result(websocket, request, json!({"turn": {"id": TURN_ID}})).await?;
+    send_json(
+        websocket,
+        json!({
+            "method": "turn/started",
+            "params": {
+                "threadId": THREAD_ID,
+                "turn": {"id": TURN_ID, "status": "inProgress"}
+            }
+        }),
+    )
+    .await?;
+    send_json(
+        websocket,
+        json!({
+            "method": "thread/status/changed",
+            "params": {
+                "threadId": THREAD_ID,
+                "status": {"type": "active", "activeFlags": []}
+            }
+        }),
+    )
+    .await?;
+    completion
+        .await
+        .context("test stopped before allowing turn completion")?;
+    send_json(
+        websocket,
+        json!({
+            "method": "item/completed",
+            "params": {
+                "threadId": THREAD_ID,
+                "turnId": TURN_ID,
+                "item": {
+                    "id": "message-process-smoke",
+                    "type": "agentMessage",
+                    "text": "Fake Codex completed the turn."
+                }
+            }
+        }),
+    )
+    .await?;
+    send_json(
+        websocket,
+        json!({
+            "method": "thread/status/changed",
+            "params": {
+                "threadId": THREAD_ID,
+                "status": {"type": "idle"}
+            }
+        }),
+    )
+    .await?;
+    send_json(
+        websocket,
+        json!({
+            "method": "turn/completed",
+            "params": {
+                "threadId": THREAD_ID,
+                "turn": {"id": TURN_ID, "status": "completed"}
+            }
+        }),
+    )
+    .await
+}
+
+async fn handle_remote_connection(
+    mut websocket: WebSocketStream<TcpStream>,
+    observed_requests: Arc<Mutex<Vec<Value>>>,
+) -> Result<()> {
+    while let Some(message) = websocket.next().await {
+        let message = match message {
+            Ok(message) => message,
+            Err(_) => return Ok(()),
+        };
+        let frame = match message {
+            Message::Text(text) => serde_json::from_str::<Value>(&text)?,
+            Message::Binary(bytes) => serde_json::from_slice::<Value>(&bytes)?,
+            Message::Close(_) => return Ok(()),
+            Message::Ping(payload) => {
+                websocket.send(Message::Pong(payload)).await?;
+                continue;
+            }
+            Message::Pong(_) | Message::Frame(_) => continue,
+        };
+        observed_requests
+            .lock()
+            .expect("remote request capture mutex was poisoned")
+            .push(frame.clone());
+        match frame.get("method").and_then(Value::as_str) {
+            Some("initialize") => send_result(&mut websocket, &frame, json!({})).await?,
+            Some("initialized") => {}
+            Some("thread/resume") => {
+                send_result(
                     &mut websocket,
+                    &frame,
                     json!({
-                        "method": "turn/started",
-                        "params": {
-                            "threadId": THREAD_ID,
-                            "turn": {"id": TURN_ID, "status": "inProgress"}
-                        }
-                    }),
-                )
-                .await?;
-                send_json(
-                    &mut websocket,
-                    json!({
-                        "method": "item/completed",
-                        "params": {
-                            "threadId": THREAD_ID,
-                            "turnId": TURN_ID,
-                            "item": {
-                                "id": "message-process-smoke",
-                                "type": "agentMessage",
-                                "text": "Fake Codex completed the turn."
-                            }
-                        }
-                    }),
-                )
-                .await?;
-                send_json(
-                    &mut websocket,
-                    json!({
-                        "method": "turn/completed",
-                        "params": {
-                            "threadId": THREAD_ID,
-                            "turn": {"id": TURN_ID, "status": "completed"}
+                        "thread": {
+                            "id": THREAD_ID,
+                            "status": {"type": "active", "activeFlags": []}
                         }
                     }),
                 )
                 .await?;
             }
-            Some(other) => bail!("unexpected App Server method {other:?}"),
-            None => bail!("received an App Server frame without a method: {frame}"),
+            Some("thread/unsubscribe") => {
+                send_result(&mut websocket, &frame, json!({})).await?;
+            }
+            Some(other) => bail!("unexpected remote TUI method {other:?}"),
+            None => bail!("received a remote TUI frame without a method: {frame}"),
         }
     }
     Ok(())
@@ -361,6 +509,96 @@ async fn send_json(websocket: &mut WebSocketStream<TcpStream>, value: Value) -> 
         .send(Message::Text(serde_json::to_string(&value)?.into()))
         .await?;
     Ok(())
+}
+
+async fn remote_tui_session(endpoint: &str, token: &str, graceful: bool) -> Result<()> {
+    let address = endpoint
+        .strip_prefix("ws://")
+        .context("remote TUI endpoint was not a ws:// URL")?
+        .parse::<SocketAddr>()
+        .context("remote TUI endpoint had an invalid socket address")?;
+    let mut request = endpoint.into_client_request()?;
+    request.headers_mut().insert(
+        AUTHORIZATION,
+        format!("Bearer {token}")
+            .parse()
+            .context("capability token was not a valid authorization header")?,
+    );
+    let stream = TcpStream::connect(address).await?;
+    let (mut websocket, _) = client_async(request, stream).await?;
+
+    send_json(
+        &mut websocket,
+        json!({
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "clientInfo": {"name": "coco-remote-contract", "version": "0.0.0"}
+            }
+        }),
+    )
+    .await?;
+    await_result(&mut websocket, json!(1)).await?;
+    send_json(
+        &mut websocket,
+        json!({"method": "initialized", "params": {}}),
+    )
+    .await?;
+    send_json(
+        &mut websocket,
+        json!({
+            "id": 2,
+            "method": "thread/resume",
+            "params": {"threadId": THREAD_ID}
+        }),
+    )
+    .await?;
+    await_result(&mut websocket, json!(2)).await?;
+
+    if graceful {
+        send_json(
+            &mut websocket,
+            json!({
+                "id": 3,
+                "method": "thread/unsubscribe",
+                "params": {"threadId": THREAD_ID}
+            }),
+        )
+        .await?;
+        await_result(&mut websocket, json!(3)).await?;
+        websocket.close(None).await?;
+    }
+    Ok(())
+}
+
+async fn await_result(
+    websocket: &mut WebSocketStream<TcpStream>,
+    expected_id: Value,
+) -> Result<()> {
+    while let Some(message) = websocket.next().await {
+        let frame = match message? {
+            Message::Text(text) => serde_json::from_str::<Value>(&text)?,
+            Message::Binary(bytes) => serde_json::from_slice::<Value>(&bytes)?,
+            Message::Ping(payload) => {
+                websocket.send(Message::Pong(payload)).await?;
+                continue;
+            }
+            Message::Pong(_) | Message::Frame(_) => continue,
+            Message::Close(_) => bail!("remote App Server closed before responding"),
+        };
+        if frame.get("id") == Some(&expected_id) {
+            ensure!(
+                frame.get("error").is_none(),
+                "remote App Server returned an error: {frame}"
+            );
+            ensure!(
+                frame.get("result").is_some(),
+                "remote App Server response had no result: {frame}"
+            );
+            return Ok(());
+        }
+    }
+    bail!("remote App Server disconnected before responding")
 }
 
 fn prepare_repository(repository: &Path) -> Result<()> {
@@ -405,11 +643,25 @@ fn write_fake_codex(path: &Path) -> Result<()> {
         path,
         r#"#!/bin/sh
 set -eu
-: "${COCO_TEST_CODEX_ARGS:?}"
-arguments_tmp="${COCO_TEST_CODEX_ARGS}.tmp"
+case "${1:-}" in
+  app-server)
+    : "${COCO_TEST_CODEX_ARGS:?}"
+    destination="${COCO_TEST_CODEX_ARGS}"
+    ;;
+  resume)
+    : "${COCO_TEST_JUMP_ARGS:?}"
+    destination="${COCO_TEST_JUMP_ARGS}"
+    ;;
+  *)
+    exit 64
+    ;;
+esac
+arguments_tmp="${destination}.tmp"
 printf '%s\n' "$@" > "$arguments_tmp"
-mv "$arguments_tmp" "$COCO_TEST_CODEX_ARGS"
-exec sleep 3600
+mv "$arguments_tmp" "$destination"
+if [ "$1" = "app-server" ]; then
+  exec sleep 3600
+fi
 "#,
     )?;
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
@@ -441,6 +693,24 @@ fn verify_app_server_arguments(arguments: &[String], token_path: &Path) -> Resul
         "unexpected token path"
     );
     Ok(arguments[2].clone())
+}
+
+fn verify_jump_arguments(arguments: &[String], endpoint: &str, worktree: &Path) -> Result<()> {
+    let expected = [
+        "resume".to_owned(),
+        THREAD_ID.to_owned(),
+        "--remote".to_owned(),
+        endpoint.to_owned(),
+        "--remote-auth-token-env".to_owned(),
+        "COCO_CODEX_REMOTE_CAPABILITY_TOKEN".to_owned(),
+        "-C".to_owned(),
+        worktree.to_string_lossy().into_owned(),
+    ];
+    ensure!(
+        arguments == expected,
+        "unexpected fake jump arguments: {arguments:?}"
+    );
+    Ok(())
 }
 
 async fn run_cli(paths: &TestPaths, repository: &Path, arguments: &[&str]) -> Result<Output> {
@@ -560,6 +830,41 @@ fn verify_codex_requests(requests: &[Value], worktree: &Path) -> Result<()> {
             .and_then(Value::as_str)
             .is_some_and(|value| value.starts_with("coco-")),
         "turn/start had no CoCo message id"
+    );
+    Ok(())
+}
+
+fn verify_remote_tui_requests(requests: &[Value]) -> Result<()> {
+    let methods = requests
+        .iter()
+        .map(|request| {
+            request
+                .get("method")
+                .and_then(Value::as_str)
+                .context("remote TUI request had no method")
+        })
+        .collect::<Result<Vec<_>>>()?;
+    assert_eq!(
+        methods,
+        [
+            "initialize",
+            "initialized",
+            "thread/resume",
+            "thread/unsubscribe",
+            "initialize",
+            "initialized",
+            "thread/resume",
+        ]
+    );
+    for request in requests
+        .iter()
+        .filter(|request| request.get("method") == Some(&json!("thread/resume")))
+    {
+        assert_eq!(request.pointer("/params/threadId"), Some(&json!(THREAD_ID)));
+    }
+    ensure!(
+        !methods.contains(&"turn/interrupt"),
+        "leaving a remote TUI unexpectedly interrupted the turn"
     );
     Ok(())
 }
