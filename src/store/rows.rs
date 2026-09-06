@@ -8,24 +8,26 @@ use super::{StoreError, path_text};
 #[cfg(test)]
 use crate::domain::{Audit, AuditOutcome};
 use crate::domain::{
-    CodexThreadStatus, ContextMode, EventKind, EventSource, NormalizedEvent, Repository, Task,
-    TaskLifecycle, ThreadRuntimeSnapshot, Turn, TurnPhase, derive_task_runtime,
+    CodexThreadStatus, ContextMode, EventKind, EventSource, NormalizedEvent, Repository,
+    ThreadRuntimeSnapshot, Turn, TurnPhase, Workspace, WorkspaceLifecycle,
+    derive_workspace_runtime,
 };
 
-pub(super) const TASK_SELECT: &str = "SELECT id, create_operation_id, repository_id, name,
+pub(super) const WORKSPACE_SELECT: &str = "SELECT id, create_operation_id, repository_id, name,
     context_mode, context_json, profile_json, lifecycle, thread_status_json,
     thread_status_generation, thread_status_observed_at_ms, thread_status_is_fresh,
     branch_name, base_sha, worktree_path, codex_thread_id, parent_thread_id, active_turn_id,
-    last_error_code, last_error_message, created_at_ms, updated_at_ms, completed_at_ms FROM tasks";
+    last_error_code, last_error_message, created_at_ms, updated_at_ms, completed_at_ms FROM workspaces";
 
-pub(super) const TURN_SELECT: &str = "SELECT id, task_id, operation_id, client_message_id,
+pub(super) const TURN_SELECT: &str = "SELECT id, workspace_id, operation_id, client_message_id,
     codex_turn_id, phase, requested_at_ms, started_at_ms, completed_at_ms, error_json FROM turns";
 
-pub(super) const EVENT_SELECT: &str = "SELECT sequence, id, task_id, turn_id, kind, source,
+pub(super) const EVENT_SELECT: &str = "SELECT sequence, id, workspace_id, turn_id, kind, source,
     source_method, occurred_at_ms, recorded_at_ms, payload_json FROM events";
 
 #[cfg(test)]
-pub(super) const AUDIT_SELECT: &str = "SELECT sequence, id, source, action, task_id, operation_id,
+pub(super) const AUDIT_SELECT: &str =
+    "SELECT sequence, id, source, action, workspace_id, operation_id,
     outcome, details_json, occurred_at_ms FROM audit_events";
 
 pub(super) fn map_repository(row: &Row<'_>) -> rusqlite::Result<Repository> {
@@ -40,16 +42,16 @@ pub(super) fn map_repository(row: &Row<'_>) -> rusqlite::Result<Repository> {
     })
 }
 
-pub(super) fn map_task(row: &Row<'_>) -> rusqlite::Result<Task> {
+pub(super) fn map_workspace(row: &Row<'_>) -> rusqlite::Result<Workspace> {
     let context_mode: String = row.get(4)?;
     let lifecycle: String = row.get(7)?;
-    let lifecycle = TaskLifecycle::parse(&lifecycle)
-        .ok_or_else(|| invalid_value(7, "task lifecycle", &lifecycle))?;
+    let lifecycle = WorkspaceLifecycle::parse(&lifecycle)
+        .ok_or_else(|| invalid_value(7, "workspace lifecycle", &lifecycle))?;
     let thread_runtime = map_thread_status(row)?;
     let active_turn_id: Option<String> = row.get(17)?;
     let (phase, wait_reasons) =
-        derive_task_runtime(lifecycle, thread_runtime.as_ref(), active_turn_id.is_some());
-    Ok(Task {
+        derive_workspace_runtime(lifecycle, thread_runtime.as_ref(), active_turn_id.is_some());
+    Ok(Workspace {
         id: row.get(0)?,
         create_operation_id: row.get(1)?,
         repository_id: row.get(2)?,
@@ -98,7 +100,7 @@ pub(super) fn map_turn(row: &Row<'_>) -> rusqlite::Result<Turn> {
     let phase: String = row.get(5)?;
     Ok(Turn {
         id: row.get(0)?,
-        task_id: row.get(1)?,
+        workspace_id: row.get(1)?,
         operation_id: row.get(2)?,
         client_message_id: row.get(3)?,
         codex_turn_id: row.get(4)?,
@@ -116,7 +118,7 @@ pub(super) fn map_event(row: &Row<'_>) -> rusqlite::Result<NormalizedEvent> {
     Ok(NormalizedEvent {
         sequence: row.get(0)?,
         id: row.get(1)?,
-        task_id: row.get(2)?,
+        workspace_id: row.get(2)?,
         turn_id: row.get(3)?,
         kind: EventKind::parse(&kind).ok_or_else(|| invalid_value(4, "event kind", &kind))?,
         source: EventSource::parse(&source)
@@ -136,7 +138,7 @@ pub(super) fn map_audit(row: &Row<'_>) -> rusqlite::Result<Audit> {
         id: row.get(1)?,
         source: row.get(2)?,
         action: row.get(3)?,
-        task_id: row.get(4)?,
+        workspace_id: row.get(4)?,
         operation_id: row.get(5)?,
         outcome: AuditOutcome::parse(&outcome)
             .ok_or_else(|| invalid_value(6, "audit outcome", &outcome))?,
@@ -206,19 +208,26 @@ pub(super) fn get_repository_by_common_dir(
         .map_err(StoreError::from)
 }
 
-pub(super) fn get_task_by_id(
+pub(super) fn get_workspace_by_id(
     connection: &Connection,
     id: &str,
-) -> Result<Option<Task>, StoreError> {
+) -> Result<Option<Workspace>, StoreError> {
     connection
-        .query_row(&format!("{} WHERE id = ?1", TASK_SELECT), [id], map_task)
+        .query_row(
+            &format!("{} WHERE id = ?1", WORKSPACE_SELECT),
+            [id],
+            map_workspace,
+        )
         .optional()
         .map_err(StoreError::from)
 }
 
-pub(super) fn require_task(connection: &Connection, id: &str) -> Result<Task, StoreError> {
-    get_task_by_id(connection, id)?.ok_or_else(|| StoreError::NotFound {
-        entity: "task",
+pub(super) fn require_workspace(
+    connection: &Connection,
+    id: &str,
+) -> Result<Workspace, StoreError> {
+    get_workspace_by_id(connection, id)?.ok_or_else(|| StoreError::NotFound {
+        entity: "workspace",
         id: id.to_owned(),
     })
 }

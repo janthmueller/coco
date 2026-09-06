@@ -12,16 +12,24 @@ use super::output::phase_label;
 use super::status::follow_stops_at;
 
 #[test]
-fn parses_task_preparation_with_an_optional_profile() {
-    let minimal = Cli::try_parse_from(["coco", "new", "auth"]);
+fn parses_workspace_creation_with_an_optional_profile() {
+    let minimal = Cli::try_parse_from(["coco", "create", "auth"]);
     assert!(minimal.is_ok());
 
-    let configured =
-        Cli::try_parse_from(["coco", "new", "auth", "--base", "main", "--profile", "dev"]);
+    let configured = Cli::try_parse_from([
+        "coco",
+        "create",
+        "auth",
+        "--base",
+        "main",
+        "--profile",
+        "dev",
+    ]);
     assert!(configured.is_ok());
 
-    assert!(Cli::try_parse_from(["coco", "new", "auth", "--goal", "work"]).is_err());
-    assert!(Cli::try_parse_from(["coco", "new", "auth", "--context", "fresh"]).is_err());
+    assert!(Cli::try_parse_from(["coco", "create", "auth", "--goal", "work"]).is_err());
+    assert!(Cli::try_parse_from(["coco", "create", "auth", "--context", "fresh"]).is_err());
+    assert!(Cli::try_parse_from(["coco", "new", "auth"]).is_err());
 }
 
 #[test]
@@ -43,7 +51,7 @@ fn exposes_status_follow_and_jump_without_the_old_overlapping_commands() {
 }
 
 #[test]
-fn presents_stable_user_facing_task_states() {
+fn presents_stable_user_facing_workspace_states() {
     assert_eq!(phase_label("provisioning"), "Preparing worktree");
     assert_eq!(phase_label("active"), "Working");
     assert_eq!(phase_label("waiting_for_approval"), "Waiting for approval");
@@ -75,7 +83,7 @@ async fn builds_an_authenticated_jump_into_the_managed_worktree() {
     .unwrap();
     std::fs::write(&paths.codex_token_path, "test-capability\n").unwrap();
     let response = json!({
-        "task": {
+        "workspace": {
             "worktreePath": worktree,
             "codexThreadId": "thread-123"
         }

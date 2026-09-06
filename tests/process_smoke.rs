@@ -161,34 +161,40 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     run_cli(
         &paths,
         &repository,
-        &["new", "process-smoke", "--base", "HEAD"],
+        &["create", "process-smoke", "--base", "HEAD"],
     )
     .await?;
 
     let listed = cli_json(&run_cli(&paths, &repository, &["ls", "--json"]).await?)?;
-    assert_eq!(listed["schemaVersion"], 2);
-    let tasks = listed["tasks"]
+    assert_eq!(listed["schemaVersion"], 3);
+    let workspaces = listed["workspaces"]
         .as_array()
-        .context("coco ls did not return a tasks array")?;
+        .context("coco ls did not return a workspaces array")?;
     ensure!(
-        tasks.len() == 1,
-        "coco ls returned an unexpected task count"
+        workspaces.len() == 1,
+        "coco ls returned an unexpected workspace count"
     );
-    let task = &tasks[0];
-    assert_eq!(task["name"], "process-smoke");
-    assert_eq!(task["lifecycle"], "ready");
-    assert_eq!(task["phase"], "idle");
-    assert_eq!(task["waitReasons"], json!([]));
-    assert_eq!(task["threadRuntime"]["status"]["type"], "idle");
-    assert_eq!(task["threadRuntime"]["isFresh"], true);
-    assert_eq!(task["codexThreadId"], THREAD_ID);
-    ensure!(task.get("goal").is_none(), "retired goal field was exposed");
+    let workspace = &workspaces[0];
+    assert_eq!(workspace["name"], "process-smoke");
+    assert_eq!(workspace["lifecycle"], "ready");
+    assert_eq!(workspace["phase"], "idle");
+    assert_eq!(workspace["waitReasons"], json!([]));
+    assert_eq!(workspace["threadRuntime"]["status"]["type"], "idle");
+    assert_eq!(workspace["threadRuntime"]["isFresh"], true);
+    assert_eq!(workspace["codexThreadId"], THREAD_ID);
+    ensure!(
+        workspace.get("goal").is_none(),
+        "retired goal field was exposed"
+    );
     let worktree = PathBuf::from(
-        task["worktreePath"]
+        workspace["worktreePath"]
             .as_str()
-            .context("prepared task had no worktree path")?,
+            .context("prepared workspace had no worktree path")?,
     );
-    ensure!(worktree.is_dir(), "prepared task worktree does not exist");
+    ensure!(
+        worktree.is_dir(),
+        "prepared workspace worktree does not exist"
+    );
 
     run_cli(
         &paths,
@@ -196,8 +202,8 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         &["send", "process-smoke", "Complete the process smoke test"],
     )
     .await?;
-    let active = task_status(&paths, &repository).await?;
-    assert_eq!(active["task"]["phase"], "active");
+    let active = workspace_status(&paths, &repository).await?;
+    assert_eq!(active["workspace"]["phase"], "active");
 
     run_cli(&paths, &repository, &["jump", "process-smoke"]).await?;
     let jump_arguments = read_arguments(&paths.jump_args)?;
@@ -211,23 +217,23 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
 
     remote_tui_session(&endpoint, capability_token.trim(), true).await?;
     assert_eq!(
-        task_status(&paths, &repository).await?["task"]["phase"],
+        workspace_status(&paths, &repository).await?["workspace"]["phase"],
         "active"
     );
     remote_tui_session(&endpoint, capability_token.trim(), false).await?;
     assert_eq!(
-        task_status(&paths, &repository).await?["task"]["phase"],
+        workspace_status(&paths, &repository).await?["workspace"]["phase"],
         "active"
     );
 
     complete_sender
         .send(())
         .map_err(|_| anyhow::anyhow!("fake App Server stopped before turn completion"))?;
-    let completed = wait_for_task_phase(&paths, &repository, "idle").await?;
-    assert_eq!(completed["task"]["activeTurnId"], Value::Null);
-    let initial_generation = completed["task"]["threadRuntime"]["runtimeGeneration"]
+    let completed = wait_for_workspace_phase(&paths, &repository, "idle").await?;
+    assert_eq!(completed["workspace"]["activeTurnId"], Value::Null);
+    let initial_generation = completed["workspace"]["threadRuntime"]["runtimeGeneration"]
         .as_str()
-        .context("task had no initial runtime generation")?
+        .context("workspace had no initial runtime generation")?
         .to_owned();
 
     interrupt(&daemon).await?;
@@ -243,7 +249,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     let server_result = timeout(PROCESS_TIMEOUT, app_server)
         .await
         .context("fake App Server did not stop")?
-        .context("fake App Server task panicked")?;
+        .context("fake App Server workspace panicked")?;
     server_result?;
 
     let expected_authorization = format!("Bearer {capability_token}");
@@ -306,14 +312,14 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     ));
 
     wait_for_file(&paths.socket, &mut recovered_daemon, &recovery_log).await?;
-    let recovered = task_status(&paths, &repository).await?;
-    assert_eq!(recovered["task"]["phase"], "idle");
-    assert_eq!(recovered["task"]["threadRuntime"]["isFresh"], true);
+    let recovered = workspace_status(&paths, &repository).await?;
+    assert_eq!(recovered["workspace"]["phase"], "idle");
+    assert_eq!(recovered["workspace"]["threadRuntime"]["isFresh"], true);
     assert_ne!(
-        recovered["task"]["threadRuntime"]["runtimeGeneration"],
+        recovered["workspace"]["threadRuntime"]["runtimeGeneration"],
         initial_generation
     );
-    assert_eq!(recovered["task"]["codexThreadId"], THREAD_ID);
+    assert_eq!(recovered["workspace"]["codexThreadId"], THREAD_ID);
 
     interrupt(&recovered_daemon).await?;
     let recovered_daemon_status = timeout(PROCESS_TIMEOUT, recovered_daemon.wait())
@@ -327,7 +333,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     let recovery_server_result = timeout(PROCESS_TIMEOUT, recovery_server)
         .await
         .context("recovery App Server did not stop")?
-        .context("recovery App Server task panicked")?;
+        .context("recovery App Server workspace panicked")?;
     recovery_server_result?;
     verify_recovery_requests(
         &recovery_requests
@@ -875,23 +881,23 @@ fn cli_json(output: &Output) -> Result<Value> {
     serde_json::from_slice(&output.stdout).context("coco did not emit valid JSON")
 }
 
-async fn task_status(paths: &TestPaths, repository: &Path) -> Result<Value> {
+async fn workspace_status(paths: &TestPaths, repository: &Path) -> Result<Value> {
     cli_json(&run_cli(paths, repository, &["status", "process-smoke", "--json"]).await?)
 }
 
-async fn wait_for_task_phase(
+async fn wait_for_workspace_phase(
     paths: &TestPaths,
     repository: &Path,
     expected: &str,
 ) -> Result<Value> {
     let deadline = Instant::now() + PROCESS_TIMEOUT;
     loop {
-        let status = task_status(paths, repository).await?;
-        if status.pointer("/task/phase").and_then(Value::as_str) == Some(expected) {
+        let status = workspace_status(paths, repository).await?;
+        if status.pointer("/workspace/phase").and_then(Value::as_str) == Some(expected) {
             return Ok(status);
         }
         if Instant::now() >= deadline {
-            bail!("task did not reach phase {expected:?}: {status}");
+            bail!("workspace did not reach phase {expected:?}: {status}");
         }
         sleep(POLL_INTERVAL).await;
     }

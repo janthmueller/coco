@@ -10,11 +10,12 @@ use super::turn::PendingTurnGuard;
 use super::*;
 use crate::codex::CodexEvent;
 use crate::domain::{
-    CodexThreadStatus, ContextMode, Task, TaskLifecycle, TaskPhase, TaskWaitReason,
+    CodexThreadStatus, ContextMode, Workspace, WorkspaceLifecycle, WorkspacePhase,
+    WorkspaceWaitReason,
 };
 use crate::protocol::{
-    EventListParams, RepositoryRegisterParams, TaskCreateParams, TaskDiffParams, TaskGetParams,
-    TaskGitStatus, TaskListParams, TurnStartParams,
+    EventListParams, RepositoryRegisterParams, TurnStartParams, WorkspaceCreateParams,
+    WorkspaceDiffParams, WorkspaceGetParams, WorkspaceGitStatus, WorkspaceListParams,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -212,10 +213,10 @@ impl Fixture {
             .unwrap()
     }
 
-    fn create_params(&self) -> TaskCreateParams {
-        TaskCreateParams {
+    fn create_params(&self) -> WorkspaceCreateParams {
+        WorkspaceCreateParams {
             repository_path: self.source.clone(),
-            name: "first-task".to_owned(),
+            name: "first-workspace".to_owned(),
             base_ref: "HEAD".to_owned(),
             context_mode: ContextMode::Fresh,
             profile: "default".to_owned(),
@@ -240,29 +241,30 @@ impl Fixture {
 }
 
 #[tokio::test]
-async fn prepares_an_idle_task_without_starting_a_turn_and_replays_operation_ids() {
+async fn prepares_an_idle_workspace_without_starting_a_turn_and_replays_operation_ids() {
     let fixture = Fixture::new(FakeWorker::default());
     let repository = fixture.register().await;
 
     let created = fixture
         .coordinator
-        .create_task(fixture.create_params())
+        .create_workspace(fixture.create_params())
         .await
         .unwrap();
-    let task = created.task.clone();
-    assert_eq!(task.lifecycle, TaskLifecycle::Ready);
-    assert_eq!(task.phase, TaskPhase::Idle);
+    let workspace = created.workspace.clone();
+    assert_eq!(workspace.lifecycle, WorkspaceLifecycle::Ready);
+    assert_eq!(workspace.phase, WorkspacePhase::Idle);
     assert_eq!(
-        task.thread_runtime
+        workspace
+            .thread_runtime
             .as_ref()
             .map(|snapshot| &snapshot.status),
         Some(&CodexThreadStatus::Idle)
     );
-    assert!(task.thread_runtime.as_ref().unwrap().is_fresh);
-    assert_eq!(task.codex_thread_id.as_deref(), Some("thread-1"));
+    assert!(workspace.thread_runtime.as_ref().unwrap().is_fresh);
+    assert_eq!(workspace.codex_thread_id.as_deref(), Some("thread-1"));
     assert!(created.turn_id.is_none());
-    assert_eq!(task.profile.effective_settings["model"], "gpt-test");
-    let worktree = task.worktree_path.as_deref().unwrap();
+    assert_eq!(workspace.profile.effective_settings["model"], "gpt-test");
+    let worktree = workspace.worktree_path.as_deref().unwrap();
     assert!(worktree.starts_with(fixture.worktrees.join(&repository.id)));
     assert!(worktree.join("README.md").is_file());
 
@@ -271,28 +273,28 @@ async fn prepares_an_idle_task_without_starting_a_turn_and_replays_operation_ids
     assert!(matches!(
         &calls[0],
         WorkerCall::Thread { name, cwd, config }
-            if name == "first-task" && cwd == worktree && config == &json!({})
+            if name == "first-workspace" && cwd == worktree && config == &json!({})
     ));
     let replay = fixture
         .coordinator
-        .create_task(fixture.create_params())
+        .create_workspace(fixture.create_params())
         .await
         .unwrap();
-    assert_eq!(replay.task.id, task.id);
+    assert_eq!(replay.workspace.id, workspace.id);
     assert_eq!(fixture.worker.calls().len(), 1);
 
     let mut conflict = fixture.create_params();
     conflict.base_ref = "different-base".to_owned();
     assert!(matches!(
-        fixture.coordinator.create_task(conflict).await,
+        fixture.coordinator.create_workspace(conflict).await,
         Err(CoordinatorError::IdempotencyConflict)
     ));
 
-    let events = fixture.store.events_after(Some(&task.id), 0).unwrap();
+    let events = fixture.store.events_after(Some(&workspace.id), 0).unwrap();
     assert_eq!(
         events.iter().map(|event| event.kind).collect::<Vec<_>>(),
         [
-            EventKind::TaskCreated,
+            EventKind::WorkspaceCreated,
             EventKind::WorktreeCreated,
             EventKind::AgentStarted,
         ]
@@ -305,14 +307,19 @@ async fn recovers_a_ready_thread_with_its_stored_worktree_and_profile() {
     fixture.register().await;
     let created = fixture
         .coordinator
-        .create_task(fixture.create_params())
+        .create_workspace(fixture.create_params())
         .await
         .unwrap();
-    let task = created.task;
+    let workspace = created.workspace;
     assert!(fixture.store.reconcile_unfinished().unwrap().is_empty());
     assert_eq!(
-        fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
-        TaskPhase::Unavailable
+        fixture
+            .store
+            .workspace_by_id(&workspace.id)
+            .unwrap()
+            .unwrap()
+            .phase,
+        WorkspacePhase::Unavailable
     );
 
     let worker = Arc::new(FakeWorker::default());
@@ -322,8 +329,12 @@ async fn recovers_a_ready_thread_with_its_stored_worktree_and_profile() {
     assert_eq!(report.recovered, 1);
     assert_eq!(report.failed, 0);
 
-    let recovered = fixture.store.task_by_id(&task.id).unwrap().unwrap();
-    assert_eq!(recovered.phase, TaskPhase::Idle);
+    let recovered = fixture
+        .store
+        .workspace_by_id(&workspace.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(recovered.phase, WorkspacePhase::Idle);
     let runtime = recovered.thread_runtime.unwrap();
     assert!(runtime.is_fresh);
     assert_eq!(runtime.runtime_generation, "runtime-recovered");
@@ -332,13 +343,13 @@ async fn recovers_a_ready_thread_with_its_stored_worktree_and_profile() {
         worker.calls(),
         [WorkerCall::Resume {
             thread_id: "thread-1".to_owned(),
-            cwd: task.worktree_path.unwrap(),
+            cwd: workspace.worktree_path.unwrap(),
             config: json!({}),
         }]
     );
     let event = fixture
         .store
-        .events_after(Some(&task.id), 0)
+        .events_after(Some(&workspace.id), 0)
         .unwrap()
         .pop()
         .unwrap();
@@ -353,19 +364,19 @@ async fn isolates_resume_failure_and_retries_only_the_unavailable_thread() {
     fixture.register().await;
     let first = fixture
         .coordinator
-        .create_task(fixture.create_params())
+        .create_workspace(fixture.create_params())
         .await
         .unwrap()
-        .task;
+        .workspace;
     let mut second_params = fixture.create_params();
-    second_params.name = "second-task".to_owned();
+    second_params.name = "second-workspace".to_owned();
     second_params.operation_id = "create-operation-2".to_owned();
     let second = fixture
         .coordinator
-        .create_task(second_params)
+        .create_workspace(second_params)
         .await
         .unwrap()
-        .task;
+        .workspace;
     fixture.store.reconcile_unfinished().unwrap();
 
     let failing_worker = Arc::new(FakeWorker::failing_resume("thread-1"));
@@ -375,8 +386,8 @@ async fn isolates_resume_failure_and_retries_only_the_unavailable_thread() {
     assert_eq!(report.recovered, 1);
     assert_eq!(report.failed, 1);
 
-    let unavailable = fixture.store.task_by_id(&first.id).unwrap().unwrap();
-    assert_eq!(unavailable.phase, TaskPhase::Unavailable);
+    let unavailable = fixture.store.workspace_by_id(&first.id).unwrap().unwrap();
+    assert_eq!(unavailable.phase, WorkspacePhase::Unavailable);
     assert_eq!(
         unavailable.last_error_code.as_deref(),
         Some("THREAD_RECOVERY_FAILED")
@@ -385,8 +396,8 @@ async fn isolates_resume_failure_and_retries_only_the_unavailable_thread() {
         unavailable.last_error_message.as_deref(),
         Some("Codex could not resume the stored thread")
     );
-    let recovered = fixture.store.task_by_id(&second.id).unwrap().unwrap();
-    assert_eq!(recovered.phase, TaskPhase::Idle);
+    let recovered = fixture.store.workspace_by_id(&second.id).unwrap().unwrap();
+    assert_eq!(recovered.phase, WorkspacePhase::Idle);
     assert!(recovered.thread_runtime.unwrap().is_fresh);
 
     let retry_worker = Arc::new(FakeWorker::default());
@@ -395,8 +406,8 @@ async fn isolates_resume_failure_and_retries_only_the_unavailable_thread() {
     assert_eq!(retry_report.attempted, 1);
     assert_eq!(retry_report.recovered, 1);
     assert_eq!(retry_report.failed, 0);
-    let retried = fixture.store.task_by_id(&first.id).unwrap().unwrap();
-    assert_eq!(retried.phase, TaskPhase::Idle);
+    let retried = fixture.store.workspace_by_id(&first.id).unwrap().unwrap();
+    assert_eq!(retried.phase, WorkspacePhase::Idle);
     assert_eq!(retried.last_error_code, None);
     assert_eq!(retried.last_error_message, None);
     assert_eq!(retry_worker.calls().len(), 1);
@@ -414,7 +425,12 @@ async fn refuses_to_resume_when_the_named_profile_changed() {
     .unwrap();
     let mut params = fixture.create_params();
     params.profile = "dev".to_owned();
-    let task = fixture.coordinator.create_task(params).await.unwrap().task;
+    let workspace = fixture
+        .coordinator
+        .create_workspace(params)
+        .await
+        .unwrap()
+        .workspace;
     fixture.store.reconcile_unfinished().unwrap();
     fs::write(
         fixture.codex_home.join("config.toml"),
@@ -429,15 +445,19 @@ async fn refuses_to_resume_when_the_named_profile_changed() {
     assert_eq!(report.recovered, 0);
     assert_eq!(report.failed, 1);
     assert!(worker.calls().is_empty());
-    let unavailable = fixture.store.task_by_id(&task.id).unwrap().unwrap();
-    assert_eq!(unavailable.phase, TaskPhase::Unavailable);
+    let unavailable = fixture
+        .store
+        .workspace_by_id(&workspace.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(unavailable.phase, WorkspacePhase::Unavailable);
     assert_eq!(
         unavailable.last_error_message.as_deref(),
-        Some("The task profile changed after the thread was created")
+        Some("The workspace profile changed after the thread was created")
     );
     let failure = fixture
         .store
-        .events_after(Some(&task.id), 0)
+        .events_after(Some(&workspace.id), 0)
         .unwrap()
         .pop()
         .unwrap();
@@ -452,20 +472,20 @@ async fn normalizes_codex_events_and_allows_an_idempotent_follow_up_turn() {
     fixture.register().await;
     let created = fixture
         .coordinator
-        .create_task(fixture.create_params())
+        .create_workspace(fixture.create_params())
         .await
         .unwrap();
-    let task = created.task;
+    let workspace = created.workspace;
 
     let first_send = TurnStartParams {
         repository_path: fixture.source.clone(),
-        task: task.name.clone(),
+        workspace: workspace.name.clone(),
         message: "Implement the requested behavior".to_owned(),
         operation_id: "send-operation-initial".to_owned(),
     };
     let first_started = fixture.coordinator.start_turn(first_send).await.unwrap();
     assert_eq!(first_started.codex_turn_id.as_deref(), Some("turn-1"));
-    assert_eq!(first_started.task.phase, TaskPhase::Active);
+    assert_eq!(first_started.workspace.phase, WorkspacePhase::Active);
 
     fixture
         .coordinator
@@ -481,12 +501,17 @@ async fn normalizes_codex_events_and_allows_an_idempotent_follow_up_turn() {
         })
         .unwrap();
     assert_eq!(
-        fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
-        TaskPhase::Active
+        fixture
+            .store
+            .workspace_by_id(&workspace.id)
+            .unwrap()
+            .unwrap()
+            .phase,
+        WorkspacePhase::Active
     );
     let request = fixture
         .store
-        .events_after(Some(&task.id), 0)
+        .events_after(Some(&workspace.id), 0)
         .unwrap()
         .pop()
         .unwrap();
@@ -516,13 +541,18 @@ async fn normalizes_codex_events_and_allows_an_idempotent_follow_up_turn() {
         })
         .unwrap();
     assert_eq!(
-        fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
-        TaskPhase::Idle
+        fixture
+            .store
+            .workspace_by_id(&workspace.id)
+            .unwrap()
+            .unwrap()
+            .phase,
+        WorkspacePhase::Idle
     );
 
     let send = TurnStartParams {
         repository_path: fixture.source.clone(),
-        task: task.name.clone(),
+        workspace: workspace.name.clone(),
         message: "Run the final checks".to_owned(),
         operation_id: "send-operation-1".to_owned(),
     };
@@ -552,7 +582,7 @@ fn record_thread_status(fixture: &Fixture, status: Value) {
         .unwrap();
 }
 
-fn assert_waiting_status_projection(fixture: &Fixture, task: &Task) {
+fn assert_waiting_status_projection(fixture: &Fixture, workspace: &Workspace) {
     record_thread_status(
         fixture,
         json!({
@@ -560,11 +590,18 @@ fn assert_waiting_status_projection(fixture: &Fixture, task: &Task) {
             "activeFlags": ["waitingOnUserInput", "futureFlag", "waitingOnApproval"]
         }),
     );
-    let waiting = fixture.store.task_by_id(&task.id).unwrap().unwrap();
-    assert_eq!(waiting.phase, TaskPhase::WaitingForApproval);
+    let waiting = fixture
+        .store
+        .workspace_by_id(&workspace.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(waiting.phase, WorkspacePhase::WaitingForApproval);
     assert_eq!(
         waiting.wait_reasons,
-        [TaskWaitReason::Approval, TaskWaitReason::UserInput]
+        [
+            WorkspaceWaitReason::Approval,
+            WorkspaceWaitReason::UserInput
+        ]
     );
     assert_eq!(
         waiting
@@ -585,31 +622,56 @@ fn assert_waiting_status_projection(fixture: &Fixture, task: &Task) {
         json!({"type": "active", "activeFlags": ["waitingOnUserInput"]}),
     );
     assert_eq!(
-        fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
-        TaskPhase::WaitingForInput
+        fixture
+            .store
+            .workspace_by_id(&workspace.id)
+            .unwrap()
+            .unwrap()
+            .phase,
+        WorkspacePhase::WaitingForInput
     );
     record_thread_status(fixture, json!({"type": "active", "activeFlags": []}));
     assert_eq!(
-        fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
-        TaskPhase::Active
+        fixture
+            .store
+            .workspace_by_id(&workspace.id)
+            .unwrap()
+            .unwrap()
+            .phase,
+        WorkspacePhase::Active
     );
 }
 
-fn assert_nonactive_status_projection(fixture: &Fixture, task: &Task) {
+fn assert_nonactive_status_projection(fixture: &Fixture, workspace: &Workspace) {
     record_thread_status(fixture, json!({"type": "systemError"}));
     assert_eq!(
-        fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
-        TaskPhase::SystemError
+        fixture
+            .store
+            .workspace_by_id(&workspace.id)
+            .unwrap()
+            .unwrap()
+            .phase,
+        WorkspacePhase::SystemError
     );
     record_thread_status(fixture, json!({"type": "notLoaded"}));
     assert_eq!(
-        fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
-        TaskPhase::NotLoaded
+        fixture
+            .store
+            .workspace_by_id(&workspace.id)
+            .unwrap()
+            .unwrap()
+            .phase,
+        WorkspacePhase::NotLoaded
     );
     assert_eq!(fixture.coordinator.record_codex_disconnected().unwrap(), 1);
     assert_eq!(
-        fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
-        TaskPhase::Unavailable
+        fixture
+            .store
+            .workspace_by_id(&workspace.id)
+            .unwrap()
+            .unwrap()
+            .phase,
+        WorkspacePhase::Unavailable
     );
 }
 
@@ -619,10 +681,10 @@ async fn tracks_turns_started_by_an_external_tui_and_runtime_waiting_states() {
     fixture.register().await;
     let created = fixture
         .coordinator
-        .create_task(fixture.create_params())
+        .create_workspace(fixture.create_params())
         .await
         .unwrap();
-    let task = created.task;
+    let workspace = created.workspace;
     let started = CodexEvent::Notification {
         method: "turn/started".to_owned(),
         params: json!({
@@ -638,14 +700,23 @@ async fn tracks_turns_started_by_an_external_tui_and_runtime_waiting_states() {
             .record_codex_event(started.clone())
             .unwrap();
         assert_eq!(
-            fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
-            TaskPhase::Idle
+            fixture
+                .store
+                .workspace_by_id(&workspace.id)
+                .unwrap()
+                .unwrap()
+                .phase,
+            WorkspacePhase::Idle
         );
     }
 
     fixture.coordinator.record_codex_event(started).unwrap();
-    let active = fixture.store.task_by_id(&task.id).unwrap().unwrap();
-    assert_eq!(active.phase, TaskPhase::Active);
+    let active = fixture
+        .store
+        .workspace_by_id(&workspace.id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(active.phase, WorkspacePhase::Active);
     assert!(active.active_turn_id.is_some());
     assert!(
         fixture
@@ -655,7 +726,7 @@ async fn tracks_turns_started_by_an_external_tui_and_runtime_waiting_states() {
             .is_some()
     );
 
-    assert_waiting_status_projection(&fixture, &task);
+    assert_waiting_status_projection(&fixture, &workspace);
 
     fixture
         .coordinator
@@ -668,8 +739,13 @@ async fn tracks_turns_started_by_an_external_tui_and_runtime_waiting_states() {
         })
         .unwrap();
     assert_eq!(
-        fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
-        TaskPhase::Active
+        fixture
+            .store
+            .workspace_by_id(&workspace.id)
+            .unwrap()
+            .unwrap()
+            .phase,
+        WorkspacePhase::Active
     );
 
     fixture
@@ -683,34 +759,39 @@ async fn tracks_turns_started_by_an_external_tui_and_runtime_waiting_states() {
         })
         .unwrap();
     assert_eq!(
-        fixture.store.task_by_id(&task.id).unwrap().unwrap().phase,
-        TaskPhase::Idle
+        fixture
+            .store
+            .workspace_by_id(&workspace.id)
+            .unwrap()
+            .unwrap()
+            .phase,
+        WorkspacePhase::Idle
     );
 
-    assert_nonactive_status_projection(&fixture, &task);
+    assert_nonactive_status_projection(&fixture, &workspace);
 }
 
 #[tokio::test]
-async fn preserves_the_worktree_and_marks_the_task_failed_after_worker_failure() {
+async fn preserves_the_worktree_and_marks_the_workspace_failed_after_worker_failure() {
     let fixture = Fixture::new(FakeWorker::failing_thread_start());
     let repository = fixture.register().await;
 
     assert!(matches!(
         fixture
             .coordinator
-            .create_task(fixture.create_params())
+            .create_workspace(fixture.create_params())
             .await,
         Err(CoordinatorError::Worker(WorkerError::Runtime(_)))
     ));
-    let task = fixture
+    let workspace = fixture
         .store
-        .task_by_name(&repository.id, "first-task")
+        .workspace_by_name(&repository.id, "first-workspace")
         .unwrap()
         .unwrap();
-    assert_eq!(task.phase, TaskPhase::Failed);
-    assert_eq!(task.lifecycle, TaskLifecycle::Failed);
-    assert_eq!(task.last_error_code.as_deref(), Some("CODEX_ERROR"));
-    assert!(task.worktree_path.unwrap().is_dir());
+    assert_eq!(workspace.phase, WorkspacePhase::Failed);
+    assert_eq!(workspace.lifecycle, WorkspaceLifecycle::Failed);
+    assert_eq!(workspace.last_error_code.as_deref(), Some("CODEX_ERROR"));
+    assert!(workspace.worktree_path.unwrap().is_dir());
     assert_eq!(fixture.worker.calls().len(), 1);
 }
 
@@ -720,16 +801,16 @@ async fn serves_repository_views_events_and_bounded_diffs() {
     fixture.register().await;
     let created = fixture
         .coordinator
-        .create_task(fixture.create_params())
+        .create_workspace(fixture.create_params())
         .await
         .unwrap();
-    let task = created.task;
-    let worktree = task.worktree_path.as_deref().unwrap();
+    let workspace = created.workspace;
+    let worktree = workspace.worktree_path.as_deref().unwrap();
     fs::write(worktree.join("new.txt"), "new content\n").unwrap();
 
     let listed = fixture
         .coordinator
-        .list_tasks(TaskListParams {
+        .list_workspaces(WorkspaceListParams {
             repository_path: fixture.source.clone(),
             phases: Some(vec!["idle".to_owned()]),
         })
@@ -738,21 +819,21 @@ async fn serves_repository_views_events_and_bounded_diffs() {
 
     let shown = fixture
         .coordinator
-        .get_task(TaskGetParams {
+        .get_workspace(WorkspaceGetParams {
             repository_path: fixture.source.clone(),
-            task: task.id.clone(),
+            workspace: workspace.id.clone(),
         })
         .unwrap();
     assert!(matches!(
         shown.git,
-        TaskGitStatus::Observed(ref observation) if observation.observed && observation.dirty
+        WorkspaceGitStatus::Observed(ref observation) if observation.observed && observation.dirty
     ));
 
     let events = fixture
         .coordinator
         .list_events(EventListParams {
             repository_path: fixture.source.clone(),
-            task: "first-task".to_owned(),
+            workspace: "first-workspace".to_owned(),
             after_sequence: 0,
         })
         .unwrap();
@@ -760,9 +841,9 @@ async fn serves_repository_views_events_and_bounded_diffs() {
 
     let diff = fixture
         .coordinator
-        .task_diff(TaskDiffParams {
+        .workspace_diff(WorkspaceDiffParams {
             repository_path: fixture.source.clone(),
-            task: "first-task".to_owned(),
+            workspace: "first-workspace".to_owned(),
             max_bytes: Some(16),
         })
         .unwrap();

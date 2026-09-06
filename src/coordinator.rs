@@ -6,9 +6,9 @@ use serde_json::json;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::error;
 
-use crate::domain::{EventKind, EventSource, Repository, Task, TaskLifecycle};
+use crate::domain::{EventKind, EventSource, Repository, Workspace, WorkspaceLifecycle};
 use crate::git::{Git, GitRepository};
-use crate::protocol::TaskResult;
+use crate::protocol::WorkspaceResult;
 use crate::store::{EventDraft, Store};
 
 const MAX_OPERATION_ID_BYTES: usize = 256;
@@ -16,9 +16,9 @@ const MAX_OPERATION_ID_BYTES: usize = 256;
 mod codex_events;
 mod error;
 mod recovery;
-mod task;
 mod turn;
 mod worker;
+mod workspace;
 
 pub(crate) use error::CoordinatorError;
 pub(crate) use worker::{StartedThread, StartedTurn, WorkerError, WorkerRuntime};
@@ -69,21 +69,21 @@ impl Coordinator {
         Ok((repository, discovered))
     }
 
-    fn resolve_task(
+    fn resolve_workspace(
         &self,
         repository: &Repository,
         reference: &str,
-    ) -> Result<Task, CoordinatorError> {
-        if let Some(task) = self.store.task_by_id(reference)? {
-            return if task.repository_id == repository.id {
-                Ok(task)
+    ) -> Result<Workspace, CoordinatorError> {
+        if let Some(workspace) = self.store.workspace_by_id(reference)? {
+            return if workspace.repository_id == repository.id {
+                Ok(workspace)
             } else {
-                Err(CoordinatorError::TaskNotFound(reference.to_owned()))
+                Err(CoordinatorError::WorkspaceNotFound(reference.to_owned()))
             };
         }
         self.store
-            .task_by_name(&repository.id, reference)?
-            .ok_or_else(|| CoordinatorError::TaskNotFound(reference.to_owned()))
+            .workspace_by_name(&repository.id, reference)?
+            .ok_or_else(|| CoordinatorError::WorkspaceNotFound(reference.to_owned()))
     }
 
     async fn repository_lock(&self, repository_id: &str) -> Arc<AsyncMutex<()>> {
@@ -95,40 +95,46 @@ impl Coordinator {
         )
     }
 
-    fn task_response(&self, task: Task) -> Result<TaskResult, CoordinatorError> {
-        let turn = task
+    fn workspace_response(
+        &self,
+        workspace: Workspace,
+    ) -> Result<WorkspaceResult, CoordinatorError> {
+        let turn = workspace
             .active_turn_id
             .as_deref()
             .map(|turn_id| self.store.turn_by_id(turn_id))
             .transpose()?
             .flatten();
         match turn {
-            Some(turn) => Ok(TaskResult::with_turn(task, &turn)),
-            None => Ok(TaskResult::prepared(task)),
+            Some(turn) => Ok(WorkspaceResult::with_turn(workspace, &turn)),
+            None => Ok(WorkspaceResult::prepared(workspace)),
         }
     }
 
-    fn mark_task_failed(
+    fn mark_workspace_failed(
         &self,
-        task_id: &str,
+        workspace_id: &str,
         stage: &'static str,
         source_error: &CoordinatorError,
         source: EventSource,
     ) {
         let message = source_error.to_string();
         let code = source_error.code();
-        if let Err(store_error) = self.store.transition_task_lifecycle_from_with_event(
-            task_id,
-            &[TaskLifecycle::Provisioning, TaskLifecycle::Starting],
-            TaskLifecycle::Failed,
+        if let Err(store_error) = self.store.transition_workspace_lifecycle_from_with_event(
+            workspace_id,
+            &[
+                WorkspaceLifecycle::Provisioning,
+                WorkspaceLifecycle::Starting,
+            ],
+            WorkspaceLifecycle::Failed,
             Some((code, &message)),
-            EventDraft::task(
+            EventDraft::workspace(
                 EventKind::AgentFailed,
                 source,
                 json!({"stage": stage, "code": code, "message": message}),
             ),
         ) {
-            error!(task_id, stage, %store_error, "could not persist task failure");
+            error!(workspace_id, stage, %store_error, "could not persist workspace failure");
         }
     }
 }

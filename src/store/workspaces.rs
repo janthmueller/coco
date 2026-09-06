@@ -3,28 +3,28 @@ use serde_json::json;
 
 use super::events::insert_event;
 use super::rows::{
-    TASK_SELECT, TURN_SELECT, get_task_by_id, get_turn_by_id, map_task, map_turn, require_task,
-    require_turn,
+    TURN_SELECT, WORKSPACE_SELECT, get_turn_by_id, get_workspace_by_id, map_turn, map_workspace,
+    require_turn, require_workspace,
 };
 use super::{
-    EventDraft, NewTask, NewThreadBinding, NewTurn, Store, StoreError, TurnCompletion,
+    EventDraft, NewThreadBinding, NewTurn, NewWorkspace, Store, StoreError, TurnCompletion,
     json_to_sql_error, new_id, now_ms, path_text, sanitized_error_columns,
 };
 use crate::domain::{
-    CodexThreadStatus, EventKind, EventSource, NormalizedEvent, ProfileSnapshot, Task,
-    TaskLifecycle, Turn, TurnPhase,
+    CodexThreadStatus, EventKind, EventSource, NormalizedEvent, ProfileSnapshot, Turn, TurnPhase,
+    Workspace, WorkspaceLifecycle,
 };
 
 impl Store {
-    pub fn create_task_with_event(
+    pub fn create_workspace_with_event(
         &self,
-        input: NewTask,
+        input: NewWorkspace,
         mut event: EventDraft,
-    ) -> Result<(Task, NormalizedEvent), StoreError> {
+    ) -> Result<(Workspace, NormalizedEvent), StoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let now = now_ms();
-        let task_id = new_id();
+        let workspace_id = new_id();
         let profile_json = serde_json::to_string(&input.profile).map_err(json_to_sql_error)?;
         let context_json = serde_json::to_string(&input.context).map_err(json_to_sql_error)?;
         let worktree_path = input
@@ -34,7 +34,7 @@ impl Store {
             .transpose()?
             .map(str::to_owned);
         transaction.execute(
-            "INSERT INTO tasks (
+            "INSERT INTO workspaces (
                 id, create_operation_id, repository_id, name, context_mode,
                 context_json, profile_json, lifecycle, thread_status_json,
                 thread_status_generation, thread_status_observed_at_ms,
@@ -46,7 +46,7 @@ impl Store {
                 ?8, ?9, ?10, NULL, NULL, NULL, NULL, NULL, ?11, ?11, NULL
              )",
             params![
-                task_id,
+                workspace_id,
                 input.create_operation_id,
                 input.repository_id,
                 input.name,
@@ -59,26 +59,28 @@ impl Store {
                 now,
             ],
         )?;
-        event.task_id = Some(task_id.clone());
+        event.workspace_id = Some(workspace_id.clone());
         let event = insert_event(&transaction, event)?;
-        let task = get_task_by_id(&transaction, &task_id)?.ok_or_else(|| StoreError::NotFound {
-            entity: "task",
-            id: task_id.clone(),
+        let workspace = get_workspace_by_id(&transaction, &workspace_id)?.ok_or_else(|| {
+            StoreError::NotFound {
+                entity: "workspace",
+                id: workspace_id.clone(),
+            }
         })?;
         transaction.commit()?;
-        Ok((task, event))
+        Ok((workspace, event))
     }
 
-    pub fn transition_task_lifecycle_with_event(
+    pub fn transition_workspace_lifecycle_with_event(
         &self,
-        task_id: &str,
-        expected: TaskLifecycle,
-        next: TaskLifecycle,
+        workspace_id: &str,
+        expected: WorkspaceLifecycle,
+        next: WorkspaceLifecycle,
         last_error: Option<(&str, &str)>,
         event: EventDraft,
-    ) -> Result<(Task, NormalizedEvent), StoreError> {
-        self.transition_task_lifecycle_from_with_event(
-            task_id,
+    ) -> Result<(Workspace, NormalizedEvent), StoreError> {
+        self.transition_workspace_lifecycle_from_with_event(
+            workspace_id,
             &[expected],
             next,
             last_error,
@@ -86,24 +88,24 @@ impl Store {
         )
     }
 
-    pub fn transition_task_lifecycle_from_with_event(
+    pub fn transition_workspace_lifecycle_from_with_event(
         &self,
-        task_id: &str,
-        expected: &[TaskLifecycle],
-        next: TaskLifecycle,
+        workspace_id: &str,
+        expected: &[WorkspaceLifecycle],
+        next: WorkspaceLifecycle,
         last_error: Option<(&str, &str)>,
         mut event: EventDraft,
-    ) -> Result<(Task, NormalizedEvent), StoreError> {
+    ) -> Result<(Workspace, NormalizedEvent), StoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        assert_task_lifecycle(&transaction, task_id, expected)?;
+        assert_workspace_lifecycle(&transaction, workspace_id, expected)?;
         let now = now_ms();
         let (error_code, error_message) = last_error
             .map(|(code, message)| (Some(code), Some(message)))
             .unwrap_or((None, None));
-        let completed_at = (next == TaskLifecycle::Completed).then_some(now);
+        let completed_at = (next == WorkspaceLifecycle::Completed).then_some(now);
         transaction.execute(
-            "UPDATE tasks SET lifecycle = ?1, last_error_code = ?2, last_error_message = ?3,
+            "UPDATE workspaces SET lifecycle = ?1, last_error_code = ?2, last_error_message = ?3,
                 completed_at_ms = ?4, updated_at_ms = ?5 WHERE id = ?6",
             params![
                 next.as_str(),
@@ -111,31 +113,31 @@ impl Store {
                 error_message,
                 completed_at,
                 now,
-                task_id
+                workspace_id
             ],
         )?;
-        event.task_id = Some(task_id.to_owned());
+        event.workspace_id = Some(workspace_id.to_owned());
         let event = insert_event(&transaction, event)?;
-        let task = require_task(&transaction, task_id)?;
+        let workspace = require_workspace(&transaction, workspace_id)?;
         transaction.commit()?;
-        Ok((task, event))
+        Ok((workspace, event))
     }
 
     pub fn bind_thread_with_event(
         &self,
-        task_id: &str,
-        expected: TaskLifecycle,
+        workspace_id: &str,
+        expected: WorkspaceLifecycle,
         binding: NewThreadBinding,
         mut event: EventDraft,
-    ) -> Result<(Task, NormalizedEvent), StoreError> {
+    ) -> Result<(Workspace, NormalizedEvent), StoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        assert_task_lifecycle(&transaction, task_id, &[expected])?;
+        assert_workspace_lifecycle(&transaction, workspace_id, &[expected])?;
         let status_json =
             serde_json::to_string(&binding.status.canonicalized()).map_err(json_to_sql_error)?;
         let now = now_ms();
         transaction.execute(
-            "UPDATE tasks SET codex_thread_id = ?1, parent_thread_id = ?2,
+            "UPDATE workspaces SET codex_thread_id = ?1, parent_thread_id = ?2,
                 lifecycle = 'ready', thread_status_json = ?3,
                 thread_status_generation = ?4, thread_status_observed_at_ms = ?5,
                 thread_status_is_fresh = 1, updated_at_ms = ?5 WHERE id = ?6",
@@ -145,29 +147,29 @@ impl Store {
                 status_json,
                 binding.runtime_generation,
                 now,
-                task_id
+                workspace_id
             ],
         )?;
-        event.task_id = Some(task_id.to_owned());
+        event.workspace_id = Some(workspace_id.to_owned());
         let event = insert_event(&transaction, event)?;
-        let task = require_task(&transaction, task_id)?;
+        let workspace = require_workspace(&transaction, workspace_id)?;
         transaction.commit()?;
-        Ok((task, event))
+        Ok((workspace, event))
     }
 
     pub fn start_turn_with_event(
         &self,
-        task_id: &str,
+        workspace_id: &str,
         input: NewTurn,
         mut event: EventDraft,
-    ) -> Result<(Task, Turn, NormalizedEvent), StoreError> {
+    ) -> Result<(Workspace, Turn, NormalizedEvent), StoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        assert_task_lifecycle(&transaction, task_id, &[TaskLifecycle::Ready])?;
-        let current = require_task(&transaction, task_id)?;
+        assert_workspace_lifecycle(&transaction, workspace_id, &[WorkspaceLifecycle::Ready])?;
+        let current = require_workspace(&transaction, workspace_id)?;
         if current.active_turn_id.is_some() {
-            return Err(StoreError::InvalidTaskTransition {
-                task_id: task_id.to_owned(),
+            return Err(StoreError::InvalidWorkspaceTransition {
+                workspace_id: workspace_id.to_owned(),
                 expected: "no active turn".to_owned(),
                 actual: "active turn".to_owned(),
             });
@@ -181,12 +183,12 @@ impl Store {
         };
         transaction.execute(
             "INSERT INTO turns (
-                id, task_id, operation_id, client_message_id, codex_turn_id, phase,
+                id, workspace_id, operation_id, client_message_id, codex_turn_id, phase,
                 requested_at_ms, started_at_ms, completed_at_ms, error_json
              ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL)",
             params![
                 turn_id,
-                task_id,
+                workspace_id,
                 input.operation_id,
                 input.client_message_id,
                 input.codex_turn_id,
@@ -200,25 +202,25 @@ impl Store {
             ],
         )?;
         transaction.execute(
-            "UPDATE tasks SET active_turn_id = ?1, updated_at_ms = ?2 WHERE id = ?3",
-            params![turn_id, now, task_id],
+            "UPDATE workspaces SET active_turn_id = ?1, updated_at_ms = ?2 WHERE id = ?3",
+            params![turn_id, now, workspace_id],
         )?;
-        event.task_id = Some(task_id.to_owned());
+        event.workspace_id = Some(workspace_id.to_owned());
         event.turn_id = Some(turn_id.clone());
         let event = insert_event(&transaction, event)?;
-        let task = require_task(&transaction, task_id)?;
+        let workspace = require_workspace(&transaction, workspace_id)?;
         let turn = require_turn(&transaction, &turn_id)?;
         transaction.commit()?;
-        Ok((task, turn, event))
+        Ok((workspace, turn, event))
     }
 
     pub fn complete_turn_with_event(
         &self,
-        task_id: &str,
+        workspace_id: &str,
         turn_id: &str,
         completion: TurnCompletion,
         mut event: EventDraft,
-    ) -> Result<(Task, Turn, NormalizedEvent), StoreError> {
+    ) -> Result<(Workspace, Turn, NormalizedEvent), StoreError> {
         match completion.phase {
             TurnPhase::Completed | TurnPhase::Failed | TurnPhase::Interrupted => {}
             phase => {
@@ -230,11 +232,11 @@ impl Store {
         };
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        assert_task_lifecycle(&transaction, task_id, &[TaskLifecycle::Ready])?;
-        let current = require_task(&transaction, task_id)?;
+        assert_workspace_lifecycle(&transaction, workspace_id, &[WorkspaceLifecycle::Ready])?;
+        let current = require_workspace(&transaction, workspace_id)?;
         if current.active_turn_id.as_deref() != Some(turn_id) {
-            return Err(StoreError::InvalidTaskTransition {
-                task_id: task_id.to_owned(),
+            return Err(StoreError::InvalidWorkspaceTransition {
+                workspace_id: workspace_id.to_owned(),
                 expected: format!("active turn {turn_id}"),
                 actual: current
                     .active_turn_id
@@ -252,44 +254,50 @@ impl Store {
             .map_err(json_to_sql_error)?;
         let updated = transaction.execute(
             "UPDATE turns SET phase = ?1, completed_at_ms = ?2, error_json = ?3
-             WHERE id = ?4 AND task_id = ?5 AND phase IN ('starting', 'in_progress')",
-            params![completion.phase.as_str(), now, error_json, turn_id, task_id],
+             WHERE id = ?4 AND workspace_id = ?5 AND phase IN ('starting', 'in_progress')",
+            params![
+                completion.phase.as_str(),
+                now,
+                error_json,
+                turn_id,
+                workspace_id
+            ],
         )?;
         if updated != 1 {
-            return Err(StoreError::InvalidTaskTransition {
-                task_id: task_id.to_owned(),
+            return Err(StoreError::InvalidWorkspaceTransition {
+                workspace_id: workspace_id.to_owned(),
                 expected: format!("unfinished turn {turn_id}"),
                 actual: "turn missing or already terminal".to_owned(),
             });
         }
         let (error_code, error_message) = sanitized_error_columns(completion.error.as_ref());
         transaction.execute(
-            "UPDATE tasks SET active_turn_id = NULL, last_error_code = ?1,
+            "UPDATE workspaces SET active_turn_id = NULL, last_error_code = ?1,
                 last_error_message = ?2, updated_at_ms = ?3 WHERE id = ?4",
-            params![error_code, error_message, now, task_id],
+            params![error_code, error_message, now, workspace_id],
         )?;
-        event.task_id = Some(task_id.to_owned());
+        event.workspace_id = Some(workspace_id.to_owned());
         event.turn_id = Some(turn_id.to_owned());
         let event = insert_event(&transaction, event)?;
-        let task = require_task(&transaction, task_id)?;
+        let workspace = require_workspace(&transaction, workspace_id)?;
         let turn = require_turn(&transaction, turn_id)?;
         transaction.commit()?;
-        Ok((task, turn, event))
+        Ok((workspace, turn, event))
     }
 
     pub fn observe_thread_status_with_event(
         &self,
-        task_id: &str,
+        workspace_id: &str,
         status: CodexThreadStatus,
         runtime_generation: &str,
         mut event: EventDraft,
-    ) -> Result<(Task, NormalizedEvent), StoreError> {
+    ) -> Result<(Workspace, NormalizedEvent), StoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = require_task(&transaction, task_id)?;
+        let current = require_workspace(&transaction, workspace_id)?;
         if current.codex_thread_id.is_none() {
-            return Err(StoreError::InvalidTaskTransition {
-                task_id: task_id.to_owned(),
+            return Err(StoreError::InvalidWorkspaceTransition {
+                workspace_id: workspace_id.to_owned(),
                 expected: "a bound Codex thread".to_owned(),
                 actual: "no Codex thread".to_owned(),
             });
@@ -298,7 +306,7 @@ impl Store {
             serde_json::to_string(&status.canonicalized()).map_err(json_to_sql_error)?;
         let now = now_ms();
         transaction.execute(
-            "UPDATE tasks SET thread_status_json = ?1, thread_status_generation = ?2,
+            "UPDATE workspaces SET thread_status_json = ?1, thread_status_generation = ?2,
                 thread_status_observed_at_ms = ?3, thread_status_is_fresh = 1,
                 last_error_code = CASE
                     WHEN last_error_code = 'THREAD_RECOVERY_FAILED' THEN NULL
@@ -307,76 +315,76 @@ impl Store {
                     WHEN last_error_code = 'THREAD_RECOVERY_FAILED' THEN NULL
                     ELSE last_error_message END,
                 updated_at_ms = ?3 WHERE id = ?4",
-            params![status_json, runtime_generation, now, task_id],
+            params![status_json, runtime_generation, now, workspace_id],
         )?;
-        event.task_id = Some(task_id.to_owned());
+        event.workspace_id = Some(workspace_id.to_owned());
         let event = insert_event(&transaction, event)?;
-        let task = require_task(&transaction, task_id)?;
+        let workspace = require_workspace(&transaction, workspace_id)?;
         transaction.commit()?;
-        Ok((task, event))
+        Ok((workspace, event))
     }
 
     pub fn record_thread_recovery_failure_with_event(
         &self,
-        task_id: &str,
+        workspace_id: &str,
         error_code: &str,
         error_message: &str,
         mut event: EventDraft,
-    ) -> Result<(Task, NormalizedEvent), StoreError> {
+    ) -> Result<(Workspace, NormalizedEvent), StoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        assert_task_lifecycle(&transaction, task_id, &[TaskLifecycle::Ready])?;
+        assert_workspace_lifecycle(&transaction, workspace_id, &[WorkspaceLifecycle::Ready])?;
         let now = now_ms();
         transaction.execute(
-            "UPDATE tasks SET thread_status_is_fresh = 0, last_error_code = ?1,
+            "UPDATE workspaces SET thread_status_is_fresh = 0, last_error_code = ?1,
                 last_error_message = ?2, updated_at_ms = ?3 WHERE id = ?4",
-            params![error_code, error_message, now, task_id],
+            params![error_code, error_message, now, workspace_id],
         )?;
-        event.task_id = Some(task_id.to_owned());
+        event.workspace_id = Some(workspace_id.to_owned());
         let event = insert_event(&transaction, event)?;
-        let task = require_task(&transaction, task_id)?;
+        let workspace = require_workspace(&transaction, workspace_id)?;
         transaction.commit()?;
-        Ok((task, event))
+        Ok((workspace, event))
     }
 
     pub fn mark_thread_statuses_stale(&self) -> Result<usize, StoreError> {
         let connection = self.lock()?;
         connection
             .execute(
-                "UPDATE tasks SET thread_status_is_fresh = 0
+                "UPDATE workspaces SET thread_status_is_fresh = 0
                  WHERE thread_status_is_fresh = 1",
                 [],
             )
             .map_err(StoreError::from)
     }
 
-    pub fn task_by_id(&self, id: &str) -> Result<Option<Task>, StoreError> {
+    pub fn workspace_by_id(&self, id: &str) -> Result<Option<Workspace>, StoreError> {
         let connection = self.lock()?;
-        get_task_by_id(&connection, id)
+        get_workspace_by_id(&connection, id)
     }
 
-    pub fn task_by_create_operation_id(
+    pub fn workspace_by_create_operation_id(
         &self,
         operation_id: &str,
-    ) -> Result<Option<Task>, StoreError> {
+    ) -> Result<Option<Workspace>, StoreError> {
         let connection = self.lock()?;
         connection
             .query_row(
-                &format!("{} WHERE create_operation_id = ?1", TASK_SELECT),
+                &format!("{} WHERE create_operation_id = ?1", WORKSPACE_SELECT),
                 [operation_id],
-                map_task,
+                map_workspace,
             )
             .optional()
             .map_err(StoreError::from)
     }
 
-    pub fn task_by_thread_id(&self, thread_id: &str) -> Result<Option<Task>, StoreError> {
+    pub fn workspace_by_thread_id(&self, thread_id: &str) -> Result<Option<Workspace>, StoreError> {
         let connection = self.lock()?;
         connection
             .query_row(
-                &format!("{} WHERE codex_thread_id = ?1", TASK_SELECT),
+                &format!("{} WHERE codex_thread_id = ?1", WORKSPACE_SELECT),
                 [thread_id],
-                map_task,
+                map_workspace,
             )
             .optional()
             .map_err(StoreError::from)
@@ -384,60 +392,71 @@ impl Store {
 
     /// Replaces a provisional profile with the effective, non-secret App Server settings.
     /// Profiles become immutable once the first turn is active.
-    pub fn update_task_profile(
+    pub fn update_workspace_profile(
         &self,
-        task_id: &str,
+        workspace_id: &str,
         profile: &ProfileSnapshot,
-    ) -> Result<Task, StoreError> {
+    ) -> Result<Workspace, StoreError> {
         let profile_json = serde_json::to_string(profile).map_err(json_to_sql_error)?;
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        assert_task_lifecycle(
+        assert_workspace_lifecycle(
             &transaction,
-            task_id,
-            &[TaskLifecycle::Provisioning, TaskLifecycle::Starting],
+            workspace_id,
+            &[
+                WorkspaceLifecycle::Provisioning,
+                WorkspaceLifecycle::Starting,
+            ],
         )?;
         transaction.execute(
-            "UPDATE tasks SET profile_json = ?1, updated_at_ms = ?2 WHERE id = ?3",
-            params![profile_json, now_ms(), task_id],
+            "UPDATE workspaces SET profile_json = ?1, updated_at_ms = ?2 WHERE id = ?3",
+            params![profile_json, now_ms(), workspace_id],
         )?;
-        let task = require_task(&transaction, task_id)?;
+        let workspace = require_workspace(&transaction, workspace_id)?;
         transaction.commit()?;
-        Ok(task)
+        Ok(workspace)
     }
 
-    pub fn task_by_name(
+    pub fn workspace_by_name(
         &self,
         repository_id: &str,
         name: &str,
-    ) -> Result<Option<Task>, StoreError> {
+    ) -> Result<Option<Workspace>, StoreError> {
         let connection = self.lock()?;
         connection
             .query_row(
-                &format!("{} WHERE repository_id = ?1 AND name = ?2", TASK_SELECT),
+                &format!(
+                    "{} WHERE repository_id = ?1 AND name = ?2",
+                    WORKSPACE_SELECT
+                ),
                 params![repository_id, name],
-                map_task,
+                map_workspace,
             )
             .optional()
             .map_err(StoreError::from)
     }
 
-    pub fn list_tasks(&self, repository_id: Option<&str>) -> Result<Vec<Task>, StoreError> {
+    pub fn list_workspaces(
+        &self,
+        repository_id: Option<&str>,
+    ) -> Result<Vec<Workspace>, StoreError> {
         let connection = self.lock()?;
         if let Some(repository_id) = repository_id {
             let mut statement = connection.prepare(&format!(
                 "{} WHERE repository_id = ?1 ORDER BY updated_at_ms DESC, id",
-                TASK_SELECT
+                WORKSPACE_SELECT
             ))?;
             statement
-                .query_map([repository_id], map_task)?
+                .query_map([repository_id], map_workspace)?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(StoreError::from)
         } else {
-            let mut statement =
-                connection.prepare(&format!("{} ORDER BY updated_at_ms DESC, id", TASK_SELECT))?;
+            let mut statement = connection.prepare(&format!(
+                "{} ORDER BY updated_at_ms DESC, id",
+                WORKSPACE_SELECT
+            ))?;
             statement
-                .query_map([], map_task)?
+                .query_map([], map_workspace)?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(StoreError::from)
         }
@@ -477,27 +496,27 @@ impl Store {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         transaction.execute(
-            "UPDATE tasks SET thread_status_is_fresh = 0
+            "UPDATE workspaces SET thread_status_is_fresh = 0
              WHERE thread_status_is_fresh = 1",
             [],
         )?;
         let mut statement = transaction.prepare(&format!(
             "{} WHERE lifecycle IN ('provisioning', 'starting')
                 OR active_turn_id IS NOT NULL ORDER BY id",
-            TASK_SELECT
+            WORKSPACE_SELECT
         ))?;
-        let tasks = statement
-            .query_map([], map_task)?
+        let workspaces = statement
+            .query_map([], map_workspace)?
             .collect::<Result<Vec<_>, _>>()?;
         drop(statement);
 
         let now = now_ms();
-        let mut events = Vec::with_capacity(tasks.len());
-        for task in tasks {
+        let mut events = Vec::with_capacity(workspaces.len());
+        for workspace in workspaces {
             transaction.execute(
                 "UPDATE turns SET phase = 'interrupted', completed_at_ms = ?1,
                     error_json = ?2
-                 WHERE task_id = ?3 AND phase IN ('starting', 'in_progress')",
+                 WHERE workspace_id = ?3 AND phase IN ('starting', 'in_progress')",
                 params![
                     now,
                     serde_json::to_string(&json!({
@@ -505,30 +524,30 @@ impl Store {
                         "message": "Turn state was unfinished when cocod restarted"
                     }))
                     .map_err(json_to_sql_error)?,
-                    task.id,
+                    workspace.id,
                 ],
             )?;
             let creation_failed = matches!(
-                task.lifecycle,
-                TaskLifecycle::Provisioning | TaskLifecycle::Starting
+                workspace.lifecycle,
+                WorkspaceLifecycle::Provisioning | WorkspaceLifecycle::Starting
             );
             let next_lifecycle = if creation_failed {
-                TaskLifecycle::Failed
+                WorkspaceLifecycle::Failed
             } else {
-                task.lifecycle
+                workspace.lifecycle
             };
             let message = if creation_failed {
-                "Task preparation was unfinished when cocod restarted"
+                "Workspace preparation was unfinished when cocod restarted"
             } else {
                 "Turn state was unfinished when cocod restarted"
             };
             transaction.execute(
-                "UPDATE tasks SET lifecycle = ?1, active_turn_id = NULL,
+                "UPDATE workspaces SET lifecycle = ?1, active_turn_id = NULL,
                     last_error_code = 'DAEMON_RESTART', last_error_message = ?2,
                     updated_at_ms = ?3 WHERE id = ?4",
-                params![next_lifecycle.as_str(), message, now, task.id],
+                params![next_lifecycle.as_str(), message, now, workspace.id],
             )?;
-            let active_turn_id = task.active_turn_id.clone();
+            let active_turn_id = workspace.active_turn_id.clone();
             let event_kind = if active_turn_id.is_some() {
                 EventKind::TurnCompleted
             } else {
@@ -537,7 +556,7 @@ impl Store {
             events.push(insert_event(
                 &transaction,
                 EventDraft {
-                    task_id: Some(task.id),
+                    workspace_id: Some(workspace.id),
                     turn_id: active_turn_id.clone(),
                     kind: event_kind,
                     source: EventSource::Coco,
@@ -556,22 +575,22 @@ impl Store {
     }
 }
 
-fn assert_task_lifecycle(
+fn assert_workspace_lifecycle(
     connection: &Connection,
-    task_id: &str,
-    expected: &[TaskLifecycle],
+    workspace_id: &str,
+    expected: &[WorkspaceLifecycle],
 ) -> Result<(), StoreError> {
-    let task = require_task(connection, task_id)?;
-    if expected.contains(&task.lifecycle) {
+    let workspace = require_workspace(connection, workspace_id)?;
+    if expected.contains(&workspace.lifecycle) {
         return Ok(());
     }
-    Err(StoreError::InvalidTaskTransition {
-        task_id: task_id.to_owned(),
+    Err(StoreError::InvalidWorkspaceTransition {
+        workspace_id: workspace_id.to_owned(),
         expected: expected
             .iter()
             .map(|lifecycle| lifecycle.as_str())
             .collect::<Vec<_>>()
             .join(" or "),
-        actual: task.lifecycle.as_str().to_owned(),
+        actual: workspace.lifecycle.as_str().to_owned(),
     })
 }

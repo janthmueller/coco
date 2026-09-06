@@ -16,45 +16,45 @@ use uuid::Uuid;
 use crate::domain::AuditOutcome;
 use crate::paths::CocoPaths;
 use crate::protocol::{
-    AuditRecordParams, DaemonRequest, TaskDiffParams, TaskGetParams, TaskListParams,
-    TurnStartParams,
+    AuditRecordParams, DaemonRequest, TurnStartParams, WorkspaceDiffParams, WorkspaceGetParams,
+    WorkspaceListParams,
 };
 use crate::rpc::{RpcClient, RpcClientError};
 
-const TASKS_LIST: &str = "tasks.list";
-const AGENTS_STATUS: &str = "agents.status";
-const CHANGES_DIFF: &str = "changes.diff";
-const AGENTS_SEND: &str = "agents.send";
+const WORKSPACES_LIST: &str = "workspaces.list";
+const WORKSPACES_STATUS: &str = "workspaces.status";
+const WORKSPACES_DIFF: &str = "workspaces.diff";
+const WORKSPACES_SEND: &str = "workspaces.send";
 const MAX_ERROR_CHARS: usize = 1_024;
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct TasksListInput {
-    /// Only return tasks whose phase is one of these values.
+struct WorkspacesListInput {
+    /// Only return workspaces whose phase is one of these values.
     phases: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct AgentStatusInput {
-    /// Repository-local task name or globally unique task ID.
-    task: String,
+struct WorkspaceStatusInput {
+    /// Repository-local workspace name or globally unique workspace ID.
+    workspace: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ChangesDiffInput {
-    /// Repository-local task name or globally unique task ID.
-    task: String,
+struct WorkspaceDiffInput {
+    /// Repository-local workspace name or globally unique workspace ID.
+    workspace: String,
     /// Optional upper bound for returned diff output, in bytes.
     max_bytes: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct AgentSendInput {
-    /// Repository-local task name or globally unique task ID.
-    task: String,
+struct WorkspaceSendInput {
+    /// Repository-local workspace name or globally unique workspace ID.
+    workspace: String,
     /// Text to send as the next turn.
     message: String,
     /// Idempotency key. CoCo generates one when omitted.
@@ -75,7 +75,7 @@ impl McpServer {
     fn new(repository: PathBuf, allow_send: bool, socket_path: PathBuf) -> Self {
         let mut tool_router = Self::tool_router();
         if !allow_send {
-            tool_router.disable_route(AGENTS_SEND);
+            tool_router.disable_route(WORKSPACES_SEND);
         }
         Self {
             tool_router,
@@ -87,8 +87,8 @@ impl McpServer {
 #[tool_router]
 impl McpServer {
     #[tool(
-        name = "tasks.list",
-        description = "List CoCo tasks in the configured repository.",
+        name = "workspaces.list",
+        description = "List CoCo workspaces in the configured repository.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -96,30 +96,16 @@ impl McpServer {
             open_world_hint = false
         )
     )]
-    async fn tasks_list(&self, Parameters(input): Parameters<TasksListInput>) -> CallToolResult {
-        self.dispatcher.tasks_list(input).await
-    }
-
-    #[tool(
-        name = "agents.status",
-        description = "Show one CoCo task and its bound agent status.",
-        annotations(
-            read_only_hint = true,
-            destructive_hint = false,
-            idempotent_hint = true,
-            open_world_hint = false
-        )
-    )]
-    async fn agents_status(
+    async fn workspaces_list(
         &self,
-        Parameters(input): Parameters<AgentStatusInput>,
+        Parameters(input): Parameters<WorkspacesListInput>,
     ) -> CallToolResult {
-        self.dispatcher.agents_status(input).await
+        self.dispatcher.workspaces_list(input).await
     }
 
     #[tool(
-        name = "changes.diff",
-        description = "Show bounded tracked and untracked changes for one CoCo task.",
+        name = "workspaces.status",
+        description = "Show one CoCo workspace and its workspace status.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -127,16 +113,33 @@ impl McpServer {
             open_world_hint = false
         )
     )]
-    async fn changes_diff(
+    async fn workspaces_status(
         &self,
-        Parameters(input): Parameters<ChangesDiffInput>,
+        Parameters(input): Parameters<WorkspaceStatusInput>,
     ) -> CallToolResult {
-        self.dispatcher.changes_diff(input).await
+        self.dispatcher.workspaces_status(input).await
     }
 
     #[tool(
-        name = "agents.send",
-        description = "Start another turn for one CoCo task.",
+        name = "workspaces.diff",
+        description = "Show bounded tracked and untracked changes for one CoCo workspace.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
+    async fn workspaces_diff(
+        &self,
+        Parameters(input): Parameters<WorkspaceDiffInput>,
+    ) -> CallToolResult {
+        self.dispatcher.workspaces_diff(input).await
+    }
+
+    #[tool(
+        name = "workspaces.send",
+        description = "Start another turn for one CoCo workspace.",
         annotations(
             read_only_hint = false,
             destructive_hint = true,
@@ -144,8 +147,11 @@ impl McpServer {
             open_world_hint = true
         )
     )]
-    async fn agents_send(&self, Parameters(input): Parameters<AgentSendInput>) -> CallToolResult {
-        self.dispatcher.agents_send(input).await
+    async fn workspaces_send(
+        &self,
+        Parameters(input): Parameters<WorkspaceSendInput>,
+    ) -> CallToolResult {
+        self.dispatcher.workspaces_send(input).await
     }
 }
 
@@ -155,7 +161,7 @@ impl ServerHandler for McpServer {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("coco", env!("CARGO_PKG_VERSION")))
             .with_instructions(
-                "Repository-scoped CoCo task inspection. agents.send is available only when explicitly enabled by the operator.",
+                "Repository-scoped CoCo workspace inspection. workspaces.send is available only when explicitly enabled by the operator.",
             )
     }
 }
@@ -174,10 +180,10 @@ where
         Self { client, repository }
     }
 
-    async fn tasks_list(&self, input: TasksListInput) -> CallToolResult {
+    async fn workspaces_list(&self, input: WorkspacesListInput) -> CallToolResult {
         self.call(
-            TASKS_LIST,
-            TaskListParams {
+            WORKSPACES_LIST,
+            WorkspaceListParams {
                 repository_path: self.repository.clone(),
                 phases: input.phases,
             },
@@ -187,49 +193,49 @@ where
         .await
     }
 
-    async fn agents_status(&self, input: AgentStatusInput) -> CallToolResult {
-        let task = input.task;
+    async fn workspaces_status(&self, input: WorkspaceStatusInput) -> CallToolResult {
+        let workspace = input.workspace;
         self.call(
-            AGENTS_STATUS,
-            TaskGetParams {
+            WORKSPACES_STATUS,
+            WorkspaceGetParams {
                 repository_path: self.repository.clone(),
-                task: task.clone(),
+                workspace: workspace.clone(),
             },
-            Some(task),
+            Some(workspace),
             None,
         )
         .await
     }
 
-    async fn changes_diff(&self, input: ChangesDiffInput) -> CallToolResult {
-        let task = input.task;
+    async fn workspaces_diff(&self, input: WorkspaceDiffInput) -> CallToolResult {
+        let workspace = input.workspace;
         self.call(
-            CHANGES_DIFF,
-            TaskDiffParams {
+            WORKSPACES_DIFF,
+            WorkspaceDiffParams {
                 repository_path: self.repository.clone(),
-                task: task.clone(),
+                workspace: workspace.clone(),
                 max_bytes: input.max_bytes,
             },
-            Some(task),
+            Some(workspace),
             None,
         )
         .await
     }
 
-    async fn agents_send(&self, input: AgentSendInput) -> CallToolResult {
+    async fn workspaces_send(&self, input: WorkspaceSendInput) -> CallToolResult {
         let operation_id = input
             .operation_id
             .unwrap_or_else(|| Uuid::new_v4().to_string());
-        let task = input.task;
+        let workspace = input.workspace;
         self.call(
-            AGENTS_SEND,
+            WORKSPACES_SEND,
             TurnStartParams {
                 repository_path: self.repository.clone(),
-                task: task.clone(),
+                workspace: workspace.clone(),
                 message: input.message,
                 operation_id: operation_id.clone(),
             },
-            Some(task),
+            Some(workspace),
             Some(operation_id),
         )
         .await
@@ -239,7 +245,7 @@ where
         &self,
         action: &'static str,
         request: R,
-        task_id: Option<String>,
+        workspace_id: Option<String>,
         operation_id: Option<String>,
     ) -> CallToolResult
     where
@@ -252,7 +258,7 @@ where
         });
         self.audit(
             action,
-            task_id.as_deref(),
+            workspace_id.as_deref(),
             operation_id.as_deref(),
             &response,
         )
@@ -267,7 +273,7 @@ where
     async fn audit(
         &self,
         action: &'static str,
-        task_id: Option<&str>,
+        workspace_id: Option<&str>,
         operation_id: Option<&str>,
         response: &Result<Value, DaemonFailure>,
     ) {
@@ -281,7 +287,7 @@ where
             .request(AuditRecordParams {
                 source: "mcp".to_owned(),
                 action: action.to_owned(),
-                task_id: task_id.map(ToOwned::to_owned),
+                workspace_id: workspace_id.map(ToOwned::to_owned),
                 operation_id: operation_id.map(ToOwned::to_owned),
                 outcome: if response.is_ok() {
                     AuditOutcome::Succeeded
@@ -462,24 +468,24 @@ mod tests {
                 "createdAtMs": 1,
                 "updatedAtMs": 1,
             }),
-            DaemonMethod::TaskCreate => json!({"task": fake_task()}),
-            DaemonMethod::TaskList => json!([]),
-            DaemonMethod::TaskGet => json!({
-                "task": fake_task(),
+            DaemonMethod::WorkspaceCreate => json!({"workspace": fake_workspace()}),
+            DaemonMethod::WorkspaceList => json!([]),
+            DaemonMethod::WorkspaceGet => json!({
+                "workspace": fake_workspace(),
                 "git": {"observed": false, "reason": "test fixture"},
                 "nextSequence": 0,
             }),
             DaemonMethod::TurnStart => json!({
-                "task": fake_task(),
+                "workspace": fake_workspace(),
                 "turnId": "turn-test",
                 "codexTurnId": "codex-turn-test",
             }),
             DaemonMethod::EventList => json!({
-                "task": fake_task(),
+                "workspace": fake_workspace(),
                 "events": [],
                 "nextSequence": 0,
             }),
-            DaemonMethod::TaskDiff => json!({
+            DaemonMethod::WorkspaceDiff => json!({
                 "patch": "",
                 "patchTruncated": false,
                 "untrackedPaths": [],
@@ -489,7 +495,7 @@ mod tests {
                 "id": "audit-test",
                 "source": "mcp",
                 "action": "test",
-                "taskId": null,
+                "workspaceId": null,
                 "operationId": null,
                 "outcome": "succeeded",
                 "details": {},
@@ -498,12 +504,12 @@ mod tests {
         }
     }
 
-    fn fake_task() -> Value {
+    fn fake_workspace() -> Value {
         json!({
-            "id": "task-test",
+            "id": "workspace-test",
             "createOperationId": "create-test",
             "repositoryId": "repo-test",
-            "name": "task",
+            "name": "workspace",
             "contextMode": "fresh",
             "context": {},
             "profile": {
@@ -521,7 +527,7 @@ mod tests {
             },
             "phase": "idle",
             "waitReasons": [],
-            "branchName": "coco/task",
+            "branchName": "coco/workspace",
             "baseSha": "base-test",
             "worktreePath": "/worktree",
             "codexThreadId": "thread-test",
@@ -536,7 +542,7 @@ mod tests {
     }
 
     #[test]
-    fn agents_send_is_only_exposed_when_enabled() {
+    fn workspaces_send_is_only_exposed_when_enabled() {
         let socket = PathBuf::from("/tmp/cocod-test.sock");
         let read_only = McpServer::new(PathBuf::from("/repo"), false, socket.clone());
         let writable = McpServer::new(PathBuf::from("/repo"), true, socket);
@@ -549,9 +555,9 @@ mod tests {
             .collect();
         assert_eq!(
             read_only_names,
-            vec![AGENTS_STATUS, CHANGES_DIFF, TASKS_LIST]
+            vec![WORKSPACES_DIFF, WORKSPACES_LIST, WORKSPACES_STATUS]
         );
-        assert!(!read_only.tool_router.has_route(AGENTS_SEND));
+        assert!(!read_only.tool_router.has_route(WORKSPACES_SEND));
 
         let writable_names: Vec<_> = writable
             .tool_router
@@ -561,9 +567,14 @@ mod tests {
             .collect();
         assert_eq!(
             writable_names,
-            vec![AGENTS_SEND, AGENTS_STATUS, CHANGES_DIFF, TASKS_LIST]
+            vec![
+                WORKSPACES_DIFF,
+                WORKSPACES_LIST,
+                WORKSPACES_SEND,
+                WORKSPACES_STATUS,
+            ]
         );
-        assert!(writable.tool_router.has_route(AGENTS_SEND));
+        assert!(writable.tool_router.has_route(WORKSPACES_SEND));
     }
 
     #[tokio::test]
@@ -572,24 +583,24 @@ mod tests {
         let dispatcher = Dispatcher::new(daemon.clone(), PathBuf::from("/fixed/repository"));
 
         dispatcher
-            .tasks_list(TasksListInput {
+            .workspaces_list(WorkspacesListInput {
                 phases: Some(vec!["running".into(), "idle".into()]),
             })
             .await;
         dispatcher
-            .agents_status(AgentStatusInput {
-                task: "task-one".into(),
+            .workspaces_status(WorkspaceStatusInput {
+                workspace: "workspace-one".into(),
             })
             .await;
         dispatcher
-            .changes_diff(ChangesDiffInput {
-                task: "task-two".into(),
+            .workspaces_diff(WorkspaceDiffInput {
+                workspace: "workspace-two".into(),
                 max_bytes: Some(4_096),
             })
             .await;
         dispatcher
-            .agents_send(AgentSendInput {
-                task: "task-three".into(),
+            .workspaces_send(WorkspaceSendInput {
+                workspace: "workspace-three".into(),
                 message: "private prompt text".into(),
                 operation_id: Some("operation-7".into()),
             })
@@ -597,7 +608,7 @@ mod tests {
 
         let calls = daemon.calls();
         assert_eq!(calls.len(), 8);
-        assert_eq!(calls[0].0, "task.list");
+        assert_eq!(calls[0].0, "workspace.list");
         assert_eq!(
             calls[0].1,
             json!({
@@ -605,17 +616,17 @@ mod tests {
                 "phases": ["running", "idle"]
             })
         );
-        assert_eq!(calls[2].0, "task.get");
+        assert_eq!(calls[2].0, "workspace.get");
         assert_eq!(
             calls[2].1,
-            json!({ "repositoryPath": "/fixed/repository", "task": "task-one" })
+            json!({ "repositoryPath": "/fixed/repository", "workspace": "workspace-one" })
         );
-        assert_eq!(calls[4].0, "task.diff");
+        assert_eq!(calls[4].0, "workspace.diff");
         assert_eq!(
             calls[4].1,
             json!({
                 "repositoryPath": "/fixed/repository",
-                "task": "task-two",
+                "workspace": "workspace-two",
                 "maxBytes": 4_096
             })
         );
@@ -624,7 +635,7 @@ mod tests {
             calls[6].1,
             json!({
                 "repositoryPath": "/fixed/repository",
-                "task": "task-three",
+                "workspace": "workspace-three",
                 "message": "private prompt text",
                 "operationId": "operation-7"
             })
@@ -642,8 +653,11 @@ mod tests {
             );
         }
         assert_eq!(calls[7].1.get("source"), Some(&json!("mcp")));
-        assert_eq!(calls[7].1.get("action"), Some(&json!(AGENTS_SEND)));
-        assert_eq!(calls[7].1.get("taskId"), Some(&json!("task-three")));
+        assert_eq!(calls[7].1.get("action"), Some(&json!(WORKSPACES_SEND)));
+        assert_eq!(
+            calls[7].1.get("workspaceId"),
+            Some(&json!("workspace-three"))
+        );
         assert_eq!(calls[7].1.get("operationId"), Some(&json!("operation-7")));
         assert!(!calls[7].1.to_string().contains("private prompt text"));
     }
@@ -654,8 +668,8 @@ mod tests {
         let dispatcher = Dispatcher::new(daemon.clone(), PathBuf::from("/repo"));
 
         dispatcher
-            .agents_send(AgentSendInput {
-                task: "task".into(),
+            .workspaces_send(WorkspaceSendInput {
+                workspace: "workspace".into(),
                 message: "message".into(),
                 operation_id: None,
             })
@@ -672,14 +686,14 @@ mod tests {
     async fn returns_structured_errors_and_audits_only_the_safe_code() {
         let daemon = RecordingDaemon::default();
         daemon.fail(
-            "task.get",
-            DaemonFailure::new("TASK_NOT_FOUND", "task does not exist"),
+            "workspace.get",
+            DaemonFailure::new("WORKSPACE_NOT_FOUND", "workspace does not exist"),
         );
         let dispatcher = Dispatcher::new(daemon.clone(), PathBuf::from("/repo"));
 
         let result = dispatcher
-            .agents_status(AgentStatusInput {
-                task: "missing".into(),
+            .workspaces_status(WorkspaceStatusInput {
+                workspace: "missing".into(),
             })
             .await;
 
@@ -688,8 +702,8 @@ mod tests {
             result.structured_content,
             Some(json!({
                 "error": {
-                    "code": "TASK_NOT_FOUND",
-                    "message": "task does not exist"
+                    "code": "WORKSPACE_NOT_FOUND",
+                    "message": "workspace does not exist"
                 }
             }))
         );
@@ -698,8 +712,8 @@ mod tests {
         let calls = daemon.calls();
         assert_eq!(calls[1].0, "audit.record");
         assert_eq!(calls[1].1["outcome"], "failed");
-        assert_eq!(calls[1].1["details"]["error"], "TASK_NOT_FOUND");
-        assert!(!calls[1].1.to_string().contains("task does not exist"));
+        assert_eq!(calls[1].1["details"]["error"], "WORKSPACE_NOT_FOUND");
+        assert!(!calls[1].1.to_string().contains("workspace does not exist"));
     }
 
     #[tokio::test]
@@ -711,7 +725,9 @@ mod tests {
         );
         let dispatcher = Dispatcher::new(daemon, PathBuf::from("/repo"));
 
-        let result = dispatcher.tasks_list(TasksListInput::default()).await;
+        let result = dispatcher
+            .workspaces_list(WorkspacesListInput::default())
+            .await;
 
         assert_eq!(result.is_error, Some(false));
         assert_eq!(result.structured_content, Some(json!([])));

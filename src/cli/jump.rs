@@ -31,19 +31,19 @@ pub(super) struct JumpTarget {
 }
 
 pub(super) async fn load_jump_target(paths: &CocoPaths, result: &Value) -> Result<JumpTarget> {
-    let task = result
-        .get("task")
-        .context("cocod returned task.get without a task")?;
-    let worktree = task
+    let workspace = result
+        .get("workspace")
+        .context("cocod returned workspace.get without a workspace")?;
+    let worktree = workspace
         .get("worktreePath")
         .and_then(Value::as_str)
         .map(PathBuf::from)
-        .context("task has no managed worktree yet")?;
-    let thread_id = task
+        .context("workspace has no managed worktree yet")?;
+    let thread_id = workspace
         .get("codexThreadId")
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
-        .context("task has no Codex thread yet")?;
+        .context("workspace has no Codex thread yet")?;
     let descriptor_bytes = tokio::fs::read(&paths.codex_endpoint_path)
         .await
         .with_context(|| {

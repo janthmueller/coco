@@ -17,7 +17,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(25);
 const SUPPORTED_CODEX_VERSION: &str = "codex-cli 0.147.0";
 const OPT_IN_ENV: &str = "COCO_RUN_REAL_CODEX_COMPAT";
 const CODEX_BINARY_ENV: &str = "COCO_REAL_CODEX_BINARY";
-const TASK_NAME: &str = "real-codex-compat";
+const WORKSPACE_NAME: &str = "real-codex-compat";
 
 struct TestPaths {
     home: PathBuf,
@@ -178,12 +178,12 @@ async fn run_daemon_lifecycle(
             paths,
             codex_binary,
             repository,
-            &["new", TASK_NAME, "--base", "HEAD"],
+            &["create", WORKSPACE_NAME, "--base", "HEAD"],
         )
         .await
         .with_context(|| format!("cocod log:\n{}", read_log(&log)))?;
     }
-    let status = task_status(paths, codex_binary, repository)
+    let status = workspace_status(paths, codex_binary, repository)
         .await
         .with_context(|| format!("cocod log:\n{}", read_log(&log)))?;
     stop_daemon(&mut daemon, &log).await?;
@@ -227,12 +227,16 @@ async fn run_cli(
     Ok(output)
 }
 
-async fn task_status(paths: &TestPaths, codex_binary: &Path, repository: &Path) -> Result<Value> {
+async fn workspace_status(
+    paths: &TestPaths,
+    codex_binary: &Path,
+    repository: &Path,
+) -> Result<Value> {
     let output = run_cli(
         paths,
         codex_binary,
         repository,
-        &["status", TASK_NAME, "--json"],
+        &["status", WORKSPACE_NAME, "--json"],
     )
     .await?;
     serde_json::from_slice(&output.stdout).context("coco status did not return JSON")
@@ -325,33 +329,33 @@ fn read_log(path: &Path) -> String {
 fn assert_same_persisted_thread(first: &Value, second: &Value) -> Result<()> {
     for status in [first, second] {
         ensure!(
-            status["task"]["lifecycle"] == "ready",
-            "task was not ready: {status}"
+            status["workspace"]["lifecycle"] == "ready",
+            "workspace was not ready: {status}"
         );
         ensure!(
-            status["task"]["phase"] == "idle",
+            status["workspace"]["phase"] == "idle",
             "thread was not idle: {status}"
         );
         ensure!(
-            status["task"]["threadRuntime"]["isFresh"] == true,
+            status["workspace"]["threadRuntime"]["isFresh"] == true,
             "thread status was stale: {status}"
         );
         ensure!(
-            status["task"]["activeTurnId"].is_null(),
+            status["workspace"]["activeTurnId"].is_null(),
             "compatibility smoke unexpectedly created a model turn: {status}"
         );
     }
     ensure!(
-        first["task"]["codexThreadId"] == second["task"]["codexThreadId"],
+        first["workspace"]["codexThreadId"] == second["workspace"]["codexThreadId"],
         "daemon restart changed the Codex thread"
     );
     ensure!(
-        first["task"]["worktreePath"] == second["task"]["worktreePath"],
-        "daemon restart changed the task worktree"
+        first["workspace"]["worktreePath"] == second["workspace"]["worktreePath"],
+        "daemon restart changed the workspace worktree"
     );
     ensure!(
-        first["task"]["threadRuntime"]["runtimeGeneration"]
-            != second["task"]["threadRuntime"]["runtimeGeneration"],
+        first["workspace"]["threadRuntime"]["runtimeGeneration"]
+            != second["workspace"]["threadRuntime"]["runtimeGeneration"],
         "daemon restart did not refresh the runtime generation"
     );
     Ok(())

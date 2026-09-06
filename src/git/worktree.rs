@@ -13,17 +13,17 @@ impl Git {
         &self,
         repository: &GitRepository,
         worktrees_root: impl AsRef<Path>,
-        task_name: &str,
+        workspace_name: &str,
         base_sha: &str,
     ) -> Result<WorktreePlan, GitError> {
-        validate_task_name(task_name)?;
+        validate_workspace_name(workspace_name)?;
         validate_object_id(base_sha)?;
-        let branch_name = format!("coco/{task_name}");
+        let branch_name = format!("coco/{workspace_name}");
         self.validate_branch_name(repository, &branch_name)?;
 
         let worktrees_root = secure_directory(worktrees_root.as_ref())?;
         let repository_root = secure_directory(&worktrees_root.join(&repository.id))?;
-        let path = repository_root.join(task_name);
+        let path = repository_root.join(workspace_name);
         if fs::symlink_metadata(&path).is_ok() {
             return Err(GitError::DestinationExists(path));
         }
@@ -177,7 +177,7 @@ impl Git {
     }
 }
 
-pub(super) fn validate_task_name(name: &str) -> Result<(), GitError> {
+pub(super) fn validate_workspace_name(name: &str) -> Result<(), GitError> {
     let bytes = name.as_bytes();
     let valid = (1..=63).contains(&bytes.len())
         && bytes
@@ -192,7 +192,7 @@ pub(super) fn validate_task_name(name: &str) -> Result<(), GitError> {
     if valid {
         Ok(())
     } else {
-        Err(GitError::InvalidTaskName(name.to_owned()))
+        Err(GitError::InvalidWorkspaceName(name.to_owned()))
     }
 }
 

@@ -4,10 +4,10 @@ use super::StoreError;
 
 pub(super) fn migrate(connection: &Connection) -> Result<(), StoreError> {
     let mut version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if version > 3 {
+    if version > 4 {
         return Err(StoreError::UnsupportedSchema(version));
     }
-    if version == 3 {
+    if version == 4 {
         return Ok(());
     }
     if version == 1 {
@@ -15,7 +15,11 @@ pub(super) fn migrate(connection: &Connection) -> Result<(), StoreError> {
         version = 2;
     }
     if version == 2 {
-        return migrate_task_runtime_ownership(connection);
+        migrate_task_runtime_ownership(connection)?;
+        version = 3;
+    }
+    if version == 3 {
+        return migrate_workspace_vocabulary(connection);
     }
     create_current_schema(connection)
 }
@@ -32,7 +36,7 @@ fn create_current_schema(connection: &Connection) -> Result<(), StoreError> {
             created_at_ms INTEGER NOT NULL,
             updated_at_ms INTEGER NOT NULL
          );
-         CREATE TABLE IF NOT EXISTS tasks (
+         CREATE TABLE IF NOT EXISTS workspaces (
             id TEXT PRIMARY KEY,
             create_operation_id TEXT UNIQUE,
             repository_id TEXT NOT NULL REFERENCES repositories(id),
@@ -75,7 +79,7 @@ fn create_current_schema(connection: &Connection) -> Result<(), StoreError> {
          );
          CREATE TABLE IF NOT EXISTS turns (
             id TEXT PRIMARY KEY,
-            task_id TEXT NOT NULL REFERENCES tasks(id),
+            workspace_id TEXT NOT NULL REFERENCES workspaces(id),
             operation_id TEXT UNIQUE,
             client_message_id TEXT NOT NULL UNIQUE,
             codex_turn_id TEXT UNIQUE,
@@ -87,11 +91,12 @@ fn create_current_schema(connection: &Connection) -> Result<(), StoreError> {
             completed_at_ms INTEGER,
             error_json TEXT CHECK (error_json IS NULL OR json_valid(error_json))
          );
-         CREATE INDEX IF NOT EXISTS turns_task_idx ON turns(task_id, requested_at_ms);
+         CREATE INDEX IF NOT EXISTS turns_workspace_idx
+            ON turns(workspace_id, requested_at_ms);
          CREATE TABLE IF NOT EXISTS events (
             sequence INTEGER PRIMARY KEY AUTOINCREMENT,
             id TEXT NOT NULL UNIQUE,
-            task_id TEXT REFERENCES tasks(id),
+            workspace_id TEXT REFERENCES workspaces(id),
             turn_id TEXT REFERENCES turns(id),
             kind TEXT NOT NULL,
             source TEXT NOT NULL CHECK (source IN ('coco', 'git', 'codex')),
@@ -100,23 +105,57 @@ fn create_current_schema(connection: &Connection) -> Result<(), StoreError> {
             recorded_at_ms INTEGER NOT NULL,
             payload_json TEXT NOT NULL CHECK (json_valid(payload_json))
          );
-         CREATE INDEX IF NOT EXISTS events_task_sequence_idx ON events(task_id, sequence);
+         CREATE INDEX IF NOT EXISTS events_workspace_sequence_idx
+            ON events(workspace_id, sequence);
          CREATE TABLE IF NOT EXISTS audit_events (
             sequence INTEGER PRIMARY KEY AUTOINCREMENT,
             id TEXT NOT NULL UNIQUE,
             source TEXT NOT NULL,
             action TEXT NOT NULL,
-            task_id TEXT REFERENCES tasks(id),
+            workspace_id TEXT REFERENCES workspaces(id),
             operation_id TEXT,
             outcome TEXT NOT NULL CHECK (outcome IN ('succeeded', 'failed')),
             details_json TEXT NOT NULL CHECK (json_valid(details_json)),
             occurred_at_ms INTEGER NOT NULL
          );
-         CREATE INDEX IF NOT EXISTS audit_task_sequence_idx
-            ON audit_events(task_id, sequence);
-         PRAGMA user_version = 3;
+         CREATE INDEX IF NOT EXISTS audit_workspace_sequence_idx
+            ON audit_events(workspace_id, sequence);
+         PRAGMA user_version = 4;
          COMMIT;",
     )?;
+    Ok(())
+}
+
+fn migrate_workspace_vocabulary(connection: &Connection) -> Result<(), StoreError> {
+    let migration = connection.execute_batch(
+        "BEGIN IMMEDIATE;
+         ALTER TABLE tasks RENAME TO workspaces;
+         ALTER TABLE turns RENAME COLUMN task_id TO workspace_id;
+         ALTER TABLE events RENAME COLUMN task_id TO workspace_id;
+         ALTER TABLE audit_events RENAME COLUMN task_id TO workspace_id;
+         DROP INDEX IF EXISTS turns_task_idx;
+         DROP INDEX IF EXISTS events_task_sequence_idx;
+         DROP INDEX IF EXISTS audit_task_sequence_idx;
+         CREATE INDEX turns_workspace_idx ON turns(workspace_id, requested_at_ms);
+         CREATE INDEX events_workspace_sequence_idx ON events(workspace_id, sequence);
+         CREATE INDEX audit_workspace_sequence_idx
+            ON audit_events(workspace_id, sequence);
+         UPDATE events SET kind = 'workspace.created' WHERE kind = 'task.created';
+         UPDATE events SET kind = 'workspace.completed' WHERE kind = 'task.completed';
+         UPDATE audit_events SET action = CASE action
+            WHEN 'tasks.list' THEN 'workspaces.list'
+            WHEN 'agents.status' THEN 'workspaces.status'
+            WHEN 'changes.diff' THEN 'workspaces.diff'
+            WHEN 'agents.send' THEN 'workspaces.send'
+            ELSE action
+         END;
+         PRAGMA user_version = 4;
+         COMMIT;",
+    );
+    if migration.is_err() {
+        let _ = connection.execute_batch("ROLLBACK;");
+    }
+    migration?;
     Ok(())
 }
 

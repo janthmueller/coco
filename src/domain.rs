@@ -32,7 +32,7 @@ impl ContextMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TaskLifecycle {
+pub enum WorkspaceLifecycle {
     Provisioning,
     Starting,
     Ready,
@@ -40,7 +40,7 @@ pub enum TaskLifecycle {
     Failed,
 }
 
-impl TaskLifecycle {
+impl WorkspaceLifecycle {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Provisioning => "provisioning",
@@ -103,7 +103,7 @@ pub struct ThreadRuntimeSnapshot {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TaskPhase {
+pub enum WorkspacePhase {
     Active,
     WaitingForApproval,
     WaitingForInput,
@@ -117,7 +117,7 @@ pub enum TaskPhase {
     Failed,
 }
 
-impl TaskPhase {
+impl WorkspacePhase {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Active => "active",
@@ -154,51 +154,51 @@ impl TaskPhase {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TaskWaitReason {
+pub enum WorkspaceWaitReason {
     Approval,
     UserInput,
 }
 
-pub fn derive_task_runtime(
-    lifecycle: TaskLifecycle,
+pub fn derive_workspace_runtime(
+    lifecycle: WorkspaceLifecycle,
     thread_runtime: Option<&ThreadRuntimeSnapshot>,
     has_active_turn: bool,
-) -> (TaskPhase, Vec<TaskWaitReason>) {
+) -> (WorkspacePhase, Vec<WorkspaceWaitReason>) {
     let lifecycle_phase = match lifecycle {
-        TaskLifecycle::Provisioning => Some(TaskPhase::Provisioning),
-        TaskLifecycle::Starting => Some(TaskPhase::Starting),
-        TaskLifecycle::Completed => Some(TaskPhase::Completed),
-        TaskLifecycle::Failed => Some(TaskPhase::Failed),
-        TaskLifecycle::Ready => None,
+        WorkspaceLifecycle::Provisioning => Some(WorkspacePhase::Provisioning),
+        WorkspaceLifecycle::Starting => Some(WorkspacePhase::Starting),
+        WorkspaceLifecycle::Completed => Some(WorkspacePhase::Completed),
+        WorkspaceLifecycle::Failed => Some(WorkspacePhase::Failed),
+        WorkspaceLifecycle::Ready => None,
     };
     if let Some(phase) = lifecycle_phase {
         return (phase, Vec::new());
     }
 
     let Some(snapshot) = thread_runtime.filter(|snapshot| snapshot.is_fresh) else {
-        return (TaskPhase::Unavailable, Vec::new());
+        return (WorkspacePhase::Unavailable, Vec::new());
     };
     match &snapshot.status {
-        CodexThreadStatus::NotLoaded => (TaskPhase::NotLoaded, Vec::new()),
-        CodexThreadStatus::Idle if has_active_turn => (TaskPhase::Active, Vec::new()),
-        CodexThreadStatus::Idle => (TaskPhase::Idle, Vec::new()),
-        CodexThreadStatus::SystemError => (TaskPhase::SystemError, Vec::new()),
+        CodexThreadStatus::NotLoaded => (WorkspacePhase::NotLoaded, Vec::new()),
+        CodexThreadStatus::Idle if has_active_turn => (WorkspacePhase::Active, Vec::new()),
+        CodexThreadStatus::Idle => (WorkspacePhase::Idle, Vec::new()),
+        CodexThreadStatus::SystemError => (WorkspacePhase::SystemError, Vec::new()),
         CodexThreadStatus::Active { active_flags } => {
             let approval = active_flags.iter().any(|flag| flag == "waitingOnApproval");
             let user_input = active_flags.iter().any(|flag| flag == "waitingOnUserInput");
             let mut reasons = Vec::with_capacity(usize::from(approval) + usize::from(user_input));
             if approval {
-                reasons.push(TaskWaitReason::Approval);
+                reasons.push(WorkspaceWaitReason::Approval);
             }
             if user_input {
-                reasons.push(TaskWaitReason::UserInput);
+                reasons.push(WorkspaceWaitReason::UserInput);
             }
             let phase = if approval {
-                TaskPhase::WaitingForApproval
+                WorkspacePhase::WaitingForApproval
             } else if user_input {
-                TaskPhase::WaitingForInput
+                WorkspacePhase::WaitingForInput
             } else {
-                TaskPhase::Active
+                WorkspacePhase::Active
             };
             (phase, reasons)
         }
@@ -262,7 +262,7 @@ pub struct Repository {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Task {
+pub struct Workspace {
     pub id: String,
     pub create_operation_id: Option<String>,
     pub repository_id: String,
@@ -270,12 +270,12 @@ pub struct Task {
     pub context_mode: ContextMode,
     pub context: Value,
     pub profile: ProfileSnapshot,
-    pub lifecycle: TaskLifecycle,
+    pub lifecycle: WorkspaceLifecycle,
     pub thread_runtime: Option<ThreadRuntimeSnapshot>,
     /// Derived on every storage read; never persisted as mutable state.
-    pub phase: TaskPhase,
+    pub phase: WorkspacePhase,
     /// Derived from the complete native active-flag set.
-    pub wait_reasons: Vec<TaskWaitReason>,
+    pub wait_reasons: Vec<WorkspaceWaitReason>,
     pub branch_name: Option<String>,
     pub base_sha: Option<String>,
     pub worktree_path: Option<PathBuf>,
@@ -293,7 +293,7 @@ pub struct Task {
 #[serde(rename_all = "camelCase")]
 pub struct Turn {
     pub id: String,
-    pub task_id: String,
+    pub workspace_id: String,
     pub operation_id: Option<String>,
     pub client_message_id: String,
     pub codex_turn_id: Option<String>,
@@ -333,8 +333,8 @@ impl EventSource {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventKind {
-    #[serde(rename = "task.created")]
-    TaskCreated,
+    #[serde(rename = "workspace.created")]
+    WorkspaceCreated,
     #[serde(rename = "worktree.created")]
     WorktreeCreated,
     #[serde(rename = "agent.started")]
@@ -361,8 +361,8 @@ pub enum EventKind {
     TurnCompleted,
     #[serde(rename = "agent.failed")]
     AgentFailed,
-    #[serde(rename = "task.completed")]
-    TaskCompleted,
+    #[serde(rename = "workspace.completed")]
+    WorkspaceCompleted,
     #[serde(rename = "control.call.started")]
     ControlCallStarted,
     #[serde(rename = "control.call.completed")]
@@ -372,7 +372,7 @@ pub enum EventKind {
 impl EventKind {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::TaskCreated => "task.created",
+            Self::WorkspaceCreated => "workspace.created",
             Self::WorktreeCreated => "worktree.created",
             Self::AgentStarted => "agent.started",
             Self::MessageReceived => "message.received",
@@ -386,7 +386,7 @@ impl EventKind {
             Self::AgentMessageCompleted => "agent.message.completed",
             Self::TurnCompleted => "turn.completed",
             Self::AgentFailed => "agent.failed",
-            Self::TaskCompleted => "task.completed",
+            Self::WorkspaceCompleted => "workspace.completed",
             Self::ControlCallStarted => "control.call.started",
             Self::ControlCallCompleted => "control.call.completed",
         }
@@ -394,7 +394,7 @@ impl EventKind {
 
     pub fn parse(value: &str) -> Option<Self> {
         match value {
-            "task.created" => Some(Self::TaskCreated),
+            "workspace.created" => Some(Self::WorkspaceCreated),
             "worktree.created" => Some(Self::WorktreeCreated),
             "agent.started" => Some(Self::AgentStarted),
             "message.received" => Some(Self::MessageReceived),
@@ -408,7 +408,7 @@ impl EventKind {
             "agent.message.completed" => Some(Self::AgentMessageCompleted),
             "turn.completed" => Some(Self::TurnCompleted),
             "agent.failed" => Some(Self::AgentFailed),
-            "task.completed" => Some(Self::TaskCompleted),
+            "workspace.completed" => Some(Self::WorkspaceCompleted),
             "control.call.started" => Some(Self::ControlCallStarted),
             "control.call.completed" => Some(Self::ControlCallCompleted),
             _ => None,
@@ -421,7 +421,7 @@ impl EventKind {
 pub struct NormalizedEvent {
     pub sequence: i64,
     pub id: String,
-    pub task_id: Option<String>,
+    pub workspace_id: Option<String>,
     pub turn_id: Option<String>,
     pub kind: EventKind,
     pub source: EventSource,
@@ -488,7 +488,7 @@ pub struct Audit {
     pub id: String,
     pub source: String,
     pub action: String,
-    pub task_id: Option<String>,
+    pub workspace_id: Option<String>,
     pub operation_id: Option<String>,
     pub outcome: AuditOutcome,
     /// Sanitized metadata only; raw prompts, credentials, and environments are forbidden.
@@ -503,7 +503,7 @@ mod tests {
     #[test]
     fn wire_names_are_stable() {
         assert_eq!(
-            serde_json::to_string(&TaskPhase::WaitingForApproval).unwrap(),
+            serde_json::to_string(&WorkspacePhase::WaitingForApproval).unwrap(),
             "\"waiting_for_approval\""
         );
         assert_eq!(
@@ -538,22 +538,25 @@ mod tests {
             is_fresh: true,
         };
         assert_eq!(
-            derive_task_runtime(TaskLifecycle::Ready, Some(&snapshot), true),
+            derive_workspace_runtime(WorkspaceLifecycle::Ready, Some(&snapshot), true),
             (
-                TaskPhase::WaitingForApproval,
-                vec![TaskWaitReason::Approval, TaskWaitReason::UserInput]
+                WorkspacePhase::WaitingForApproval,
+                vec![
+                    WorkspaceWaitReason::Approval,
+                    WorkspaceWaitReason::UserInput
+                ]
             )
         );
         assert_eq!(
-            derive_task_runtime(
-                TaskLifecycle::Ready,
+            derive_workspace_runtime(
+                WorkspaceLifecycle::Ready,
                 Some(&ThreadRuntimeSnapshot {
                     is_fresh: false,
                     ..snapshot
                 }),
                 true,
             ),
-            (TaskPhase::Unavailable, Vec::new())
+            (WorkspacePhase::Unavailable, Vec::new())
         );
     }
 }

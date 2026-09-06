@@ -47,11 +47,11 @@ pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<
     );
     let reconciled = store
         .reconcile_unfinished()
-        .context("could not reconcile unfinished tasks")?;
+        .context("could not reconcile unfinished workspaces")?;
     if !reconciled.is_empty() {
         warn!(
-            tasks = reconciled.len(),
-            "reconciled unfinished task preparation or turns after daemon restart"
+            workspaces = reconciled.len(),
+            "reconciled unfinished workspace preparation or turns after daemon restart"
         );
     }
 
@@ -112,7 +112,7 @@ pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<
         error!(%source, "could not close the Codex App Server cleanly");
     }
     if let Err(source) = event_task.await {
-        error!(%source, "Codex event task panicked");
+        error!(%source, "Codex event workspace panicked");
     }
     server_result.context("daemon RPC server stopped with an error")
 }
@@ -167,7 +167,7 @@ async fn pump_codex_events(
     }
     match coordinator.record_codex_disconnected() {
         Ok(0) => {}
-        Ok(tasks) => warn!(tasks, "marked native thread status snapshots stale"),
+        Ok(workspaces) => warn!(workspaces, "marked native thread status snapshots stale"),
         Err(source) => error!(%source, "could not mark thread statuses stale"),
     }
 }

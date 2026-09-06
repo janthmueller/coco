@@ -5,19 +5,19 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::domain::{
-    Audit, AuditOutcome, ContextMode, GitObservation, NormalizedEvent, Repository, Task, Turn,
+    Audit, AuditOutcome, ContextMode, GitObservation, NormalizedEvent, Repository, Turn, Workspace,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DaemonMethod {
     Health,
     RepositoryRegister,
-    TaskCreate,
-    TaskList,
-    TaskGet,
+    WorkspaceCreate,
+    WorkspaceList,
+    WorkspaceGet,
     TurnStart,
     EventList,
-    TaskDiff,
+    WorkspaceDiff,
     AuditRecord,
 }
 
@@ -26,12 +26,12 @@ impl DaemonMethod {
     pub const ALL: [Self; 9] = [
         Self::Health,
         Self::RepositoryRegister,
-        Self::TaskCreate,
-        Self::TaskList,
-        Self::TaskGet,
+        Self::WorkspaceCreate,
+        Self::WorkspaceList,
+        Self::WorkspaceGet,
         Self::TurnStart,
         Self::EventList,
-        Self::TaskDiff,
+        Self::WorkspaceDiff,
         Self::AuditRecord,
     ];
 
@@ -39,12 +39,12 @@ impl DaemonMethod {
         match self {
             Self::Health => "health",
             Self::RepositoryRegister => "repository.register",
-            Self::TaskCreate => "task.create",
-            Self::TaskList => "task.list",
-            Self::TaskGet => "task.get",
+            Self::WorkspaceCreate => "workspace.create",
+            Self::WorkspaceList => "workspace.list",
+            Self::WorkspaceGet => "workspace.get",
             Self::TurnStart => "turn.start",
             Self::EventList => "event.list",
-            Self::TaskDiff => "task.diff",
+            Self::WorkspaceDiff => "workspace.diff",
             Self::AuditRecord => "audit.record",
         }
     }
@@ -53,12 +53,12 @@ impl DaemonMethod {
         match value {
             "health" => Some(Self::Health),
             "repository.register" => Some(Self::RepositoryRegister),
-            "task.create" => Some(Self::TaskCreate),
-            "task.list" => Some(Self::TaskList),
-            "task.get" => Some(Self::TaskGet),
+            "workspace.create" => Some(Self::WorkspaceCreate),
+            "workspace.list" => Some(Self::WorkspaceList),
+            "workspace.get" => Some(Self::WorkspaceGet),
             "turn.start" => Some(Self::TurnStart),
             "event.list" => Some(Self::EventList),
-            "task.diff" => Some(Self::TaskDiff),
+            "workspace.diff" => Some(Self::WorkspaceDiff),
             "audit.record" => Some(Self::AuditRecord),
             _ => None,
         }
@@ -96,7 +96,7 @@ pub struct RepositoryRegisterParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct TaskCreateParams {
+pub struct WorkspaceCreateParams {
     pub repository_path: PathBuf,
     pub name: String,
     pub base_ref: String,
@@ -108,7 +108,7 @@ pub struct TaskCreateParams {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct TaskListParams {
+pub struct WorkspaceListParams {
     pub repository_path: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phases: Option<Vec<String>>,
@@ -116,16 +116,16 @@ pub struct TaskListParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct TaskGetParams {
+pub struct WorkspaceGetParams {
     pub repository_path: PathBuf,
-    pub task: String,
+    pub workspace: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TurnStartParams {
     pub repository_path: PathBuf,
-    pub task: String,
+    pub workspace: String,
     pub message: String,
     pub operation_id: String,
 }
@@ -134,16 +134,16 @@ pub struct TurnStartParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EventListParams {
     pub repository_path: PathBuf,
-    pub task: String,
+    pub workspace: String,
     #[serde(default)]
     pub after_sequence: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct TaskDiffParams {
+pub struct WorkspaceDiffParams {
     pub repository_path: PathBuf,
-    pub task: String,
+    pub workspace: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_bytes: Option<u64>,
 }
@@ -154,7 +154,7 @@ pub struct AuditRecordParams {
     pub source: String,
     pub action: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task_id: Option<String>,
+    pub workspace_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation_id: Option<String>,
     pub outcome: AuditOutcome,
@@ -170,26 +170,26 @@ pub struct HealthResult {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct TaskResult {
-    pub task: Task,
+pub struct WorkspaceResult {
+    pub workspace: Workspace,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex_turn_id: Option<String>,
 }
 
-impl TaskResult {
-    pub fn prepared(task: Task) -> Self {
+impl WorkspaceResult {
+    pub fn prepared(workspace: Workspace) -> Self {
         Self {
-            task,
+            workspace,
             turn_id: None,
             codex_turn_id: None,
         }
     }
 
-    pub fn with_turn(task: Task, turn: &Turn) -> Self {
+    pub fn with_turn(workspace: Workspace, turn: &Turn) -> Self {
         Self {
-            task,
+            workspace,
             turn_id: Some(turn.id.clone()),
             codex_turn_id: turn.codex_turn_id.clone(),
         }
@@ -198,7 +198,7 @@ impl TaskResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum TaskGitStatus {
+pub enum WorkspaceGitStatus {
     Observed(GitObservation),
     Unavailable(GitUnavailable),
     Incomplete(GitIncomplete),
@@ -227,23 +227,23 @@ pub struct GitIncomplete {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct TaskStatusResult {
-    pub task: Task,
-    pub git: TaskGitStatus,
+pub struct WorkspaceStatusResult {
+    pub workspace: Workspace,
+    pub git: WorkspaceGitStatus,
     pub next_sequence: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EventListResult {
-    pub task: Task,
+    pub workspace: Workspace,
     pub events: Vec<NormalizedEvent>,
     pub next_sequence: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct TaskDiffResult {
+pub struct WorkspaceDiffResult {
     pub patch: String,
     pub patch_truncated: bool,
     pub untracked_paths: Vec<PathBuf>,
@@ -261,12 +261,12 @@ macro_rules! daemon_request {
 
 daemon_request!(HealthParams, Health, HealthResult);
 daemon_request!(RepositoryRegisterParams, RepositoryRegister, Repository);
-daemon_request!(TaskCreateParams, TaskCreate, TaskResult);
-daemon_request!(TaskListParams, TaskList, Vec<Task>);
-daemon_request!(TaskGetParams, TaskGet, TaskStatusResult);
-daemon_request!(TurnStartParams, TurnStart, TaskResult);
+daemon_request!(WorkspaceCreateParams, WorkspaceCreate, WorkspaceResult);
+daemon_request!(WorkspaceListParams, WorkspaceList, Vec<Workspace>);
+daemon_request!(WorkspaceGetParams, WorkspaceGet, WorkspaceStatusResult);
+daemon_request!(TurnStartParams, TurnStart, WorkspaceResult);
 daemon_request!(EventListParams, EventList, EventListResult);
-daemon_request!(TaskDiffParams, TaskDiff, TaskDiffResult);
+daemon_request!(WorkspaceDiffParams, WorkspaceDiff, WorkspaceDiffResult);
 daemon_request!(AuditRecordParams, AuditRecord, Audit);
 
 fn default_profile() -> String {
@@ -286,12 +286,12 @@ mod tests {
             [
                 "health",
                 "repository.register",
-                "task.create",
-                "task.list",
-                "task.get",
+                "workspace.create",
+                "workspace.list",
+                "workspace.get",
                 "turn.start",
                 "event.list",
-                "task.diff",
+                "workspace.diff",
                 "audit.record",
             ]
         );
@@ -299,7 +299,7 @@ mod tests {
             assert_eq!(DaemonMethod::parse(method.as_str()), Some(method));
             assert_eq!(method.to_string(), method.as_str());
         }
-        assert_eq!(DaemonMethod::parse("task.unknown"), None);
+        assert_eq!(DaemonMethod::parse("workspace.unknown"), None);
     }
 
     #[test]
@@ -313,18 +313,18 @@ mod tests {
             json!({"path": "/repo"}),
         );
         assert_request(
-            TaskCreateParams {
+            WorkspaceCreateParams {
                 repository_path: PathBuf::from("/repo"),
-                name: "task".to_owned(),
+                name: "workspace".to_owned(),
                 base_ref: "HEAD".to_owned(),
                 context_mode: ContextMode::Fresh,
                 profile: "dev".to_owned(),
                 operation_id: "create-1".to_owned(),
             },
-            DaemonMethod::TaskCreate,
+            DaemonMethod::WorkspaceCreate,
             json!({
                 "repositoryPath": "/repo",
-                "name": "task",
+                "name": "workspace",
                 "baseRef": "HEAD",
                 "contextMode": "fresh",
                 "profile": "dev",
@@ -332,32 +332,32 @@ mod tests {
             }),
         );
         assert_request(
-            TaskListParams {
+            WorkspaceListParams {
                 repository_path: PathBuf::from("/repo"),
                 phases: None,
             },
-            DaemonMethod::TaskList,
+            DaemonMethod::WorkspaceList,
             json!({"repositoryPath": "/repo"}),
         );
         assert_request(
-            TaskGetParams {
+            WorkspaceGetParams {
                 repository_path: PathBuf::from("/repo"),
-                task: "task".to_owned(),
+                workspace: "workspace".to_owned(),
             },
-            DaemonMethod::TaskGet,
-            json!({"repositoryPath": "/repo", "task": "task"}),
+            DaemonMethod::WorkspaceGet,
+            json!({"repositoryPath": "/repo", "workspace": "workspace"}),
         );
         assert_request(
             TurnStartParams {
                 repository_path: PathBuf::from("/repo"),
-                task: "task".to_owned(),
+                workspace: "workspace".to_owned(),
                 message: "continue".to_owned(),
                 operation_id: "send-1".to_owned(),
             },
             DaemonMethod::TurnStart,
             json!({
                 "repositoryPath": "/repo",
-                "task": "task",
+                "workspace": "workspace",
                 "message": "continue",
                 "operationId": "send-1",
             }),
@@ -365,26 +365,26 @@ mod tests {
         assert_request(
             EventListParams {
                 repository_path: PathBuf::from("/repo"),
-                task: "task".to_owned(),
+                workspace: "workspace".to_owned(),
                 after_sequence: 7,
             },
             DaemonMethod::EventList,
-            json!({"repositoryPath": "/repo", "task": "task", "afterSequence": 7}),
+            json!({"repositoryPath": "/repo", "workspace": "workspace", "afterSequence": 7}),
         );
         assert_request(
-            TaskDiffParams {
+            WorkspaceDiffParams {
                 repository_path: PathBuf::from("/repo"),
-                task: "task".to_owned(),
+                workspace: "workspace".to_owned(),
                 max_bytes: Some(4096),
             },
-            DaemonMethod::TaskDiff,
-            json!({"repositoryPath": "/repo", "task": "task", "maxBytes": 4096}),
+            DaemonMethod::WorkspaceDiff,
+            json!({"repositoryPath": "/repo", "workspace": "workspace", "maxBytes": 4096}),
         );
         assert_request(
             AuditRecordParams {
                 source: "mcp".to_owned(),
-                action: "tasks.list".to_owned(),
-                task_id: None,
+                action: "workspaces.list".to_owned(),
+                workspace_id: None,
                 operation_id: Some("operation-1".to_owned()),
                 outcome: AuditOutcome::Succeeded,
                 details: json!({"repositoryPath": "/repo"}),
@@ -392,7 +392,7 @@ mod tests {
             DaemonMethod::AuditRecord,
             json!({
                 "source": "mcp",
-                "action": "tasks.list",
+                "action": "workspaces.list",
                 "operationId": "operation-1",
                 "outcome": "succeeded",
                 "details": {"repositoryPath": "/repo"},
@@ -401,10 +401,10 @@ mod tests {
     }
 
     #[test]
-    fn task_creation_defaults_to_the_default_profile() {
-        let params: TaskCreateParams = serde_json::from_value(json!({
+    fn workspace_creation_defaults_to_the_default_profile() {
+        let params: WorkspaceCreateParams = serde_json::from_value(json!({
             "repositoryPath": "/repo",
-            "name": "task",
+            "name": "workspace",
             "baseRef": "HEAD",
             "contextMode": "fresh",
             "operationId": "create-1",
@@ -415,9 +415,9 @@ mod tests {
 
     #[test]
     fn request_dtos_reject_unknown_fields() {
-        let error = serde_json::from_value::<TaskGetParams>(json!({
+        let error = serde_json::from_value::<WorkspaceGetParams>(json!({
             "repositoryPath": "/repo",
-            "task": "task",
+            "workspace": "workspace",
             "goal": "retired",
         }))
         .unwrap_err();
@@ -436,14 +436,14 @@ mod tests {
             "createdAtMs": 1,
             "updatedAtMs": 2,
         }));
-        assert_response::<TaskCreateParams>(json!({"task": task()}));
-        assert_response::<TaskListParams>(json!([task()]));
-        assert_response::<TaskGetParams>(json!({
-            "task": task(),
+        assert_response::<WorkspaceCreateParams>(json!({"workspace": workspace()}));
+        assert_response::<WorkspaceListParams>(json!([workspace()]));
+        assert_response::<WorkspaceGetParams>(json!({
+            "workspace": workspace(),
             "git": {
                 "observed": true,
                 "canonicalPath": "/worktree",
-                "branchName": "coco/task",
+                "branchName": "coco/workspace",
                 "headSha": "head",
                 "baseSha": "base",
                 "dirty": true,
@@ -456,16 +456,16 @@ mod tests {
             "nextSequence": 3,
         }));
         assert_response::<TurnStartParams>(json!({
-            "task": task(),
+            "workspace": workspace(),
             "turnId": "turn-1",
             "codexTurnId": "codex-turn-1",
         }));
         assert_response::<EventListParams>(json!({
-            "task": task(),
+            "workspace": workspace(),
             "events": [{
                 "sequence": 3,
                 "id": "event-3",
-                "taskId": "task-1",
+                "workspaceId": "workspace-1",
                 "turnId": null,
                 "kind": "agent.started",
                 "source": "codex",
@@ -476,7 +476,7 @@ mod tests {
             }],
             "nextSequence": 3,
         }));
-        assert_response::<TaskDiffParams>(json!({
+        assert_response::<WorkspaceDiffParams>(json!({
             "patch": "diff --git a/a b/a\n",
             "patchTruncated": false,
             "untrackedPaths": ["new.txt"],
@@ -485,8 +485,8 @@ mod tests {
             "sequence": 4,
             "id": "audit-4",
             "source": "mcp",
-            "action": "tasks.list",
-            "taskId": null,
+            "action": "workspaces.list",
+            "workspaceId": null,
             "operationId": null,
             "outcome": "succeeded",
             "details": {"repositoryPath": "/repo"},
@@ -519,12 +519,12 @@ mod tests {
         assert_eq!(serde_json::to_value(decoded).unwrap(), expected);
     }
 
-    fn task() -> Value {
+    fn workspace() -> Value {
         json!({
-            "id": "task-1",
+            "id": "workspace-1",
             "createOperationId": "create-1",
             "repositoryId": "repo-1",
-            "name": "task",
+            "name": "workspace",
             "contextMode": "fresh",
             "context": {"version": 1, "mode": "fresh", "baseRef": "HEAD"},
             "profile": {
@@ -542,7 +542,7 @@ mod tests {
             },
             "phase": "idle",
             "waitReasons": [],
-            "branchName": "coco/task",
+            "branchName": "coco/workspace",
             "baseSha": "base",
             "worktreePath": "/worktree",
             "codexThreadId": "thread-1",

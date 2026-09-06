@@ -21,16 +21,16 @@ pub(super) fn phase_label(phase: &str) -> &'static str {
 pub(super) fn versioned(value: Value) -> Value {
     match value {
         Value::Object(mut object) => {
-            object.insert("schemaVersion".into(), Value::from(2));
+            object.insert("schemaVersion".into(), Value::from(3));
             Value::Object(object)
         }
-        value => json!({ "schemaVersion": 2, "result": value }),
+        value => json!({ "schemaVersion": 3, "result": value }),
     }
 }
 
 pub(super) fn versioned_array(key: &str, value: Value) -> Value {
     let mut object = serde_json::Map::new();
-    object.insert("schemaVersion".to_owned(), Value::from(2));
+    object.insert("schemaVersion".to_owned(), Value::from(3));
     object.insert(key.to_owned(), value);
     Value::Object(object)
 }
@@ -41,8 +41,8 @@ pub(super) fn print_json(value: Value) -> Result<()> {
 }
 
 pub(super) fn print_human(value: &Value) {
-    if let Some(task) = value.get("task") {
-        print_human(task);
+    if let Some(workspace) = value.get("workspace") {
+        print_human(workspace);
         if let Some(turn_id) = value.get("turnId").and_then(Value::as_str) {
             println!("turn: {turn_id}");
         }
@@ -69,39 +69,42 @@ pub(super) fn print_human(value: &Value) {
     }
 }
 
-pub(super) fn print_task_list(value: &Value) {
-    let Some(tasks) = value.as_array() else {
-        println!("No tasks.");
+pub(super) fn print_workspace_list(value: &Value) {
+    let Some(workspaces) = value.as_array() else {
+        println!("No workspaces.");
         return;
     };
-    if tasks.is_empty() {
-        println!("No tasks.");
+    if workspaces.is_empty() {
+        println!("No workspaces.");
         return;
     }
     println!("ID\tNAME\tPHASE\tBRANCH");
-    for task in tasks {
+    for workspace in workspaces {
         println!(
             "{}\t{}\t{}\t{}",
-            text(task, "id"),
-            text(task, "name"),
-            text(task, "phase"),
-            text(task, "branchName")
+            text(workspace, "id"),
+            text(workspace, "name"),
+            text(workspace, "phase"),
+            text(workspace, "branchName")
         );
     }
 }
 
 pub(super) fn print_status(value: &Value) {
-    let task = value.get("task").unwrap_or(value);
-    let name = task.get("name").and_then(Value::as_str).unwrap_or("task");
-    let phase = task
+    let workspace = value.get("workspace").unwrap_or(value);
+    let name = workspace
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("workspace");
+    let phase = workspace
         .get("phase")
         .and_then(Value::as_str)
         .unwrap_or("unknown");
     println!("{name}: {}", phase_label(phase));
-    if let Some(worktree) = task.get("worktreePath").and_then(Value::as_str) {
+    if let Some(worktree) = workspace.get("worktreePath").and_then(Value::as_str) {
         println!("worktree: {worktree}");
     }
-    if let Some(message) = task.get("lastErrorMessage").and_then(Value::as_str) {
+    if let Some(message) = workspace.get("lastErrorMessage").and_then(Value::as_str) {
         println!("error: {message}");
     }
 }

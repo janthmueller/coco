@@ -6,7 +6,7 @@ use tempfile::TempDir;
 
 use crate::domain::BaseRelation;
 
-use super::worktree::validate_task_name;
+use super::worktree::validate_workspace_name;
 use super::{Git, GitError};
 
 struct Fixture {
@@ -110,12 +110,12 @@ fn diff_and_observation_include_commits_and_untracked_paths() {
 }
 
 #[test]
-fn validates_task_names_without_accepting_path_syntax() {
-    assert!(validate_task_name("task-42").is_ok());
+fn validates_workspace_names_without_accepting_path_syntax() {
+    assert!(validate_workspace_name("workspace-42").is_ok());
     for invalid in ["", "UPPER", "-leading", "trailing-", "path/name", "a_b"] {
         assert!(matches!(
-            validate_task_name(invalid),
-            Err(GitError::InvalidTaskName(_))
+            validate_workspace_name(invalid),
+            Err(GitError::InvalidWorkspaceName(_))
         ));
     }
 }

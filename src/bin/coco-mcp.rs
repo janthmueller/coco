@@ -9,7 +9,7 @@ struct Args {
     /// Fix all tools to this repository.
     #[arg(long)]
     repository: PathBuf,
-    /// Advertise the mutating agents.send tool.
+    /// Advertise the mutating workspaces.send tool.
     #[arg(long)]
     allow_send: bool,
 }

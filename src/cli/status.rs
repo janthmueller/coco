@@ -11,7 +11,11 @@ use crate::rpc::RpcClient;
 
 use super::output::phase_label;
 
-pub(super) async fn follow_status(client: &RpcClient, repository: &Path, task: &str) -> Result<()> {
+pub(super) async fn follow_status(
+    client: &RpcClient,
+    repository: &Path,
+    workspace: &str,
+) -> Result<()> {
     let mut after_sequence = 0_i64;
     let mut last_phase: Option<String> = None;
     let mut last_message: Option<String> = None;
@@ -22,7 +26,7 @@ pub(super) async fn follow_status(client: &RpcClient, repository: &Path, task: &
         let response = client
             .request(EventListParams {
                 repository_path: repository.to_path_buf(),
-                task: task.to_owned(),
+                workspace: workspace.to_owned(),
                 after_sequence,
             })
             .await?;
@@ -36,8 +40,8 @@ pub(super) async fn follow_status(client: &RpcClient, repository: &Path, task: &
             }
         }
         after_sequence = response.next_sequence;
-        let phase = response.task.phase.as_str();
-        let name = response.task.name.as_str();
+        let phase = response.workspace.phase.as_str();
+        let name = response.workspace.name.as_str();
         if !interactive && last_phase.as_deref() != Some(phase) {
             println!("{name}: {}", phase_label(phase));
         }

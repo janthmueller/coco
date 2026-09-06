@@ -16,40 +16,40 @@ pub(super) enum Command {
         #[command(subcommand)]
         command: RepoCommand,
     },
-    /// Prepare a fresh Codex task in an isolated worktree.
-    New(NewArgs),
-    /// List tasks in the current repository.
+    /// Create a fresh Codex workspace in an isolated worktree.
+    Create(CreateArgs),
+    /// List workspaces in the current repository.
     Ls {
         /// Emit stable, machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
-    /// Show a task's current state, optionally following it until it pauses.
+    /// Show a workspace's current state, optionally following it until it pauses.
     Status {
-        /// Task name or ID.
-        task: String,
-        /// Keep updating until the task becomes ready, pauses, or finishes.
+        /// Workspace name or ID.
+        workspace: String,
+        /// Keep updating until the workspace becomes ready, pauses, or finishes.
         #[arg(long, conflicts_with = "json")]
         follow: bool,
         /// Emit stable, machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
-    /// Start the first or next turn for a ready task.
+    /// Start the first or next turn for a ready workspace.
     Send {
-        /// Task name or ID.
-        task: String,
+        /// Workspace name or ID.
+        workspace: String,
         /// Instruction to send to Codex.
         message: String,
     },
-    /// Open the task's existing Codex thread in its managed worktree.
+    /// Open the workspace's existing Codex thread in its managed worktree.
     /// Leaving with /quit or /exit does not cancel active work.
     Jump {
-        /// Task name or ID.
-        task: String,
+        /// Workspace name or ID.
+        workspace: String,
     },
     /// Show all tracked and untracked changes from the immutable base.
-    Diff { task: String },
+    Diff { workspace: String },
     /// Run CoCo as a local MCP server.
     Mcp {
         #[command(subcommand)]
@@ -67,10 +67,10 @@ pub(super) enum RepoCommand {
 }
 
 #[derive(Debug, Args)]
-pub(super) struct NewArgs {
-    /// Short task name, also used to derive its branch and worktree.
+pub(super) struct CreateArgs {
+    /// Short workspace name, also used to derive its branch and worktree.
     pub(super) name: String,
-    /// Git revision from which to prepare the task.
+    /// Git revision from which to prepare the workspace.
     #[arg(long, default_value = "HEAD")]
     pub(super) base: String,
     /// Apply `[profiles.<PROFILE>]` from `$CODEX_HOME/config.toml` to the thread.
@@ -84,7 +84,7 @@ pub(super) enum McpCommand {
     Serve {
         #[arg(long)]
         repository: PathBuf,
-        /// Advertise the mutating agents.send tool.
+        /// Advertise the mutating workspaces.send tool.
         #[arg(long)]
         allow_send: bool,
     },

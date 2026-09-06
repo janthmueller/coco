@@ -8,8 +8,8 @@ use tracing::error;
 
 use crate::coordinator::{Coordinator, CoordinatorError};
 use crate::protocol::{
-    AuditRecordParams, DaemonMethod, EventListParams, HealthParams, HealthResult, TaskCreateParams,
-    TaskDiffParams, TaskGetParams, TaskListParams, TurnStartParams,
+    AuditRecordParams, DaemonMethod, EventListParams, HealthParams, HealthResult, TurnStartParams,
+    WorkspaceCreateParams, WorkspaceDiffParams, WorkspaceGetParams, WorkspaceListParams,
 };
 use crate::rpc::{RpcErrorPayload, RpcHandler};
 
@@ -42,18 +42,21 @@ impl RpcHandler for DaemonHandler {
             DaemonMethod::RepositoryRegister => {
                 execute(self.coordinator.register_repository(decode(params)?))
             }
-            DaemonMethod::TaskCreate => execute(
+            DaemonMethod::WorkspaceCreate => execute(
                 self.coordinator
-                    .create_task(decode::<TaskCreateParams>(params)?)
+                    .create_workspace(decode::<WorkspaceCreateParams>(params)?)
                     .await,
             ),
-            DaemonMethod::TaskList => execute(
-                self.coordinator
-                    .list_tasks(decode::<TaskListParams>(params)?),
-            ),
-            DaemonMethod::TaskGet => {
-                execute(self.coordinator.get_task(decode::<TaskGetParams>(params)?))
-            }
+            DaemonMethod::WorkspaceList => execute(self.coordinator.list_workspaces(decode::<
+                WorkspaceListParams,
+            >(
+                params
+            )?)),
+            DaemonMethod::WorkspaceGet => execute(self.coordinator.get_workspace(decode::<
+                WorkspaceGetParams,
+            >(
+                params
+            )?)),
             DaemonMethod::TurnStart => execute(
                 self.coordinator
                     .start_turn(decode::<TurnStartParams>(params)?)
@@ -63,10 +66,11 @@ impl RpcHandler for DaemonHandler {
                 self.coordinator
                     .list_events(decode::<EventListParams>(params)?),
             ),
-            DaemonMethod::TaskDiff => execute(
-                self.coordinator
-                    .task_diff(decode::<TaskDiffParams>(params)?),
-            ),
+            DaemonMethod::WorkspaceDiff => execute(self.coordinator.workspace_diff(decode::<
+                WorkspaceDiffParams,
+            >(
+                params
+            )?)),
             DaemonMethod::AuditRecord => execute(self.coordinator.record_audit(decode::<
                 AuditRecordParams,
             >(

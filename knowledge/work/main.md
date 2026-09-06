@@ -146,6 +146,13 @@ architectural baseline for CoCo.
   daemon methods and DTOs, operation/event names, CLI rendering, MCP schemas,
   tests, and internal documentation. Replace `coco new` with `coco create` and
   update public docs only when that behavior ships.
+  - [x] Rename the Rust domain, Store/Coordinator modules, RPC methods and
+    fields, CLI output, event names, errors, and control-MCP tools.
+  - [x] Add the lossless SQLite v4 vocabulary migration and bump the CLI JSON
+    envelope to schema version 3.
+  - [x] Verify the code migration through the full unit and process suite.
+  - [ ] Update canonical internal knowledge and the public site before marking
+    the slice complete.
 - [ ] Add the create convenience pipeline and process coverage:
   `coco create <name>` prepares only; `--send <message>` starts the first turn;
   `--jump` opens the existing thread; both run create, send, then jump. Preserve
@@ -387,6 +394,12 @@ architectural baseline for CoCo.
   external reference. Replace `new` with `create`. Let `--send <message>` and
   `--jump` compose in the deterministic order create, send, jump; later-stage
   failure never rolls back a successfully created workspace or accepted turn.
+- 2026-09-06 — Treat the vocabulary change as a deliberate prerelease wire and
+  storage break: daemon methods are `workspace.*`, control-MCP tools are
+  `workspaces.*`, event kinds are `workspace.created` and
+  `workspace.completed`, and CLI JSON is schema version 3. SQLite schema v4
+  migrates existing records and correlations in place rather than discarding
+  prerelease state.
 
 ## Findings
 
@@ -530,6 +543,10 @@ architectural baseline for CoCo.
   empty thread but does not create the rollout file at `thread/start`. A
   model-free `thread/name/set` creates the durable record; after that operation
   a fresh App Server resumes the exact ID successfully.
+- The vocabulary migration must cover more than a Rust type rename: SQLite
+  owns table/foreign-key/index names, durable event and audit strings need
+  translation, the daemon and MCP each expose independent method namespaces,
+  and CLI JSON consumers need an explicit schema-version break.
 
 ## Verification
 
@@ -647,6 +664,12 @@ architectural baseline for CoCo.
   real test. All-target/all-feature Clippy with warnings denied, rustfmt,
   `cargo machete`, `nix run .#docs-check`, `nix run .#docs-build`, and
   `nix flake check . --no-write-lock-file --max-jobs 1` pass.
+- The workspace code/schema checkpoint passes all 55 library tests plus the
+  fake daemon/CLI process smoke with one build job and one test thread outside
+  the Unix-socket-restricted sandbox. The run verifies v1 task data migrating
+  through SQLite schema v4, the new `workspace.*` and `workspaces.*` surfaces,
+  `coco create`, and CLI JSON schema version 3. The all-target/all-feature
+  Clippy gate with warnings denied also passes.
 - The repository-scope, slash-name, and native Git policy record passes
   `git diff --check` and a targeted stale-decision scan. No Rust code or public
   documentation changed in this decision-only slice.

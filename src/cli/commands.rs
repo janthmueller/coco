@@ -6,15 +6,16 @@ use uuid::Uuid;
 use crate::domain::ContextMode;
 use crate::paths::CocoPaths;
 use crate::protocol::{
-    RepositoryRegisterParams, TaskCreateParams, TaskDiffParams, TaskGetParams, TaskListParams,
-    TurnStartParams,
+    RepositoryRegisterParams, TurnStartParams, WorkspaceCreateParams, WorkspaceDiffParams,
+    WorkspaceGetParams, WorkspaceListParams,
 };
 use crate::rpc::RpcClient;
 
-use super::args::{Cli, Command, McpCommand, NewArgs, RepoCommand};
+use super::args::{Cli, Command, CreateArgs, McpCommand, RepoCommand};
 use super::jump::jump;
 use super::output::{
-    print_diff, print_human, print_json, print_status, print_task_list, versioned, versioned_array,
+    print_diff, print_human, print_json, print_status, print_workspace_list, versioned,
+    versioned_array,
 };
 use super::status::follow_status;
 
@@ -26,14 +27,18 @@ pub(super) async fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Mcp { command } => run_mcp(command, paths).await,
         Command::Repo { command } => run_repo(command, &paths, &repository_path).await,
-        Command::New(args) => prepare_task(&paths, repository_path, args).await,
-        Command::Ls { json } => list_tasks(&paths, repository_path, json).await,
-        Command::Status { task, follow, json } => {
-            show_status(&paths, repository_path, task, follow, json).await
+        Command::Create(args) => create_workspace(&paths, repository_path, args).await,
+        Command::Ls { json } => list_workspaces(&paths, repository_path, json).await,
+        Command::Status {
+            workspace,
+            follow,
+            json,
+        } => show_status(&paths, repository_path, workspace, follow, json).await,
+        Command::Send { workspace, message } => {
+            send(&paths, repository_path, workspace, message).await
         }
-        Command::Send { task, message } => send(&paths, repository_path, task, message).await,
-        Command::Jump { task } => jump_to_task(&paths, repository_path, task).await,
-        Command::Diff { task } => show_diff(&paths, repository_path, task).await,
+        Command::Jump { workspace } => jump_to_workspace(&paths, repository_path, workspace).await,
+        Command::Diff { workspace } => show_diff(&paths, repository_path, workspace).await,
     }
 }
 
@@ -59,9 +64,9 @@ async fn run_repo(command: RepoCommand, paths: &CocoPaths, cwd: &Path) -> Result
     Ok(())
 }
 
-async fn prepare_task(paths: &CocoPaths, cwd: PathBuf, args: NewArgs) -> Result<()> {
+async fn create_workspace(paths: &CocoPaths, cwd: PathBuf, args: CreateArgs) -> Result<()> {
     let result = RpcClient::new(paths.socket_path.clone())
-        .request(TaskCreateParams {
+        .request(WorkspaceCreateParams {
             repository_path: cwd,
             name: args.name,
             base_ref: args.base,
@@ -74,18 +79,18 @@ async fn prepare_task(paths: &CocoPaths, cwd: PathBuf, args: NewArgs) -> Result<
     Ok(())
 }
 
-async fn list_tasks(paths: &CocoPaths, cwd: PathBuf, json_output: bool) -> Result<()> {
+async fn list_workspaces(paths: &CocoPaths, cwd: PathBuf, json_output: bool) -> Result<()> {
     let result = RpcClient::new(paths.socket_path.clone())
-        .request(TaskListParams {
+        .request(WorkspaceListParams {
             repository_path: cwd,
             phases: None,
         })
         .await?;
     let result = serde_json::to_value(result)?;
     if json_output {
-        print_json(versioned_array("tasks", result))
+        print_json(versioned_array("workspaces", result))
     } else {
-        print_task_list(&result);
+        print_workspace_list(&result);
         Ok(())
     }
 }
@@ -93,18 +98,18 @@ async fn list_tasks(paths: &CocoPaths, cwd: PathBuf, json_output: bool) -> Resul
 async fn show_status(
     paths: &CocoPaths,
     cwd: PathBuf,
-    task: String,
+    workspace: String,
     follow: bool,
     json_output: bool,
 ) -> Result<()> {
     let client = RpcClient::new(paths.socket_path.clone());
     if follow {
-        return follow_status(&client, &cwd, &task).await;
+        return follow_status(&client, &cwd, &workspace).await;
     }
     let result = client
-        .request(TaskGetParams {
+        .request(WorkspaceGetParams {
             repository_path: cwd,
-            task,
+            workspace,
         })
         .await?;
     let result = serde_json::to_value(result)?;
@@ -116,14 +121,14 @@ async fn show_status(
     }
 }
 
-async fn send(paths: &CocoPaths, cwd: PathBuf, task: String, message: String) -> Result<()> {
+async fn send(paths: &CocoPaths, cwd: PathBuf, workspace: String, message: String) -> Result<()> {
     if message.trim().is_empty() {
         bail!("message must not be empty");
     }
     let result = RpcClient::new(paths.socket_path.clone())
         .request(TurnStartParams {
             repository_path: cwd,
-            task,
+            workspace,
             message,
             operation_id: Uuid::new_v4().to_string(),
         })
@@ -132,21 +137,21 @@ async fn send(paths: &CocoPaths, cwd: PathBuf, task: String, message: String) ->
     Ok(())
 }
 
-async fn jump_to_task(paths: &CocoPaths, cwd: PathBuf, task: String) -> Result<()> {
+async fn jump_to_workspace(paths: &CocoPaths, cwd: PathBuf, workspace: String) -> Result<()> {
     let result = RpcClient::new(paths.socket_path.clone())
-        .request(TaskGetParams {
+        .request(WorkspaceGetParams {
             repository_path: cwd,
-            task,
+            workspace,
         })
         .await?;
     jump(paths, &serde_json::to_value(result)?).await
 }
 
-async fn show_diff(paths: &CocoPaths, cwd: PathBuf, task: String) -> Result<()> {
+async fn show_diff(paths: &CocoPaths, cwd: PathBuf, workspace: String) -> Result<()> {
     let result = RpcClient::new(paths.socket_path.clone())
-        .request(TaskDiffParams {
+        .request(WorkspaceDiffParams {
             repository_path: cwd,
-            task,
+            workspace,
             max_bytes: None,
         })
         .await?;

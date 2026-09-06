@@ -2,7 +2,7 @@ use serde_json::json;
 use tracing::warn;
 
 use super::{Coordinator, CoordinatorError, WorkerError};
-use crate::domain::{EventKind, EventSource, ProfileSnapshot, Task, TaskLifecycle};
+use crate::domain::{EventKind, EventSource, ProfileSnapshot, Workspace, WorkspaceLifecycle};
 use crate::profile::load_profile;
 use crate::store::EventDraft;
 
@@ -19,23 +19,23 @@ impl Coordinator {
     pub(crate) async fn recover_ready_threads(
         &self,
     ) -> Result<ThreadRecoveryReport, CoordinatorError> {
-        let tasks = self.store.list_tasks(None)?;
+        let workspaces = self.store.list_workspaces(None)?;
         let mut report = ThreadRecoveryReport::default();
-        for task in tasks.into_iter().filter(|task| {
-            task.lifecycle == TaskLifecycle::Ready
-                && task.thread_runtime.as_ref().is_none_or(|snapshot| {
+        for workspace in workspaces.into_iter().filter(|workspace| {
+            workspace.lifecycle == WorkspaceLifecycle::Ready
+                && workspace.thread_runtime.as_ref().is_none_or(|snapshot| {
                     !snapshot.is_fresh || snapshot.runtime_generation != self.runtime_generation
                 })
         }) {
             report.attempted += 1;
-            match self.resume_task_thread(&task).await {
+            match self.resume_workspace_thread(&workspace).await {
                 Ok(resumed) => {
                     self.store.observe_thread_status_with_event(
-                        &task.id,
+                        &workspace.id,
                         resumed.status.clone(),
                         &self.runtime_generation,
                         EventDraft {
-                            task_id: Some(task.id.clone()),
+                            workspace_id: Some(workspace.id.clone()),
                             turn_id: None,
                             kind: EventKind::ThreadStatusChanged,
                             source: EventSource::Codex,
@@ -52,17 +52,17 @@ impl Coordinator {
                 Err(source) => {
                     let cause_code = source.code();
                     warn!(
-                        task_id = %task.id,
-                        thread_id = task.codex_thread_id.as_deref().unwrap_or("(missing)"),
+                        workspace_id = %workspace.id,
+                        thread_id = workspace.codex_thread_id.as_deref().unwrap_or("(missing)"),
                         cause_code,
                         "could not resume a persisted Codex thread"
                     );
                     self.store.record_thread_recovery_failure_with_event(
-                        &task.id,
+                        &workspace.id,
                         RECOVERY_ERROR_CODE,
                         recovery_message(&source),
                         EventDraft {
-                            task_id: Some(task.id.clone()),
+                            workspace_id: Some(workspace.id.clone()),
                             turn_id: None,
                             kind: EventKind::AgentFailed,
                             source: EventSource::Coco,
@@ -82,21 +82,23 @@ impl Coordinator {
         Ok(report)
     }
 
-    async fn resume_task_thread(
+    async fn resume_workspace_thread(
         &self,
-        task: &Task,
+        workspace: &Workspace,
     ) -> Result<super::StartedThread, CoordinatorError> {
-        let thread_id = task
+        let thread_id = workspace
             .codex_thread_id
             .as_deref()
-            .ok_or(CoordinatorError::IncompleteTask("Codex thread"))?;
-        let worktree = task
+            .ok_or(CoordinatorError::IncompleteWorkspace("Codex thread"))?;
+        let worktree = workspace
             .worktree_path
             .as_deref()
-            .ok_or(CoordinatorError::IncompleteTask("worktree"))?;
-        let profile = load_profile(&task.profile.name, &self.codex_home)?;
-        if !same_profile_source(&profile.snapshot, &task.profile) {
-            return Err(CoordinatorError::ProfileChanged(task.profile.name.clone()));
+            .ok_or(CoordinatorError::IncompleteWorkspace("worktree"))?;
+        let profile = load_profile(&workspace.profile.name, &self.codex_home)?;
+        if !same_profile_source(&profile.snapshot, &workspace.profile) {
+            return Err(CoordinatorError::ProfileChanged(
+                workspace.profile.name.clone(),
+            ));
         }
         let resumed = self
             .worker
@@ -126,13 +128,13 @@ fn same_profile_source(current: &ProfileSnapshot, stored: &ProfileSnapshot) -> b
 
 fn recovery_message(error: &CoordinatorError) -> &'static str {
     match error {
-        CoordinatorError::IncompleteTask(_) => {
-            "The task is missing information required to resume its Codex thread"
+        CoordinatorError::IncompleteWorkspace(_) => {
+            "The workspace is missing information required to resume its Codex thread"
         }
         CoordinatorError::ProfileChanged(_) => {
-            "The task profile changed after the thread was created"
+            "The workspace profile changed after the thread was created"
         }
-        CoordinatorError::Profile(_) => "The task profile is unavailable or invalid",
+        CoordinatorError::Profile(_) => "The workspace profile is unavailable or invalid",
         CoordinatorError::Worker(_) => "Codex could not resume the stored thread",
         _ => "CoCo could not recover the stored thread",
     }

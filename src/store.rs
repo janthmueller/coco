@@ -21,7 +21,7 @@ use crate::domain::{
 mod events;
 mod migrations;
 mod rows;
-mod tasks;
+mod workspaces;
 
 use migrations::migrate;
 use rows::{get_repository_by_common_dir, get_repository_by_root};
@@ -48,24 +48,28 @@ pub enum StoreError {
     NotFound { entity: &'static str, id: String },
     #[error("invalid {field} value in database: {value}")]
     InvalidStoredValue { field: &'static str, value: String },
-    #[error("invalid transition for task {task_id}: expected {expected}, observed {actual}")]
-    InvalidTaskTransition {
-        task_id: String,
+    #[error(
+        "invalid transition for workspace {workspace_id}: expected {expected}, observed {actual}"
+    )]
+    InvalidWorkspaceTransition {
+        workspace_id: String,
         expected: String,
         actual: String,
     },
     #[error("turn {turn_id} cannot complete with phase {phase}")]
     InvalidTurnCompletion { turn_id: String, phase: String },
-    #[error("event turn {turn_id} belongs to task {turn_task_id}, not {event_task_id}")]
+    #[error(
+        "event turn {turn_id} belongs to workspace {turn_workspace_id}, not {event_workspace_id}"
+    )]
     EventCorrelation {
         turn_id: String,
-        turn_task_id: String,
-        event_task_id: String,
+        turn_workspace_id: String,
+        event_workspace_id: String,
     },
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct NewTask {
+pub struct NewWorkspace {
     pub create_operation_id: Option<String>,
     pub repository_id: String,
     pub name: String,
@@ -79,7 +83,7 @@ pub struct NewTask {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventDraft {
-    pub task_id: Option<String>,
+    pub workspace_id: Option<String>,
     pub turn_id: Option<String>,
     pub kind: EventKind,
     pub source: EventSource,
@@ -89,9 +93,9 @@ pub struct EventDraft {
 }
 
 impl EventDraft {
-    pub fn task(kind: EventKind, source: EventSource, payload: Value) -> Self {
+    pub fn workspace(kind: EventKind, source: EventSource, payload: Value) -> Self {
         Self {
-            task_id: None,
+            workspace_id: None,
             turn_id: None,
             kind,
             source,
@@ -129,7 +133,7 @@ pub struct TurnCompletion {
 pub struct AuditDraft {
     pub source: String,
     pub action: String,
-    pub task_id: Option<String>,
+    pub workspace_id: Option<String>,
     pub operation_id: Option<String>,
     pub outcome: AuditOutcome,
     pub details: Value,

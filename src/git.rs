@@ -38,8 +38,8 @@ pub enum GitError {
     NotAWorktree(PathBuf),
     #[error("repository checkout is dirty: {0}")]
     DirtyRepository(PathBuf),
-    #[error("invalid task name `{0}`; use 1-63 lowercase ASCII letters, digits, or hyphens")]
-    InvalidTaskName(String),
+    #[error("invalid workspace name `{0}`; use 1-63 lowercase ASCII letters, digits, or hyphens")]
+    InvalidWorkspaceName(String),
     #[error("branch already exists: {0}")]
     BranchExists(String),
     #[error("worktree destination already exists (including symlinks): {0}")]
