@@ -6,6 +6,7 @@ mod commands;
 mod decision;
 mod jump;
 mod output;
+mod prompt;
 mod status;
 
 #[cfg(test)]

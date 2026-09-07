@@ -22,8 +22,6 @@ pub(crate) struct WorkspaceReferenceCandidate {
 pub(crate) enum CoordinatorError {
     #[error("invalid request parameters: {0}")]
     InvalidParams(String),
-    #[error("unsupported context mode {0:?}")]
-    UnsupportedContext(String),
     #[error("repository is not registered: {0}")]
     RepositoryNotRegistered(PathBuf),
     #[error("workspace already exists: {0}")]
@@ -40,6 +38,10 @@ pub(crate) enum CoordinatorError {
     },
     #[error("operation ID was already used with different parameters")]
     IdempotencyConflict,
+    #[error(
+        "operation {operation_id} may already have reached Codex and will not be retried automatically"
+    )]
+    OperationUncertain { operation_id: String },
     #[error("workspace must be {expected}, but is {actual:?}")]
     InvalidWorkspaceState {
         expected: &'static str,
@@ -67,12 +69,12 @@ impl CoordinatorError {
     pub(crate) fn code(&self) -> &'static str {
         match self {
             Self::InvalidParams(_) => "INVALID_PARAMS",
-            Self::UnsupportedContext(_) => "UNSUPPORTED_CONTEXT",
             Self::RepositoryNotRegistered(_) => "REPOSITORY_NOT_REGISTERED",
             Self::WorkspaceExists(_) => "WORKSPACE_EXISTS",
             Self::WorkspaceNotFound { .. } => "WORKSPACE_NOT_FOUND",
             Self::WorkspaceReferenceAmbiguous { .. } => "WORKSPACE_REFERENCE_AMBIGUOUS",
             Self::IdempotencyConflict => "IDEMPOTENCY_CONFLICT",
+            Self::OperationUncertain { .. } => "OPERATION_UNCERTAIN",
             Self::InvalidWorkspaceState { .. } => "INVALID_WORKSPACE_STATE",
             Self::IncompleteWorkspace(_) => "INCOMPLETE_WORKSPACE",
             Self::ProfileChanged(_) => "PROFILE_CHANGED",
@@ -104,6 +106,7 @@ impl CoordinatorError {
             Self::WorkspaceReferenceAmbiguous { candidates, .. } => {
                 Some(json!({"matches": candidates}))
             }
+            Self::OperationUncertain { operation_id } => Some(json!({"operationId": operation_id})),
             _ => None,
         }
     }

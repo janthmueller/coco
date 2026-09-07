@@ -3,7 +3,7 @@ use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 
-use crate::domain::{BaseRelation, GitObservation};
+use crate::domain::{BaseRelation, GitObservation, WorktreeMode};
 
 use super::command::{command_failed, ensure_success};
 use super::repository::{canonicalize, validate_object_id};
@@ -41,11 +41,13 @@ impl Git {
         &self,
         repository: &GitRepository,
         worktree_path: impl AsRef<Path>,
-        expected_branch: &str,
+        expected_mode: WorktreeMode,
+        expected_branch: Option<&str>,
         base_sha: &str,
     ) -> Result<GitObservation, GitError> {
         validate_object_id(base_sha)?;
-        let binding = self.verify_worktree(repository, worktree_path, expected_branch)?;
+        let binding =
+            self.verify_worktree(repository, worktree_path, expected_mode, expected_branch)?;
         let status = self.run(
             &binding.path,
             "status",
@@ -74,7 +76,7 @@ impl Git {
         Ok(GitObservation {
             observed: true,
             canonical_path: Some(binding.path),
-            branch_name: Some(binding.branch_name),
+            branch_name: binding.branch_name,
             head_sha: Some(binding.head_sha),
             base_sha: base_sha.to_owned(),
             dirty: !status.stdout.bytes.is_empty(),

@@ -1,91 +1,76 @@
-use serde_json::json;
-use tracing::warn;
-
-use super::{Coordinator, CoordinatorError, WorkerError};
-use crate::domain::{EventKind, EventSource, ProfileSnapshot, Workspace, WorkspaceLifecycle};
+use super::{Coordinator, CoordinatorError, NativeThread, StartedThread, WorkerError};
+use crate::domain::{CodexThreadStatus, ProfileSnapshot, Workspace, WorkspaceLifecycle};
 use crate::profile::load_profile;
-use crate::store::EventDraft;
-
-const RECOVERY_ERROR_CODE: &str = "THREAD_RECOVERY_FAILED";
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ThreadRecoveryReport {
-    pub(crate) attempted: usize,
-    pub(crate) recovered: usize,
-    pub(crate) failed: usize,
-}
 
 impl Coordinator {
-    pub(crate) async fn recover_ready_threads(
+    /// Returns the bound native thread without loading it into the App Server.
+    ///
+    /// Binding validation lives here so passive projections and activating
+    /// operations apply the same thread-ID and cwd invariants.
+    pub(super) async fn read_bound_thread(
         &self,
-    ) -> Result<ThreadRecoveryReport, CoordinatorError> {
-        let workspaces = self.store.list_workspaces(None)?;
-        let mut report = ThreadRecoveryReport::default();
-        for workspace in workspaces.into_iter().filter(|workspace| {
-            workspace.lifecycle == WorkspaceLifecycle::Ready
-                && workspace.thread_runtime.as_ref().is_none_or(|snapshot| {
-                    !snapshot.is_fresh || snapshot.runtime_generation != self.runtime_generation
-                })
-        }) {
-            report.attempted += 1;
-            match self.resume_workspace_thread(&workspace).await {
-                Ok(resumed) => {
-                    self.store.observe_thread_status_with_event(
-                        &workspace.id,
-                        resumed.status.clone(),
-                        &self.runtime_generation,
-                        EventDraft {
-                            workspace_id: Some(workspace.id.clone()),
-                            turn_id: None,
-                            kind: EventKind::ThreadStatusChanged,
-                            source: EventSource::Codex,
-                            source_method: Some("thread/resume".to_owned()),
-                            occurred_at_ms: None,
-                            payload: json!({
-                                "status": resumed.status,
-                                "reason": "daemon_recovery",
-                            }),
-                        },
-                    )?;
-                    report.recovered += 1;
-                }
-                Err(source) => {
-                    let cause_code = source.code();
-                    warn!(
-                        workspace_id = %workspace.id,
-                        thread_id = workspace.codex_thread_id.as_deref().unwrap_or("(missing)"),
-                        cause_code,
-                        "could not resume a persisted Codex thread"
-                    );
-                    self.store.record_thread_recovery_failure_with_event(
-                        &workspace.id,
-                        RECOVERY_ERROR_CODE,
-                        recovery_message(&source),
-                        EventDraft {
-                            workspace_id: Some(workspace.id.clone()),
-                            turn_id: None,
-                            kind: EventKind::AgentFailed,
-                            source: EventSource::Coco,
-                            source_method: Some("startup.recover".to_owned()),
-                            occurred_at_ms: None,
-                            payload: json!({
-                                "stage": "thread.resume",
-                                "code": RECOVERY_ERROR_CODE,
-                                "causeCode": cause_code,
-                            }),
-                        },
-                    )?;
-                    report.failed += 1;
-                }
-            }
+        workspace: &Workspace,
+    ) -> Result<NativeThread, CoordinatorError> {
+        let thread_id = workspace
+            .codex_thread_id
+            .as_deref()
+            .ok_or(CoordinatorError::IncompleteWorkspace("Codex thread"))?;
+        let worktree = workspace
+            .worktree_path
+            .as_deref()
+            .ok_or(CoordinatorError::IncompleteWorkspace("worktree"))?;
+        let native = self.worker.read_thread(thread_id).await?;
+        if native.id != thread_id {
+            return Err(CoordinatorError::Worker(WorkerError::ThreadIdMismatch {
+                expected: thread_id.to_owned(),
+                actual: native.id,
+            }));
         }
-        Ok(report)
+        if native.cwd != worktree {
+            return Err(CoordinatorError::Worker(WorkerError::CwdMismatch {
+                expected: worktree.to_owned(),
+                actual: native.cwd,
+            }));
+        }
+        Ok(native)
+    }
+
+    /// Ensures the daemon connection owns a live subscription for a workspace
+    /// thread. Passive status reads deliberately never call this method.
+    pub(super) async fn ensure_workspace_thread_loaded(
+        &self,
+        workspace: Workspace,
+    ) -> Result<Workspace, CoordinatorError> {
+        if workspace.lifecycle != WorkspaceLifecycle::Ready {
+            return Err(CoordinatorError::InvalidWorkspaceState {
+                expected: "ready",
+                actual: workspace.phase,
+            });
+        }
+
+        let native = self.read_bound_thread(&workspace).await?;
+        let thread_id = native.id.clone();
+        let needs_resume = native.status == CodexThreadStatus::NotLoaded
+            || !self.has_thread_subscription(&thread_id);
+        let status = if needs_resume {
+            let resumed = self.resume_workspace_thread(&workspace).await?;
+            if resumed.status == CodexThreadStatus::NotLoaded {
+                return Err(CoordinatorError::Worker(WorkerError::InvalidThreadRead(
+                    "thread remained notLoaded after thread/resume".to_owned(),
+                )));
+            }
+            self.mark_thread_subscribed(&thread_id);
+            resumed.status
+        } else {
+            native.status
+        };
+        Ok(self.project_native_thread_runtime(workspace, status))
     }
 
     async fn resume_workspace_thread(
         &self,
         workspace: &Workspace,
-    ) -> Result<super::StartedThread, CoordinatorError> {
+    ) -> Result<StartedThread, CoordinatorError> {
         let thread_id = workspace
             .codex_thread_id
             .as_deref()
@@ -129,18 +114,4 @@ fn same_profile_source(current: &ProfileSnapshot, stored: &ProfileSnapshot) -> b
     current.name == stored.name
         && current.source_path == stored.source_path
         && current.source_hash == stored.source_hash
-}
-
-fn recovery_message(error: &CoordinatorError) -> &'static str {
-    match error {
-        CoordinatorError::IncompleteWorkspace(_) => {
-            "The workspace is missing information required to resume its Codex thread"
-        }
-        CoordinatorError::ProfileChanged(_) => {
-            "The workspace profile changed after the thread was created"
-        }
-        CoordinatorError::Profile(_) => "The workspace profile is unavailable or invalid",
-        CoordinatorError::Worker(_) => "Codex could not resume the stored thread",
-        _ => "CoCo could not recover the stored thread",
-    }
 }

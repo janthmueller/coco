@@ -27,36 +27,65 @@ default. Put a registered path before the command to select another
 repository:
 
 ```bash
-coco ../api ls
+coco ../api list
 coco ../api status fix/login
 ```
 
-Use `--all-repos` or `-a` with `ls`, `status`, `send`, `jump`, or `diff` to
-list across repositories or resolve a globally unique name:
+Use `--all-repos` or `-a` with `list` to include every registered repository:
 
 ```bash
-coco --all-repos ls
-coco -a jump fix/login
+coco list --all-repos
 ```
 
-`create` always needs one repository. `repo`, `models`, `decide`, and `mcp`
-do not accept the leading path or `--all-repos`. A full workspace ID resolves
-globally without either option.
+Use `--global` or `-g` with a command that targets one workspace. Supply a
+globally unique name, or omit it in a terminal to choose from every repository:
+
+```bash
+coco status fix/login --global
+coco jump -g
+```
+
+`create` always needs one repository. `repo`, `model`, `decide`, and `mcp` do
+not accept a leading path or either scope flag. A full workspace ID resolves
+globally without `-g`.
 
 ## Repository commands
 
 ```text
 coco repo add [PATH]
-coco repo list [--json]
+coco repo <list|ls> [--json]
 ```
 
 `repo add` registers the Git repository containing `PATH`; it defaults to `.`
 and is safe to repeat. `repo list` shows every registered repository.
 
-## Model command
+`list` is the documented spelling throughout CoCo; `ls` is its equivalent
+short alias.
+
+## Interactive input
+
+When standard input and the terminal display are connected to a terminal, you
+may omit some values:
+
+- `create` asks for a missing workspace name and lets you choose a registered
+  repository when the current directory does not select one;
+- `status`, `send`, `jump`, and `diff` let you choose a missing workspace;
+- `send` asks for a missing message after the workspace is known; and
+- `decide` uses the same selector for the choices supplied by Codex.
+
+Use `↑`/`↓` or `j`/`k` to move and Enter to confirm. Keys `1` through `9`
+select the corresponding option immediately. Press Escape, `q`, or Ctrl+C to
+cancel.
+
+CoCo never opens a selector when its input or prompt stream is not attached to
+a terminal, or when `--no-input` is present. In those cases, pass every required
+value explicitly. Collection commands remain non-interactive, and JSON output
+always requires an explicit target.
+
+## Model commands
 
 ```text
-coco models [--json]
+coco model <list|ls> [--json]
 ```
 
 Lists the models reported by the running Codex installation. This command is
@@ -65,23 +94,39 @@ not repository-scoped.
 ## Create a workspace
 
 ```text
-coco [REPOSITORY_PATH] create <NAME>
-  [--base <GIT_REF>]
-  [--fork-from <WORKSPACE>]
+coco [REPOSITORY_PATH] create [NAME]
+  [--base <GIT_REF> | --base-workspace <WORKSPACE>]
+  [--context-workspace <WORKSPACE> | --context-thread <THREAD_ID>]
   [--compact]
+  [--branch <BRANCH> | --checkout <BRANCH> | --detached/-D]
+  [--carry-changes [--carry-untracked] | --dirty/-d]
   [--profile <NAME>]
   [-m, --model <MODEL>]
   [-s, --send <MESSAGE>]
   [-j, --jump]
 ```
 
-`--base` defaults to `HEAD`. Names are 1–63 bytes and contain lowercase ASCII
+Omit `NAME` in a terminal to enter it interactively. `--base` defaults to
+`HEAD`. Names are 1–63 bytes and contain lowercase ASCII
 letters, numbers, and hyphens, with optional single slashes between
 components, such as `fix/login`. Each component begins and ends with a letter
-or number. The normal creation path requires a clean checkout.
+or number. Creation requires a clean checkout unless you explicitly carry its
+local changes.
 
-Use `--fork-from` instead of `--base` to create from a ready, clean workspace
-in the same repository. `--compact` is available only with `--fork-from`.
+`--base-workspace` selects another workspace's committed `HEAD` as code.
+`--context-workspace` or `--context-thread` independently forks conversation
+history; the latter takes one exact Codex thread ID, not a workspace name.
+`--compact` requires one of those context sources.
+
+The default creates `coco/<NAME>`. `--branch` chooses another new branch,
+`--checkout` selects an existing local branch, and `--detached` creates no
+branch. `--checkout` cannot be combined with a base option, and Git rejects a
+branch already checked out elsewhere.
+
+`--carry-changes` copies tracked staged and unstaged changes.
+`--carry-untracked` additionally copies non-ignored `??` files and requires
+`--carry-changes`. `--dirty` is shorthand for both carry options; it remains
+independent of `--detached`. Ignored files require `.worktreeinclude`.
 
 `--send` starts the first turn after creation. `--jump` then opens the same
 thread in the Codex terminal UI. Their short forms are independent and may be
@@ -91,39 +136,51 @@ combined.
 
 In the forms below, `<WORKSPACE>` may be a repository-local name or full ID.
 
-| Command                            | Purpose                                           |
-| ---------------------------------- | ------------------------------------------------- |
-| `coco ls [--json]`                 | List workspaces in the selected scope             |
-| `coco status <WORKSPACE> [--json]` | Show current state and pending input              |
-| `coco status <WORKSPACE> --follow` | Follow activity until it stops or needs you       |
-| `coco send <WORKSPACE> <MESSAGE>`  | Start the first or next turn                      |
-| `coco jump <WORKSPACE>`            | Open the existing thread in the Codex TUI         |
-| `coco diff <WORKSPACE>`            | Print a bounded tracked patch and untracked paths |
+| Command                                               | Purpose                                       |
+| ----------------------------------------------------- | --------------------------------------------- |
+| `coco list [--json]` (`ls`)                           | List workspaces in the selected scope         |
+| `coco status [WORKSPACE] [--json]`                    | Choose or show one workspace's current state  |
+| `coco status [WORKSPACE] --follow`                    | Choose or follow one workspace until it stops |
+| `coco send [WORKSPACE] [MESSAGE] [--operation-id ID]` | Choose a workspace and start its next turn    |
+| `coco jump [WORKSPACE]`                               | Choose or open the existing thread in the TUI |
+| `coco diff [WORKSPACE]`                               | Choose or print its bounded change summary    |
 
-`status --follow` cannot be combined with `--json`. Quote messages containing
-spaces. `send` returns after Codex accepts the turn; use `status --follow` to
-watch it.
+Omitted values use interactive input only as described above. `status --follow`
+cannot be combined with `--json`. Quote messages containing spaces. `send`
+returns after Codex accepts the turn; use `status --follow` to watch it. `list`
+and `status` inspect saved conversations without loading them; `send` and
+`jump` load one when needed.
+
+Add `--global`/`-g` to `status`, `send`, `jump`, or `diff` to resolve one
+workspace name—or populate an omitted-target selector—from all repositories.
+Add `--all-repos`/`-a` only to `list`; it never broadcasts an action.
+
+If a `send` response is interrupted, CoCo prints its operation ID. Retry that
+exact message with `--operation-id <ID>` so CoCo can return the prior result
+without starting it twice. Do not reuse the ID for a different message.
 
 ## Answer a request
 
 ```text
-coco decide <DECISION_ID>
+coco decide <DECISION_ID> [--choice <NUMBER>]
 ```
 
 When CoCo can present a pending approval or question, `status` prints its
-decision ID. `decide` shows numbered choices and may accept text for an
-ordinary question. Secret answers are hidden while you type and are not
-retained by CoCo.
+decision ID. `decide` uses the interactive selector and may accept text for an
+ordinary question. For scripts, `--choice` submits one displayed approval
+option by its one-based number; structured questions still require interactive
+input. Secret answers are hidden while you type and are not retained by CoCo.
 
 Decision IDs work from any directory and do not accept a repository path or
-`--all-repos`.
+either repository-scope flag.
 
 ## Machine-readable output
 
 ```bash
 coco repo list --json
-coco models --json
-coco ls --json
+coco model list --json
+coco list --json
+coco list --all-repos --json
 coco status feat/first --json
 ```
 

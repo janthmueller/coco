@@ -32,6 +32,7 @@ fn new_workspace(repository_id: &str, name: &str) -> NewWorkspace {
             model_override: None,
             effective_settings: json!({"network_access": false}),
         },
+        worktree_mode: WorktreeMode::NewBranch,
         branch_name: Some(format!("coco/{name}")),
         base_sha: Some("0123456789abcdef".to_owned()),
         worktree_path: Some(PathBuf::from(format!("/tmp/worktrees/{name}"))),
@@ -62,8 +63,6 @@ fn ready_workspace(store: &Store, repository_id: &str, name: &str) -> Workspace 
             NewThreadBinding {
                 thread_id: format!("thread-{name}"),
                 parent_thread_id: None,
-                status: CodexThreadStatus::Idle,
-                runtime_generation: "runtime-test".to_owned(),
             },
             EventDraft::workspace(EventKind::AgentStarted, EventSource::Codex, json!({})),
         )
@@ -196,7 +195,8 @@ fn migrates_v1_tasks_to_workspaces_without_losing_data() {
     let version: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 5);
+    assert_eq!(version, 7);
+    assert_eq!(workspace.worktree_mode, WorktreeMode::NewBranch);
     assert_eq!(workspace.lifecycle, WorkspaceLifecycle::Ready);
     assert_eq!(workspace.phase, WorkspacePhase::Unavailable);
     assert_eq!(
@@ -251,6 +251,7 @@ fn migrates_v1_tasks_to_workspaces_without_losing_data() {
     assert_eq!(retired_table_count, 0);
     for index in [
         "turns_workspace_idx",
+        "operations_workspace_state_idx",
         "events_workspace_sequence_idx",
         "audit_workspace_sequence_idx",
     ] {
@@ -324,15 +325,13 @@ fn state_and_events_change_atomically() {
             NewThreadBinding {
                 thread_id: "thread-1".to_owned(),
                 parent_thread_id: None,
-                status: CodexThreadStatus::Idle,
-                runtime_generation: "runtime-1".to_owned(),
             },
             EventDraft::workspace(EventKind::AgentStarted, EventSource::Codex, json!({})),
         )
         .unwrap();
     assert_eq!(workspace.codex_thread_id.as_deref(), Some("thread-1"));
     assert_eq!(workspace.lifecycle, WorkspaceLifecycle::Ready);
-    assert_eq!(workspace.phase, WorkspacePhase::Idle);
+    assert_eq!(workspace.phase, WorkspacePhase::Unavailable);
     assert_eq!(
         store
             .workspace_by_thread_id("thread-1")
@@ -354,7 +353,7 @@ fn state_and_events_change_atomically() {
             EventDraft::workspace(EventKind::TurnStarted, EventSource::Codex, json!({})),
         )
         .unwrap();
-    assert_eq!(workspace.phase, WorkspacePhase::Active);
+    assert_eq!(workspace.phase, WorkspacePhase::Unavailable);
     assert_eq!(workspace.active_turn_id.as_deref(), Some(turn.id.as_str()));
     assert_eq!(
         store
@@ -377,7 +376,7 @@ fn state_and_events_change_atomically() {
             EventDraft::workspace(EventKind::TurnCompleted, EventSource::Codex, json!({})),
         )
         .unwrap();
-    assert_eq!(workspace.phase, WorkspacePhase::Idle);
+    assert_eq!(workspace.phase, WorkspacePhase::Unavailable);
     assert_eq!(workspace.active_turn_id, None);
     assert_eq!(turn.phase, TurnPhase::Completed);
     assert_eq!(turn.completed_at_ms, Some(30));
@@ -531,7 +530,7 @@ fn a_failed_turn_does_not_fail_the_workspace_lifecycle() {
         .unwrap();
 
     assert_eq!(workspace.lifecycle, WorkspaceLifecycle::Ready);
-    assert_eq!(workspace.phase, WorkspacePhase::Idle);
+    assert_eq!(workspace.phase, WorkspacePhase::Unavailable);
     assert_eq!(workspace.last_error_code.as_deref(), Some("MODEL_ERROR"));
     assert_eq!(turn.phase, TurnPhase::Failed);
 }
@@ -593,8 +592,6 @@ fn native_thread_status_is_persisted_losslessly_and_can_be_staled() {
             NewThreadBinding {
                 thread_id: "thread-runtime".to_owned(),
                 parent_thread_id: None,
-                status: CodexThreadStatus::Idle,
-                runtime_generation: "runtime-1".to_owned(),
             },
             EventDraft::workspace(EventKind::AgentStarted, EventSource::Codex, json!({})),
         )
@@ -650,6 +647,126 @@ fn native_thread_status_is_persisted_losslessly_and_can_be_staled() {
 }
 
 #[test]
+fn operation_ledger_separates_intent_dispatch_and_proven_acceptance() {
+    let store = Store::in_memory().unwrap();
+    let repo = repository(Path::new("/tmp/source-operations"));
+    store.register_repository(&repo).unwrap();
+    let workspace = ready_workspace(&store, &repo.id, "operations");
+    let input = NewOperation {
+        operation_id: "send-operation".to_owned(),
+        workspace_id: workspace.id.clone(),
+        kind: OperationKind::TurnStart,
+        request_fingerprint: "one-way-message-fingerprint".to_owned(),
+    };
+
+    let (prepared, inserted) = store.prepare_operation(input.clone()).unwrap();
+    assert!(inserted);
+    assert_eq!(prepared.state, OperationState::Prepared);
+    assert!(prepared.dispatch_started_at_ms.is_none());
+    assert!(prepared.result_recorded_at_ms.is_none());
+    assert!(prepared.native_result_id.is_none());
+
+    let (replayed, inserted) = store.prepare_operation(input).unwrap();
+    assert!(!inserted);
+    assert_eq!(replayed, prepared);
+
+    let dispatching = store.begin_operation_dispatch(&prepared.id).unwrap();
+    assert_eq!(dispatching.state, OperationState::Dispatching);
+    assert!(dispatching.dispatch_started_at_ms.is_some());
+    assert_eq!(store.mark_unconfirmed_operations_uncertain().unwrap(), 1);
+    let uncertain = store.operation_by_id(&prepared.id).unwrap().unwrap();
+    assert_eq!(uncertain.state, OperationState::Uncertain);
+    assert!(uncertain.result_recorded_at_ms.is_some());
+
+    let accepted = store
+        .accept_operation(&prepared.id, "native-turn-result")
+        .unwrap();
+    assert_eq!(accepted.state, OperationState::Accepted);
+    assert_eq!(
+        accepted.native_result_id.as_deref(),
+        Some("native-turn-result")
+    );
+    assert_eq!(
+        store
+            .operation_by_native_result_id("native-turn-result")
+            .unwrap(),
+        Some(accepted.clone())
+    );
+    assert_eq!(
+        store
+            .accept_operation(&prepared.id, "native-turn-result")
+            .unwrap(),
+        accepted
+    );
+    assert!(matches!(
+        store.accept_operation(&prepared.id, "different-native-turn"),
+        Err(StoreError::OperationResultConflict { .. })
+    ));
+}
+
+#[test]
+fn migrates_v5_turn_idempotency_into_the_operation_ledger() {
+    let store = Store::in_memory().unwrap();
+    let repo = repository(Path::new("/tmp/source-v5-operation"));
+    store.register_repository(&repo).unwrap();
+    let workspace = ready_workspace(&store, &repo.id, "v5-operation");
+    let (_, turn, _) = store
+        .start_turn_with_event(
+            &workspace.id,
+            NewTurn {
+                operation_id: Some("legacy-send-operation".to_owned()),
+                client_message_id: "legacy-message-fingerprint".to_owned(),
+                codex_turn_id: Some("legacy-native-turn".to_owned()),
+                started_at_ms: Some(20),
+            },
+            EventDraft::workspace(EventKind::TurnStarted, EventSource::Codex, json!({})),
+        )
+        .unwrap();
+
+    {
+        let connection = store.lock().unwrap();
+        connection
+            .execute_batch("DROP TABLE operations; PRAGMA user_version = 5;")
+            .unwrap();
+        super::migrations::migrate(&connection).unwrap();
+        let version: i64 = connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 7);
+    }
+
+    let operation = store
+        .operation_by_client_id("legacy-send-operation")
+        .unwrap()
+        .unwrap();
+    assert_eq!(operation.id, turn.id);
+    assert_eq!(operation.workspace_id, workspace.id);
+    assert_eq!(operation.kind, OperationKind::TurnStart);
+    assert_eq!(operation.request_fingerprint, "legacy-message-fingerprint");
+    assert_eq!(operation.state, OperationState::Accepted);
+    assert_eq!(
+        operation.native_result_id.as_deref(),
+        Some("legacy-native-turn")
+    );
+    assert!(
+        store
+            .workspace_by_id(&workspace.id)
+            .unwrap()
+            .unwrap()
+            .active_turn_id
+            .is_none()
+    );
+    assert_eq!(
+        store
+            .turn_by_operation_id("legacy-send-operation")
+            .unwrap()
+            .unwrap()
+            .phase,
+        TurnPhase::Interrupted
+    );
+}
+
+#[test]
 fn audit_round_trips_sanitized_metadata() {
     let store = Store::in_memory().unwrap();
     let audit = store
@@ -668,12 +785,12 @@ fn audit_round_trips_sanitized_metadata() {
 }
 
 #[test]
-fn restart_reconciliation_marks_inflight_state_interrupted() {
+fn restart_reconciliation_marks_dispatch_uncertain_without_failing_the_workspace() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("coco.sqlite3");
     let workspace_id;
     let unfinished_creation_id;
-    let turn_id;
+    let operation_id;
     {
         let store = Store::open(&path).unwrap();
         let repo = repository(&temp.path().join("source"));
@@ -708,31 +825,29 @@ fn restart_reconciliation_marks_inflight_state_interrupted() {
                 NewThreadBinding {
                     thread_id: "thread-restart".to_owned(),
                     parent_thread_id: None,
-                    status: CodexThreadStatus::Idle,
-                    runtime_generation: "runtime-before-restart".to_owned(),
                 },
                 EventDraft::workspace(EventKind::AgentStarted, EventSource::Codex, json!({})),
             )
             .unwrap();
-        let (_, turn, _) = store
-            .start_turn_with_event(
-                &workspace.id,
-                NewTurn {
-                    operation_id: Some("restart-operation".to_owned()),
-                    client_message_id: "restart-message".to_owned(),
-                    codex_turn_id: Some("codex-restart-turn".to_owned()),
-                    started_at_ms: None,
-                },
-                EventDraft::workspace(EventKind::TurnStarted, EventSource::Codex, json!({})),
-            )
+        let (operation, inserted) = store
+            .prepare_operation(NewOperation {
+                operation_id: "restart-operation".to_owned(),
+                workspace_id: workspace.id.clone(),
+                kind: OperationKind::TurnStart,
+                request_fingerprint: "restart-message-fingerprint".to_owned(),
+            })
             .unwrap();
+        assert!(inserted);
+        let operation = store.begin_operation_dispatch(&operation.id).unwrap();
         workspace_id = workspace.id;
-        turn_id = turn.id;
+        operation_id = operation.id;
     }
 
     let store = Store::open(&path).unwrap();
     let reconciled = store.reconcile_unfinished().unwrap();
-    assert_eq!(reconciled.len(), 2);
+    assert_eq!(reconciled.failed_workspace_preparations, 1);
+    assert_eq!(reconciled.uncertain_operations, 1);
+    assert_eq!(reconciled.stale_thread_snapshots, 0);
     let unfinished_creation = store
         .workspace_by_id(&unfinished_creation_id)
         .unwrap()
@@ -749,10 +864,9 @@ fn restart_reconciliation_marks_inflight_state_interrupted() {
     );
     let workspace = store.workspace_by_id(&workspace_id).unwrap().unwrap();
     assert_eq!(workspace.phase, WorkspacePhase::Unavailable);
-    assert!(!workspace.thread_runtime.unwrap().is_fresh);
     assert_eq!(
-        store.turn_by_id(&turn_id).unwrap().unwrap().phase,
-        TurnPhase::Interrupted
+        store.operation_by_id(&operation_id).unwrap().unwrap().state,
+        OperationState::Uncertain
     );
 
     #[cfg(unix)]

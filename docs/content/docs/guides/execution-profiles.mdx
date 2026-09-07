@@ -13,14 +13,16 @@ With `cocod` running, ask the connected Codex installation for its current
 model catalog:
 
 ```bash
-coco models
+coco model list
 ```
+
+`coco model ls` is the equivalent short spelling.
 
 The output shows the value to pass as `--model`, its display name, whether it
 is the default, and the reasoning efforts it advertises. For scripts, use:
 
 ```bash
-coco models --json
+coco model list --json
 ```
 
 ## Select a model
@@ -34,10 +36,10 @@ coco create refactor/cache --model gpt-5.6-sol
 Without `--model`, Codex selects the model from its normal configuration.
 CoCo does not maintain a separate model catalog or alias list.
 
-## Define a Codex profile
+## Define a CoCo execution profile
 
-Named profiles use the same file convention as `codex --profile`. Create a
-file next to your normal Codex configuration:
+CoCo's named profiles are complete Codex configuration layers stored next to
+your normal Codex configuration:
 
 ```toml title="~/.codex/dev.config.toml"
 model_reasoning_effort = "high"
@@ -75,13 +77,14 @@ coco create refactor/cache \
 ## Keep profile files stable
 
 CoCo records which named profile was applied when the workspace was created.
-Do not change or remove its settings while you still need the workspace: after
-a `cocod` restart, CoCo refuses to resume the thread if the parsed
-configuration no longer matches. Comments and formatting do not affect this
-check.
+When a command needs to load that conversation again, CoCo checks that the
+parsed profile still matches. If you changed or removed its settings, `send`
+and `jump` refuse to load it. Comments and formatting do not affect this check.
+`list` and `status` do not
+load the conversation or run this check.
 
 When you want different settings, create another profile name and use it for a
 new workspace. CoCo checks the named profile file, not Codex's base
-configuration layer. If you change the base configuration, inherited settings can
-therefore change for any resumed workspace the next time `cocod` starts. Put
-settings that must stay fixed explicitly in the named profile.
+configuration layer. If you change the base configuration, inherited settings
+can therefore change the next time a workspace is loaded. Put settings that
+must stay fixed explicitly in the named profile.

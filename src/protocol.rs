@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::domain::{
     Audit, AuditOutcome, CodexModel, ContextMode, Decision, GitObservation, NormalizedEvent,
-    Repository, Turn, Workspace,
+    Repository, Workspace,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -15,10 +15,12 @@ pub enum DaemonMethod {
     Health,
     ModelList,
     RepositoryRegister,
+    RepositoryResolve,
     RepositoryList,
     WorkspaceCreate,
     WorkspaceList,
     WorkspaceGet,
+    WorkspaceAttach,
     TurnStart,
     EventList,
     WorkspaceDiff,
@@ -29,14 +31,16 @@ pub enum DaemonMethod {
 
 impl DaemonMethod {
     #[cfg(test)]
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 15] = [
         Self::Health,
         Self::ModelList,
         Self::RepositoryRegister,
+        Self::RepositoryResolve,
         Self::RepositoryList,
         Self::WorkspaceCreate,
         Self::WorkspaceList,
         Self::WorkspaceGet,
+        Self::WorkspaceAttach,
         Self::TurnStart,
         Self::EventList,
         Self::WorkspaceDiff,
@@ -50,10 +54,12 @@ impl DaemonMethod {
             Self::Health => "health",
             Self::ModelList => "model.list",
             Self::RepositoryRegister => "repository.register",
+            Self::RepositoryResolve => "repository.resolve",
             Self::RepositoryList => "repository.list",
             Self::WorkspaceCreate => "workspace.create",
             Self::WorkspaceList => "workspace.list",
             Self::WorkspaceGet => "workspace.get",
+            Self::WorkspaceAttach => "workspace.attach",
             Self::TurnStart => "turn.start",
             Self::EventList => "event.list",
             Self::WorkspaceDiff => "workspace.diff",
@@ -68,10 +74,12 @@ impl DaemonMethod {
             "health" => Some(Self::Health),
             "model.list" => Some(Self::ModelList),
             "repository.register" => Some(Self::RepositoryRegister),
+            "repository.resolve" => Some(Self::RepositoryResolve),
             "repository.list" => Some(Self::RepositoryList),
             "workspace.create" => Some(Self::WorkspaceCreate),
             "workspace.list" => Some(Self::WorkspaceList),
             "workspace.get" => Some(Self::WorkspaceGet),
+            "workspace.attach" => Some(Self::WorkspaceAttach),
             "turn.start" => Some(Self::TurnStart),
             "event.list" => Some(Self::EventList),
             "workspace.diff" => Some(Self::WorkspaceDiff),
@@ -116,6 +124,12 @@ pub struct RepositoryRegisterParams {
     pub path: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RepositoryResolveParams {
+    pub path: PathBuf,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RepositoryListParams {}
@@ -134,16 +148,86 @@ impl RepositoryScope {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum WorkspaceBaseRequest {
+    Revision { revision: String },
+    Workspace { workspace: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum WorkspaceContextSource {
+    Workspace { workspace: String },
+    Thread { thread_id: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum WorkspaceContextRequest {
+    Fresh,
+    Fork {
+        source: WorkspaceContextSource,
+        #[serde(default)]
+        compact: bool,
+    },
+}
+
+impl WorkspaceContextRequest {
+    pub const fn mode(&self) -> ContextMode {
+        match self {
+            Self::Fresh => ContextMode::Fresh,
+            Self::Fork { .. } => ContextMode::Fork,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum WorkspaceWorktreeRequest {
+    NewBranch {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        branch: Option<String>,
+        base: WorkspaceBaseRequest,
+    },
+    ExistingBranch {
+        branch: String,
+    },
+    Detached {
+        base: WorkspaceBaseRequest,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceChangesRequest {
+    Reject,
+    CarryTracked,
+    CarryTrackedAndUntracked,
+}
+
+impl WorkspaceChangesRequest {
+    pub const fn carries_tracked(self) -> bool {
+        !matches!(self, Self::Reject)
+    }
+
+    pub const fn carries_untracked(self) -> bool {
+        matches!(self, Self::CarryTrackedAndUntracked)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkspaceCreateParams {
     pub repository_path: PathBuf,
     pub name: String,
-    pub base_ref: String,
-    pub context_mode: ContextMode,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fork_from: Option<String>,
-    #[serde(default)]
-    pub compact: bool,
+    pub context: WorkspaceContextRequest,
+    pub worktree: WorkspaceWorktreeRequest,
+    pub changes: WorkspaceChangesRequest,
     #[serde(default = "default_profile")]
     pub profile: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -162,6 +246,13 @@ pub struct WorkspaceListParams {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkspaceGetParams {
+    pub scope: RepositoryScope,
+    pub workspace: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceAttachParams {
     pub scope: RepositoryScope,
     pub workspace: String,
 }
@@ -278,11 +369,15 @@ impl WorkspaceResult {
         }
     }
 
-    pub fn with_turn(workspace: Workspace, turn: &Turn) -> Self {
+    pub fn with_operation(
+        workspace: Workspace,
+        operation_id: &str,
+        native_result_id: Option<&str>,
+    ) -> Self {
         Self {
             workspace,
-            turn_id: Some(turn.id.clone()),
-            codex_turn_id: turn.codex_turn_id.clone(),
+            turn_id: Some(operation_id.to_owned()),
+            codex_turn_id: native_result_id.map(ToOwned::to_owned),
         }
     }
 }
@@ -363,10 +458,16 @@ macro_rules! daemon_request {
 daemon_request!(HealthParams, Health, HealthResult);
 daemon_request!(ModelListParams, ModelList, Vec<CodexModel>);
 daemon_request!(RepositoryRegisterParams, RepositoryRegister, Repository);
+daemon_request!(
+    RepositoryResolveParams,
+    RepositoryResolve,
+    RepositorySummary
+);
 daemon_request!(RepositoryListParams, RepositoryList, Vec<RepositorySummary>);
 daemon_request!(WorkspaceCreateParams, WorkspaceCreate, WorkspaceResult);
 daemon_request!(WorkspaceListParams, WorkspaceList, Vec<WorkspaceListItem>);
 daemon_request!(WorkspaceGetParams, WorkspaceGet, WorkspaceStatusResult);
+daemon_request!(WorkspaceAttachParams, WorkspaceAttach, WorkspaceResult);
 daemon_request!(TurnStartParams, TurnStart, WorkspaceResult);
 daemon_request!(EventListParams, EventList, EventListResult);
 daemon_request!(WorkspaceDiffParams, WorkspaceDiff, WorkspaceDiffResult);
@@ -392,10 +493,12 @@ mod tests {
                 "health",
                 "model.list",
                 "repository.register",
+                "repository.resolve",
                 "repository.list",
                 "workspace.create",
                 "workspace.list",
                 "workspace.get",
+                "workspace.attach",
                 "turn.start",
                 "event.list",
                 "workspace.diff",
@@ -428,13 +531,24 @@ mod tests {
             json!({}),
         );
         assert_request(
+            RepositoryResolveParams {
+                path: PathBuf::from("/repo/worktree"),
+            },
+            DaemonMethod::RepositoryResolve,
+            json!({"path": "/repo/worktree"}),
+        );
+        assert_request(
             WorkspaceCreateParams {
                 repository_path: PathBuf::from("/repo"),
                 name: "workspace".to_owned(),
-                base_ref: "HEAD".to_owned(),
-                context_mode: ContextMode::Fresh,
-                fork_from: None,
-                compact: false,
+                context: WorkspaceContextRequest::Fresh,
+                worktree: WorkspaceWorktreeRequest::NewBranch {
+                    branch: None,
+                    base: WorkspaceBaseRequest::Revision {
+                        revision: "HEAD".to_owned(),
+                    },
+                },
+                changes: WorkspaceChangesRequest::Reject,
                 profile: "dev".to_owned(),
                 model: Some("gpt-explicit".to_owned()),
                 operation_id: "create-1".to_owned(),
@@ -443,9 +557,12 @@ mod tests {
             json!({
                 "repositoryPath": "/repo",
                 "name": "workspace",
-                "baseRef": "HEAD",
-                "contextMode": "fresh",
-                "compact": false,
+                "context": {"kind": "fresh"},
+                "worktree": {
+                    "kind": "newBranch",
+                    "base": {"kind": "revision", "revision": "HEAD"}
+                },
+                "changes": "reject",
                 "profile": "dev",
                 "model": "gpt-explicit",
                 "operationId": "create-1",
@@ -455,10 +572,18 @@ mod tests {
             WorkspaceCreateParams {
                 repository_path: PathBuf::from("/repo"),
                 name: "child".to_owned(),
-                base_ref: "HEAD".to_owned(),
-                context_mode: ContextMode::Fork,
-                fork_from: Some("source".to_owned()),
-                compact: true,
+                context: WorkspaceContextRequest::Fork {
+                    source: WorkspaceContextSource::Thread {
+                        thread_id: "thread-source".to_owned(),
+                    },
+                    compact: true,
+                },
+                worktree: WorkspaceWorktreeRequest::Detached {
+                    base: WorkspaceBaseRequest::Workspace {
+                        workspace: "source".to_owned(),
+                    },
+                },
+                changes: WorkspaceChangesRequest::CarryTrackedAndUntracked,
                 profile: "default".to_owned(),
                 model: None,
                 operation_id: "create-fork".to_owned(),
@@ -467,10 +592,16 @@ mod tests {
             json!({
                 "repositoryPath": "/repo",
                 "name": "child",
-                "baseRef": "HEAD",
-                "contextMode": "fork",
-                "forkFrom": "source",
-                "compact": true,
+                "context": {
+                    "kind": "fork",
+                    "source": {"kind": "thread", "threadId": "thread-source"},
+                    "compact": true
+                },
+                "worktree": {
+                    "kind": "detached",
+                    "base": {"kind": "workspace", "workspace": "source"}
+                },
+                "changes": "carryTrackedAndUntracked",
                 "profile": "default",
                 "operationId": "create-fork",
             }),
@@ -478,6 +609,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one exhaustive assertion keeps every scoped request wire shape together"
+    )]
     fn scoped_request_dtos_preserve_all_wire_field_names() {
         assert_request(
             WorkspaceListParams {
@@ -494,6 +629,17 @@ mod tests {
             },
             DaemonMethod::WorkspaceGet,
             json!({"scope": {"kind": "allRepositories"}, "workspace": "workspace"}),
+        );
+        assert_request(
+            WorkspaceAttachParams {
+                scope: RepositoryScope::repository("/repo"),
+                workspace: "workspace".to_owned(),
+            },
+            DaemonMethod::WorkspaceAttach,
+            json!({
+                "scope": {"kind": "repository", "path": "/repo"},
+                "workspace": "workspace",
+            }),
         );
         assert_request(
             TurnStartParams {
@@ -579,15 +725,29 @@ mod tests {
         let params: WorkspaceCreateParams = serde_json::from_value(json!({
             "repositoryPath": "/repo",
             "name": "workspace",
-            "baseRef": "HEAD",
-            "contextMode": "fresh",
+            "context": {"kind": "fresh"},
+            "worktree": {
+                "kind": "newBranch",
+                "base": {"kind": "revision", "revision": "HEAD"}
+            },
+            "changes": "reject",
             "operationId": "create-1",
         }))
         .unwrap();
         assert_eq!(params.profile, "default");
         assert_eq!(params.model, None);
-        assert_eq!(params.fork_from, None);
-        assert!(!params.compact);
+        assert_eq!(params.context, WorkspaceContextRequest::Fresh);
+    }
+
+    #[test]
+    fn event_listing_defaults_the_cursor() {
+        let params: EventListParams = serde_json::from_value(json!({
+            "scope": {"kind": "repository", "path": "/repo"},
+            "workspace": "workspace",
+        }))
+        .unwrap();
+
+        assert_eq!(params.after_sequence, 0);
     }
 
     #[test]
@@ -636,6 +796,11 @@ mod tests {
             "rootPath": "/repo",
             "displayName": "repo",
         }]));
+        assert_response::<RepositoryResolveParams>(json!({
+            "id": "repo-1",
+            "rootPath": "/repo",
+            "displayName": "repo",
+        }));
         assert_response::<WorkspaceCreateParams>(json!({"workspace": workspace()}));
         let mut listed = workspace();
         listed.as_object_mut().unwrap().insert(
@@ -661,6 +826,7 @@ mod tests {
             "openDecisions": [],
             "nextSequence": 3,
         }));
+        assert_response::<WorkspaceAttachParams>(json!({"workspace": workspace()}));
         assert_response::<TurnStartParams>(json!({
             "workspace": workspace(),
             "turnId": "turn-1",
@@ -756,6 +922,7 @@ mod tests {
             },
             "phase": "idle",
             "waitReasons": [],
+            "worktreeMode": "new_branch",
             "branchName": "coco/workspace",
             "baseSha": "base",
             "worktreePath": "/worktree",

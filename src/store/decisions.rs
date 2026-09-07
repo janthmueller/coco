@@ -157,28 +157,6 @@ impl Store {
         Ok(Some(decision))
     }
 
-    pub fn orphan_submitted_decision(
-        &self,
-        id: &str,
-        runtime_generation: &str,
-        reason: &str,
-    ) -> Result<StoredDecision, StoreError> {
-        let mut connection = self.lock()?;
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current = require_decision(&transaction, id)?;
-        if current.runtime_generation != runtime_generation {
-            return Err(StoreError::DecisionGenerationMismatch {
-                decision_id: id.to_owned(),
-            });
-        }
-        if current.decision.state == DecisionState::Submitted {
-            orphan_decision(&transaction, &current, reason)?;
-        }
-        let decision = require_decision(&transaction, id)?;
-        transaction.commit()?;
-        Ok(decision)
-    }
-
     pub fn orphan_open_decisions(
         &self,
         runtime_generation: Option<&str>,

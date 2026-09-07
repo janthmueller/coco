@@ -48,22 +48,14 @@ pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<
     let reconciled = store
         .reconcile_unfinished()
         .context("could not reconcile unfinished workspaces")?;
-    let orphaned_decisions = store
-        .orphan_open_decisions(None, "daemon_restarted")
-        .context("could not reconcile pending decisions")?;
-    if !reconciled.is_empty() {
+    if reconciled.total() > 0 {
         warn!(
-            workspaces = reconciled.len(),
-            "reconciled unfinished workspace preparation or turns after daemon restart"
+            failed_workspace_preparations = reconciled.failed_workspace_preparations,
+            uncertain_operations = reconciled.uncertain_operations,
+            stale_thread_snapshots = reconciled.stale_thread_snapshots,
+            "reconciled unfinished local state after daemon restart"
         );
     }
-    if orphaned_decisions > 0 {
-        warn!(
-            decisions = orphaned_decisions,
-            "orphaned decisions from an earlier App Server generation"
-        );
-    }
-
     let (codex, events) = CodexClient::spawn(codex_options)
         .await
         .context("could not start the Codex App Server")?;
@@ -77,22 +69,6 @@ pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<
         runtime_generation,
     ));
     let event_task = tokio::spawn(pump_codex_events(Arc::clone(&coordinator), events));
-    let recovery = match coordinator.recover_ready_threads().await {
-        Ok(recovery) => recovery,
-        Err(source) => {
-            let _ = codex.close().await;
-            let _ = event_task.await;
-            return Err(source).context("could not recover persisted Codex threads");
-        }
-    };
-    if recovery.attempted > 0 {
-        info!(
-            attempted = recovery.attempted,
-            recovered = recovery.recovered,
-            failed = recovery.failed,
-            "finished persisted thread recovery"
-        );
-    }
 
     let handler: Arc<dyn RpcHandler> = Arc::new(DaemonHandler::new(Arc::clone(&coordinator)));
     let server = match RpcServer::bind(&paths.socket_path, handler).await {
@@ -171,13 +147,16 @@ async fn pump_codex_events(
 ) {
     while let Some(event) = events.recv().await {
         if let Err(source) = coordinator.record_codex_event(event) {
-            error!(%source, "could not persist a Codex event");
+            error!(%source, "could not handle a Codex event");
         }
     }
     match coordinator.record_codex_disconnected() {
         Ok(0) => {}
-        Ok(workspaces) => warn!(workspaces, "marked native thread status snapshots stale"),
-        Err(source) => error!(%source, "could not mark thread statuses stale"),
+        Ok(records) => warn!(
+            records,
+            "reconciled runtime records after App Server disconnect"
+        ),
+        Err(source) => error!(%source, "could not reconcile runtime records after disconnect"),
     }
 }
 

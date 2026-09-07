@@ -4,10 +4,13 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
-use crate::domain::BaseRelation;
+use crate::domain::{BaseRelation, WorktreeMode};
 
 use super::worktree::validate_workspace_name;
-use super::{Git, GitError};
+use super::{Git, GitError, WorktreeTarget};
+
+mod local_state;
+mod worktree_modes;
 
 struct Fixture {
     _temp: TempDir,
@@ -44,7 +47,13 @@ fn repository_identity_is_stable_across_worktrees() {
     let repository = git.discover(&fixture.source).unwrap();
     let base = git.resolve_commit(&repository, "HEAD").unwrap();
     let plan = git
-        .plan_worktree(&repository, &fixture.worktrees, "stable", &base)
+        .plan_worktree(
+            &repository,
+            &fixture.worktrees,
+            "stable",
+            new_branch("coco/stable"),
+            &base,
+        )
         .unwrap();
     let binding = git.create_worktree(&repository, &plan).unwrap();
     let linked = git.discover(&binding.path).unwrap();
@@ -53,7 +62,7 @@ fn repository_identity_is_stable_across_worktrees() {
     assert_eq!(linked.git_common_dir, repository.git_common_dir);
     assert_ne!(linked.root_path, repository.root_path);
     assert!(linked.is_linked_worktree);
-    assert_eq!(binding.branch_name, "coco/stable");
+    assert_eq!(binding.branch_name.as_deref(), Some("coco/stable"));
     assert_eq!(binding.head_sha, base);
 }
 
@@ -64,12 +73,24 @@ fn dirty_source_and_collisions_are_rejected() {
     let repository = git.discover(&fixture.source).unwrap();
     let base = git.resolve_commit(&repository, "HEAD").unwrap();
     let plan = git
-        .plan_worktree(&repository, &fixture.worktrees, "collision", &base)
+        .plan_worktree(
+            &repository,
+            &fixture.worktrees,
+            "collision",
+            new_branch("coco/collision"),
+            &base,
+        )
         .unwrap();
     git.create_worktree(&repository, &plan).unwrap();
 
     assert!(matches!(
-        git.plan_worktree(&repository, &fixture.worktrees, "collision", &base),
+        git.plan_worktree(
+            &repository,
+            &fixture.worktrees,
+            "collision",
+            new_branch("coco/collision"),
+            &base,
+        ),
         Err(GitError::BranchCollision { .. })
     ));
     fs::write(fixture.source.join("untracked.txt"), "dirty\n").unwrap();
@@ -86,7 +107,13 @@ fn diff_and_observation_include_commits_and_untracked_paths() {
     let repository = git.discover(&fixture.source).unwrap();
     let base = git.resolve_commit(&repository, "HEAD").unwrap();
     let plan = git
-        .plan_worktree(&repository, &fixture.worktrees, "inspect", &base)
+        .plan_worktree(
+            &repository,
+            &fixture.worktrees,
+            "inspect",
+            new_branch("coco/inspect"),
+            &base,
+        )
         .unwrap();
     let binding = git.create_worktree(&repository, &plan).unwrap();
 
@@ -100,7 +127,13 @@ fn diff_and_observation_include_commits_and_untracked_paths() {
     assert_eq!(diff.untracked_paths, [PathBuf::from("untracked.txt")]);
 
     let observation = git
-        .observe(&repository, &binding.path, "coco/inspect", &base)
+        .observe(
+            &repository,
+            &binding.path,
+            WorktreeMode::NewBranch,
+            Some("coco/inspect"),
+            &base,
+        )
         .unwrap();
     assert_eq!(observation.base_relation, BaseRelation::Descendant);
     assert_eq!(observation.ahead_by, Some(1));
@@ -143,7 +176,13 @@ fn creates_nested_workspace_paths_and_rejects_ref_prefix_collisions() {
     let repository = git.discover(&fixture.source).unwrap();
     let base = git.resolve_commit(&repository, "HEAD").unwrap();
     let plan = git
-        .plan_worktree(&repository, &fixture.worktrees, "feat/login", &base)
+        .plan_worktree(
+            &repository,
+            &fixture.worktrees,
+            "feat/login",
+            new_branch("coco/feat/login"),
+            &base,
+        )
         .unwrap();
     assert_eq!(
         plan.path,
@@ -154,10 +193,16 @@ fn creates_nested_workspace_paths_and_rejects_ref_prefix_collisions() {
             .join("login")
     );
     let binding = git.create_worktree(&repository, &plan).unwrap();
-    assert_eq!(binding.branch_name, "coco/feat/login");
+    assert_eq!(binding.branch_name.as_deref(), Some("coco/feat/login"));
 
     let error = git
-        .plan_worktree(&repository, &fixture.worktrees, "feat", &base)
+        .plan_worktree(
+            &repository,
+            &fixture.worktrees,
+            "feat",
+            new_branch("coco/feat"),
+            &base,
+        )
         .unwrap_err();
     assert!(matches!(
         error,
@@ -177,7 +222,13 @@ fn rejects_an_unsafe_nested_workspace_parent() {
     fs::write(repository_root.join("feat"), "not a directory").unwrap();
 
     assert!(matches!(
-        git.plan_worktree(&repository, &fixture.worktrees, "feat/login", &base),
+        git.plan_worktree(
+            &repository,
+            &fixture.worktrees,
+            "feat/login",
+            new_branch("coco/feat/login"),
+            &base,
+        ),
         Err(GitError::DestinationExists(_))
     ));
 }
@@ -191,13 +242,25 @@ fn rejects_an_existing_branch_that_is_a_parent_of_the_requested_ref() {
     run(&fixture.source, ["branch", "coco/chore"]);
 
     let error = git
-        .plan_worktree(&repository, &fixture.worktrees, "chore/docs", &base)
+        .plan_worktree(
+            &repository,
+            &fixture.worktrees,
+            "chore/docs",
+            new_branch("coco/chore/docs"),
+            &base,
+        )
         .unwrap_err();
     assert!(matches!(
         error,
         GitError::BranchCollision { requested, existing }
             if requested == "coco/chore/docs" && existing == "coco/chore"
     ));
+}
+
+fn new_branch(name: &str) -> WorktreeTarget {
+    WorktreeTarget::NewBranch {
+        branch_name: name.to_owned(),
+    }
 }
 
 fn run<const N: usize>(cwd: &Path, args: [&str; N]) {

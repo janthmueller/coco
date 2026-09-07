@@ -32,6 +32,33 @@ impl ContextMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum WorktreeMode {
+    NewBranch,
+    ExistingBranch,
+    Detached,
+}
+
+impl WorktreeMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NewBranch => "new_branch",
+            Self::ExistingBranch => "existing_branch",
+            Self::Detached => "detached",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "new_branch" => Some(Self::NewBranch),
+            "existing_branch" => Some(Self::ExistingBranch),
+            "detached" => Some(Self::Detached),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum WorkspaceLifecycle {
     Provisioning,
     Starting,
@@ -216,6 +243,7 @@ pub enum TurnPhase {
 }
 
 impl TurnPhase {
+    #[cfg(test)]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Starting => "starting",
@@ -307,6 +335,7 @@ pub struct Workspace {
     pub phase: WorkspacePhase,
     /// Derived from the complete native active-flag set.
     pub wait_reasons: Vec<WorkspaceWaitReason>,
+    pub worktree_mode: WorktreeMode,
     pub branch_name: Option<String>,
     pub base_sha: Option<String>,
     pub worktree_path: Option<PathBuf>,
@@ -344,6 +373,7 @@ pub enum DecisionKind {
 }
 
 impl DecisionKind {
+    #[cfg(test)]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::CommandApproval => "command_approval",
@@ -352,6 +382,7 @@ impl DecisionKind {
         }
     }
 
+    #[cfg(test)]
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "command_approval" => Some(Self::CommandApproval),
@@ -381,6 +412,7 @@ impl DecisionState {
         }
     }
 
+    #[cfg(test)]
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "pending" => Some(Self::Pending),

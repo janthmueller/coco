@@ -8,6 +8,117 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-09-07
+
+- **Terminal-gated CLI interaction**: Added one reusable picker for omitted
+  repository/workspace targets and native decision options. Arrow keys and
+  `j`/`k` move immediately, Enter confirms, keys 1 through 9 select directly,
+  and Escape/`q`/Ctrl-C cancel. `create` can collect a missing name and
+  repository, while `status`, `send`, `jump`, and `diff` can collect a missing
+  workspace; `send` separately collects a missing message. Collection commands,
+  JSON, non-terminal execution, and explicit `--no-input` remain deterministic.
+  `--choice` provides a non-interactive one-based approval response. The
+  previous workspace-free status overview was removed in favor of canonical
+  `list`/`ls`, leaving status as one detailed target locally or with `--global`.
+- **Consistent collection and repository-scope CLI**: Made `list` the visible
+  canonical collection verb and `ls` its visible alias for workspaces,
+  repositories, and models. Split the former overloaded `--all-repos` scope;
+  the later terminal-interaction entry above records the final refinement that
+  reserves `--all-repos`/`-a` for `list`, uses `--global`/`-g` for one named or
+  interactively selected workspace, and removes the duplicate status overview.
+  The compatibility-only top-level `models` spelling remains hidden for one
+  revision.
+- **Independent workspace creation axes**: Replaced the public coupled
+  `--fork-from` contract with independent Git base
+  (`--base`/`--base-workspace`), native context
+  (`--context-workspace`/`--context-thread`), Git binding
+  (new branch, existing branch, or detached), and local-state selections.
+  `--context-thread` means exact Codex `thread.id`, never
+  `thread.sessionId`. Schema v7 persists the typed worktree mode and
+  descriptor v3 keeps bounded resolved provenance; the former coupled option
+  remains hidden for one compatibility revision.
+- **Explicit local-state carry**: Added staged/unstaged tracked patch carry,
+  opt-in ordinary non-ignored untracked files, and the CLI-only `-d`/`--dirty`
+  preset. `-D` remains the independent detached selector, so `-dD` composes
+  both. Every managed worktree honors Codex's `.worktreeinclude` convention
+  only for Git-confirmed ignored paths, with automatic ignored root
+  `AGENTS.override.md`, symlink/overwrite refusal, count/byte bounds, private
+  destination permissions, memory-only contents, and no source mutation.
+- **Process-smoke module split**: Replaced the 2,028-line integration-test file
+  with a small crate root and focused lifecycle, native-fork, fake-App-Server,
+  and process-support modules without changing the two scenarios.
+- **Schema-v6 operation ledger and turn stop-write**: Added a minimal durable
+  `turn_start` state machine with `prepared`, `dispatching`, `accepted`, and
+  `uncertain` states. Intent commits before the App Server call; only its
+  direct correlated response proves acceptance, because `turn/started` does
+  not echo the client message ID. Unconfirmed dispatches are never retried
+  automatically. Production stopped writing local turns, persisted
+  `active_turn_id`, start/resume status snapshots, and turn start/completion
+  events; legacy rows remain for one reversible migration revision. The CLI
+  now surfaces and accepts an operation ID for exact send replay after an
+  interrupted client response.
+- **Coordinator test responsibility split**: Kept the shared fake worker,
+  fixture, and Git helpers in `coordinator/tests.rs`, and moved the unchanged
+  behavior cases into focused workspace, context/activation, decision, and
+  native-event child modules. The structural checkpoint changes no production
+  code or assertions and preserves all 30 Coordinator tests.
+- **Generation-local decision and event reduction**: Moved actionable command,
+  file-change, and structured-input requests out of SQLite into the daemon
+  generation that owns their native callback. The registry preserves bounded
+  presentation and exact private response correlation, changes pending to
+  submitted under one lock before the native write, resolves from Codex, and
+  orphans on disconnect without retaining user answers. Production also
+  stopped event writes for sent prompts, native status/plan/diff/error
+  notifications, decisions, and unsupported requests. The schema-v6 entry
+  above records the later removal of local turn and status-snapshot writes;
+  provisioning events and completed agent text remain.
+- **Native read and on-demand activation cutover**: Passive workspace list,
+  status, and follow polling now use stable, non-loading `thread/read`, validate
+  the stored ID and `cwd`, and project failures as unavailable rather than
+  serving the SQLite snapshot. Daemon startup no longer resumes every workspace;
+  `send` and the internal `workspace.attach` used by `jump` resume and
+  subscribe only the selected thread after profile and binding validation.
+  Native context forks address the exact readable source thread without
+  coupling it to source-worktree activation. At that checkpoint, schema-v5
+  native notification, turn, event,
+  and decision paths still received compatibility writes; eager recovery
+  status and failure writes ended with eager startup resume. The later entry
+  above records the next reduction.
+- **Bounded-history compatibility seam**: Kept completed agent text in the
+  normalized compatibility event stream after a pinned 0.147.0 process probe
+  showed that bounded `thread/turns/list` and `thread/items/list` require the
+  `experimentalApi` initialization capability. Stable
+  `thread/read(includeTurns: true)` hydrates the full thread and can exceed
+  CoCo's bounded shared transport for long histories, so it is not called by
+  `status --follow`. Follow instead waits for a stable second terminal poll;
+  current phase remains native while final text remains transitional.
+- **Reversible direct read cutover**: Replaced the planned prolonged
+  shadow-only checkpoint with a direct projection cutover after the published,
+  pinned Codex 0.147.0 real-process test proved non-loading read/history behavior
+  across restart and focused fake-runtime tests covered mismatches, failures,
+  status projection, and follow-output stabilization. No table or existing
+  record was removed; obsolete eager-recovery status/failure writes stopped,
+  while the then-remaining compatibility writes kept the bridge reversible.
+  The later schema-v6 entry above records completion of the operation-ledger,
+  remaining turn/status stop-write, and crash-reconciliation gate.
+- **Native-first ownership confirmed**: Reframed CoCo as a local headless
+  control plane rather than a competing worktree launcher or Codex history
+  store. Git remains authoritative for repository/worktree truth and the App
+  Server for threads, turns, conversation, native status, models,
+  configuration, and server-request semantics. CoCo retains only its stable
+  repository/worktree/thread binding, provisioning/failure evidence,
+  idempotent composite-operation correlation, and irreducible context/policy
+  provenance.
+- **State-reduction migration and release gate**: Classified schema-v5 native
+  snapshots, turn rows, normalized events, completed messages, decision rows,
+  and MCP audit history as implemented compatibility behavior rather than
+  permanent authority. Recorded a released-Codex compatibility gate, shadow
+  reads, native read/follow cutover, per-field removal criteria, historical
+  database migration tests, and a final multi-repository CLI/MCP/`jump`
+  control-plane proof. Public release remains a no-go if actual use collapses
+  to `create` followed by `jump` or native Codex exposes the equivalent
+  programmable binding.
+
 ## 2026-09-06
 
 - **Private incubation restored**: Changed `janthmueller/coco` from public to
@@ -50,7 +161,7 @@ status: stable
   start, native fork, idempotency, persistence, and recovery. Codex remains
   authoritative for configuration precedence; CoCo records only the requested
   override and Codex-reported non-secret effective settings.
-- **Native workspace fork delivered**: Added same-repository
+- **Native workspace fork delivered (superseded interface)**: Added same-repository
   `coco create --fork-from <workspace> [--compact]`. The destination derives
   from an idle, clean source workspace's committed `HEAD` and native Codex
   history; compaction applies explicitly to the child and finishes before an
@@ -58,7 +169,9 @@ status: stable
   failure retention, exact App Server calls, and static user docs are covered.
   Compaction remains fork provenance rather than a fourth context mode, while
   handoff stays deferred until its plan and artifact/reference model is
-  designed.
+  designed. The 2026-09-07 independent-creation entry above retains this
+  behavior through separate base and context selectors and hides the coupled
+  flag.
 - **Handoff design kept open**: Separated producing transfer material from
   attaching and consuming it. A future handoff may be agent-authored, supplied
   as Markdown or CLI input, or incorporate an external ticket/reference and
@@ -113,11 +226,11 @@ status: stable
   model-free persistent thread preparation, and resume through a fresh App
   Server. The test exposed and removed an unnegotiated experimental field and
   established `thread/name/set` as the empty-thread durability step.
-- **Daemon thread recovery**: A fresh `cocod` now resumes each persisted
-  `ready` Codex thread with its verified ID, worktree, and unchanged in-memory
-  profile overlay. Successful responses refresh native status; profile drift
-  or one resume failure leaves only that task unavailable, while unfinished
-  turns remain truthfully interrupted.
+- **Daemon thread recovery (superseded on 2026-09-07)**: The first recovery
+  implementation made a fresh `cocod` resume each persisted `ready` Codex
+  thread with its verified ID, worktree, and unchanged in-memory profile
+  overlay. The native-first cutover replaced this eager behavior with passive
+  reads and per-workspace activation on demand.
 - **TUI detach contract**: Locked down `coco jump` as an attachment to the
   existing Codex thread: both `/quit`/`/exit` and abrupt remote-client loss
   leave active work running under daemon observation, while explicit Codex

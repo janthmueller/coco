@@ -20,6 +20,20 @@ pub(crate) struct StartedTurn {
     pub(crate) id: String,
 }
 
+/// Stable subset of a native Codex thread used to hydrate CoCo projections.
+///
+/// App Server wire payloads stay in the daemon adapter. In particular, callers
+/// cannot accidentally make storage or public protocol types depend on the
+/// complete native response shape.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NativeThread {
+    pub(crate) id: String,
+    pub(crate) cwd: PathBuf,
+    pub(crate) name: Option<String>,
+    pub(crate) status: CodexThreadStatus,
+    pub(crate) forked_from_id: Option<String>,
+}
+
 #[derive(Debug, Error)]
 pub(crate) enum WorkerError {
     #[error(transparent)]
@@ -30,6 +44,8 @@ pub(crate) enum WorkerError {
     InvalidThreadStatus(String),
     #[error("Codex returned an invalid model catalog: {0}")]
     InvalidModelCatalog(String),
+    #[error("Codex returned an invalid thread read response: {0}")]
+    InvalidThreadRead(String),
     #[error("Codex thread ID mismatch: expected {expected}, received {actual}")]
     ThreadIdMismatch { expected: String, actual: String },
     #[error("Codex thread cwd mismatch: expected {expected}, received {actual}")]
@@ -45,6 +61,16 @@ impl WorkerError {
 #[async_trait]
 pub(crate) trait WorkerRuntime: Send + Sync + 'static {
     async fn list_models(&self) -> Result<Vec<CodexModel>, WorkerError>;
+
+    /// Reads native thread truth without loading it or applying configuration.
+    ///
+    /// The default keeps existing test and alternate worker implementations
+    /// source-compatible while the read path is introduced behind this port.
+    async fn read_thread(&self, _thread_id: &str) -> Result<NativeThread, WorkerError> {
+        Err(WorkerError::InvalidThreadRead(
+            "thread/read is not supported by this worker".to_owned(),
+        ))
+    }
 
     async fn start_thread(
         &self,

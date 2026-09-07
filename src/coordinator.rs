@@ -25,7 +25,7 @@ mod worker;
 mod workspace;
 
 pub(crate) use error::{CoordinatorError, WorkspaceReferenceCandidate};
-pub(crate) use worker::{StartedThread, StartedTurn, WorkerError, WorkerRuntime};
+pub(crate) use worker::{NativeThread, StartedThread, StartedTurn, WorkerError, WorkerRuntime};
 
 pub(crate) struct Coordinator {
     store: Arc<Store>,
@@ -35,7 +35,9 @@ pub(crate) struct Coordinator {
     codex_home: PathBuf,
     runtime_generation: String,
     repository_locks: AsyncMutex<HashMap<String, Arc<AsyncMutex<()>>>>,
-    pending_turn_threads: StdMutex<HashSet<String>>,
+    decisions: StdMutex<decision::DecisionRegistry>,
+    subscribed_threads: StdMutex<HashSet<String>>,
+    active_turn_operations: StdMutex<HashMap<String, turn::RuntimeTurnOperation>>,
     pending_compactions: StdMutex<HashMap<String, context::PendingCompaction>>,
     file_change_previews: StdMutex<HashMap<(String, String), Vec<DecisionFileChange>>>,
 }
@@ -57,7 +59,9 @@ impl Coordinator {
             codex_home,
             runtime_generation,
             repository_locks: AsyncMutex::new(HashMap::new()),
-            pending_turn_threads: StdMutex::new(HashSet::new()),
+            decisions: StdMutex::new(decision::DecisionRegistry::default()),
+            subscribed_threads: StdMutex::new(HashSet::new()),
+            active_turn_operations: StdMutex::new(HashMap::new()),
             pending_compactions: StdMutex::new(HashMap::new()),
             file_change_previews: StdMutex::new(HashMap::new()),
         }
@@ -191,20 +195,33 @@ impl Coordinator {
         )
     }
 
+    fn has_thread_subscription(&self, thread_id: &str) -> bool {
+        self.subscribed_threads
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains(thread_id)
+    }
+
+    fn mark_thread_subscribed(&self, thread_id: &str) {
+        self.subscribed_threads
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(thread_id.to_owned());
+    }
+
     fn workspace_response(
         &self,
-        workspace: Workspace,
+        mut workspace: Workspace,
     ) -> Result<WorkspaceResult, CoordinatorError> {
-        let turn = workspace
-            .active_turn_id
-            .as_deref()
-            .map(|turn_id| self.store.turn_by_id(turn_id))
-            .transpose()?
-            .flatten();
-        match turn {
-            Some(turn) => Ok(WorkspaceResult::with_turn(workspace, &turn)),
-            None => Ok(WorkspaceResult::prepared(workspace)),
+        if let Some(runtime) = self.runtime_turn_for_workspace(&workspace) {
+            workspace.active_turn_id = Some(runtime.id.clone());
+            return Ok(WorkspaceResult::with_operation(
+                workspace,
+                &runtime.id,
+                runtime.native_result_id.as_deref(),
+            ));
         }
+        Ok(WorkspaceResult::prepared(workspace))
     }
 
     fn mark_workspace_failed(

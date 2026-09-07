@@ -4,10 +4,10 @@ use super::StoreError;
 
 pub(super) fn migrate(connection: &Connection) -> Result<(), StoreError> {
     let mut version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if version > 5 {
+    if version > 7 {
         return Err(StoreError::UnsupportedSchema(version));
     }
-    if version == 5 {
+    if version == 7 {
         return Ok(());
     }
     if version == 1 {
@@ -23,7 +23,15 @@ pub(super) fn migrate(connection: &Connection) -> Result<(), StoreError> {
         version = 4;
     }
     if version == 4 {
-        return migrate_pending_decisions(connection);
+        migrate_pending_decisions(connection)?;
+        version = 5;
+    }
+    if version == 5 {
+        migrate_operation_ledger(connection)?;
+        version = 6;
+    }
+    if version == 6 {
+        return migrate_worktree_modes(connection);
     }
     create_current_schema(connection)
 }
@@ -63,6 +71,8 @@ fn create_current_schema(connection: &Connection) -> Result<(), StoreError> {
             thread_status_observed_at_ms INTEGER,
             thread_status_is_fresh INTEGER NOT NULL DEFAULT 0
                 CHECK (thread_status_is_fresh IN (0, 1)),
+            worktree_mode TEXT NOT NULL DEFAULT 'new_branch'
+                CHECK (worktree_mode IN ('new_branch', 'existing_branch', 'detached')),
             branch_name TEXT,
             base_sha TEXT,
             worktree_path TEXT UNIQUE,
@@ -101,6 +111,35 @@ fn create_current_schema(connection: &Connection) -> Result<(), StoreError> {
          );
          CREATE INDEX IF NOT EXISTS turns_workspace_idx
             ON turns(workspace_id, requested_at_ms);
+         CREATE TABLE IF NOT EXISTS operations (
+            id TEXT PRIMARY KEY,
+            operation_id TEXT NOT NULL UNIQUE,
+            workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+            kind TEXT NOT NULL CHECK (kind IN ('turn_start')),
+            request_fingerprint TEXT NOT NULL UNIQUE,
+            native_result_id TEXT UNIQUE,
+            state TEXT NOT NULL CHECK (state IN (
+                'prepared', 'dispatching', 'accepted', 'uncertain'
+            )),
+            created_at_ms INTEGER NOT NULL,
+            dispatch_started_at_ms INTEGER,
+            result_recorded_at_ms INTEGER,
+            CHECK (
+                (state = 'prepared' AND dispatch_started_at_ms IS NULL
+                    AND result_recorded_at_ms IS NULL AND native_result_id IS NULL)
+                OR
+                (state = 'dispatching' AND dispatch_started_at_ms IS NOT NULL
+                    AND result_recorded_at_ms IS NULL AND native_result_id IS NULL)
+                OR
+                (state = 'accepted' AND dispatch_started_at_ms IS NOT NULL
+                    AND result_recorded_at_ms IS NOT NULL AND native_result_id IS NOT NULL)
+                OR
+                (state = 'uncertain' AND dispatch_started_at_ms IS NOT NULL
+                    AND result_recorded_at_ms IS NOT NULL AND native_result_id IS NULL)
+            )
+         );
+         CREATE INDEX IF NOT EXISTS operations_workspace_state_idx
+            ON operations(workspace_id, state, created_at_ms);
          CREATE TABLE IF NOT EXISTS decisions (
             id TEXT PRIMARY KEY,
             workspace_id TEXT NOT NULL REFERENCES workspaces(id),
@@ -155,10 +194,130 @@ fn create_current_schema(connection: &Connection) -> Result<(), StoreError> {
          );
          CREATE INDEX IF NOT EXISTS audit_workspace_sequence_idx
             ON audit_events(workspace_id, sequence);
-         PRAGMA user_version = 5;
+         PRAGMA user_version = 7;
          COMMIT;",
     )?;
     Ok(())
+}
+
+fn migrate_worktree_modes(connection: &Connection) -> Result<(), StoreError> {
+    let migration = (|| -> Result<(), StoreError> {
+        connection.execute_batch("BEGIN IMMEDIATE;")?;
+        if !table_has_columns(connection, "workspaces", &["worktree_mode"])? {
+            connection.execute_batch(
+                "ALTER TABLE workspaces ADD COLUMN worktree_mode TEXT NOT NULL DEFAULT 'new_branch'
+                    CHECK (worktree_mode IN ('new_branch', 'existing_branch', 'detached'));",
+            )?;
+        }
+        connection.execute_batch("PRAGMA user_version = 7; COMMIT;")?;
+        Ok(())
+    })();
+    if migration.is_err() {
+        let _ = connection.execute_batch("ROLLBACK;");
+    }
+    migration?;
+    Ok(())
+}
+
+fn migrate_operation_ledger(connection: &Connection) -> Result<(), StoreError> {
+    let migration = (|| -> Result<(), StoreError> {
+        connection.execute_batch(
+            "BEGIN IMMEDIATE;
+         CREATE TABLE operations (
+            id TEXT PRIMARY KEY,
+            operation_id TEXT NOT NULL UNIQUE,
+            workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+            kind TEXT NOT NULL CHECK (kind IN ('turn_start')),
+            request_fingerprint TEXT NOT NULL UNIQUE,
+            native_result_id TEXT UNIQUE,
+            state TEXT NOT NULL CHECK (state IN (
+                'prepared', 'dispatching', 'accepted', 'uncertain'
+            )),
+            created_at_ms INTEGER NOT NULL,
+            dispatch_started_at_ms INTEGER,
+            result_recorded_at_ms INTEGER,
+            CHECK (
+                (state = 'prepared' AND dispatch_started_at_ms IS NULL
+                    AND result_recorded_at_ms IS NULL AND native_result_id IS NULL)
+                OR
+                (state = 'dispatching' AND dispatch_started_at_ms IS NOT NULL
+                    AND result_recorded_at_ms IS NULL AND native_result_id IS NULL)
+                OR
+                (state = 'accepted' AND dispatch_started_at_ms IS NOT NULL
+                    AND result_recorded_at_ms IS NOT NULL AND native_result_id IS NOT NULL)
+                OR
+                (state = 'uncertain' AND dispatch_started_at_ms IS NOT NULL
+                    AND result_recorded_at_ms IS NOT NULL AND native_result_id IS NULL)
+            )
+         );
+         CREATE INDEX operations_workspace_state_idx
+            ON operations(workspace_id, state, created_at_ms);",
+        )?;
+        if table_has_columns(
+            connection,
+            "turns",
+            &[
+                "operation_id",
+                "workspace_id",
+                "client_message_id",
+                "codex_turn_id",
+                "phase",
+                "started_at_ms",
+                "completed_at_ms",
+            ],
+        )? {
+            connection.execute_batch(
+                "INSERT INTO operations (
+                    id, operation_id, workspace_id, kind, request_fingerprint,
+                    native_result_id, state, created_at_ms, dispatch_started_at_ms,
+                    result_recorded_at_ms
+                 ) SELECT
+                    id, operation_id, workspace_id, 'turn_start', client_message_id,
+                    codex_turn_id,
+                    CASE WHEN codex_turn_id IS NULL THEN 'uncertain' ELSE 'accepted' END,
+                    requested_at_ms,
+                    COALESCE(started_at_ms, requested_at_ms),
+                    COALESCE(completed_at_ms, started_at_ms, requested_at_ms)
+                 FROM turns WHERE operation_id IS NOT NULL;
+                 UPDATE turns SET phase = 'interrupted',
+                    completed_at_ms = COALESCE(
+                        completed_at_ms,
+                        CAST(strftime('%s', 'now') AS INTEGER) * 1000
+                    )
+                 WHERE phase IN ('starting', 'in_progress');",
+            )?;
+        }
+        connection.execute_batch(
+            "UPDATE workspaces SET active_turn_id = NULL
+             WHERE active_turn_id IS NOT NULL;
+             PRAGMA user_version = 6;
+             COMMIT;",
+        )?;
+        Ok(())
+    })();
+    if migration.is_err() {
+        let _ = connection.execute_batch("ROLLBACK;");
+    }
+    migration?;
+    Ok(())
+}
+
+fn table_has_columns(
+    connection: &Connection,
+    table: &str,
+    columns: &[&str],
+) -> Result<bool, StoreError> {
+    for column in columns {
+        let count: i64 = connection.query_row(
+            &format!("SELECT count(*) FROM pragma_table_info('{table}') WHERE name = ?1"),
+            [column],
+            |row| row.get(0),
+        )?;
+        if count != 1 {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 fn migrate_pending_decisions(connection: &Connection) -> Result<(), StoreError> {

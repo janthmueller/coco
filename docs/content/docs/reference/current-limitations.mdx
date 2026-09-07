@@ -48,16 +48,19 @@ Line Tools. Nix installation supplies the project toolchain as an alternative.
 
 ## A repository is rejected
 
-Workspace creation needs a Git repository with at least one commit and a clean
-selected checkout. Inspect it with:
+Workspace creation needs a Git repository with at least one commit. The
+selected checkout must be clean unless you explicitly use the carry options.
+Inspect it with:
 
 ```bash
 git status --short
 git log -1 --oneline
 ```
 
-Commit, move, or otherwise handle existing changes yourself before retrying.
-CoCo never stashes or resets them for you.
+Commit, move, or otherwise handle existing changes yourself before retrying,
+or use `--carry-changes` and optionally `--carry-untracked`. CoCo never stashes
+or resets the source checkout for you. Ignored files are copied only when they
+match the repository's `.worktreeinclude`.
 
 ## A workspace name is ambiguous
 
@@ -68,7 +71,7 @@ repository path:
 coco ../api status fix/login
 ```
 
-You can also use the full workspace ID shown by `coco --all-repos ls`; IDs
+You can also use the full workspace ID shown by `coco list --all-repos`; IDs
 resolve from any directory.
 
 ## A workspace is already working
@@ -83,22 +86,35 @@ coco status fix/login --follow
 `Ready` means the thread is idle and can accept another message; it does not
 mean the code was reviewed, merged, or otherwise complete.
 
+## A Codex thread is unloaded
+
+This is expected for an inactive workspace after restarting `cocod`. `list` and
+`status` do not load saved conversations. Use `send` to continue the work or
+`jump` to enter its terminal UI; CoCo loads the conversation before continuing.
+
 ## A named profile changed
 
-After restarting `cocod`, CoCo verifies that a workspace's parsed named-profile
-settings still match those used at creation. Restore the configuration at
-`$CODEX_HOME/<name>.config.toml` or create a new workspace with a new profile
-name. Comments and formatting may change; setting changes may not. CoCo will
-not silently resume the old workspace with a different named overlay.
+When `send` or `jump` needs to load a workspace, CoCo verifies
+that its parsed named-profile settings still match those used at creation.
+Restore the configuration at `$CODEX_HOME/<name>.config.toml` or create a new
+workspace with a new profile name. Comments and formatting may change; setting
+changes may not. CoCo will not silently resume the old workspace with a
+different named overlay. `list` and `status` do not load the conversation or run
+this check.
 
 Codex's base configuration is not pinned by this check. Changing it can affect
-settings that any resumed workspace does not override in its named profile.
+settings that a loaded workspace does not override in its named profile.
 
 ## Local data and secrets
 
-CoCo keeps workspace metadata, messages sent with `coco send`, completed agent
-messages, and activity history in your local user data. Git changes remain in
-the managed worktrees. Secret answers entered through `coco decide` are hidden
+CoCo keeps workspace details and a limited activity history in your local user
+data. For now, that history includes completed agent messages so
+`status --follow` can show the final response. CoCo does not add the text passed
+to `coco send` to its own activity history. Codex still owns and retains the
+conversation itself, and Git changes remain in the managed worktrees.
+
+Pending approval and question details exist only while the current `cocod`
+connection is alive. Secret answers entered through `coco decide` are hidden
 while typing and are not retained by CoCo.
 
 An MCP host can receive repository paths, workspace metadata, and code diffs.
@@ -112,15 +128,18 @@ Configure `coco-mcp` only in applications you trust with that information.
 - `coco decide` handles known command approvals, file-change approvals, and
   Codex questions. An unknown request type remains blocked instead of being
   answered unsafely.
-- Prepared conversations can be loaded after restarting `cocod`, but a turn
-  active during the restart is interrupted and does not continue
-  automatically. A pending decision from the old process can no longer be
-  answered.
+- Prepared conversations are loaded only when `send` or `jump`
+  needs them. A turn active during a `cocod` restart is interrupted and does
+  not continue automatically. A pending decision from the old process can no
+  longer be answered.
+- If Codex disconnects while accepting a `send`, CoCo reports that operation
+  as uncertain instead of retrying it automatically. Inspect the workspace
+  with `status` or `jump` before choosing to start another turn.
 - CoCo has no commands to cancel, complete, remove, merge, or clean up a
   workspace. Created branches, worktrees, and workspace records remain.
-- A workspace fork requires a ready, clean source in the same repository and
-  carries only committed code. New workspaces always create a
-  `coco/<name>` branch.
+- A conversation context source must be idle or unloaded. Detached workspaces
+  have no branch, and this alpha cannot yet promote one through CoCo; keep
+  durable work on a branch-backed workspace.
 - CoCo's MCP server can inspect or continue existing workspaces. CoCo does not
   currently provide its own MCP registry or per-workspace tool selector.
 

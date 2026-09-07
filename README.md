@@ -20,15 +20,16 @@ named workspace with its own Git worktree.
 A CoCo workspace keeps together:
 
 - a registered Git repository;
-- a separate worktree and `coco/<name>` branch;
+- a separate worktree with a new, existing, or detached Git binding;
 - one persistent Codex thread; and
 - the model and Codex profile selected for that thread.
 
 This lets you prepare work without starting a model turn, follow active work
 from another terminal, answer Codex approvals and questions, and later enter
 the same conversation through the normal Codex terminal UI. Workspaces can
-also be found across multiple repositories or forked with their committed code
-and Codex history intact.
+also be found across multiple repositories. Their Git base and Codex
+conversation context can be selected independently, including from another
+CoCo workspace or an exact native Codex thread ID.
 
 ## Install
 
@@ -84,7 +85,7 @@ From a clean Git repository with at least one commit:
 
 ```bash
 coco repo add .
-coco models
+coco model list
 
 coco create feat/first --base HEAD \
   --send "Inspect the project and propose one focused improvement"

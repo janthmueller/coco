@@ -29,9 +29,14 @@ context together.
 A workspace is one unit of Codex work. It contains:
 
 - a registered repository;
-- a separate Git worktree and `coco/<name>` branch;
+- a separate Git worktree, normally on a `coco/<name>` branch;
 - one persistent Codex thread; and
 - its selected model and Codex profile.
+
+The code base, conversation context, and Git branch binding are separate
+choices. A workspace can start from another commit, inherit an existing Codex
+conversation, use an existing branch, or run detached without coupling those
+decisions.
 
 The worktree prevents changes from being mixed into your current checkout.
 The stored thread means `send`, `status`, and `jump` all continue the same

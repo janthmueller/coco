@@ -9,8 +9,9 @@ use tracing::error;
 use crate::coordinator::{Coordinator, CoordinatorError};
 use crate::protocol::{
     AuditRecordParams, DaemonMethod, DecisionGetParams, DecisionRespondParams, EventListParams,
-    HealthParams, HealthResult, ModelListParams, TurnStartParams, WorkspaceCreateParams,
-    WorkspaceDiffParams, WorkspaceGetParams, WorkspaceListParams,
+    HealthParams, HealthResult, ModelListParams, RepositoryResolveParams, TurnStartParams,
+    WorkspaceAttachParams, WorkspaceCreateParams, WorkspaceDiffParams, WorkspaceGetParams,
+    WorkspaceListParams,
 };
 use crate::rpc::{RpcErrorPayload, RpcHandler};
 
@@ -47,6 +48,10 @@ impl RpcHandler for DaemonHandler {
             DaemonMethod::RepositoryRegister => {
                 execute(self.coordinator.register_repository(decode(params)?))
             }
+            DaemonMethod::RepositoryResolve => execute(
+                self.coordinator
+                    .resolve_repository(decode::<RepositoryResolveParams>(params)?),
+            ),
             DaemonMethod::RepositoryList => {
                 execute(self.coordinator.list_repositories(decode(params)?))
             }
@@ -55,16 +60,21 @@ impl RpcHandler for DaemonHandler {
                     .create_workspace(decode::<WorkspaceCreateParams>(params)?)
                     .await,
             ),
-            DaemonMethod::WorkspaceList => execute(self.coordinator.list_workspaces(decode::<
-                WorkspaceListParams,
-            >(
-                params
-            )?)),
-            DaemonMethod::WorkspaceGet => execute(self.coordinator.get_workspace(decode::<
-                WorkspaceGetParams,
-            >(
-                params
-            )?)),
+            DaemonMethod::WorkspaceList => execute(
+                self.coordinator
+                    .list_workspaces(decode::<WorkspaceListParams>(params)?)
+                    .await,
+            ),
+            DaemonMethod::WorkspaceGet => execute(
+                self.coordinator
+                    .get_workspace(decode::<WorkspaceGetParams>(params)?)
+                    .await,
+            ),
+            DaemonMethod::WorkspaceAttach => execute(
+                self.coordinator
+                    .attach_workspace(decode::<WorkspaceAttachParams>(params)?)
+                    .await,
+            ),
             DaemonMethod::TurnStart => execute(
                 self.coordinator
                     .start_turn(decode::<TurnStartParams>(params)?)
@@ -72,7 +82,8 @@ impl RpcHandler for DaemonHandler {
             ),
             DaemonMethod::EventList => execute(
                 self.coordinator
-                    .list_events(decode::<EventListParams>(params)?),
+                    .list_events(decode::<EventListParams>(params)?)
+                    .await,
             ),
             DaemonMethod::WorkspaceDiff => execute(self.coordinator.workspace_diff(decode::<
                 WorkspaceDiffParams,

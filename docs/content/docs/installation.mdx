@@ -84,9 +84,10 @@ can continue and remain reachable from a later `status`, `decide`, or `jump`.
 With the default paths, a second `cocod` process exits instead of competing for
 the same workspaces.
 
-Stop the coordinator with <kbd>Ctrl</kbd>+<kbd>C</kbd>. Prepared workspaces can
-be loaded again the next time it starts, but a turn that was active when it
-stopped is interrupted. The alpha does not install or enable a background
-service automatically.
+Stop the coordinator with <kbd>Ctrl</kbd>+<kbd>C</kbd>. Prepared workspaces remain
+listed the next time it starts. `list` and `status` inspect them without loading
+their Codex conversations; `send` or `jump` loads one when it is needed. A turn
+that was active when `cocod` stopped is interrupted. The
+alpha does not install or enable a background service automatically.
 
 Next, [run your first workspace](../getting-started/).

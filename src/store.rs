@@ -14,13 +14,16 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::domain::{
-    AuditOutcome, CodexThreadStatus, ContextMode, Decision, DecisionKind, DecisionPrompt,
-    EventKind, EventSource, ProfileSnapshot, Repository, TurnPhase,
+    AuditOutcome, ContextMode, EventKind, EventSource, ProfileSnapshot, Repository, WorktreeMode,
 };
+#[cfg(test)]
+use crate::domain::{Decision, DecisionKind, DecisionPrompt, TurnPhase};
 
+#[cfg(test)]
 mod decisions;
 mod events;
 mod migrations;
+mod operations;
 mod rows;
 mod workspaces;
 
@@ -59,8 +62,17 @@ pub enum StoreError {
         expected: String,
         actual: String,
     },
+    #[cfg(test)]
     #[error("turn {turn_id} cannot complete with phase {phase}")]
     InvalidTurnCompletion { turn_id: String, phase: String },
+    #[error("operation {operation_id} must be {expected}, but is {actual}")]
+    InvalidOperationState {
+        operation_id: String,
+        expected: &'static str,
+        actual: String,
+    },
+    #[error("operation {operation_id} already resolved to another native result")]
+    OperationResultConflict { operation_id: String },
     #[error(
         "event turn {turn_id} belongs to workspace {turn_workspace_id}, not {event_workspace_id}"
     )]
@@ -83,6 +95,7 @@ pub struct NewWorkspace {
     pub context_mode: ContextMode,
     pub context: Value,
     pub profile: ProfileSnapshot,
+    pub worktree_mode: WorktreeMode,
     pub branch_name: Option<String>,
     pub base_sha: Option<String>,
     pub worktree_path: Option<PathBuf>,
@@ -113,6 +126,7 @@ impl EventDraft {
     }
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewTurn {
     pub operation_id: Option<String>,
@@ -121,14 +135,84 @@ pub struct NewTurn {
     pub started_at_ms: Option<i64>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperationKind {
+    TurnStart,
+}
+
+impl OperationKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TurnStart => "turn_start",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "turn_start" => Some(Self::TurnStart),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperationState {
+    Prepared,
+    Dispatching,
+    Accepted,
+    Uncertain,
+}
+
+impl OperationState {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Prepared => "prepared",
+            Self::Dispatching => "dispatching",
+            Self::Accepted => "accepted",
+            Self::Uncertain => "uncertain",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "prepared" => Some(Self::Prepared),
+            "dispatching" => Some(Self::Dispatching),
+            "accepted" => Some(Self::Accepted),
+            "uncertain" => Some(Self::Uncertain),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Operation {
+    pub id: String,
+    pub operation_id: String,
+    pub workspace_id: String,
+    pub kind: OperationKind,
+    pub request_fingerprint: String,
+    pub native_result_id: Option<String>,
+    pub state: OperationState,
+    pub created_at_ms: i64,
+    pub dispatch_started_at_ms: Option<i64>,
+    pub result_recorded_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewOperation {
+    pub operation_id: String,
+    pub workspace_id: String,
+    pub kind: OperationKind,
+    pub request_fingerprint: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewThreadBinding {
     pub thread_id: String,
     pub parent_thread_id: Option<String>,
-    pub status: CodexThreadStatus,
-    pub runtime_generation: String,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct TurnCompletion {
     pub phase: TurnPhase,
@@ -136,6 +220,7 @@ pub struct TurnCompletion {
     pub completed_at_ms: Option<i64>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewDecision {
     pub workspace_id: String,
@@ -150,6 +235,7 @@ pub struct NewDecision {
     pub native_options: Vec<Value>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoredDecision {
     pub decision: Decision,
@@ -170,6 +256,19 @@ pub struct AuditDraft {
     pub outcome: AuditOutcome,
     pub details: Value,
     pub occurred_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ReconciliationSummary {
+    pub failed_workspace_preparations: usize,
+    pub uncertain_operations: usize,
+    pub stale_thread_snapshots: usize,
+}
+
+impl ReconciliationSummary {
+    pub const fn total(self) -> usize {
+        self.failed_workspace_preparations + self.uncertain_operations + self.stale_thread_snapshots
+    }
 }
 
 pub struct Store {
@@ -283,6 +382,7 @@ fn json_to_sql_error(error: serde_json::Error) -> StoreError {
     StoreError::Database(rusqlite::Error::ToSqlConversionFailure(Box::new(error)))
 }
 
+#[cfg(test)]
 fn sanitized_error_columns(error: Option<&Value>) -> (Option<&str>, Option<&str>) {
     let Some(Value::Object(error)) = error else {
         return (None, None);

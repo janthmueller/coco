@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::codex::CodexClient;
-use crate::coordinator::{StartedThread, StartedTurn, WorkerError, WorkerRuntime};
+use crate::coordinator::{NativeThread, StartedThread, StartedTurn, WorkerError, WorkerRuntime};
 use crate::domain::{CodexModel, CodexThreadStatus};
 
 const MODEL_PAGE_LIMIT: u32 = 100;
@@ -18,6 +18,23 @@ struct ModelPage {
     data: Vec<CodexModel>,
     #[serde(default)]
     next_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ThreadReadResponse {
+    thread: ThreadReadWire,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadReadWire {
+    id: String,
+    cwd: PathBuf,
+    #[serde(default)]
+    name: Option<String>,
+    status: CodexThreadStatus,
+    #[serde(default)]
+    forked_from_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -66,6 +83,21 @@ impl WorkerRuntime for CodexWorker {
         Err(WorkerError::InvalidModelCatalog(format!(
             "the catalog exceeded {MAX_MODEL_PAGES} pages"
         )))
+    }
+
+    async fn read_thread(&self, thread_id: &str) -> Result<NativeThread, WorkerError> {
+        let response = self
+            .client
+            .request(
+                "thread/read",
+                json!({
+                    "threadId": thread_id,
+                    "includeTurns": false,
+                }),
+            )
+            .await
+            .map_err(WorkerError::runtime)?;
+        decode_thread_read_response(response)
     }
 
     async fn start_thread(
@@ -255,4 +287,97 @@ fn decode_thread_response(
         cwd,
         response,
     })
+}
+
+fn decode_thread_read_response(response: Value) -> Result<NativeThread, WorkerError> {
+    let response = serde_json::from_value::<ThreadReadResponse>(response)
+        .map_err(|error| WorkerError::InvalidThreadRead(error.to_string()))?;
+    let thread = response.thread;
+    Ok(NativeThread {
+        id: thread.id,
+        cwd: thread.cwd,
+        name: thread.name,
+        status: thread.status.canonicalized(),
+        forked_from_id: thread.forked_from_id,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use serde_json::json;
+
+    use super::decode_thread_read_response;
+    use crate::domain::CodexThreadStatus;
+
+    #[test]
+    fn decodes_only_the_stable_thread_metadata_projection() {
+        let response = json!({
+            "thread": {
+                "id": "thread-child",
+                "cwd": "/worktrees/fix-login",
+                "name": "fix/login",
+                "status": {
+                    "type": "active",
+                    "activeFlags": ["waitingOnUserInput", "waitingOnApproval", "waitingOnApproval"]
+                },
+                "forkedFromId": "thread-parent",
+                "turns": [
+                    {
+                        "id": "turn-1",
+                        "status": "completed",
+                        "items": [
+                            {"id": "user-1", "type": "userMessage", "content": []},
+                            {"id": "agent-1", "type": "agentMessage", "text": "first"},
+                            {"id": "agent-2", "type": "agentMessage", "text": "last"}
+                        ]
+                    },
+                    {
+                        "id": "turn-2",
+                        "status": "futureStatus",
+                        "items": []
+                    }
+                ]
+            }
+        });
+
+        let thread = decode_thread_read_response(response).unwrap();
+        assert_eq!(thread.id, "thread-child");
+        assert_eq!(thread.cwd, PathBuf::from("/worktrees/fix-login"));
+        assert_eq!(thread.name.as_deref(), Some("fix/login"));
+        assert_eq!(thread.forked_from_id.as_deref(), Some("thread-parent"));
+        assert_eq!(
+            thread.status,
+            CodexThreadStatus::Active {
+                active_flags: vec![
+                    "waitingOnApproval".to_owned(),
+                    "waitingOnUserInput".to_owned(),
+                ]
+            }
+        );
+    }
+
+    #[test]
+    fn accepts_a_metadata_response_with_empty_native_history() {
+        let response = json!({
+            "thread": {
+                "id": "thread-1",
+                "cwd": "/worktree",
+                "status": {"type": "idle"},
+                "turns": []
+            }
+        });
+        let thread = decode_thread_read_response(response).unwrap();
+        assert_eq!(thread.status, CodexThreadStatus::Idle);
+    }
+
+    #[test]
+    fn rejects_a_response_without_required_native_thread_fields() {
+        let error = decode_thread_read_response(json!({
+            "thread": {"id": "thread-1", "turns": []}
+        }))
+        .unwrap_err();
+        assert!(error.to_string().contains("invalid thread read response"));
+    }
 }

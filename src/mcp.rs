@@ -469,9 +469,15 @@ mod tests {
                 "createdAtMs": 1,
                 "updatedAtMs": 1,
             }),
+            DaemonMethod::RepositoryResolve => json!({
+                "id": "repo-test",
+                "rootPath": "/repo",
+                "displayName": "repo",
+            }),
             DaemonMethod::RepositoryList => json!([]),
             DaemonMethod::WorkspaceCreate => json!({"workspace": fake_workspace()}),
             DaemonMethod::WorkspaceList => json!([]),
+            DaemonMethod::WorkspaceAttach => json!({"workspace": fake_workspace()}),
             DaemonMethod::WorkspaceGet => json!({
                 "workspace": fake_workspace(),
                 "git": {"observed": false, "reason": "test fixture"},
@@ -532,6 +538,7 @@ mod tests {
             },
             "phase": "idle",
             "waitReasons": [],
+            "worktreeMode": "new_branch",
             "branchName": "coco/workspace",
             "baseSha": "base-test",
             "worktreePath": "/worktree",

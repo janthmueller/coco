@@ -6,11 +6,13 @@ use serde_json::json;
 
 use crate::paths::CocoPaths;
 
-use super::args::{Cli, Command, RepoCommand};
-use super::commands::validate_scope_selection;
+use super::args::{Cli, Command};
 use super::jump::{jump_command, load_jump_target};
 use super::output::{phase_label, render_diff};
-use super::status::follow_stops_at;
+use super::status::{FollowAction, follow_stops_at, next_follow_action};
+
+mod collections;
+mod creation;
 
 #[test]
 fn create_help_describes_the_codex_named_profile_file() {
@@ -23,6 +25,20 @@ fn create_help_describes_the_codex_named_profile_file() {
 
     assert!(help.contains("$CODEX_HOME/<PROFILE>.config.toml"));
     assert!(!help.contains("[profiles.<PROFILE>]"));
+    for option in [
+        "--base-workspace",
+        "--context-workspace",
+        "--context-thread",
+        "--branch",
+        "--checkout",
+        "--detached",
+        "--carry-changes",
+        "--carry-untracked",
+        "--dirty",
+    ] {
+        assert!(help.contains(option), "create help omitted {option}");
+    }
+    assert!(!help.contains("--fork-from"));
 }
 
 #[test]
@@ -87,38 +103,14 @@ fn diff_help_and_human_output_disclose_bounded_patches() {
 }
 
 #[test]
-fn all_repository_help_is_limited_to_workspace_scope_commands() {
-    for name in ["ls", "status", "send", "jump", "diff"] {
-        let mut command = Cli::command();
-        let help = command
-            .find_subcommand_mut(name)
-            .unwrap_or_else(|| panic!("{name} subcommand must exist"))
-            .render_long_help()
-            .to_string();
-        assert!(
-            help.contains("--all-repos"),
-            "{name} help must advertise cross-repository scope"
-        );
-    }
-
-    for name in ["repo", "models", "create", "decide", "mcp"] {
-        let mut command = Cli::command();
-        let help = command
-            .find_subcommand_mut(name)
-            .unwrap_or_else(|| panic!("{name} subcommand must exist"))
-            .render_long_help()
-            .to_string();
-        assert!(
-            !help.contains("--all-repos"),
-            "{name} help must not advertise an unsupported scope"
-        );
-    }
-}
-
-#[test]
 fn parses_workspace_creation_with_an_optional_profile() {
     let minimal = Cli::try_parse_from(["coco", "create", "auth"]);
     assert!(minimal.is_ok());
+    let prompted = Cli::try_parse_from(["coco", "create"]).unwrap();
+    assert!(matches!(
+        prompted.command,
+        Command::Create(super::args::CreateArgs { name: None, .. })
+    ));
 
     let configured = Cli::try_parse_from([
         "coco",
@@ -177,7 +169,60 @@ fn parses_workspace_creation_with_an_optional_profile() {
     assert!(Cli::try_parse_from(["coco", "create", "auth", "--send", "  "]).is_err());
     assert!(Cli::try_parse_from(["coco", "create", "auth", "--model", "  "]).is_err());
     assert!(Cli::try_parse_from(["coco", "send", "auth", ""]).is_err());
+    let prompted_send = Cli::try_parse_from(["coco", "send"]).unwrap();
+    assert!(matches!(
+        prompted_send.command,
+        Command::Send {
+            workspace: None,
+            message: None,
+            ..
+        }
+    ));
+    let prompted_message = Cli::try_parse_from(["coco", "send", "auth"]).unwrap();
+    assert!(matches!(
+        prompted_message.command,
+        Command::Send {
+            workspace: Some(workspace),
+            message: None,
+            ..
+        } if workspace == "auth"
+    ));
+    let send = Cli::try_parse_from([
+        "coco",
+        "send",
+        "auth",
+        "continue",
+        "--operation-id",
+        "send-auth-1",
+    ])
+    .unwrap();
+    assert!(matches!(
+        send.command,
+        Command::Send {
+            operation_id: Some(operation_id),
+            ..
+        } if operation_id == "send-auth-1"
+    ));
+    assert!(
+        Cli::try_parse_from(["coco", "send", "auth", "continue", "--operation-id", " "]).is_err()
+    );
+    assert!(Cli::try_parse_from(["coco", "--no-input", "status", "auth"]).is_ok());
+    assert!(Cli::try_parse_from(["coco", "status", "auth", "--no-input"]).is_ok());
     assert!(Cli::try_parse_from(["coco", "new", "auth"]).is_err());
+}
+
+#[test]
+fn parses_deterministic_approval_choices() {
+    let explicit_decision =
+        Cli::try_parse_from(["coco", "decide", "decision-123", "--choice", "2"]).unwrap();
+    assert!(matches!(
+        explicit_decision.command,
+        Command::Decide {
+            decision,
+            choice: Some(2),
+        } if decision == "decision-123"
+    ));
+    assert!(Cli::try_parse_from(["coco", "decide", "decision-123", "--choice", "0"]).is_err());
 }
 
 #[test]
@@ -196,14 +241,23 @@ fn parses_native_workspace_forks_and_requires_an_explicit_source_for_compaction(
     let Command::Create(fork) = fork.command else {
         panic!("workspace fork did not parse as create");
     };
-    assert_eq!(fork.base, "HEAD");
+    assert_eq!(fork.base, None);
     assert_eq!(fork.fork_from.as_deref(), Some("feat/source"));
     assert!(fork.compact);
     assert_eq!(fork.send.as_deref(), Some("Continue from the review"));
 
+    let no_source = Cli::try_parse_from(["coco", "create", "child", "--compact"]).unwrap();
+    let Command::Create(no_source) = no_source.command else {
+        panic!("create did not parse as the create command");
+    };
     assert!(
-        Cli::try_parse_from(["coco", "create", "child", "--compact"]).is_err(),
-        "compaction without a fork source must be rejected"
+        super::commands::normalize_create_args(
+            PathBuf::from("/repo"),
+            no_source,
+            "create-child".to_owned(),
+        )
+        .is_err(),
+        "compaction without a fork source must be rejected before RPC"
     );
     assert!(
         Cli::try_parse_from([
@@ -221,132 +275,6 @@ fn parses_native_workspace_forks_and_requires_an_explicit_source_for_compaction(
 }
 
 #[test]
-fn repository_registration_is_a_nested_repo_command() {
-    assert!(Cli::try_parse_from(["coco", "repo", "add"]).is_ok());
-    assert!(Cli::try_parse_from(["coco", "repo", "add", "../source"]).is_ok());
-    let listed = Cli::try_parse_from(["coco", "repo", "list", "--json"]).unwrap();
-    assert!(matches!(
-        listed.command,
-        Command::Repo {
-            command: RepoCommand::List { json: true }
-        }
-    ));
-    assert!(Cli::try_parse_from(["coco", "init"]).is_err());
-}
-
-#[test]
-fn model_discovery_is_a_daemon_wide_command() {
-    let human = Cli::try_parse_from(["coco", "models"]).unwrap();
-    assert!(matches!(human.command, Command::Models { json: false }));
-    let json = Cli::try_parse_from(["coco", "models", "--json"]).unwrap();
-    assert!(matches!(json.command, Command::Models { json: true }));
-}
-
-#[test]
-fn parses_local_explicit_and_all_repository_scopes() {
-    let local = Cli::try_parse_from(["coco", "ls"]).unwrap();
-    assert!(local.scope_path.is_none());
-    assert!(!local.all_repos);
-
-    let explicit = Cli::try_parse_from(["coco", "../other", "status", "feat/login"]).unwrap();
-    assert_eq!(explicit.scope_path, Some(PathBuf::from("../other")));
-    assert!(!explicit.all_repos);
-
-    let global = Cli::try_parse_from(["coco", "-a", "ls"]).unwrap();
-    assert!(global.scope_path.is_none());
-    assert!(global.requests_all_repositories());
-
-    for command in ["ls", "status", "send", "jump", "diff"] {
-        let mut leading = vec!["coco", "-a", command];
-        let mut trailing = vec!["coco", command];
-        match command {
-            "status" | "jump" | "diff" => {
-                leading.push("feat/login");
-                trailing.push("feat/login");
-            }
-            "send" => {
-                leading.extend(["feat/login", "continue"]);
-                trailing.extend(["feat/login", "continue"]);
-            }
-            "ls" => {}
-            _ => unreachable!(),
-        }
-        trailing.push("-a");
-
-        let leading = Cli::try_parse_from(leading).unwrap();
-        let trailing = Cli::try_parse_from(trailing).unwrap();
-        assert!(leading.requests_all_repositories());
-        assert!(trailing.requests_all_repositories());
-    }
-
-    let conflicting = Cli::try_parse_from(["coco", "--all-repos", "../other", "ls"]).unwrap();
-    assert!(
-        validate_scope_selection(
-            conflicting.scope_path.is_some(),
-            conflicting.requests_all_repositories()
-        )
-        .is_err()
-    );
-    let conflicting = Cli::try_parse_from(["coco", "../other", "ls", "-a"]).unwrap();
-    assert!(
-        validate_scope_selection(
-            conflicting.scope_path.is_some(),
-            conflicting.requests_all_repositories()
-        )
-        .is_err()
-    );
-
-    for arguments in [
-        vec!["coco", "repo", "list", "-a"],
-        vec!["coco", "models", "-a"],
-        vec!["coco", "create", "auth", "-a"],
-        vec!["coco", "decide", "decision-123", "-a"],
-        vec!["coco", "mcp", "serve", "--repository", ".", "-a"],
-    ] {
-        assert!(
-            Cli::try_parse_from(&arguments).is_err(),
-            "{} must reject a trailing --all-repos flag",
-            arguments[1]
-        );
-    }
-}
-
-#[tokio::test]
-async fn leading_all_repository_scope_is_rejected_by_unscoped_commands() {
-    for arguments in [
-        vec!["coco", "-a", "repo", "list"],
-        vec!["coco", "-a", "models"],
-        vec!["coco", "-a", "create", "auth"],
-        vec!["coco", "-a", "decide", "decision-123"],
-        vec!["coco", "-a", "mcp", "serve", "--repository", "."],
-    ] {
-        let command = arguments[2];
-        let cli = Cli::try_parse_from(arguments).unwrap();
-        let error = super::commands::run(cli).await.unwrap_err().to_string();
-        assert!(
-            error.contains("does not accept") || error.contains("requires one repository"),
-            "unexpected {command} scope error: {error}"
-        );
-    }
-}
-
-#[test]
-fn exposes_status_follow_and_jump_without_the_old_overlapping_commands() {
-    assert!(Cli::try_parse_from(["coco", "status", "auth"]).is_ok());
-    assert!(Cli::try_parse_from(["coco", "status", "auth", "--follow"]).is_ok());
-    assert!(Cli::try_parse_from(["coco", "status", "auth", "--json"]).is_ok());
-    assert!(Cli::try_parse_from(["coco", "status", "auth", "--follow", "--json"]).is_err());
-    assert!(Cli::try_parse_from(["coco", "jump", "auth"]).is_ok());
-    let decide = Cli::try_parse_from(["coco", "decide", "decision-123"]).unwrap();
-    assert!(matches!(
-        decide.command,
-        Command::Decide { decision } if decision == "decision-123"
-    ));
-    assert!(Cli::try_parse_from(["coco", "show", "auth"]).is_err());
-    assert!(Cli::try_parse_from(["coco", "watch", "auth"]).is_err());
-}
-
-#[test]
 fn presents_stable_user_facing_workspace_states() {
     assert_eq!(phase_label("provisioning"), "Preparing worktree");
     assert_eq!(phase_label("active"), "Working");
@@ -356,6 +284,37 @@ fn presents_stable_user_facing_workspace_states() {
     assert!(follow_stops_at("waiting_for_input"));
     assert!(follow_stops_at("system_error"));
     assert!(!follow_stops_at("active"));
+}
+
+#[test]
+fn status_follow_waits_for_a_stable_terminal_poll() {
+    assert_eq!(
+        next_follow_action("active", false, true),
+        FollowAction::Continue
+    );
+    assert_eq!(
+        next_follow_action("idle", false, false),
+        FollowAction::Continue
+    );
+    assert_eq!(
+        next_follow_action("idle", false, true),
+        FollowAction::Finish
+    );
+    assert_eq!(
+        next_follow_action("waiting_for_approval", true, false),
+        FollowAction::Finish,
+        "open decisions are ready to present immediately"
+    );
+    assert_eq!(
+        next_follow_action("waiting_for_input", false, false),
+        FollowAction::Continue,
+        "a native waiting status gets one poll for its server request to arrive"
+    );
+    assert_eq!(
+        next_follow_action("waiting_for_input", false, true),
+        FollowAction::Finish,
+        "a stable unsupported wait is reported after the grace poll"
+    );
 }
 
 #[tokio::test]

@@ -1,5 +1,5 @@
 use std::ffi::OsStr;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
@@ -54,6 +54,28 @@ impl Git {
         one_line_metadata(self.run(cwd, category, args)?, category)
     }
 
+    pub(super) fn run_with_input<I, S>(
+        &self,
+        cwd: &Path,
+        category: &'static str,
+        args: I,
+        input: &[u8],
+    ) -> Result<CommandOutput, GitError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let output = self.execute_with_input(cwd, category, args, input)?;
+        ensure_success(category, &output)?;
+        if output.stdout.truncated || output.stderr.truncated {
+            return Err(GitError::OutputTooLarge {
+                category,
+                limit: self.capture_limit,
+            });
+        }
+        Ok(output)
+    }
+
     pub(super) fn execute<I, S>(
         &self,
         cwd: &Path,
@@ -64,11 +86,42 @@ impl Git {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
+        self.execute_inner(cwd, args, None)
+    }
+
+    pub(super) fn execute_with_input<I, S>(
+        &self,
+        cwd: &Path,
+        _category: &'static str,
+        args: I,
+        input: &[u8],
+    ) -> Result<CommandOutput, GitError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        self.execute_inner(cwd, args, Some(input))
+    }
+
+    fn execute_inner<I, S>(
+        &self,
+        cwd: &Path,
+        args: I,
+        input: Option<&[u8]>,
+    ) -> Result<CommandOutput, GitError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
         let mut command = Command::new(&self.executable);
         command
             .current_dir(cwd)
             .args(args)
-            .stdin(Stdio::null())
+            .stdin(if input.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -94,10 +147,18 @@ impl Git {
         let limit = self.capture_limit;
         let stdout_reader = thread::spawn(move || read_bounded(stdout, limit));
         let stderr_reader = thread::spawn(move || read_bounded(stderr, limit));
+        let input_result =
+            input.map(|input| child.stdin.take().expect("piped stdin").write_all(input));
         let status = child.wait().map_err(|source| GitError::Io {
             path: cwd.to_owned(),
             source,
         })?;
+        if let Some(Err(source)) = input_result {
+            return Err(GitError::Io {
+                path: cwd.to_owned(),
+                source,
+            });
+        }
         let stdout = stdout_reader
             .join()
             .expect("Git stdout reader panicked")

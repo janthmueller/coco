@@ -1,18 +1,20 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
+use chrono::Utc;
 use serde_json::{Map, Value, json};
-use tracing::{error, warn};
+use tracing::warn;
+use uuid::Uuid;
 
 use super::{Coordinator, CoordinatorError};
 use crate::domain::{
-    DecisionApprovalPrompt, DecisionFileChange, DecisionKind, DecisionOption, DecisionPermission,
-    DecisionPrompt, DecisionQuestion, DecisionState, EventKind, EventSource, Turn, Workspace,
+    Decision, DecisionApprovalPrompt, DecisionFileChange, DecisionKind, DecisionOption,
+    DecisionPermission, DecisionPrompt, DecisionQuestion, DecisionState, Workspace,
 };
 use crate::protocol::{
     DecisionGetParams, DecisionRespondParams, DecisionResult, DecisionSubmission,
 };
-use crate::store::{EventDraft, NewDecision, StoreError, StoredDecision};
+use crate::store::StoreError;
 
 const MAX_PRESENTATION_STRING_BYTES: usize = 32 * 1024;
 const MAX_REASON_BYTES: usize = 4 * 1024;
@@ -24,6 +26,102 @@ struct ProjectedDecision {
     native_options: Vec<Value>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct RuntimeDecision {
+    decision: Decision,
+    codex_thread_id: String,
+    runtime_generation: String,
+    native_request_id: Value,
+    native_options: Vec<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct NativeDecisionKey {
+    codex_thread_id: String,
+    native_request_id_json: String,
+}
+
+impl NativeDecisionKey {
+    fn new(codex_thread_id: &str, native_request_id: &Value) -> Option<Self> {
+        let valid = match native_request_id {
+            Value::String(_) => true,
+            Value::Number(number) => number.is_i64() || number.is_u64(),
+            _ => false,
+        };
+        valid.then(|| Self {
+            codex_thread_id: codex_thread_id.to_owned(),
+            native_request_id_json: serde_json::to_string(native_request_id)
+                .expect("a validated JSON request ID is serializable"),
+        })
+    }
+}
+
+#[derive(Debug, Default)]
+pub(super) struct DecisionRegistry {
+    by_id: HashMap<String, RuntimeDecision>,
+    by_native_request: HashMap<NativeDecisionKey, String>,
+}
+
+impl DecisionRegistry {
+    fn insert(&mut self, decision: RuntimeDecision) -> bool {
+        let key = NativeDecisionKey::new(&decision.codex_thread_id, &decision.native_request_id)
+            .expect("runtime decisions have validated native request IDs");
+        if self.by_native_request.contains_key(&key) {
+            return false;
+        }
+        self.by_native_request
+            .insert(key, decision.decision.id.clone());
+        self.by_id.insert(decision.decision.id.clone(), decision);
+        true
+    }
+
+    fn open_for_workspace(&self, workspace_id: &str) -> Vec<Decision> {
+        let mut decisions = self
+            .by_id
+            .values()
+            .filter(|stored| {
+                stored.decision.workspace_id == workspace_id && stored.decision.state.is_open()
+            })
+            .map(|stored| stored.decision.clone())
+            .collect::<Vec<_>>();
+        decisions.sort_by(|left, right| {
+            left.received_at_ms
+                .cmp(&right.received_at_ms)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        decisions
+    }
+
+    fn resolve(&mut self, codex_thread_id: &str, native_request_id: &Value) {
+        let Some(key) = NativeDecisionKey::new(codex_thread_id, native_request_id) else {
+            return;
+        };
+        let Some(id) = self.by_native_request.get(&key) else {
+            return;
+        };
+        let Some(stored) = self.by_id.get_mut(id) else {
+            return;
+        };
+        if stored.decision.state.is_open() {
+            stored.decision.state = DecisionState::Resolved;
+            stored.decision.resolved_at_ms = Some(Utc::now().timestamp_millis());
+        }
+    }
+
+    fn orphan_open(&mut self) -> usize {
+        let now = Utc::now().timestamp_millis();
+        let mut orphaned = 0;
+        for stored in self.by_id.values_mut() {
+            if stored.decision.state.is_open() {
+                stored.decision.state = DecisionState::Orphaned;
+                stored.decision.resolved_at_ms = Some(now);
+                orphaned += 1;
+            }
+        }
+        orphaned
+    }
+}
+
 impl Coordinator {
     pub(super) fn capture_decision_request(
         &self,
@@ -31,10 +129,10 @@ impl Coordinator {
         method: &str,
         params: &Value,
         workspace: &Workspace,
-        turn: Option<&Turn>,
-    ) -> Result<bool, StoreError> {
+        turn_id: Option<&str>,
+    ) -> bool {
         let Some(projected) = self.project_decision(method, params) else {
-            return Ok(false);
+            return false;
         };
         let Some(codex_thread_id) = params
             .get("threadId")
@@ -45,40 +143,51 @@ impl Coordinator {
                 method,
                 "ignoring decision request without a direct threadId"
             );
-            return Ok(false);
+            return false;
         };
-        let codex_turn_id = params
-            .get("turnId")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned);
-        let kind = projected.kind;
-        self.store.create_decision_with_event(
-            NewDecision {
+        if workspace.codex_thread_id.as_deref() != Some(codex_thread_id.as_str()) {
+            warn!(
+                method,
+                "ignoring a decision request with a mismatched thread binding"
+            );
+            return false;
+        }
+        if NativeDecisionKey::new(&codex_thread_id, &native_request_id).is_none() {
+            warn!(
+                method,
+                "ignoring a decision request with an invalid request ID"
+            );
+            return false;
+        }
+        let decision = RuntimeDecision {
+            decision: Decision {
+                id: Uuid::new_v4().to_string(),
                 workspace_id: workspace.id.clone(),
-                turn_id: turn.map(|turn| turn.id.clone()),
-                codex_thread_id,
-                codex_turn_id,
-                runtime_generation: self.runtime_generation.clone(),
-                native_request_id,
-                method: method.to_owned(),
-                kind,
+                turn_id: turn_id.map(ToOwned::to_owned),
+                kind: projected.kind,
+                state: DecisionState::Pending,
                 prompt: projected.prompt,
-                native_options: projected.native_options,
+                received_at_ms: params
+                    .get("startedAtMs")
+                    .and_then(Value::as_i64)
+                    .unwrap_or_else(|| Utc::now().timestamp_millis()),
+                submitted_at_ms: None,
+                resolved_at_ms: None,
             },
-            EventDraft {
-                workspace_id: Some(workspace.id.clone()),
-                turn_id: turn.map(|turn| turn.id.clone()),
-                kind: EventKind::DecisionRequested,
-                source: EventSource::Codex,
-                source_method: Some(method.to_owned()),
-                occurred_at_ms: params.get("startedAtMs").and_then(Value::as_i64),
-                payload: json!({
-                    "kind": kind,
-                    "itemId": params.get("itemId"),
-                }),
-            },
-        )?;
-        Ok(true)
+            codex_thread_id,
+            runtime_generation: self.runtime_generation.clone(),
+            native_request_id,
+            native_options: projected.native_options,
+        };
+        let inserted = self
+            .decisions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(decision);
+        if !inserted {
+            warn!(method, "ignoring a duplicate native decision request");
+        }
+        true
     }
 
     pub(super) fn cache_file_change_preview(&self, params: &Value) {
@@ -143,46 +252,50 @@ impl Coordinator {
         &self,
         params: DecisionRespondParams,
     ) -> Result<DecisionResult, CoordinatorError> {
-        let stored = self.require_decision(&params.decision_id)?;
-        if stored.runtime_generation != self.runtime_generation {
-            return Err(StoreError::DecisionGenerationMismatch {
-                decision_id: stored.decision.id,
-            }
-            .into());
-        }
-        if stored.decision.state != DecisionState::Pending {
-            return Err(StoreError::InvalidDecisionState {
-                decision_id: stored.decision.id,
-                actual: stored.decision.state.as_str().to_owned(),
-            }
-            .into());
-        }
-        let (native_response, summary) = response_for_submission(&stored, params.submission)?;
-        let submitted = self.store.mark_decision_submitted(
-            &params.decision_id,
-            &self.runtime_generation,
-            &summary,
-        )?;
+        let (submitted, native_response) = self.prepare_decision_submission(params)?;
         if let Err(source) = self
             .worker
             .respond_to_request(submitted.native_request_id.clone(), native_response)
             .await
         {
-            if let Err(store_error) = self.store.orphan_submitted_decision(
-                &params.decision_id,
-                &self.runtime_generation,
-                "native_response_failed",
-            ) {
-                error!(decision_id = %params.decision_id, %store_error, "could not orphan a failed decision response");
-            }
+            self.orphan_submitted_decision(&submitted.decision.id);
             return Err(CoordinatorError::Worker(source));
         }
         self.decision_result(submitted)
     }
 
-    fn require_decision(&self, id: &str) -> Result<StoredDecision, CoordinatorError> {
-        self.store
-            .decision_by_id(id)?
+    pub(super) fn open_decisions_for_workspace(&self, workspace_id: &str) -> Vec<Decision> {
+        self.decisions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .open_for_workspace(workspace_id)
+    }
+
+    pub(super) fn resolve_decision_by_native_request(
+        &self,
+        codex_thread_id: &str,
+        native_request_id: &Value,
+    ) {
+        self.decisions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .resolve(codex_thread_id, native_request_id);
+    }
+
+    pub(super) fn orphan_open_runtime_decisions(&self) -> usize {
+        self.decisions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .orphan_open()
+    }
+
+    fn require_decision(&self, id: &str) -> Result<RuntimeDecision, CoordinatorError> {
+        self.decisions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .by_id
+            .get(id)
+            .cloned()
             .ok_or_else(|| StoreError::NotFound {
                 entity: "decision",
                 id: id.to_owned(),
@@ -190,7 +303,55 @@ impl Coordinator {
             .map_err(CoordinatorError::from)
     }
 
-    fn decision_result(&self, stored: StoredDecision) -> Result<DecisionResult, CoordinatorError> {
+    fn prepare_decision_submission(
+        &self,
+        params: DecisionRespondParams,
+    ) -> Result<(RuntimeDecision, Value), CoordinatorError> {
+        let mut decisions = self
+            .decisions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let stored = decisions
+            .by_id
+            .get_mut(&params.decision_id)
+            .ok_or_else(|| StoreError::NotFound {
+                entity: "decision",
+                id: params.decision_id.clone(),
+            })?;
+        if stored.runtime_generation != self.runtime_generation {
+            return Err(StoreError::DecisionGenerationMismatch {
+                decision_id: stored.decision.id.clone(),
+            }
+            .into());
+        }
+        if stored.decision.state != DecisionState::Pending {
+            return Err(StoreError::InvalidDecisionState {
+                decision_id: stored.decision.id.clone(),
+                actual: stored.decision.state.as_str().to_owned(),
+            }
+            .into());
+        }
+        let native_response = response_for_submission(stored, params.submission)?;
+        stored.decision.state = DecisionState::Submitted;
+        stored.decision.submitted_at_ms = Some(Utc::now().timestamp_millis());
+        Ok((stored.clone(), native_response))
+    }
+
+    fn orphan_submitted_decision(&self, id: &str) {
+        let mut decisions = self
+            .decisions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(stored) = decisions.by_id.get_mut(id) else {
+            return;
+        };
+        if stored.decision.state == DecisionState::Submitted {
+            stored.decision.state = DecisionState::Orphaned;
+            stored.decision.resolved_at_ms = Some(Utc::now().timestamp_millis());
+        }
+    }
+
+    fn decision_result(&self, stored: RuntimeDecision) -> Result<DecisionResult, CoordinatorError> {
         let workspace = self
             .store
             .workspace_by_id(&stored.decision.workspace_id)?
@@ -226,9 +387,9 @@ impl Coordinator {
 }
 
 fn response_for_submission(
-    stored: &StoredDecision,
+    stored: &RuntimeDecision,
     submission: DecisionSubmission,
-) -> Result<(Value, Value), CoordinatorError> {
+) -> Result<Value, CoordinatorError> {
     match (&stored.decision.prompt, submission) {
         (DecisionPrompt::Approval(prompt), DecisionSubmission::Choice { choice }) => {
             let options = &prompt.options;
@@ -249,10 +410,7 @@ fn response_for_submission(
                     "the stored decision options are inconsistent".to_owned(),
                 ));
             }
-            Ok((
-                json!({"decision": native}),
-                json!({"choice": choice, "label": options[index].label}),
-            ))
+            Ok(json!({"decision": native}))
         }
         (DecisionPrompt::UserInput { questions }, DecisionSubmission::Answers { answers }) => {
             validate_answers(questions, &answers)?;
@@ -265,13 +423,7 @@ fn response_for_submission(
                     )
                 })
                 .collect::<Map<_, _>>();
-            Ok((
-                json!({"answers": native_answers}),
-                json!({
-                    "questionIds": questions.iter().map(|question| &question.id).collect::<Vec<_>>(),
-                    "secretQuestionCount": questions.iter().filter(|question| question.is_secret).count(),
-                }),
-            ))
+            Ok(json!({"answers": native_answers}))
         }
         (DecisionPrompt::Approval(_), DecisionSubmission::Answers { .. }) => Err(
             CoordinatorError::InvalidParams("this request expects a numbered choice".to_owned()),

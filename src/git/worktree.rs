@@ -4,8 +4,10 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+use super::command::{command_failed, one_line_metadata};
 use super::repository::{canonicalize, validate_object_id};
-use super::{Git, GitError, GitRepository, WorktreeBinding, WorktreePlan};
+use super::{Git, GitError, GitRepository, WorktreeBinding, WorktreePlan, WorktreeTarget};
+use crate::domain::WorktreeMode;
 
 impl Git {
     pub fn plan_worktree(
@@ -13,17 +15,36 @@ impl Git {
         repository: &GitRepository,
         worktrees_root: impl AsRef<Path>,
         workspace_name: &str,
+        target: WorktreeTarget,
         base_sha: &str,
     ) -> Result<WorktreePlan, GitError> {
         validate_workspace_name(workspace_name)?;
         validate_object_id(base_sha)?;
-        let branch_name = format!("coco/{workspace_name}");
-        self.validate_branch_name(repository, &branch_name)?;
-        if let Some(existing) = self.branch_namespace_collision(repository, &branch_name)? {
-            return Err(GitError::BranchCollision {
-                requested: branch_name,
-                existing,
-            });
+        match &target {
+            WorktreeTarget::NewBranch { branch_name } => {
+                self.validate_branch_name(repository, branch_name)?;
+                if let Some(existing) = self.branch_namespace_collision(repository, branch_name)? {
+                    return Err(GitError::BranchCollision {
+                        requested: branch_name.clone(),
+                        existing,
+                    });
+                }
+            }
+            WorktreeTarget::ExistingBranch { branch_name } => {
+                let branch_sha = self.resolve_local_branch(repository, branch_name)?;
+                if branch_sha != base_sha {
+                    return Err(GitError::BindingMismatch(format!(
+                        "existing branch {branch_name} points at {branch_sha}, not requested base {base_sha}"
+                    )));
+                }
+                if let Some(path) = self.branch_checkout_path(repository, branch_name)? {
+                    return Err(GitError::BranchAlreadyCheckedOut {
+                        branch: branch_name.clone(),
+                        path,
+                    });
+                }
+            }
+            WorktreeTarget::Detached => {}
         }
 
         let worktrees_root = secure_directory(worktrees_root.as_ref())?;
@@ -35,7 +56,8 @@ impl Git {
 
         Ok(WorktreePlan {
             path,
-            branch_name,
+            mode: target.mode(),
+            branch_name: target.branch_name().map(ToOwned::to_owned),
             base_sha: base_sha.to_owned(),
         })
     }
@@ -50,29 +72,63 @@ impl Git {
         if fs::symlink_metadata(&plan.path).is_ok() {
             return Err(GitError::DestinationExists(plan.path.clone()));
         }
-        if let Some(existing) = self.branch_namespace_collision(repository, &plan.branch_name)? {
-            return Err(GitError::BranchCollision {
-                requested: plan.branch_name.clone(),
-                existing,
-            });
+        match (plan.mode, plan.branch_name.as_deref()) {
+            (WorktreeMode::NewBranch, Some(branch_name)) => {
+                if let Some(existing) = self.branch_namespace_collision(repository, branch_name)? {
+                    return Err(GitError::BranchCollision {
+                        requested: branch_name.to_owned(),
+                        existing,
+                    });
+                }
+                self.validate_branch_name(repository, branch_name)?;
+            }
+            (WorktreeMode::ExistingBranch, Some(branch_name)) => {
+                let branch_sha = self.resolve_local_branch(repository, branch_name)?;
+                if branch_sha != plan.base_sha {
+                    return Err(GitError::BindingMismatch(format!(
+                        "existing branch {branch_name} moved from {} to {branch_sha}",
+                        plan.base_sha
+                    )));
+                }
+                if let Some(path) = self.branch_checkout_path(repository, branch_name)? {
+                    return Err(GitError::BranchAlreadyCheckedOut {
+                        branch: branch_name.to_owned(),
+                        path,
+                    });
+                }
+            }
+            (WorktreeMode::Detached, None) => {}
+            _ => {
+                return Err(GitError::BindingMismatch(
+                    "worktree mode and branch binding disagree".to_owned(),
+                ));
+            }
         }
-        self.validate_branch_name(repository, &plan.branch_name)?;
         validate_object_id(&plan.base_sha)?;
 
-        self.run(
-            &repository.root_path,
-            "worktree-add",
-            [
-                OsString::from("worktree"),
-                OsString::from("add"),
-                OsString::from("--no-guess-remote"),
-                OsString::from("-b"),
-                OsString::from(&plan.branch_name),
-                OsString::from("--"),
-                plan.path.as_os_str().to_owned(),
-                OsString::from(&plan.base_sha),
-            ],
-        )?;
+        let mut arguments = vec![
+            OsString::from("worktree"),
+            OsString::from("add"),
+            OsString::from("--no-guess-remote"),
+        ];
+        match (plan.mode, plan.branch_name.as_deref()) {
+            (WorktreeMode::NewBranch, Some(branch_name)) => {
+                arguments.push(OsString::from("-b"));
+                arguments.push(OsString::from(branch_name));
+            }
+            (WorktreeMode::ExistingBranch, Some(_)) => {}
+            (WorktreeMode::Detached, None) => arguments.push(OsString::from("--detach")),
+            _ => unreachable!("worktree plan invariants were checked above"),
+        }
+        arguments.push(OsString::from("--"));
+        arguments.push(plan.path.as_os_str().to_owned());
+        match (plan.mode, plan.branch_name.as_deref()) {
+            (WorktreeMode::ExistingBranch, Some(branch_name)) => {
+                arguments.push(OsString::from(branch_name));
+            }
+            _ => arguments.push(OsString::from(&plan.base_sha)),
+        }
+        self.run(&repository.root_path, "worktree-add", arguments)?;
 
         let canonical = canonicalize(&plan.path)?;
         if canonical != plan.path {
@@ -82,7 +138,12 @@ impl Git {
                 canonical.display()
             )));
         }
-        let binding = self.verify_worktree(repository, &canonical, &plan.branch_name)?;
+        let binding = self.verify_worktree(
+            repository,
+            &canonical,
+            plan.mode,
+            plan.branch_name.as_deref(),
+        )?;
         if binding.head_sha != plan.base_sha {
             return Err(GitError::BindingMismatch(format!(
                 "HEAD {} does not equal requested base {}",
@@ -96,7 +157,8 @@ impl Git {
         &self,
         repository: &GitRepository,
         worktree_path: impl AsRef<Path>,
-        expected_branch: &str,
+        expected_mode: WorktreeMode,
+        expected_branch: Option<&str>,
     ) -> Result<WorktreeBinding, GitError> {
         let worktree_path = canonicalize(worktree_path.as_ref())?;
         let discovered = self.discover(&worktree_path)?;
@@ -105,16 +167,40 @@ impl Git {
                 "worktree belongs to another Git common directory".to_owned(),
             ));
         }
-        let branch_ref = self.run_text(
+        let branch = self.execute(
             &worktree_path,
             "symbolic-ref",
             ["symbolic-ref", "--quiet", "HEAD"],
         )?;
-        let expected_ref = format!("refs/heads/{expected_branch}");
-        if branch_ref != expected_ref {
-            return Err(GitError::BindingMismatch(format!(
-                "expected branch {expected_ref}, observed {branch_ref}"
-            )));
+        let observed_branch = match branch.status.code() {
+            Some(0) => {
+                let branch_ref = one_line_metadata(branch, "symbolic-ref")?;
+                Some(
+                    branch_ref
+                        .strip_prefix("refs/heads/")
+                        .ok_or_else(|| {
+                            GitError::BindingMismatch(format!(
+                                "HEAD points at unexpected ref {branch_ref}"
+                            ))
+                        })?
+                        .to_owned(),
+                )
+            }
+            Some(1) => None,
+            _ => return Err(command_failed("symbolic-ref", &branch)),
+        };
+        match (expected_mode, expected_branch, observed_branch.as_deref()) {
+            (
+                WorktreeMode::NewBranch | WorktreeMode::ExistingBranch,
+                Some(expected),
+                Some(actual),
+            ) if expected == actual => {}
+            (WorktreeMode::Detached, None, None) => {}
+            _ => {
+                return Err(GitError::BindingMismatch(format!(
+                    "expected {expected_mode:?} branch {expected_branch:?}, observed {observed_branch:?}"
+                )));
+            }
         }
         let head_sha = self.run_text(&worktree_path, "head", ["rev-parse", "--verify", "HEAD"])?;
         let listing = self.run_text(
@@ -134,9 +220,63 @@ impl Git {
 
         Ok(WorktreeBinding {
             path: worktree_path,
-            branch_name: expected_branch.to_owned(),
+            mode: expected_mode,
+            branch_name: observed_branch,
             head_sha,
         })
+    }
+
+    pub fn resolve_local_branch(
+        &self,
+        repository: &GitRepository,
+        branch_name: &str,
+    ) -> Result<String, GitError> {
+        self.validate_branch_name(repository, branch_name)?;
+        let reference = format!("refs/heads/{branch_name}^{{commit}}");
+        let output = self.execute(
+            &repository.root_path,
+            "existing-branch",
+            [
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                "--end-of-options",
+                &reference,
+            ],
+        )?;
+        match output.status.code() {
+            Some(0) => one_line_metadata(output, "existing-branch"),
+            Some(1) => Err(GitError::BranchNotFound(branch_name.to_owned())),
+            _ => Err(command_failed("existing-branch", &output)),
+        }
+    }
+
+    fn branch_checkout_path(
+        &self,
+        repository: &GitRepository,
+        branch_name: &str,
+    ) -> Result<Option<PathBuf>, GitError> {
+        let listing = self.run_text(
+            &repository.root_path,
+            "worktree-list",
+            ["worktree", "list", "--porcelain", "-z"],
+        )?;
+        let expected = format!("branch refs/heads/{branch_name}");
+        for record in listing.split("\0\0") {
+            let mut path = None;
+            let mut matches = false;
+            for field in record.split('\0') {
+                if let Some(value) = field.strip_prefix("worktree ") {
+                    path = Some(PathBuf::from(value));
+                } else if field == expected {
+                    matches = true;
+                }
+            }
+            if matches {
+                return Ok(path);
+            }
+        }
+        Ok(None)
     }
 
     fn validate_branch_name(

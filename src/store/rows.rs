@@ -4,27 +4,36 @@ use rusqlite::types::Type;
 use rusqlite::{Connection, OptionalExtension, Row};
 use serde_json::Value;
 
-use super::{StoreError, StoredDecision, path_text};
 #[cfg(test)]
-use crate::domain::{Audit, AuditOutcome};
+use super::StoredDecision;
+use super::{StoreError, path_text};
+#[cfg(test)]
+use crate::domain::{Audit, AuditOutcome, Decision, DecisionKind, DecisionPrompt, DecisionState};
 use crate::domain::{
-    CodexThreadStatus, ContextMode, Decision, DecisionKind, DecisionPrompt, DecisionState,
-    EventKind, EventSource, NormalizedEvent, Repository, ThreadRuntimeSnapshot, Turn, TurnPhase,
-    Workspace, WorkspaceLifecycle, derive_workspace_runtime,
+    CodexThreadStatus, ContextMode, EventKind, EventSource, NormalizedEvent, Repository,
+    ThreadRuntimeSnapshot, Turn, TurnPhase, Workspace, WorkspaceLifecycle, WorktreeMode,
+    derive_workspace_runtime,
 };
+use crate::store::{Operation, OperationKind, OperationState};
 
 pub(super) const WORKSPACE_SELECT: &str = "SELECT id, create_operation_id, repository_id, name,
     context_mode, context_json, profile_json, lifecycle, thread_status_json,
     thread_status_generation, thread_status_observed_at_ms, thread_status_is_fresh,
-    branch_name, base_sha, worktree_path, codex_thread_id, parent_thread_id, active_turn_id,
-    last_error_code, last_error_message, created_at_ms, updated_at_ms, completed_at_ms FROM workspaces";
+    worktree_mode, branch_name, base_sha, worktree_path, codex_thread_id, parent_thread_id,
+    active_turn_id, last_error_code, last_error_message, created_at_ms, updated_at_ms,
+    completed_at_ms FROM workspaces";
 
 pub(super) const TURN_SELECT: &str = "SELECT id, workspace_id, operation_id, client_message_id,
     codex_turn_id, phase, requested_at_ms, started_at_ms, completed_at_ms, error_json FROM turns";
 
+pub(super) const OPERATION_SELECT: &str = "SELECT id, operation_id, workspace_id, kind,
+    request_fingerprint, native_result_id, state, created_at_ms, dispatch_started_at_ms,
+    result_recorded_at_ms FROM operations";
+
 pub(super) const EVENT_SELECT: &str = "SELECT sequence, id, workspace_id, turn_id, kind, source,
     source_method, occurred_at_ms, recorded_at_ms, payload_json FROM events";
 
+#[cfg(test)]
 pub(super) const DECISION_SELECT: &str = "SELECT id, workspace_id, turn_id, codex_thread_id,
     codex_turn_id, runtime_generation, native_request_id_json, method, kind, state,
     prompt_json, native_options_json, received_at_ms, submitted_at_ms, resolved_at_ms
@@ -50,10 +59,11 @@ pub(super) fn map_repository(row: &Row<'_>) -> rusqlite::Result<Repository> {
 pub(super) fn map_workspace(row: &Row<'_>) -> rusqlite::Result<Workspace> {
     let context_mode: String = row.get(4)?;
     let lifecycle: String = row.get(7)?;
+    let worktree_mode: String = row.get(12)?;
     let lifecycle = WorkspaceLifecycle::parse(&lifecycle)
         .ok_or_else(|| invalid_value(7, "workspace lifecycle", &lifecycle))?;
     let thread_runtime = map_thread_status(row)?;
-    let active_turn_id: Option<String> = row.get(17)?;
+    let active_turn_id: Option<String> = row.get(18)?;
     let (phase, wait_reasons) =
         derive_workspace_runtime(lifecycle, thread_runtime.as_ref(), active_turn_id.is_some());
     Ok(Workspace {
@@ -69,17 +79,19 @@ pub(super) fn map_workspace(row: &Row<'_>) -> rusqlite::Result<Workspace> {
         thread_runtime,
         phase,
         wait_reasons,
-        branch_name: row.get(12)?,
-        base_sha: row.get(13)?,
-        worktree_path: row.get::<_, Option<String>>(14)?.map(PathBuf::from),
-        codex_thread_id: row.get(15)?,
-        parent_thread_id: row.get(16)?,
+        worktree_mode: WorktreeMode::parse(&worktree_mode)
+            .ok_or_else(|| invalid_value(12, "worktree_mode", &worktree_mode))?,
+        branch_name: row.get(13)?,
+        base_sha: row.get(14)?,
+        worktree_path: row.get::<_, Option<String>>(15)?.map(PathBuf::from),
+        codex_thread_id: row.get(16)?,
+        parent_thread_id: row.get(17)?,
         active_turn_id,
-        last_error_code: row.get(18)?,
-        last_error_message: row.get(19)?,
-        created_at_ms: row.get(20)?,
-        updated_at_ms: row.get(21)?,
-        completed_at_ms: row.get(22)?,
+        last_error_code: row.get(19)?,
+        last_error_message: row.get(20)?,
+        created_at_ms: row.get(21)?,
+        updated_at_ms: row.get(22)?,
+        completed_at_ms: row.get(23)?,
     })
 }
 
@@ -117,6 +129,25 @@ pub(super) fn map_turn(row: &Row<'_>) -> rusqlite::Result<Turn> {
     })
 }
 
+pub(super) fn map_operation(row: &Row<'_>) -> rusqlite::Result<Operation> {
+    let kind: String = row.get(3)?;
+    let state: String = row.get(6)?;
+    Ok(Operation {
+        id: row.get(0)?,
+        operation_id: row.get(1)?,
+        workspace_id: row.get(2)?,
+        kind: OperationKind::parse(&kind)
+            .ok_or_else(|| invalid_value(3, "operation kind", &kind))?,
+        request_fingerprint: row.get(4)?,
+        native_result_id: row.get(5)?,
+        state: OperationState::parse(&state)
+            .ok_or_else(|| invalid_value(6, "operation state", &state))?,
+        created_at_ms: row.get(7)?,
+        dispatch_started_at_ms: row.get(8)?,
+        result_recorded_at_ms: row.get(9)?,
+    })
+}
+
 pub(super) fn map_event(row: &Row<'_>) -> rusqlite::Result<NormalizedEvent> {
     let kind: String = row.get(4)?;
     let source: String = row.get(5)?;
@@ -135,6 +166,7 @@ pub(super) fn map_event(row: &Row<'_>) -> rusqlite::Result<NormalizedEvent> {
     })
 }
 
+#[cfg(test)]
 pub(super) fn map_stored_decision(row: &Row<'_>) -> rusqlite::Result<StoredDecision> {
     let kind: String = row.get(8)?;
     let state: String = row.get(9)?;

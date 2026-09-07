@@ -5,7 +5,7 @@ description: Tracks repository bootstrap, the Rust baseline, and early CoCo arch
 tags: [work, branch, bootstrap, rust, mcp, architecture]
 status: active
 branch: main
-updated: 2026-09-06
+updated: 2026-09-07
 ---
 
 # main — repository foundation
@@ -40,8 +40,8 @@ architectural baseline for CoCo.
   project subpath, including browser-side search and the public-only boundary.
 - [x] Add Nix apps and development-shell tooling for installing, checking,
   building, serving, and developing the documentation site.
-- [x] Record the planned detached-worktree creation mode without presenting it
-  as current behavior.
+- [x] Record the detached-worktree direction, then implement it as an explicit
+  Git-binding choice while retaining new-branch creation as the default.
 - [x] Replace the first public site draft: it exposed internal architecture and
   roadmap material and did not meet the strict user-facing boundary.
 - [x] Separate task preparation from execution: `coco new` must not require or
@@ -187,15 +187,43 @@ architectural baseline for CoCo.
   - [x] Add multi-repository, ambiguity, explicit-scope, and process coverage.
   - [x] Reconcile canonical knowledge and public user documentation with the
     behavior that actually ships.
-- [x] Implement durable pending decisions and `coco decide <decision-id>` as
-  the selected next v0 slice.
+- [x] Unify the collection and cross-repository CLI vocabulary before release.
+  - [x] Make `list` the documented spelling and `ls` a visible alias for
+    workspace, repository, and model collections.
+  - [x] Initially reserved `--all-repos`/`-a` for collection/status overviews
+    and added `--global`/`-g` for resolving one named workspace. The interactive
+    slice below supersedes the duplicated status overview and reserves `-a`
+    for `list` alone.
+  - [x] Initially made workspace-free status mirror the list overview. The
+    interactive slice below supersedes it: status now always targets one
+    explicit or interactively selected workspace.
+  - [x] Update parser/dispatch/process coverage, public docs, canonical product
+    knowledge, and the exact CLI help contract.
+- [x] Add one consistent interactive selection layer for incomplete human CLI
+  invocations without weakening deterministic/scripted behavior.
+  - [x] Keep `list`/`ls` collection commands non-interactive and make targeted
+    workspace arguments optional only for terminal-assisted use.
+  - [x] Support immediate arrow-key/`j`/`k` cursor movement, Enter confirmation,
+    direct one-key selection for 1 through 9, and cancellation through one
+    reusable picker also used by `decide` options.
+  - [x] Let `create` prompt only for a missing name/repository, and let
+    `status`, `send`, `jump`, and `diff` select a missing workspace in the
+    resolved repository or global `-g` scope.
+  - [x] Preserve `send <workspace> <message>` as the fully explicit form;
+    prompt for the message only when its second positional value is absent.
+  - [x] Never prompt for JSON, non-terminal, or explicit no-input execution;
+    update parser/process tests, public docs, and canonical CLI knowledge.
+- [x] Implement the initial durable pending-decision slice and
+  `coco decide <decision-id>`; its SQLite ownership was superseded by the
+  generation-local native-first registry below while retaining the CLI flow.
   - [x] Persist supported native decision requests before presentation, bound
     to the exact App Server generation, thread, turn, and request ID.
   - [x] Project pending decisions through workspace status without inventing
     a second thread state machine.
   - [x] Render native choices as numbered options and accept a number;
     user-input requests may accept free text where the native schema permits
-    it. Defer cursor-driven selection and other TUI polish.
+    it. Cursor-driven selection was initially deferred and is completed by the
+    shared interactive slice above.
   - [x] Resolve through the original live App Server request, handle stale or
     already-resolved requests safely, and cover restart/orphan behavior.
   - [x] Update public and canonical internal documentation only for behavior
@@ -204,9 +232,9 @@ architectural baseline for CoCo.
   feature. Decide typed versus free-form values, mutation/audit semantics,
   privacy and display rules, fork/handoff inheritance, and explicit projection
   into Codex before adding any CLI or RPC field.
-- [x] Implement the agreed first context-transfer slice: native same-repository
-  workspace fork from an idle, clean source at its committed `HEAD`, with
-  optional explicit compaction of the child before any initial send.
+- [x] Implement the original coupled context-transfer slice, later generalized
+  by the independent creation model below: native same-repository workspace
+  fork with optional child compaction.
   - [x] Add typed CLI/RPC source selection and record immutable fork
     provenance without adding a fourth context mode.
   - [x] Bind native `thread/fork` to the destination worktree and configuration.
@@ -216,8 +244,9 @@ architectural baseline for CoCo.
     run the full gates, and create a checkpoint commit.
 - [x] Add App-Server-backed model discovery and an explicit per-workspace model
   override without duplicating Codex configuration resolution.
-  - [x] Add `coco models [--json]` over the daemon-owned App Server's
-    `model/list` result.
+  - [x] Add native model discovery over the daemon-owned App Server's
+    `model/list` result; the current public spellings are `coco model list`
+    and `coco model ls`.
   - [x] Add `coco create --model/-m <model-id>` and pass it as the explicit
     `thread/start` or `thread/fork` model override alongside the selected
     profile configuration.
@@ -243,9 +272,10 @@ architectural baseline for CoCo.
     release recommendation.
 - [x] Re-audit every public page against the shipped CLI, the pinned Codex
   executable, and current official Codex documentation before the first alpha.
-  - [x] Replace the legacy `[profiles.<name>]` interpretation with Codex
-    0.147.0's `$CODEX_HOME/<name>.config.toml` profile files across runtime,
-    tests, help, and documentation.
+  - [x] Replace the legacy `[profiles.<name>]` interpretation with CoCo's
+    explicit `$CODEX_HOME/<name>.config.toml` complete-overlay files across
+    runtime, tests, help, and documentation; do not describe that storage
+    convention as native `codex --profile` behavior.
   - [x] Use `alpha` consistently instead of the less precise `early preview`.
   - [x] Keep `cocod` startup explicit for the first alpha and record an
     opt-in, cross-platform user-service integration as separate follow-up;
@@ -256,16 +286,94 @@ architectural baseline for CoCo.
   differentiation if upstream now owns it; compare durable daemon ownership,
   multi-workspace and multi-repository control, status/decisions, reattachment,
   context transfer, MCP, and automation before recommending the first alpha.
-- [ ] Decide with the user whether CoCo should continue as a narrower headless
-  orchestration/control layer. Do not publish to crates.io unless that product
-  boundary is compelling enough to justify the additional compatibility and
-  maintenance burden.
+- [x] Decide with the user whether CoCo should continue as a narrower headless
+  orchestration/control layer. The user selected the native-first reduction;
+  do not publish to crates.io unless its multi-client product proof is
+  compelling enough to justify the compatibility and maintenance burden.
+- [x] Complete a hard product-reduction audit before that decision.
+  - [x] Inventory every current CLI/RPC/MCP operation and persisted authority.
+  - [x] Compare the implementation with both the pinned Codex 0.147.0 schemas
+    and the current official App Server, SDK, CLI, project, and worktree
+    surfaces.
+  - [x] Separate CoCo-owned cross-system bindings and operation idempotency from
+    Codex-owned thread, turn, status, content, and model state.
+  - [x] Define one concrete headless multi-client workflow and a release
+    go/no-go gate without implementing or publishing anything.
+- [x] Design a native-first architecture-overhaul proposal that removes
+  duplicated Codex state while preserving CoCo's multi-repository,
+  multi-client control layer. Evaluate per-command, daemon-owned, and
+  externally supervised App Server lifetimes; reduce SQLite to the bindings
+  and operation facts that neither Codex nor Git owns.
+- [x] Confirm the native-first overhaul with the user before changing runtime
+  behavior, persistence, canonical architecture, or public documentation.
+- [ ] Implement the confirmed native-first overhaul without expanding product
+  scope or publishing a release.
+  - [x] Prove stable non-loading thread reads and optional native history
+    hydration against the pinned published Codex 0.147.0 process.
+  - [x] Cut passive workspace list/status/follow projections over to validated
+    native reads without deleting compatibility data.
+  - [ ] Replace the completed-message compatibility event only when a stable,
+    bounded native history read is available. Pinned 0.147.0 exposes only an
+    unbounded stable read; its bounded pagination methods require the
+    `experimentalApi` capability and are not an accepted core dependency.
+  - [x] Replace eager startup resume with per-workspace activation for `send`
+    and the internal attach preflight used by `jump`; native context creation
+    reads and forks its exact source independently.
+  - [x] Reduce native notifications and generation-bound decisions to the
+    minimal live in-memory path while retaining equivalent client behavior.
+  - [x] Introduce the minimal operation ledger and stop the remaining
+    compatibility writes after crash and migration gates pass.
+    - [x] Add an append-only-compatible schema-v6 `operations` table for
+      `turn_start` intent/result correlation; migrate only legacy rows that
+      already carry a client operation ID.
+    - [x] Persist `prepared` before dispatch and `dispatching` before the
+      App Server write. Record `accepted` only with a proven native turn ID;
+      reconcile an unconfirmed dispatch to `uncertain` and never retry it
+      automatically.
+    - [x] Keep the current-generation active-operation guard in memory so a
+      transient native `idle` read cannot authorize a second turn. Let native
+      status—not the durable operation state—remain user-visible runtime truth.
+    - [x] Stop production writes to legacy turn rows, `active_turn_id`, and
+      turn start/completion events; retain the old schema and migration tests
+      through a separate physical-cleanup checkpoint.
+    - [x] Stop initial thread-status snapshot writes once creation responses
+      are projected in memory, while retaining provisioning/failure events and
+      the temporary bounded completed-output event.
+    - [ ] After the product proof, remove the now-read-only legacy status,
+      turn, and decision schema in a separate physical-cleanup revision.
+  - [ ] Run the two-repository/multi-client product proof and revisit the
+    private-alpha go/no-go decision with the user.
+- [x] Split the 2,500-line Coordinator test module in a separate structural
+  checkpoint after the current ownership change is committed. Keep one shared
+  fixture/fake worker and group behavior by workspace, context/activation,
+  turns/events, and decisions; do not alter product behavior during the move.
+- [x] Split the 2,000-line process-smoke harness into scenario, fake-App-Server,
+  and process-support modules without changing its two integration scenarios.
 - [ ] Keep handoff deferred as a separate artifact-design task. Treat authoring
   and consumption independently; consider agent-generated material, existing
   Markdown, direct CLI input, ticket or other external references, and an
   optional plan without fixing one automatic prompt. Define provenance,
   redaction, freshness, size limits, review/edit behavior, and reference
   semantics before enabling `handoff`.
+- [x] Revisit creation inputs and context transfer after the native-first
+  architecture overhaul; discuss the CLI and invariants with the user before
+  implementation.
+  - [x] Verify the current official split: Codex-managed app worktrees are a
+    Git/filesystem concern, while App Server `thread/fork` copies stored
+    conversation history and accepts an independent destination `cwd`.
+  - [x] Draft independent code-base, context-source, worktree-binding, and
+    dirty-state-transfer axes without changing runtime behavior.
+  - [x] Confirm the proposed CLI names, branch-backed initial default, and the
+    first supported dirty-state boundary with the user.
+  - [x] Separate the Git starting point from the Codex context source with
+    independent `--base`/`--base-workspace` and
+    `--context-workspace`/`--context-thread` options.
+  - [x] Allow the context source to be either a same-repository CoCo workspace
+    or an exact readable native Codex `thread.id`; validate its native state
+    without loading it and persist bounded source provenance.
+  - [x] Implement explicit tracked and ordinary-untracked carry, the
+    `-d`/`--dirty` shorthand, and Codex-compatible `.worktreeinclude` for
+    selected ignored files without mutating the source checkout.
 - [ ] Design user-configurable lifecycle hooks as a separate future feature.
   Before defining CoCo hooks, inventory the pinned Codex CLI and App Server's
   native hooks, notifications, and lifecycle events so CoCo can expose or
@@ -273,6 +381,332 @@ architectural baseline for CoCo.
   thread/turn start, agent state transitions and terminal outcomes, then decide
   execution context, filtering, ordering, retries, timeouts, failure policy,
   secret handling, auditability, and platform behavior.
+
+## Proposed workspace-creation model
+
+Status: confirmed and implemented in the working tree on 2026-09-07. Runtime,
+protocol, schema, focused tests, and public documentation are aligned; final
+whole-tree verification and a local checkpoint remain.
+
+The former public `--fork-from` was overloaded: one workspace supplied both
+the Git `HEAD` used for the destination worktree and the Codex thread used for
+conversation history. It is now replaced by four independent choices:
+
+| Axis | Proposed request | Meaning |
+| --- | --- | --- |
+| Code base | `--base <revision>` or `--base-workspace <workspace>` | Resolve only the immutable destination `base_sha`; default to `HEAD` of the invoked checkout. |
+| Conversation context | fresh, `--context-workspace <workspace>`, or `--context-thread <thread-id>` | Start a new native thread or call `thread/fork`; never selects code. |
+| Worktree binding | default new branch, `--branch <name>` for another new branch, `--checkout <branch>` for an existing branch, or `--detached` | Decide whether creation allocates, reuses, or omits a Git branch; never selects context. |
+| Local changes | none, `--carry-changes`, optional `--carry-untracked`, and `.worktreeinclude` | Snapshot explicitly selected source-checkout state onto the new worktree; never changes conversation history. |
+
+Offer `-d`/`--dirty` as a CLI-only shorthand for
+`--carry-changes --carry-untracked`. Normalize it into that typed local-state
+selection before constructing the daemon request; do not persist a `dirty`
+worktree or context mode. Worktree binding remains independent:
+`-D`/`--detached` may be used alone or combined with `-d`, while branch-backed
+creation may also carry the same dirty state. A different explicit `--base`
+remains subject to the snapshot base constraint below. Worktree-local extras
+remain an orthogonal repository convention rather than another flag.
+
+Do not auto-detect whether a string is a workspace reference or Codex thread
+ID. Separate mutually exclusive CLI options keep typos deterministic. A direct
+Codex source means `thread.id`, not `thread.sessionId`: the latter identifies a
+fork tree's root and can point at a different conversation branch. CoCo should
+validate the supplied thread with non-loading `thread/read` and always create a
+new child with `thread/fork`; it must not silently adopt or move the source
+thread. A readable inactive thread may come from another repository because
+its history and the destination code are intentionally independent. Persist
+its exact thread ID and source `cwd` as provenance, while the destination
+thread is bound only to the newly created worktree. `thread.sessionId` is not
+part of CoCo's creation contract.
+
+The first dirty-state boundary should be conservative:
+
+- no transfer remains the default and preserves today's clean-check rule;
+- `--carry-changes` captures tracked staged and unstaged changes from the
+  checkout through which `coco create` was invoked, preserving their index vs
+  worktree placement with separate binary patches;
+- `--carry-untracked` additionally captures ordinary non-ignored untracked
+  files and is valid only when tracked changes are also being carried. It is
+  independent of `.worktreeinclude` because the two file sets are disjoint;
+- every managed local worktree honors a repository-root `.worktreeinclude`,
+  using the same `.gitignore`-style allowlist convention documented by Codex
+  for ignored local setup files. This applies independently of
+  `--carry-changes`, skips source symlinks, never overwrites checkout files,
+  and uses path/count/byte limits. Other ignored files are not copied;
+- the source is never stashed, reset, staged, or otherwise mutated. Initial
+  implementation should require the chosen base SHA to equal that checkout's
+  `HEAD`; applying a dirty snapshot across a different base needs a separately
+  designed conflict/rebase mode.
+
+Snapshot contents exist only in owner-process memory, not SQLite, events, logs,
+or context metadata. Persist only source/base identity, bounded manifest
+metadata, counts, sizes, and a category-separated hash. A process crash cannot
+resume from vanished contents: startup preserves a diagnosable failed
+provisioning record and must never recapture a possibly changed source tree
+silently. The creation operation fingerprint includes all four selections.
+
+A workspace name is always a CoCo routing label, not a Git-branch identity.
+Branch-backed creation defaults to a new `coco/<workspace>` branch, while
+`--branch <name>` selects another new safe branch name. The explicit
+`--checkout <branch>` variant instead binds the worktree to an already existing
+local branch at that branch's current `HEAD`; it does not accept `--base` or
+`--base-workspace`, and must fail if Git reports that branch checked out in
+another worktree. CoCo never bypasses that Git safety check with `--force`.
+Using the same value for workspace name and checked-out branch is valid, for
+example `coco create feat/login --checkout feat/login`, although the managed
+filesystem path remains CoCo-owned. `--detached` conflicts with both branch
+options and allocates no branch. Persist a typed worktree mode and permit
+`branch_name = null`; verify detached `HEAD` rather than `symbolic-ref`.
+Detached creation is supported, but durable workflow completeness still needs
+an explicit atomic create-branch or promotion operation to anchor its commits
+before manual worktree removal. Keep the new-branch default until that
+operation and cleanup safeguards exist.
+
+Recommended implementation order:
+
+1. [x] Replace the flat `context_mode`/`fork_from` request combination with a
+   tagged context request and typed workspace-vs-thread source; migrate the old
+   persisted fork descriptor losslessly.
+2. [x] Make `--base` legal with either context source and add
+   `--base-workspace`; remove source-worktree cleanliness as a context
+   requirement.
+3. [x] Add and verify new-branch, existing-branch, and detached worktrees. Keep
+   atomic branch promotion as a separate follow-up.
+4. [x] Add `.worktreeinclude`, explicitly selected tracked/untracked snapshots,
+   and the normalized `--dirty` preset with crash, path, size, symlink, overwrite, and
+   secret-boundary tests.
+5. [x] After the combinations are covered, retire `--fork-from` from public
+   help; it may remain a hidden compatibility alias for one schema revision.
+
+## Proposed native-first architecture overhaul
+
+Status: confirmed by the user on 2026-09-07. It deliberately schedules no
+hooks, handoff, worker MCP registry, Agentgateway, Windows, or release work.
+
+### Target ownership
+
+| Authority | Owned truth |
+| --- | --- |
+| Codex App Server | threads, turns, history/items, runtime status and active flags, models, effective execution behavior, and native server requests |
+| Git | repositories, refs, commits, current worktree contents, and dirty/ahead state |
+| CoCo | curated repository registry, human workspace identity, expected worktree/base binding, Codex thread binding, creation provenance, provisioning saga, mutation idempotency, and routing of requests that are live in the current daemon generation |
+
+CoCo must project native data rather than copy it into a competing thread,
+turn, or event model. Unknown active flags remain lossless at the adapter edge.
+An unknown thread `status.type` currently fails the native read and projects
+the workspace as unavailable; CoCo must not guess its meaning from an App
+Server method name.
+
+### Runtime topology
+
+Retain one long-lived `cocod` as the default broker and let it continue to
+spawn one shared `codex app-server`. This is already how the implementation
+works. Starting a new App Server for every `coco` invocation is rejected for
+mutating operations: when the command exits it would either terminate the
+runtime or have to leave a hidden supervisor behind, and a later CLI process
+has no documented way to reclaim a connection-bound pending approval or input
+request. It would therefore remove the headless background workflow or merely
+recreate `cocod` less explicitly.
+
+The daemon's reduced responsibilities are:
+
+1. own or connect to one compatible App Server runtime;
+2. serialize CoCo's cross-system mutations and SQLite writes;
+3. keep subscriptions needed for background turns and route live server
+   requests to `coco decide`;
+4. expose the same typed local control surface to CLI and MCP; and
+5. publish the authenticated endpoint used by the official TUI for `jump`.
+
+An externally supervised App Server is a later optional lifecycle mode, not a
+prerequisite for this overhaul. It needs explicit endpoint/authentication,
+version and capability checks, reconnection semantics, and proof for requests
+that become pending while CoCo is disconnected. The experimental
+`codex remote-control` command is not selected as CoCo's local protocol host.
+Do not implement simultaneous direct and daemon mutation paths.
+
+After the reduction and child-failure/SIGTERM behavior are reliable, normal
+`coco` commands may lazily ensure that `cocod` is running. That is a user-
+experience improvement, not removal of the broker; `cocod` remains available
+in the foreground for diagnostics.
+
+### Delivery phases
+
+#### 0. Freeze and prove the native contract
+
+- Select a published supported Codex build; do not base the cutover only on
+  rolling documentation or unreleased worktree changes.
+- Extend the generated-schema and model-free real-Codex tests for stable
+  `thread/read`, `thread/list`, `thread/loaded/list`, `thread/resume`, native
+  status/active flags, and `thread/read(includeTurns)` history hydration.
+- Prove how `clientUserMessageId` appears in stored history before relying on
+  it to reconcile a turn accepted immediately before a crash.
+- Retain direct tests for approval and structured-input request correlation,
+  remote-TUI unsubscribe, and App Server restart.
+- Do not make experimental `thread/turns/list`, `thread/items/list`, or
+  undocumented section APIs a core dependency.
+
+Exit: every native read used by the redesign passes against the selected
+published executable. Otherwise stop the reduction at the unsupported seam.
+
+#### 1. Introduce native read projections without deleting data
+
+- Separate `WorkspaceBinding` and `ProvisioningState` from a read-only
+  `ThreadProjection` and `GitProjection` in the typed application boundary.
+- Extend the existing earned `WorkerRuntime` port with only the required
+  thread reads; keep App Server JSON translation in `daemon/worker.rs`.
+- Make workspace list/status use cases capable of joining local bindings with
+  native Codex and Git observations.
+- Shadow the existing SQLite projection first and report mismatches in tests
+  or diagnostics without changing CLI/JSON behavior.
+
+Exit: the compiler and contract tests prevent a native thread status from
+being treated as a CoCo provisioning lifecycle.
+
+#### 2. Cut reads and recovery over to Codex and Git
+
+- Build `ls` and `status` from the small CoCo binding plus current native
+  `thread/read`/`thread/list` data; missing App Server data projects honestly
+  as unavailable rather than falling back to a stale stored status.
+- Make `status --follow` hydrate a native snapshot and then observe live
+  notifications. A polling-first implementation is acceptable; a later local
+  stream must subscribe before hydration and deduplicate the buffered race.
+- Replace the stored `agent.message.completed` copy only after the selected
+  stable App Server exposes a bounded way to retrieve the latest response.
+  Never load an unbounded complete thread merely to render follow output, and
+  do not enable an experimental capability for this core path.
+- Stop eagerly resuming every ready thread on daemon startup. Passive list and
+  status reads must not load a thread. `send` resumes on demand; `jump` first
+  asks the daemon to load and subscribe before attaching the TUI so later
+  decisions still reach CoCo.
+- Treat an externally deleted/archived thread or removed/mismatched worktree
+  as a broken binding; never create an implicit replacement.
+
+Exit: no current-status read needs stored native status or turn lifecycle.
+The completed-message compatibility event may remain solely for follow output
+until the bounded-history gate above is met.
+
+#### 3. Reduce the live event path
+
+- Keep notification handling only for an in-memory current snapshot/wakeup,
+  compaction synchronization, live pending-request routing, and runtime
+  disconnect monitoring.
+- Move actionable decisions to a generation-bound in-memory registry. Current
+  SQLite rows are already unusable after a daemon/App Server restart, so
+  persistence does not provide request recovery.
+- Stop persisting user messages, plans, diffs, native errors, turn completion,
+  and thread-status notifications. Retain completed agent messages only while
+  `status --follow` lacks a stable bounded native replacement.
+- Replace internal `event.list` polling once `status --follow` has an equal or
+  better native-backed path. Future hooks must earn a focused redacted outbox;
+  they do not justify retaining a copy of Codex history today.
+
+Exit: cross-client `decide`, `jump`, `send`, and follow behavior remains intact
+within a daemon generation, while native conversation data has one owner.
+
+#### 4. Shrink SQLite through a reversible bridge migration
+
+Keep three responsibilities, whether represented as three tables or an
+equivalent normalized schema:
+
+- `repositories`: stable repository ID, canonical root/common directory, and
+  registration time;
+- `workspaces`: ID/name/repository, expected worktree/branch/base, bound native
+  thread, CoCo-only provisioning/error state, and minimal profile/context
+  provenance; and
+- `operations`: operation kind and ID, versioned request fingerprint, workspace
+  correlation, accepted native ID, outcome, and timestamps. It stores no raw
+  prompt.
+
+Remove after the read cutover: `thread_status_*`, `active_turn_id`, the local
+turn history, native event payloads, persisted decisions, `legacy_goal`, the
+unused completed lifecycle, and the write-only MCP audit log unless a concrete
+consumer is added first. Retain named-profile source path/hash, model override,
+and fork/source provenance only where recovery or audit behavior actually uses
+them; remove copied effective native settings.
+
+Use an additive bridge migration first: validate and back up the v5 database,
+populate new records in one transaction, keep old tables read-only for one
+revision, and cover migrations from every existing schema with golden
+databases. A later migration physically drops the legacy tables. Rollback
+restores the pre-migration database and reports any worktrees/threads created
+after it instead of silently orphaning them.
+
+#### 5. Simplify the daemon and prove the product
+
+- Keep managed-child App Server ownership as the zero-configuration default;
+  define child-exit, SIGTERM, logging, and restart behavior before adding
+  daemon auto-start or an OS user service.
+- Consider an explicit external-endpoint mode only after the default path is
+  complete and only if surviving a `cocod` restart is a demonstrated need.
+- Run the complete two-repository/two-client proof: create and send from CLI,
+  let the invoker exit, observe and send through MCP, answer a native request
+  from a separate CLI, attach/detach the same thread with `jump`, restart and
+  reconcile, and replay operation IDs without duplicate worktrees or threads.
+- Verify that the reduced database contains no user or agent message bodies.
+
+Exit: reconsider public alpha release only when that workflow passes against a
+published Codex build. If real use collapses to one person calling
+`create -> jump`, reduce CoCo to private glue rather than maintaining a
+parallel control plane.
+
+### Implementation progress (2026-09-07)
+
+- Phase 0 now has a model-free real-process proof against the published pinned
+  `codex-cli 0.147.0`: `thread/read` preserves the exact ID, `cwd`, name, native
+  `notLoaded` status, and completed turn history across App Server restarts;
+  reads do not load the thread. The generated read/list/loaded-list schemas are
+  part of the compatibility comparison.
+- The same proof found that `thread/list` does not discover CoCo's prepared
+  empty thread under either the reported `vscode` source or `appServer`, even
+  with the exact `cwd`. CoCo therefore must keep its explicit thread binding
+  and use `thread/read`; native listing is not a recovery/discovery authority.
+- `thread/read(includeTurns)` does not expose `clientUserMessageId` in the
+  selected schema. Turn-start crash reconciliation must consequently retain an
+  `uncertain` operation outcome or find a separately proven native correlation;
+  it must not guess that retrying is safe.
+- Phase 1 read projection is implemented in the working tree: passive workspace
+  list/status/event reads consult `thread/read`, validate ID and `cwd`, derive
+  phase from native status in memory, and project failures as unavailable
+  without overwriting the stored compatibility snapshot. `status --follow`
+  still obtains completed text from the existing normalized event stream; a
+  stable second terminal poll closes the native-status/notification race.
+- A real pinned-process probe rejected `thread/turns/list` and
+  `thread/items/list` without the `experimentalApi` initialization capability.
+  The stable `thread/read(includeTurns: true)` does hydrate completed history,
+  but returns the entire thread in one response. CoCo's transport deliberately
+  caps a JSON frame at 8 MiB, so automatic full-history hydration could take
+  down the shared App Server channel for a long thread. The attempted bounded
+  adapter was removed rather than silently enabling experimental API surface.
+- Phase 2 activation is implemented in the working tree: daemon startup no
+  longer resumes every `ready` workspace. `send` and the internal
+  `workspace.attach` used before `jump` validate the binding and resume only
+  when the workspace thread is `notLoaded` or the current daemon connection
+  lacks a subscription. Native context creation reads and forks the exact
+  source thread without coupling it to Git-base or source-worktree activation.
+  Start, fork, and resume establish a generation-local subscription marker;
+  globally loaded state is not mistaken for ownership by this connection.
+- A prolonged shadow-only checkpoint was deliberately skipped for this read
+  slice. The pinned published 0.147.0 real-process test proves non-loading
+  reads, exact ID/`cwd`, restart persistence, and optional history hydration;
+  focused fake-runtime tests cover mismatch, failure, phase, follow-output
+  stabilization, and activation behavior. The cutover remains reversible
+  because no table or existing record was deleted. Eager recovery
+  status/failure writes were deliberately removed with the startup-resume path.
+  This exception does not weaken the pending operation-ledger, remaining
+  stop-write, migration, or crash-reconciliation gates.
+- Phase 3 decision/event reduction is implemented in the working tree.
+  Supported approval/input requests now live only in a generation-local
+  registry with lock-protected single submission, native resolution,
+  disconnect orphaning, and no durable prompt, answer, or native correlation.
+  Sent prompts and native status, plan, diff, error, and unsupported-request
+  observations no longer create events. Local turn rows and start/completion
+  events, start/resume status snapshots, provisioning events, and completed
+  agent text remain until the operation-ledger and bounded-output gates pass.
+- The roughly 2,500-line Coordinator suite is now split without behavior
+  changes. Its shared fake worker, fixture, and Git helpers remain in
+  `src/coordinator/tests.rs`; workspace, context/activation, decisions, and
+  native-event cases live in focused child modules.
 
 ## Decisions
 
@@ -424,10 +858,9 @@ architectural baseline for CoCo.
   experimental upstream surface before relying on it in a release.
 - 2026-09-06 — Name the unified approval/user-input response command
   `coco decide <decision-id>`. Start with numbered native options and optional
-  free-text input; defer cursor navigation until the simpler workflow has
-  proven insufficient. This records the preferred shape only, not the next
-  scheduled implementation slice; priority is reconsidered after state and
-  `jump` work.
+  free-text input; cursor navigation was deferred at this checkpoint and later
+  completed through the shared CLI picker recorded below. This records the
+  original priority sequence after state and `jump` work.
 - 2026-09-06 — Put an explicit planning checkpoint after the thread-state and
   `jump` slices. Report their findings and reprioritize the remaining backlog
   with the user instead of automatically continuing into `decide`.
@@ -438,20 +871,22 @@ architectural baseline for CoCo.
   `waitReasons` as read-time projections only; bump CLI JSON documents to
   schema version 2 because the task shape now exposes `lifecycle` and
   `threadRuntime`.
-- 2026-09-06 — Treat every correlated App Server request as an observational,
-  sanitized `server_request.received` event until the pending-decision model
-  is deliberately implemented. Only `thread/start.thread.status` and
-  `thread/status/changed` may refresh native runtime state; request method
-  names never do.
+- 2026-09-06 — **Superseded on 2026-09-07.** Initially treat every correlated
+  App Server request as an observational, sanitized
+  `server_request.received` event until the pending-decision model is
+  implemented. Request method names never change runtime state. The native-
+  first reduction later removed that generic persisted observation and made
+  `thread/read` the runtime authority.
 - 2026-09-06 — Treat a successfully launched remote TUI as an ordinary client
   attachment, not as ownership of the turn. Normal unsubscribe and unexpected
   transport loss must leave the daemon connection and active turn intact;
   cancellation requires Codex's separate explicit interrupt operation.
 - 2026-09-06 — Implement the first recovery level without claiming process
   survival: a new App Server resumes persisted `ready` threads after validating
-  their ID, worktree, and immutable named-profile provenance. Turns unfinished
-  at daemon loss remain interrupted; making an active turn survive an App
-  Server crash would require a separately supervised worker lifetime.
+  their ID, worktree, and immutable named-profile provenance. Superseded on
+  2026-09-07 by passive native reads plus selected activation on demand. Turns
+  unfinished at daemon loss still cannot survive an owned App Server crash;
+  that would require a separately supervised worker lifetime.
 - 2026-09-06 — Keep the real-Codex compatibility test both ignored by default
   and guarded by `COCO_RUN_REAL_CODEX_COMPAT=1`. It uses isolated homes, pins
   the executable and relevant generated schemas, and deliberately never sends
@@ -468,12 +903,12 @@ architectural baseline for CoCo.
   grant the complete shared Git directory as an unconditional writable root.
   Validate the binding after Git-changing activity and treat drift as an
   observable error rather than repairing refs automatically.
-- 2026-09-06 — Model CLI repository scope explicitly. An omitted leading path
-  means `.`, a path selects one registered repository, and `--all-repos`
-  requests daemon-wide listing or unique workspace-name resolution. Full workspace IDs
-  resolve globally; local name lookup never falls through silently to another
-  repository. Do not persist a process-global repo selection or combine paths
-  and names into a colon-delimited identifier.
+- 2026-09-06 — Superseded on 2026-09-07: model CLI repository scope with an
+  omitted path meaning `.`, a path selecting one registered repository, and
+  `--all-repos` requesting both daemon-wide listing and unique workspace-name
+  resolution. The later CLI-vocabulary decision splits those two meanings.
+  Full workspace IDs still resolve globally; local lookup never falls through
+  silently, and paths/names are never combined into a colon-delimited ID.
 - 2026-09-06 — Admit conventional slash-separated workspace names such as
   `feat/login`, producing `coco/feat/login`, while validating every component
   before path/ref use and rejecting Git ref-prefix collisions explicitly.
@@ -489,12 +924,10 @@ architectural baseline for CoCo.
   `workspace.completed`, and CLI JSON is schema version 3. SQLite schema v4
   migrates existing records and correlations in place rather than discarding
   prerelease state.
-- 2026-09-06 — Use `-a` as the short spelling of `--all-repos`. A duplicate
-  global workspace name is never guessed: the error exposes bounded matching
-  repository paths and IDs, after which the operator selects with
-  `coco <repository-path> <command> <name>` or a globally resolved workspace
-  ID. Treat the scope switch as a global CLI option so it works both before
-  and after a subcommand. Do not add a path/name composite selector.
+- 2026-09-06 — Superseded on 2026-09-07: use `-a` as the short spelling of an
+  overloaded `--all-repos` list/lookup scope. The ambiguity behavior, bounded
+  matching repository paths/IDs, leading-path selection, and globally resolved
+  workspace IDs remain; unique global name lookup now uses `--global`/`-g`.
 - 2026-09-06 — Exercise Git approvals with Codex's native `untrusted` policy
   in the compatibility proof. `on-request` deliberately leaves escalation to
   the model and therefore cannot deterministically prove the callback. Never
@@ -506,12 +939,11 @@ architectural baseline for CoCo.
   native thread history into a new workspace; `handoff` starts a fresh thread
   from a bounded, reviewable artifact; `resume` remains continuation of the
   same thread. None of them implicitly copies dirty code.
-- 2026-09-06 — Deliver native fork before handoff. The first fork is restricted
-  to an idle, clean source in the same repository and bases the destination on
-  the source worktree's committed `HEAD`. Optional compaction applies only to
-  the new child, must complete before `--send`, and is stored as a fork
-  modifier rather than a fourth context mode. Handoff stays deferred until its
-  plan, document, CLI-input, and external-reference model is settled.
+- 2026-09-06 — Superseded on 2026-09-07: deliver native fork before handoff
+  with one workspace coupled to both code and context. The independent
+  creation contract below preserves native fork/compaction but removes that
+  coupling. Handoff stays deferred until its plan, document, CLI-input, and
+  external-reference model is settled.
 - 2026-09-06 — Use a separate opaque CoCo decision ID in public status and
   `coco decide`; keep the native App Server request ID and exact response value
   private. Persist `pending` before presentation, compare-and-set to
@@ -571,8 +1003,9 @@ architectural baseline for CoCo.
 - 2026-09-06 — Correct the shipped execution-profile contract to the pinned
   Codex convention: `default` is an empty per-thread overlay and a named profile
   is the parsed complete `$CODEX_HOME/<name>.config.toml` document. Persist only
-  provenance and redacted settings, reject named-overlay drift on recovery, and
-  disclose that changes to inherited base configuration are not pinned.
+  provenance and redacted settings, reject named-overlay drift when on-demand
+  activation reloads it, and disclose that changes to inherited base
+  configuration are not pinned.
 - 2026-09-06 — Pause the first crates.io publication after three upstream Codex
   PRs made managed worktree creation available to `codex exec`, interactive
   startup, and TUI new/fork flows. A merge to Codex main is not a released
@@ -580,9 +1013,178 @@ architectural baseline for CoCo.
   one-command TUI launch as sufficient differentiation. Publication now
   requires an explicit product decision after testing the first containing
   Codex release.
+- 2026-09-07 — Make stable `thread/read` authoritative for passive ready-
+  workspace status. Use the stored CoCo thread ID as the lookup key and
+  validate both the returned ID and canonical `cwd`; never fall back to a
+  persisted native snapshot after a read failure.
+- 2026-09-07 — Keep completed agent text in the compatibility event stream for
+  now. Pinned 0.147.0's stable history read returns the complete thread, while
+  bounded turn/item pagination requires `experimentalApi`; neither is safe as
+  an automatic core follow dependency. Do not enable the experimental
+  capability merely to remove this one mirror.
+- 2026-09-07 — Replace eager daemon-start recovery with explicit activation.
+  `send` and `workspace.attach` for `jump` resume only the selected validated
+  thread when it is unloaded or this daemon generation lacks a subscription.
+  Track that subscription in memory because another client's globally loaded
+  thread does not prove that `cocod` receives its notifications and server
+  requests. Native context forks use the exact readable source thread without
+  coupling it to source-worktree activation.
+- 2026-09-07 — Permit the initial read cutover to bypass a prolonged shadow-only
+  checkpoint because the published pinned 0.147.0 process proof and focused
+  mismatch/failure tests cover the adopted stable contract, while schema v5
+  retains its tables and existing records as a reversible bridge; only the
+  obsolete eager-recovery status/failure writes stop in this slice. Treat the
+  remaining event/decision reduction, operation-ledger design, stop-write,
+  physical migration, and crash reconciliation as later gates rather than
+  folding them into this checkpoint.
+- 2026-09-07 — Keep actionable approvals and structured input only in the
+  daemon generation that owns the native callback. Perform the pending-to-
+  submitted transition under one lock before awaiting the response; never
+  write its prompt, native correlation/options, or user answer to SQLite.
+  Disconnect or response failure orphans it, and restart drops it rather than
+  replaying an unanswerable request.
+- 2026-09-07 — Superseded in part by the operation-ledger slice: stop
+  normalizing user prompts, native status/plan/diff/error
+  notifications, decisions, and unsupported requests into durable events.
+  The later ledger removes local turn correlation writes; completed agent text
+  remains only until the stable bounded-output gate is resolved.
+- 2026-09-07 — Split the oversized Coordinator tests after the decision/event
+  checkpoint while retaining one shared parent fixture. Group behavior cases
+  by workspace, context/activation, decisions, and native events; keep the
+  move behavior-neutral and separate from authority changes.
+- 2026-09-07 — Use the operation ledger only for durable `turn_start`
+  idempotency and native-result correlation, never as another turn-history or
+  status store. Commit intent before dispatch and a dispatch marker before the
+  external call. Only the direct App Server response may prove acceptance:
+  `turn/started` contains the native ID but does not echo
+  `clientUserMessageId`, so matching by thread would be ambiguous. Otherwise a
+  crash/error becomes `uncertain`, which the same operation ID must never
+  redispatch. Keep the short current-generation concurrency guard in memory
+  and continue deriving visible runtime state from Codex.
+- 2026-09-07 — Replace coupled `--fork-from` creation with four typed axes:
+  immutable Git base, fresh/workspace/exact-native-thread context, new/existing/
+  detached worktree binding, and explicit local-state carry. Keep the old flag
+  hidden for one compatibility revision. `-d` means tracked plus ordinary
+  untracked carry, `-D` means detached, and `-dD` composes them. Adopt
+  Codex's `.worktreeinclude` convention only for ignored files, never as a
+  reason to copy every ignored path. Snapshot content remains memory-only and
+  the source checkout is never mutated.
+- 2026-09-07 — Split the process integration harness by scenario, fake App
+  Server, and process support after it exceeded 2,000 lines. Keep one
+  integration-test crate and shared constants; this is a behavior-neutral
+  module split rather than a new test framework.
+- 2026-09-07 — Use `list` as the visible canonical collection verb and `ls` as
+  its visible equivalent alias for workspaces, repositories, and models.
+  This checkpoint initially reserved `--all-repos`/`-a` for collection/status
+  overviews and used `--global`/`-g` only for one named workspace. The next
+  decision supersedes the duplicated status overview.
+- 2026-09-07 — Keep collection and target UX separate: `list`/`ls` is the only
+  workspace overview and `--all-repos`/`-a` is its collection scope. `status`
+  always presents one detailed workspace, selected explicitly or through a
+  human-terminal picker; `--global`/`-g` expands that target lookup or picker.
+  Use the same picker for `send`, `jump`, `diff`, and Codex decision options.
+  Arrow keys and `j`/`k` move immediately, Enter confirms, 1 through 9 select
+  directly, and Escape/`q`/Ctrl-C cancel. Non-terminal, JSON, and
+  `--no-input` execution must never prompt. Add approval-only `--choice` so a
+  scripted decision does not need to fake a TTY.
 
 ## Findings
 
+- Interactive repository choice needs the daemon's canonical Git identity,
+  especially from linked worktrees. The narrow `repository.resolve` read
+  avoids duplicating Git discovery or opening SQLite in the CLI; selectors
+  still obtain their choices from the existing deterministic repository and
+  workspace list methods and return a stable workspace ID.
+- Terminal assistance is gated on both stdin and the stderr prompt stream.
+  Normal stdout stays reserved for command results; collection and JSON paths
+  do not consult the interactive adapter.
+
+- The old `--all-repos` flag changed two dimensions at once: `ls -a` selected
+  a collection, while `status/send/jump/diff -a <workspace>` selected one
+  globally resolved reference. The implementation existed and handled
+  ambiguity safely, but the shared spelling made a target appear nonsensically
+  required for an "all" command. Separating overview (`-a`) from reference
+  lookup (`-g`) removes that ambiguity without changing the daemon protocol.
+- The pinned generated schema and current official App Server documentation
+  both show `clientUserMessageId` on `turn/start`, but not in the returned
+  `Turn` or `turn/started` notification. A same-thread event therefore cannot
+  safely resolve an ambiguous CoCo dispatch. Completion notifications may
+  overtake the direct response; the runtime guard records that native ID only
+  in memory and clears itself if the later response confirms the exact ID.
+- The CLI previously generated a send operation ID internally but gave the
+  user no way to reuse it after losing the local RPC response. `coco send` now
+  includes the ID in error context and accepts `--operation-id <ID>` for an
+  exact replay; a different message under that ID remains a conflict.
+- Schema v6 is intentionally additive. It migrates operation-bearing legacy
+  turns into the minimal ledger, clears old persisted active-turn pointers,
+  and leaves the legacy status/turn/decision/event shapes readable. Physical
+  deletion is deferred until after the multi-client product proof so this
+  authority cutover remains independently reversible.
+- Schema v7 adds only the persisted worktree mode. Existing rows migrate to
+  `new_branch`; new records may store `existing_branch` or `detached`, with
+  a null branch valid only for detached. Context descriptor v3 records the
+  independent requested and resolved creation axes plus bounded local-state
+  provenance.
+- Codex's `thread.sessionId` identifies the root of a live session/fork tree,
+  while `thread/read` and `thread/fork` address exact `thread.id` values.
+  Accepting only the latter prevents a session-root lookup from silently
+  choosing the wrong conversation branch.
+- `.worktreeinclude` is a Codex convention, not a Git feature. Git supplies
+  the ignore matching used to prove eligibility. Ordinary non-ignored
+  untracked paths and selected ignored paths are intentionally separate sets.
+- A detached CoCo worktree is a normal Git-registered worktree and is not
+  deleted when `cocod` exits. Its commits remain reachable through that
+  registration, but manual directory removal/pruning can eventually leave
+  unreferenced commits eligible for garbage collection; branch promotion
+  therefore remains a distinct product follow-up.
+- The pinned Codex 0.147.0 schema bundle contains `thread/list` with a `cwd`
+  filter, stable `thread/read` with optional turns and native status, plus
+  experimental `thread/turns/list` and `thread/items/list`. Direct calls prove
+  those pagination methods require the `experimentalApi` capability. CoCo now
+  uses the stable metadata read for passive projection, while start/resume/
+  fork/compact/name, turn start, model list, and continuous notifications
+  remain. Final follow text still comes from the compatibility event stream.
+  The adapter no longer mirrors prompts, decisions, or native status, plan,
+  diff, error, and unsupported-request data. It still records local turn
+  correlation and completed output pending the next gates; the storage and
+  crash-model reduction is therefore not complete.
+- Neither the official App Server nor SDK documents a first-class repository,
+  worktree, or composite workspace API. The closest stable primitive is a
+  Codex thread with `cwd`, name, fork lineage, Git metadata, history, and
+  runtime status. The experimental schema also contains undocumented
+  `threadSection/*` grouping methods, but they neither own a Git checkout nor
+  constitute a stable project/workspace contract and must not become a CoCo
+  dependency.
+- Codex now has a higher managed-worktree layer in its product surfaces. The
+  merged CLI changes allocate from the pool shared with Desktop, bind checkout
+  ownership to the thread, and support fresh or forked interactive sessions;
+  Desktop additionally provides project grouping, handoff, cleanup, and
+  restore. That layer is not exposed as a documented reusable App Server or
+  SDK control-plane API, so CoCo fills an API-composition gap rather than a
+  capability Codex could not implement itself.
+- The reduction audit identifies three substantial native-state mirrors:
+  persisted thread-runtime snapshots, a second turn lifecycle/history, and
+  normalized copies of selected Codex events. A narrower design should obtain
+  current status and history from Codex, retain Git as authority for checkout
+  state, and persist only CoCo's repository registry, workspace alias/ID,
+  expected worktree/base binding, Codex thread binding, creation provenance,
+  provisioning failure state, and a small idempotency ledger. Pending
+  decisions still require live cross-client routing, but their current durable
+  rows provide no recovery after the App Server generation disappears.
+- Multi-repository listing plus worktree creation is useful convenience but is
+  not sufficient product differentiation. The defensible workflow is a
+  headless operator or external client creating and addressing named workspaces
+  across repositories, letting the invoking client exit while the daemon owns
+  active turns, observing native status from another client, routing a pending
+  decision, and handing the exact thread/worktree to a human TUI without
+  cancelling the turn.
+- The corresponding release gate is behavioral rather than packaging-based:
+  keep the repository private and crates.io disabled until a second client can
+  create or take over, observe, control, and hand off that multi-repository
+  workflow without duplicate worktrees or lost bindings across client and
+  coordinator restart. If actual use remains one person invoking only create,
+  status, and jump, reduce CoCo to scripts/a small library or stop; native Codex
+  is the better product at that scope.
 - Codex PRs 42652, 43069, and 43120 directly overlap CoCo's most visible
   create/send/jump and fresh/fork flows. They add experimental managed
   worktrees to new and forked `codex exec` runs, `codex --worktree`, explicit
@@ -739,10 +1341,10 @@ architectural baseline for CoCo.
   WebSocket client; only the separate interrupt path sends `turn/interrupt`.
 - The thread returned by native `thread/start` already contains an exact
   `ThreadStatus`, while `turn/start` returns a native turn rather than a new
-  thread-status snapshot. The durable model therefore needs to store the
-  former and later `thread/status/changed` observations, while deriving a
-  short display phase from lifecycle, status freshness, flags, and the
-  separately correlated active turn.
+  thread-status snapshot. Start/resume snapshots remain only as bridge data;
+  passive and mutating projections read current status through `thread/read`
+  and retain the separately correlated accepted turn only as a short race
+  guard.
 - The pre-migration event projection mutated task phase from server-request
   method names and labeled every request as an approval. Codex exposes several
   request families beyond approvals and user input, so schema v3 now keeps
@@ -756,9 +1358,9 @@ architectural baseline for CoCo.
 - The executable coordinator now serializes creation and turn-start operations
   per repository, resolves client paths back to a registered Git common
   directory, and treats Git/Codex effects as persisted saga steps.
-- Supported App Server requests are now surfaced as durable, generation-bound
-  decisions and are never auto-approved. Unsupported request families remain
-  redacted observations rather than being guessed or answered blindly.
+- Supported App Server requests are surfaced as generation-local decisions and
+  are never auto-approved. Unsupported request families are warned and left
+  unanswered rather than persisted, guessed, or answered blindly.
 - Rust modules can use nested directories without becoming separate Cargo
   packages. CoCo currently has one package, one library crate, and three binary
   crates; the flat module tree is normal but its largest files now mix enough
@@ -846,6 +1448,24 @@ architectural baseline for CoCo.
 
 ## Verification
 
+- The native read contract was exercised with the guarded, model-free pinned
+  Codex 0.147.0 compatibility test: after a full App Server restart,
+  `thread/read` returned the same ID, `cwd`, name, `notLoaded` status, and (when
+  requested) completed native turn history without loading the thread. Focused
+  coordinator tests cover passive projection, failures, binding mismatches,
+  newest-turn output, and on-demand subscription behavior. Full integration
+  gates for the combined checkpoint remain to be recorded after the working-
+  tree implementation stabilizes.
+- `git diff --check -- knowledge/engineering/architecture.md
+  knowledge/product/v0-spec.md knowledge/log.md knowledge/work/main.md` passes
+  for the Phase 1/2 canonical and chronological documentation update.
+- The reduction audit made no product or public-documentation changes and ran
+  no release action. `codex --version` reports `codex-cli 0.147.0`; direct
+  inspection of its committed generated schemas confirms the list/read/status,
+  history, metadata, section, and lifecycle methods used in the comparison.
+  Current official App Server, SDK, CLI, projects, and worktree documentation
+  plus the three merged upstream worktree PR descriptions were compared with
+  CoCo's domain, schema, coordinator, protocol, CLI, and MCP surfaces.
 - The final public-content audit finds no remaining behavior, navigation,
   link, terminology, or public/internal-boundary mismatch. Direct pinned-tool
   checks pass Next route generation, TypeScript, Oxlint, and Prettier. A clean
@@ -1099,6 +1719,99 @@ architectural baseline for CoCo.
   static search, project-subpath routing, and no internal-knowledge leakage.
   `nix flake check .` and `git diff --check` also pass. The repository release
   switch was re-read immediately before checkpointing and remains `false`.
+- The native-status/on-demand-activation checkpoint passes Rustfmt; locked
+  all-target/all-feature `cargo check` and Clippy with warnings denied; the
+  full Rust suite (104 passed, one deliberate live-model test ignored); both
+  daemon/CLI process smokes; and the separately enabled model-free real-Codex
+  0.147.0 compatibility test. The real test proves exact ID/`cwd`, non-loading
+  status, restart persistence, on-demand resume, and optional stable full
+  history. It also proved bounded turn/item pagination is rejected without
+  `experimentalApi`, so that attempted dependency was removed. Public docs
+  pass Next type generation, TypeScript, Oxlint, Prettier, and a fully static
+  `/coco` export with 93 files, nine pages, search, and the public-only
+  boundary. `CARGO_BUILD_JOBS=1 nix flake check .` and `git diff --check` pass.
+- The generation-local decision/event reduction passes 105 library tests with
+  the deliberate model-consuming test ignored plus both daemon/CLI process
+  smokes outside the Unix-socket-restricted sandbox. Coverage proves no stored
+  send prompt or decision row/event, concurrent at-most-once response, native
+  resolution, restart loss, disconnect orphaning, native read-based wait
+  states, and no new status/plan/diff/error/unsupported-request events.
+  Rustfmt, all-target/all-feature Clippy with warnings denied, `cargo machete`,
+  and `git diff --check` pass. Public docs pass Next type generation,
+  TypeScript, Oxlint, and Prettier; the direct production Next build and export
+  verifier confirm 93 static files, nine pages, `/coco` routing, search, and
+  the public-only boundary.
+- The behavior-neutral Coordinator test split preserves the exact set of 30
+  orchestration tests. The shared parent is 530 lines; the focused context,
+  decision, event, and workspace children are 724, 395, 270, and 640 lines.
+  The full suite passes with 105 library tests, two process smokes, one
+  deliberate live-model ignore, and one opt-in real-Codex ignore. Rustfmt,
+  all-target/all-feature Clippy with warnings denied, `cargo machete`, and
+  `git diff --check` pass.
+- The schema-v6 operation-ledger checkpoint passes Rustfmt, locked
+  all-target/all-feature Cargo check and Clippy with warnings denied, 111
+  library tests, and both real daemon/CLI process smokes. The two deliberately
+  opt-in live-Codex tests remain ignored. Coverage includes intent-before-
+  dispatch, exact-response acceptance, ambiguous-dispatch reconciliation,
+  replay/conflict handling, current-generation send exclusion, migration from
+  operation-bearing legacy turns, and completion-before-response ordering.
+  `cargo machete`, the direct fully static `/coco` documentation export (93
+  files, nine pages, search, project-subpath routing, and the public-only
+  boundary), `git diff --check`, and
+  `CARGO_BUILD_JOBS=1 nix flake check . --no-write-lock-file --max-jobs 1`
+  pass. No push, release, Pages deployment, or crate publication was run.
+- The creation-axis working tree passes Rustfmt, locked all-target/all-feature
+  Clippy with warnings denied, `cargo machete`, and the full serialized Rust
+  suite: 134 library tests plus both real daemon/CLI process smokes pass; the
+  model-consuming Git proof and opt-in real-Codex compatibility test remain
+  deliberately ignored. Focused coverage includes 18 Git, 5 Coordinator
+  creation, 7 CLI creation, 8 protocol, and 11 store tests. It proves
+  independent base/context selection, exact native thread IDs, all three
+  worktree modes, staged/unstaged carry, ordinary untracked opt-in,
+  ignored-file inclusion, count/byte bounds, source immutability, and the
+  independent `-d`/`-D` shorthands. The process harness was split from 2,028
+  lines into a 47-line root plus focused lifecycle, fork, fake-server, and
+  support modules without changing its two scenarios. Public docs pass Next
+  type generation, TypeScript, Oxlint, and Prettier; the production
+  `DOCS_BASE_PATH=/coco` build verifies 93 static files, all nine pages,
+  search, project-subpath routing, and the public-only boundary.
+  `git diff --check` also passes. No Nix build, push, Pages deployment,
+  release, or publication was run for this slice.
+- The collection/scope CLI checkpoint passes Rustfmt, locked all-target/all-
+  feature Clippy with warnings denied, and the full serialized Rust suite:
+  138 library tests and both daemon/CLI process smokes pass; the live-model
+  Git proof and opt-in real-Codex compatibility test remain deliberately
+  ignored. The focused CLI suite has 24 passing tests, including visible
+  `list`/`ls` aliases at all three collection levels, incompatible-scope help
+  and parser behavior, status overview/detail forms, and leading/trailing
+  scope spellings. The process smoke proves selected-repository `status`,
+  daemon-wide `status -a`, global named `status -g`, canonical model/workspace
+  lists, and `repo ls` against the real RPC path. Public docs pass Next type
+  generation, TypeScript, Oxlint, and Prettier; the production
+  `DOCS_BASE_PATH=/coco` export verifies 93 static files, all nine pages,
+  search, project-subpath routing, and the public-only boundary.
+  `git diff --check` passes. No Nix build, push, Pages deployment, release, or
+  publication was run for this slice.
+- The interactive CLI slice passes Rustfmt, locked all-target/all-feature
+  Clippy with warnings denied, `cargo machete`, and the full serialized Rust
+  suite: 149 library tests contain 148 passes and one deliberately ignored
+  model-consuming proof; both daemon/CLI process scenarios pass, and the
+  separate opt-in real-Codex compatibility test remains deliberately ignored.
+  The 37 focused CLI tests cover parser/help forms, raw picker navigation,
+  direct numeric selection, cancellation, decision projection, deterministic
+  approval `--choice`, and the non-terminal no-prompt contract. The real
+  lifecycle smoke additionally rejects omitted status/create/send values when
+  no terminal is present. The dependency policy passes with only the existing
+  informational duplicate-version warnings, and the minimized Crossterm
+  feature set is used directly. Public docs pass Next type generation,
+  TypeScript, Oxlint, and Prettier; the production `/coco` build verifies 93
+  static files, all nine pages, search, project-subpath routing, and the
+  public-only boundary. The single-job Nix flake check and `git diff --check`
+  pass. No push, Pages deployment, release, or publication was run.
+- At the user's request, the nine local 2026-09-07 checkpoints from
+  `34b5b43` through `ad34e62` are intentionally consolidated into one commit
+  above the unchanged remote base `78835b2`. This is a local history rewrite;
+  no remote ref, release, publication, or deployment is changed.
 
 ## Open questions and handoff
 
@@ -1115,10 +1828,10 @@ architectural baseline for CoCo.
   and complete a `publish=false` rehearsal before requesting publication.
 - Crates.io publication is paused. The upstream comparison shows that managed
   worktree creation and TUI launch are no longer a defensible product boundary.
-  The next step is a user decision between stopping the project and narrowing
-  it to a demonstrable headless multi-repository control-plane workflow; if the
-  latter is selected, test the first Codex release containing PRs 42652, 43069,
-  and 43120 before revising public positioning or publishing an alpha.
+  The user selected the narrower headless multi-repository control-plane
+  direction; finish the native-first reduction and its behavioral proof, then
+  test the first Codex release containing PRs 42652, 43069, and 43120 before
+  revising public positioning or publishing an alpha.
 - The user withdrew the follow-up issue search and upstream-comment idea after
   the private checkpoint was completed. Do not pursue or post either unless
   explicitly requested again.
@@ -1127,20 +1840,26 @@ architectural baseline for CoCo.
 - Agentgateway is deliberately not scheduled. Reconsider it only when
   federation, centralized credential custody, independent enforcement, or
   gateway observability becomes an actual requirement.
-- Thread-runtime ownership, `jump` exit/reattach behavior, and prepared-thread
-  recovery are corrected. Running turns still become interrupted if the daemon
-  and its owned App Server stop; surviving that boundary would require a
-  separately supervised App Server lifetime.
-- The generation-bound pending-decision model and numbered `coco decide` flow
-  are implemented for command/file approvals and structured user input. Keep
-  it separate from native thread status; consider non-interactive flags only
-  after real use demonstrates a need.
+- Thread-runtime ownership, `jump` exit/reattach behavior, passive native reads,
+  and on-demand thread activation are implemented. Running turns still become
+  interrupted if the daemon and its owned App Server stop; surviving that
+  boundary would require a separately supervised App Server lifetime.
+- The generation-bound in-memory pending-decision model and shared picker-based
+  `coco decide` flow are implemented for command/file approvals and structured
+  user input. Keep it separate from native thread status. Approval-only
+  `--choice` is the deterministic scripting path; unrelated pending requests
+  are not implicitly selected because `decide` still requires their opaque ID.
 - Keep context transfer under the existing reserved modes. Before implementing
   `handoff`, agree its artifact/reference model, optional relationship to a
   plan, authoring inputs, and review UX; do not treat it as generic workspace
   metadata or duplicate the source conversation into SQLite. Native fork plus
   explicit child compaction is complete; handoff remains a separate design
   task rather than the next implicit coding step.
+- Creation inputs are now implemented as four independent axes: code base,
+  exact workspace/native-thread context, new/existing/detached Git binding, and
+  bounded explicit local-state carry. The remaining Git-lifecycle question is
+  an atomic detached-to-branch promotion; context handoff remains a separate
+  artifact design.
 - The workspace vocabulary/schema migration, create convenience pipeline,
   multi-repository CLI slice, native Git-approval proof, and interactive
   decision closure are complete.
@@ -1151,9 +1870,9 @@ architectural baseline for CoCo.
 - The reorganized public site now passes a production export under the `/coco`
   GitHub Pages project subpath with nine total routes. Keep that static-export
   check when changing its routing or deployment workflow.
-- Phase 2 and its review are complete. Do not split a workspace now. If
-  cross-platform support is scheduled next, begin Phase 3 by moving the
-  existing Unix RPC backend behind the common transport API, then add Windows
-  named pipes with native CI before claiming Windows support. Otherwise prefer
-  a user-visible capability such as safe approval responses or daemon recovery
-  over more structural movement.
+- The earlier Rust module-layout Phase 2 and its review are complete. Do not
+  split a workspace now. If cross-platform support is scheduled next, begin
+  that architecture's Phase 3 by moving the existing Unix RPC backend behind
+  the common transport API, then add Windows named pipes with native CI before
+  claiming Windows support. Otherwise prefer a user-visible capability over
+  more structural movement.

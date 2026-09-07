@@ -141,7 +141,13 @@ src/
     turn.rs                      # turn start and idempotency
     codex_events.rs              # App Server event projection
     error.rs
-    tests.rs
+    tests.rs                     # shared Coordinator fake and fixture
+    tests/
+      workspace.rs              # creation, status, scope, and diff behavior
+      context.rs                # fork, compact, attach, and activation behavior
+      operations.rs             # turn-start idempotency and ambiguous dispatch
+      decisions.rs              # approvals and structured-input behavior
+      events.rs                 # native runtime projection behavior
 
   codex.rs                       # narrow App Server client facade
   codex/
@@ -155,6 +161,7 @@ src/
     migrations.rs
     rows.rs                      # SQL row mapping only
     workspaces.rs
+    operations.rs               # durable control-operation ledger
     events.rs
     tests.rs
 
@@ -260,14 +267,22 @@ concrete Codex-backed worker moved to `daemon/worker.rs`, so the coordinator's
 worker contract no longer imports the Codex client. On 2026-09-06, the shared
 Coordinator fixture and its behavior tests moved unchanged into
 `coordinator/tests.rs`, leaving `coordinator.rs` as a production-only facade.
+After that suite grew beyond 2,500 lines during the native-first cutover, its
+shared fake worker and fixture stayed in `coordinator/tests.rs`, while behavior
+cases moved without assertion changes into focused `tests/{workspace,context,
+decisions,events}.rs` children on 2026-09-07. The later schema-v6 slice added
+`tests/operations.rs` for dispatch/idempotency behavior without regrowing the
+shared fixture.
 The first Store slice also completed on 2026-09-06: schema creation and the
 v1-to-v2 migration live in `store/migrations.rs`, while stable select lists and
 all SQLite-row-to-domain decoding live in `store/rows.rs`. Transactional write
 operations were then separated into `store/workspaces.rs` and `store/events.rs`
-without weakening their atomic boundaries: workspace/turn operations pass their
-existing `Transaction` into the shared event insert helper. Cross-module Store
-tests live in `store/tests.rs`; `store.rs` is now the connection, repository,
-shared-type, filesystem-safety, and facade layer.
+without weakening their atomic boundaries. Schema v6 adds
+`store/operations.rs` as the narrow durable turn-start intent/dispatch/result
+state machine; schema v7 extends workspace rows with the typed worktree mode.
+Legacy turn helpers remain test-only for migration coverage.
+Cross-module Store tests live in `store/tests.rs`; `store.rs` is now the
+connection, repository, shared-type, filesystem-safety, and facade layer.
 The Codex adapter split completed next: `codex/process.rs` owns child startup,
 initialization, stderr capture, and termination; `codex/jsonl.rs` owns framing,
 request correlation, and server-event dispatch; and `codex/websocket.rs` owns
@@ -276,19 +291,27 @@ client state and close contract remain in the roughly 240-line `codex.rs`
 facade, while its unchanged transport tests live in `codex/tests.rs`.
 The Git adapter followed on 2026-09-06. `git/command.rs` is now the only place
 that spawns Git and bounds stdout/stderr; repository identity, worktree
-lifecycle, and diff/observation policy live in their corresponding child
-modules. `git.rs` retains the error and public data types plus adapter
-construction, and the unchanged native-Git fixture lives in `git/tests.rs`.
+lifecycle, explicit local-state carry, and diff/observation policy live in
+their corresponding child modules. `git.rs` retains the error and shared data
+types plus adapter construction. Worktree-mode and local-state cases now live
+under focused `git/tests/` children while the shared native-Git fixture
+remains in `git/tests.rs`.
 The final physical split completed with the CLI: the facade now only parses
 and delegates, while Clap arguments, typed command execution, the status
 follow-loop, authenticated TUI jump, output rendering, and tests have focused
-child modules. The original `cli::run` size finding is gone. A final cleanup
+child modules. The later terminal-input slice keeps reusable TTY detection,
+raw-mode restoration, picker state, and line-input behavior in
+`cli/prompt.rs`; commands and native-decision presentation depend on that one
+adapter instead of implementing separate input loops. The original `cli::run`
+size finding is gone. A final cleanup
 extracted shared App Server process startup, prepared-workspace persistence, and
 terminal-turn projection, removing every production `too_many_lines` finding.
 Both `too_many_lines` and the separately reviewed `excessive_nesting` lint are
-now denied package-wide. The single end-to-end process scenario has a local,
-reasoned size exception; the oversized protocol test was split by assertion
-responsibility instead.
+now denied package-wide. The process harness later grew beyond 2,000 lines and
+was split into lifecycle/fork scenarios, fake-App-Server behavior, and process
+support; the long lifecycle scenario retains one local, reasoned function-size
+exception. The oversized protocol test was split by assertion responsibility
+instead.
 
 Extract coherent child modules in this order:
 

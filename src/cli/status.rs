@@ -10,6 +10,12 @@ use crate::rpc::RpcClient;
 
 use super::output::{phase_label, print_decision_hints};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum FollowAction {
+    Continue,
+    Finish,
+}
+
 pub(super) async fn follow_status(
     client: &RpcClient,
     scope: RepositoryScope,
@@ -39,13 +45,24 @@ pub(super) async fn follow_status(
             }
         }
         after_sequence = response.next_sequence;
+        let stop_state_is_stable = is_stop_state_stable(
+            response.workspace.phase.as_str(),
+            !response.open_decisions.is_empty(),
+            last_phase.as_deref(),
+        );
+
         let phase = response.workspace.phase.as_str();
         let name = response.workspace.name.as_str();
         if !interactive && last_phase.as_deref() != Some(phase) {
             println!("{name}: {}", phase_label(phase));
         }
         last_phase = Some(phase.to_owned());
-        if follow_stops_at(phase) || !response.open_decisions.is_empty() {
+        if next_follow_action(
+            phase,
+            !response.open_decisions.is_empty(),
+            stop_state_is_stable,
+        ) == FollowAction::Finish
+        {
             if interactive {
                 clear_status_line()?;
                 println!("{name}: {}", phase_label(phase));
@@ -83,6 +100,34 @@ pub(super) async fn follow_status(
             }
         }
     }
+}
+
+pub(super) fn next_follow_action(
+    phase: &str,
+    has_open_decisions: bool,
+    stop_state_is_stable: bool,
+) -> FollowAction {
+    if has_open_decisions {
+        FollowAction::Finish
+    } else if !follow_stops_at(phase) {
+        FollowAction::Continue
+    } else if stop_state_is_stable {
+        FollowAction::Finish
+    } else {
+        // Native status may reach thread/read before the matching completion
+        // notification or server request reaches cocod's event projection.
+        // One stable poll keeps presentation and the current compatibility
+        // event stream aligned without loading the complete native history.
+        FollowAction::Continue
+    }
+}
+
+fn is_stop_state_stable(
+    phase: &str,
+    has_open_decisions: bool,
+    previous_phase: Option<&str>,
+) -> bool {
+    has_open_decisions || previous_phase == Some(phase)
 }
 
 fn clear_status_line() -> Result<()> {
