@@ -10,6 +10,7 @@ use super::worktree::validate_workspace_name;
 use super::{Git, GitError, WorktreeTarget};
 
 mod local_state;
+mod retirement;
 mod worktree_modes;
 
 struct Fixture {

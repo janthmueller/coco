@@ -41,7 +41,7 @@ fn list_and_ls_are_visible_aliases_for_every_collection() {
         "the old models spelling must not compete with model list in help"
     );
 
-    for group in ["repo", "model"] {
+    for group in ["repo", "model", "signal"] {
         let list = command
             .find_subcommand(group)
             .unwrap_or_else(|| panic!("{group} subcommand must exist"))
@@ -93,7 +93,16 @@ fn help_assigns_all_repos_to_overviews_and_global_to_single_targets() {
         .to_string();
     assert!(list_help.contains("--all-repos"));
 
-    for name in ["status", "send", "jump", "diff"] {
+    let mut command = Cli::command();
+    let status_help = command
+        .find_subcommand_mut("status")
+        .expect("status subcommand must exist")
+        .render_long_help()
+        .to_string();
+    assert!(status_help.contains("--all-repos"));
+    assert!(status_help.contains("--global"));
+
+    for name in ["send", "jump", "diff", "close", "reopen", "delete"] {
         let mut command = Cli::command();
         let help = command
             .find_subcommand_mut(name)
@@ -134,6 +143,12 @@ fn parses_repository_overviews_and_global_workspace_searches_separately() {
         assert!(!parsed.requests_global_search());
     }
 
+    for arguments in [["coco", "-a", "status"], ["coco", "status", "-a"]] {
+        let parsed = Cli::try_parse_from(arguments).unwrap();
+        assert!(parsed.requests_all_repositories());
+        assert!(!parsed.requests_global_search());
+    }
+
     for arguments in [
         vec!["coco", "-g", "status"],
         vec!["coco", "status", "-g"],
@@ -151,6 +166,9 @@ fn parses_repository_overviews_and_global_workspace_searches_separately() {
         vec!["coco", "send", "-g"],
         vec!["coco", "-g", "send", "feat/login", "continue"],
         vec!["coco", "send", "feat/login", "continue", "-g"],
+        vec!["coco", "close", "feat/login", "-g"],
+        vec!["coco", "reopen", "feat/login", "-g"],
+        vec!["coco", "delete", "feat/login", "-g"],
     ] {
         let parsed = Cli::try_parse_from(arguments).unwrap();
         assert!(!parsed.requests_all_repositories());
@@ -159,11 +177,14 @@ fn parses_repository_overviews_and_global_workspace_searches_separately() {
 }
 
 #[test]
-fn status_supports_interactive_selection_details_and_single_workspace_following() {
+fn status_supports_collection_overviews_and_explicit_workspace_details() {
     for arguments in [
         vec!["coco", "status"],
         vec!["coco", "status", "--json"],
         vec!["coco", "status", "--follow"],
+        vec!["coco", "status", "-a"],
+        vec!["coco", "status", "-a", "--json"],
+        vec!["coco", "status", "-a", "--follow"],
         vec!["coco", "status", "-g"],
         vec!["coco", "status", "auth"],
         vec!["coco", "status", "auth", "--json"],
@@ -177,7 +198,6 @@ fn status_supports_interactive_selection_details_and_single_workspace_following(
     }
 
     for arguments in [
-        vec!["coco", "status", "-a"],
         vec!["coco", "status", "auth", "-a"],
         vec!["coco", "status", "auth", "--follow", "--json"],
     ] {
@@ -196,6 +216,9 @@ fn incompatible_repository_scopes_are_rejected_before_rpc() {
         vec!["coco", "--global", "../other", "status", "auth"],
         vec!["coco", "../other", "status", "auth", "-g"],
         vec!["coco", "-a", "-g", "status", "auth"],
+        vec!["coco", "../other", "signal", "list", "-a"],
+        vec!["coco", "../other", "signal", "list", "auth", "-g"],
+        vec!["coco", "-a", "-g", "signal", "list", "auth"],
     ] {
         let parsed = Cli::try_parse_from(arguments).unwrap();
         assert!(
@@ -218,7 +241,9 @@ fn collection_and_reference_flags_do_not_parse_on_the_wrong_commands() {
         vec!["coco", "send", "auth", "continue", "-a"],
         vec!["coco", "jump", "auth", "-a"],
         vec!["coco", "diff", "auth", "-a"],
-        vec!["coco", "status", "-a"],
+        vec!["coco", "close", "auth", "-a"],
+        vec!["coco", "reopen", "auth", "-a"],
+        vec!["coco", "delete", "auth", "-a"],
         vec!["coco", "list", "-g"],
         vec!["coco", "repo", "list", "-g"],
         vec!["coco", "model", "list", "-g"],
@@ -241,10 +266,13 @@ async fn leading_scope_flags_are_rejected_by_incompatible_commands() {
         vec!["coco", "-a", "create", "auth"],
         vec!["coco", "-a", "send", "auth", "continue"],
         vec!["coco", "-a", "status", "auth"],
+        vec!["coco", "-g", "status"],
         vec!["coco", "-g", "list"],
         vec!["coco", "-g", "repo", "list"],
         vec!["coco", "-g", "model", "list"],
         vec!["coco", "-g", "create", "auth"],
+        vec!["coco", "-a", "signal", "list", "auth"],
+        vec!["coco", "-g", "signal", "list"],
     ] {
         let cli = Cli::try_parse_from(&arguments).unwrap();
         let error = super::super::commands::run(cli)

@@ -7,21 +7,31 @@ use crate::paths::CocoPaths;
 use crate::protocol::{
     ModelListParams, RepositoryListParams, RepositoryRegisterParams, RepositoryResolveParams,
     RepositoryScope, RepositorySummary, TurnStartParams, WorkspaceAttachParams,
-    WorkspaceBaseRequest, WorkspaceChangesRequest, WorkspaceContextRequest, WorkspaceContextSource,
-    WorkspaceCreateParams, WorkspaceDiffParams, WorkspaceGetParams, WorkspaceListItem,
-    WorkspaceListParams, WorkspaceResult, WorkspaceWorktreeRequest,
+    WorkspaceBaseRequest, WorkspaceChangesRequest, WorkspaceCloseParams, WorkspaceContextRequest,
+    WorkspaceContextSource, WorkspaceCreateParams, WorkspaceDeleteParams, WorkspaceDiffParams,
+    WorkspaceGetParams, WorkspaceListItem, WorkspaceListParams, WorkspaceReopenParams,
+    WorkspaceResult, WorkspaceWorktreeRequest,
 };
 use crate::rpc::{RpcClient, RpcClientError};
 
-use super::args::{Cli, Command, CreateArgs, McpCommand, ModelCommand, RepoCommand, StatusArgs};
+use super::args::{
+    Cli, CloseArgs, Command, CreateArgs, DeleteArgs, McpCommand, ModelCommand, RepoCommand,
+    StatusArgs,
+};
 use super::decision::decide;
 use super::jump::jump;
 use super::output::{
-    print_diff, print_human, print_json, print_model_list, print_repository_list, print_status,
-    print_workspace_list, versioned, versioned_array,
+    print_diff, print_json, print_model_list, print_repository_list, print_repository_registered,
+    print_retirement_plan, print_status, print_turn_started, print_workspace_closed,
+    print_workspace_created, print_workspace_deleted, print_workspace_list,
+    print_workspace_reopened, versioned, versioned_array,
 };
 use super::prompt::{Choice, Interaction, TerminalInteraction};
-use super::status::follow_status;
+use super::status::{follow_status, follow_status_collection};
+
+#[cfg(test)]
+mod retirement_tests;
+use super::turn::wait_for_turn;
 
 pub(super) async fn run(cli: Cli) -> Result<()> {
     let mut interaction = TerminalInteraction::detect(cli.no_input);
@@ -44,6 +54,9 @@ async fn run_with_interaction(cli: Cli, interaction: &mut dyn Interaction) -> Re
     let repository_path = resolve_repository_path(&cwd, scope_path);
 
     match command {
+        Command::Signal { command } => {
+            super::signals::run(command, &paths, repository_path, all_repos, global).await
+        }
         Command::Mcp { command } => {
             reject_top_level_scope(has_explicit_scope, "mcp")?;
             run_mcp(command, paths).await
@@ -71,19 +84,80 @@ async fn run_with_interaction(cli: Cli, interaction: &mut dyn Interaction) -> Re
             )
             .await
         }
-        Command::List { json, .. } => {
+        command @ (Command::Close(_)
+        | Command::Reopen(_)
+        | Command::Delete(_)
+        | Command::Send { .. }
+        | Command::Jump { .. }
+        | Command::Diff { .. }) => {
+            run_targeted_scoped(
+                command,
+                &paths,
+                &repository_path,
+                has_scope_path,
+                all_repos,
+                global,
+                interaction,
+            )
+            .await
+        }
+        Command::List { json, closed, .. } => {
             if global {
                 bail!("coco list accepts --all-repos for an overview, not --global");
             }
             let scope = overview_scope(RepositoryScope::repository(repository_path), all_repos);
-            list_workspaces(&paths, scope, json).await
+            list_workspaces(&paths, scope, json, closed).await
         }
-        Command::Status(args) => {
-            reject_all_repos_for_reference(all_repos, "status")?;
-            run_status(
-                &paths,
+        Command::Status(args) => run_status(&paths, repository_path, args, all_repos, global).await,
+        Command::Decide { decision, choice } => {
+            reject_top_level_scope(has_explicit_scope, "decide")?;
+            decide(&paths, decision, choice, interaction).await
+        }
+    }
+}
+
+async fn run_targeted_scoped(
+    command: Command,
+    paths: &CocoPaths,
+    repository_path: &Path,
+    has_scope_path: bool,
+    all_repos: bool,
+    global: bool,
+    interaction: &mut dyn Interaction,
+) -> Result<()> {
+    match command {
+        Command::Close(args) => {
+            run_close_scoped(
+                paths,
+                repository_path,
+                has_scope_path,
+                all_repos,
+                global,
                 args,
-                workspace_selection(&repository_path, has_scope_path, None, global),
+                interaction,
+            )
+            .await
+        }
+        Command::Reopen(args) => {
+            run_reopen_scoped(
+                paths,
+                repository_path,
+                has_scope_path,
+                all_repos,
+                global,
+                args,
+                interaction,
+            )
+            .await
+        }
+        Command::Delete(args) => {
+            run_delete_scoped(
+                paths,
+                repository_path,
+                has_scope_path,
+                all_repos,
+                global,
+                args,
                 interaction,
             )
             .await
@@ -92,41 +166,150 @@ async fn run_with_interaction(cli: Cli, interaction: &mut dyn Interaction) -> Re
             workspace,
             message,
             operation_id,
+            wait,
             ..
         } => {
-            reject_all_repos_for_reference(all_repos, "send")?;
-            run_send(
-                &paths,
-                workspace_selection(&repository_path, has_scope_path, workspace, global),
+            run_send_scoped(
+                paths,
+                repository_path,
+                has_scope_path,
+                all_repos,
+                global,
+                workspace,
                 message,
                 operation_id,
+                wait,
                 interaction,
             )
             .await
         }
         Command::Jump { workspace, .. } => {
-            reject_all_repos_for_reference(all_repos, "jump")?;
-            run_jump(
-                &paths,
-                workspace_selection(&repository_path, has_scope_path, workspace, global),
+            run_jump_scoped(
+                paths,
+                repository_path,
+                has_scope_path,
+                all_repos,
+                global,
+                workspace,
                 interaction,
             )
             .await
-        }
-        Command::Decide { decision, choice } => {
-            reject_top_level_scope(has_explicit_scope, "decide")?;
-            decide(&paths, decision, choice, interaction).await
         }
         Command::Diff { workspace, .. } => {
-            reject_all_repos_for_reference(all_repos, "diff")?;
-            run_diff(
-                &paths,
-                workspace_selection(&repository_path, has_scope_path, workspace, global),
+            run_diff_scoped(
+                paths,
+                repository_path,
+                has_scope_path,
+                all_repos,
+                global,
+                workspace,
                 interaction,
             )
             .await
         }
+        _ => unreachable!("non-targeted command routed to targeted dispatcher"),
     }
+}
+
+async fn run_close_scoped(
+    paths: &CocoPaths,
+    repository_path: &Path,
+    has_scope_path: bool,
+    all_repos: bool,
+    global: bool,
+    args: CloseArgs,
+    interaction: &mut dyn Interaction,
+) -> Result<()> {
+    reject_all_repos_for_reference(all_repos, "close")?;
+    let selection = workspace_selection(
+        repository_path,
+        has_scope_path,
+        args.workspace.clone(),
+        global,
+    );
+    run_close(paths, selection, args, interaction).await
+}
+
+async fn run_reopen_scoped(
+    paths: &CocoPaths,
+    repository_path: &Path,
+    has_scope_path: bool,
+    all_repos: bool,
+    global: bool,
+    args: super::args::ReopenArgs,
+    interaction: &mut dyn Interaction,
+) -> Result<()> {
+    reject_all_repos_for_reference(all_repos, "reopen")?;
+    let selection = workspace_selection(repository_path, has_scope_path, args.workspace, global);
+    run_reopen(paths, selection, interaction).await
+}
+
+async fn run_delete_scoped(
+    paths: &CocoPaths,
+    repository_path: &Path,
+    has_scope_path: bool,
+    all_repos: bool,
+    global: bool,
+    args: DeleteArgs,
+    interaction: &mut dyn Interaction,
+) -> Result<()> {
+    reject_all_repos_for_reference(all_repos, "delete")?;
+    let selection = workspace_selection(
+        repository_path,
+        has_scope_path,
+        args.workspace.clone(),
+        global,
+    );
+    run_delete(paths, selection, args, interaction).await
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the scoped send adapter keeps each independent CLI input explicit"
+)]
+async fn run_send_scoped(
+    paths: &CocoPaths,
+    repository_path: &Path,
+    has_scope_path: bool,
+    all_repos: bool,
+    global: bool,
+    workspace: Option<String>,
+    message: Option<String>,
+    operation_id: Option<String>,
+    wait: bool,
+    interaction: &mut dyn Interaction,
+) -> Result<()> {
+    reject_all_repos_for_reference(all_repos, "send")?;
+    let selection = workspace_selection(repository_path, has_scope_path, workspace, global);
+    run_send(paths, selection, message, operation_id, wait, interaction).await
+}
+
+async fn run_jump_scoped(
+    paths: &CocoPaths,
+    repository_path: &Path,
+    has_scope_path: bool,
+    all_repos: bool,
+    global: bool,
+    workspace: Option<String>,
+    interaction: &mut dyn Interaction,
+) -> Result<()> {
+    reject_all_repos_for_reference(all_repos, "jump")?;
+    let selection = workspace_selection(repository_path, has_scope_path, workspace, global);
+    run_jump(paths, selection, interaction).await
+}
+
+async fn run_diff_scoped(
+    paths: &CocoPaths,
+    repository_path: &Path,
+    has_scope_path: bool,
+    all_repos: bool,
+    global: bool,
+    workspace: Option<String>,
+    interaction: &mut dyn Interaction,
+) -> Result<()> {
+    reject_all_repos_for_reference(all_repos, "diff")?;
+    let selection = workspace_selection(repository_path, has_scope_path, workspace, global);
+    run_diff(paths, selection, interaction).await
 }
 
 async fn run_model(command: ModelCommand, paths: &CocoPaths) -> Result<()> {
@@ -158,9 +341,8 @@ async fn list_models(paths: &CocoPaths, json_output: bool) -> Result<()> {
     let models = RpcClient::new(paths.socket_path.clone())
         .request(ModelListParams {})
         .await?;
-    let models = serde_json::to_value(models)?;
     if json_output {
-        print_json(versioned_array("models", models))
+        print_json(versioned_array("models", serde_json::to_value(models)?))
     } else {
         print_model_list(&models);
         Ok(())
@@ -199,7 +381,7 @@ fn reject_top_level_scope(has_explicit_scope: bool, command: &str) -> Result<()>
     Ok(())
 }
 
-fn overview_scope(scope: RepositoryScope, all_repos: bool) -> RepositoryScope {
+pub(super) fn overview_scope(scope: RepositoryScope, all_repos: bool) -> RepositoryScope {
     if all_repos {
         RepositoryScope::AllRepositories
     } else {
@@ -207,7 +389,11 @@ fn overview_scope(scope: RepositoryScope, all_repos: bool) -> RepositoryScope {
     }
 }
 
-fn scope_for_reference(scope: RepositoryScope, reference: &str, global: bool) -> RepositoryScope {
+pub(super) fn scope_for_reference(
+    scope: RepositoryScope,
+    reference: &str,
+    global: bool,
+) -> RepositoryScope {
     if global || Uuid::parse_str(reference).is_ok() {
         RepositoryScope::AllRepositories
     } else {
@@ -215,7 +401,7 @@ fn scope_for_reference(scope: RepositoryScope, reference: &str, global: bool) ->
     }
 }
 
-fn reject_all_repos_for_reference(all_repos: bool, command: &str) -> Result<()> {
+pub(super) fn reject_all_repos_for_reference(all_repos: bool, command: &str) -> Result<()> {
     if all_repos {
         bail!(
             "coco {command} targets one workspace; use --global to resolve its name across repositories"
@@ -315,6 +501,16 @@ async fn resolve_workspace_input(
     title: &str,
     interaction: &mut dyn Interaction,
 ) -> Result<ResolvedWorkspaceTarget> {
+    resolve_workspace_input_with_phases(paths, selection, title, None, interaction).await
+}
+
+async fn resolve_workspace_input_with_phases(
+    paths: &CocoPaths,
+    selection: WorkspaceSelection,
+    title: &str,
+    phases: Option<Vec<String>>,
+    interaction: &mut dyn Interaction,
+) -> Result<ResolvedWorkspaceTarget> {
     let WorkspaceSelection {
         repository_scope,
         has_explicit_path,
@@ -340,10 +536,7 @@ async fn resolve_workspace_input(
         )
     };
     let workspaces = client
-        .request(WorkspaceListParams {
-            scope,
-            phases: None,
-        })
+        .request(WorkspaceListParams { scope, phases })
         .await?;
     if workspaces.is_empty() {
         let scope_hint = if global {
@@ -353,7 +546,10 @@ async fn resolve_workspace_input(
         };
         bail!("no workspaces are available {scope_hint}; create one with `coco create <NAME>`");
     }
-    let choices = workspaces.iter().map(workspace_choice).collect::<Vec<_>>();
+    let choices = workspaces
+        .iter()
+        .map(|workspace| workspace_choice(workspace, global))
+        .collect::<Vec<_>>();
     let selected = interaction.select(title, &choices)?;
     Ok(ResolvedWorkspaceTarget {
         scope: RepositoryScope::AllRepositories,
@@ -361,16 +557,15 @@ async fn resolve_workspace_input(
     })
 }
 
-fn workspace_choice(item: &WorkspaceListItem) -> Choice {
+fn workspace_choice(item: &WorkspaceListItem, include_repository: bool) -> Choice {
     let branch = item.workspace.branch_name.as_deref().unwrap_or("detached");
-    Choice::new(
-        item.workspace.name.clone(),
-        Some(format!(
-            "{} | {} | {branch}",
-            item.repository.root_path.display(),
-            super::output::phase_label(item.workspace.phase.as_str()),
-        )),
-    )
+    let mut detail = Vec::with_capacity(3);
+    if include_repository {
+        detail.push(item.repository.root_path.display().to_string());
+    }
+    detail.push(super::output::phase_label(item.workspace.phase.as_str()).to_owned());
+    detail.push(branch.to_owned());
+    Choice::new(item.workspace.name.clone(), Some(detail.join(" · ")))
 }
 
 fn require_interactive(interaction: &dyn Interaction, field: &str) -> Result<()> {
@@ -400,8 +595,17 @@ async fn run_mcp(command: McpCommand, paths: CocoPaths) -> Result<()> {
     let McpCommand::Serve {
         repository,
         allow_send,
+        allowed_signals,
+        signal_catalog,
     } = command;
-    crate::mcp::serve(repository, allow_send, paths.socket_path).await
+    crate::mcp::serve(
+        repository,
+        allow_send,
+        paths.socket_path,
+        allowed_signals,
+        signal_catalog,
+    )
+    .await
 }
 
 async fn run_repo(command: RepoCommand, paths: &CocoPaths, cwd: &Path) -> Result<()> {
@@ -410,14 +614,16 @@ async fn run_repo(command: RepoCommand, paths: &CocoPaths, cwd: &Path) -> Result
         RepoCommand::Add { path } => {
             let path = resolve_repository_path(cwd, Some(path));
             let result = client.request(RepositoryRegisterParams { path }).await?;
-            print_human(&serde_json::to_value(&result)?);
+            print_repository_registered(&result);
             Ok(())
         }
         RepoCommand::List { json } => {
             let result = client.request(RepositoryListParams {}).await?;
-            let result = serde_json::to_value(result)?;
             if json {
-                print_json(versioned_array("repositories", result))
+                print_json(versioned_array(
+                    "repositories",
+                    serde_json::to_value(result)?,
+                ))
             } else {
                 print_repository_list(&result);
                 Ok(())
@@ -459,7 +665,7 @@ async fn create_workspace(
             format!("workspace {name:?} was created, but its initial message was not accepted")
         })?;
     }
-    print_human(&serde_json::to_value(&result)?);
+    print_workspace_created(&result);
     if should_jump {
         attach_and_jump(
             paths,
@@ -490,10 +696,9 @@ pub(super) fn normalize_create_args(
         name,
         base,
         base_workspace,
-        context_workspace,
-        context_thread,
+        context,
         fork_from,
-        compact,
+        compact_context,
         branch,
         checkout,
         detached,
@@ -513,7 +718,7 @@ pub(super) fn normalize_create_args(
             },
             WorkspaceContextRequest::Fork {
                 source: WorkspaceContextSource::Workspace { workspace: source },
-                compact,
+                compact: compact_context,
             },
         )
     } else {
@@ -523,16 +728,13 @@ pub(super) fn normalize_create_args(
                 revision: base.unwrap_or_else(|| "HEAD".to_owned()),
             },
         };
-        let source = match (context_workspace, context_thread) {
-            (Some(workspace), None) => Some(WorkspaceContextSource::Workspace { workspace }),
-            (None, Some(thread_id)) => Some(WorkspaceContextSource::Thread { thread_id }),
-            (None, None) => None,
-            (Some(_), Some(_)) => unreachable!("clap rejects conflicting context sources"),
-        };
-        let context = match source {
-            Some(source) => WorkspaceContextRequest::Fork { source, compact },
-            None if compact => {
-                bail!("--compact requires --context-workspace, --context-thread, or --fork-from")
+        let context = match context {
+            Some(reference) => WorkspaceContextRequest::Fork {
+                source: WorkspaceContextSource::Reference { reference },
+                compact: compact_context,
+            },
+            None if compact_context => {
+                bail!("--compact-context requires --context or --fork-from")
             }
             None => WorkspaceContextRequest::Fresh,
         };
@@ -575,17 +777,17 @@ async fn list_workspaces(
     paths: &CocoPaths,
     scope: RepositoryScope,
     json_output: bool,
+    closed: bool,
 ) -> Result<()> {
     let include_repository = matches!(scope, RepositoryScope::AllRepositories);
     let result = RpcClient::new(paths.socket_path.clone())
         .request(WorkspaceListParams {
             scope,
-            phases: None,
+            phases: closed.then(|| vec!["closed".to_owned()]),
         })
         .await?;
-    let result = serde_json::to_value(result)?;
     if json_output {
-        print_json(versioned_array("workspaces", result))
+        print_json(versioned_array("workspaces", serde_json::to_value(result)?))
     } else {
         print_workspace_list(&result, include_repository);
         Ok(())
@@ -594,29 +796,181 @@ async fn list_workspaces(
 
 async fn run_status(
     paths: &CocoPaths,
+    repository_path: PathBuf,
     args: StatusArgs,
-    mut selection: WorkspaceSelection,
+    all_repos: bool,
+    global: bool,
+) -> Result<()> {
+    let repository_scope = RepositoryScope::repository(repository_path);
+    if let Some(workspace) = args.workspace {
+        if all_repos {
+            bail!(
+                "coco status WORKSPACE targets one workspace; use --global to resolve its name across repositories"
+            );
+        }
+        let scope = scope_for_reference(repository_scope, &workspace, global);
+        return show_status(paths, scope, workspace, args.follow, args.json).await;
+    }
+    if global {
+        bail!(
+            "coco status --global requires a workspace name or ID; use --all-repos for an overview"
+        );
+    }
+    let scope = overview_scope(repository_scope, all_repos);
+    if args.follow {
+        follow_status_collection(&RpcClient::new(paths.socket_path.clone()), scope).await
+    } else {
+        list_workspaces(paths, scope, args.json, false).await
+    }
+}
+
+async fn run_close(
+    paths: &CocoPaths,
+    selection: WorkspaceSelection,
+    args: CloseArgs,
     interaction: &mut dyn Interaction,
 ) -> Result<()> {
-    if args.workspace.is_none() && args.json {
-        bail!("coco status --json requires a workspace; use `coco list --json` for an overview");
+    let target =
+        resolve_workspace_input(paths, selection, "Choose a workspace to close", interaction)
+            .await?;
+    let client = RpcClient::new(paths.socket_path.clone());
+    let mut discard_changes = args.discard_changes;
+    let mut preview = client
+        .request(WorkspaceCloseParams {
+            scope: target.scope.clone(),
+            workspace: target.workspace.clone(),
+            archive_thread: args.archive_thread,
+            discard_changes,
+            dry_run: true,
+            expected_plan: None,
+        })
+        .await?;
+    if args.dry_run {
+        print_retirement_plan("Close", &preview.plan);
+        return Ok(());
     }
-    selection.workspace = args.workspace;
-    let target = resolve_workspace_input(
+
+    if preview.plan.has_local_changes() && !discard_changes {
+        if args.yes || !interaction.is_interactive() {
+            print_retirement_plan("Close", &preview.plan);
+        }
+        if args.yes {
+            bail!(
+                "--yes does not discard local changes; add --discard-changes after reviewing them"
+            );
+        }
+        require_interactive(interaction, "confirmation")?;
+        discard_changes = true;
+        preview = client
+            .request(WorkspaceCloseParams {
+                scope: target.scope.clone(),
+                workspace: preview.plan.workspace_id.clone(),
+                archive_thread: args.archive_thread,
+                discard_changes,
+                dry_run: true,
+                expected_plan: None,
+            })
+            .await?;
+    }
+    if !preview.plan.blockers.is_empty() {
+        print_retirement_plan("Close", &preview.plan);
+        bail!("workspace cannot be closed while the listed blockers remain");
+    }
+    if discard_changes && preview.plan.has_local_changes() && !args.yes {
+        print_retirement_plan("Close", &preview.plan);
+        require_interactive(interaction, "confirmation")?;
+        if !interaction.confirm("Discard every listed local change and close this workspace?")? {
+            bail!("workspace close cancelled");
+        }
+    }
+    let result = client
+        .request(WorkspaceCloseParams {
+            scope: target.scope,
+            workspace: preview.plan.workspace_id.clone(),
+            archive_thread: args.archive_thread,
+            discard_changes,
+            dry_run: false,
+            expected_plan: Some(preview.plan),
+        })
+        .await?;
+    print_workspace_closed(&result);
+    Ok(())
+}
+
+async fn run_reopen(
+    paths: &CocoPaths,
+    selection: WorkspaceSelection,
+    interaction: &mut dyn Interaction,
+) -> Result<()> {
+    let target = resolve_workspace_input_with_phases(
         paths,
         selection,
-        "Choose a workspace for status",
+        "Choose a workspace to reopen",
+        Some(vec!["closed".to_owned()]),
         interaction,
     )
     .await?;
-    show_status(
+    let result = RpcClient::new(paths.socket_path.clone())
+        .request(WorkspaceReopenParams {
+            scope: target.scope,
+            workspace: target.workspace,
+        })
+        .await?;
+    print_workspace_reopened(&result);
+    Ok(())
+}
+
+async fn run_delete(
+    paths: &CocoPaths,
+    selection: WorkspaceSelection,
+    args: DeleteArgs,
+    interaction: &mut dyn Interaction,
+) -> Result<()> {
+    let target = resolve_workspace_input_with_phases(
         paths,
-        target.scope,
-        target.workspace,
-        args.follow,
-        args.json,
+        selection,
+        "Choose a closed workspace to delete",
+        Some(vec!["closed".to_owned()]),
+        interaction,
     )
-    .await
+    .await?;
+    let client = RpcClient::new(paths.socket_path.clone());
+    let preview = client
+        .request(WorkspaceDeleteParams {
+            scope: target.scope.clone(),
+            workspace: target.workspace.clone(),
+            delete_thread: args.delete_thread,
+            delete_branch: args.delete_branch,
+            dry_run: true,
+            expected_plan: None,
+        })
+        .await?;
+    if args.dry_run {
+        print_retirement_plan("Delete", &preview.plan);
+        return Ok(());
+    }
+    print_retirement_plan("Delete", &preview.plan);
+    if !preview.plan.blockers.is_empty() {
+        bail!("workspace cannot be deleted while the listed blockers remain");
+    }
+    if !args.yes {
+        require_interactive(interaction, "confirmation")?;
+        if !interaction.confirm("Permanently apply this deletion plan?")? {
+            bail!("workspace deletion cancelled");
+        }
+    }
+    let result = client
+        .request(WorkspaceDeleteParams {
+            scope: target.scope,
+            workspace: preview.plan.workspace_id.clone(),
+            delete_thread: args.delete_thread,
+            delete_branch: args.delete_branch,
+            dry_run: false,
+            expected_plan: Some(preview.plan),
+        })
+        .await?;
+    print_workspace_deleted(&result);
+    Ok(())
 }
 
 async fn run_send(
@@ -624,6 +978,7 @@ async fn run_send(
     selection: WorkspaceSelection,
     message: Option<String>,
     operation_id: Option<String>,
+    wait: bool,
     interaction: &mut dyn Interaction,
 ) -> Result<()> {
     let target = resolve_workspace_input(
@@ -634,7 +989,15 @@ async fn run_send(
     )
     .await?;
     let message = resolve_text_input(message, "message", "Message", interaction)?;
-    send(paths, target.scope, target.workspace, message, operation_id).await
+    send(
+        paths,
+        target.scope,
+        target.workspace,
+        message,
+        operation_id,
+        wait,
+    )
+    .await
 }
 
 async fn show_status(
@@ -651,9 +1014,8 @@ async fn show_status(
     let result = client
         .request(WorkspaceGetParams { scope, workspace })
         .await?;
-    let result = serde_json::to_value(result)?;
     if json_output {
-        print_json(versioned(result))
+        print_json(versioned(serde_json::to_value(result)?))
     } else {
         print_status(&result);
         Ok(())
@@ -666,17 +1028,24 @@ async fn send(
     workspace: String,
     message: String,
     operation_id: Option<String>,
+    wait: bool,
 ) -> Result<()> {
+    let client = RpcClient::new(paths.socket_path.clone());
+    let operation_id = operation_id.unwrap_or_else(|| Uuid::new_v4().to_string());
     let result = request_turn(
-        &RpcClient::new(paths.socket_path.clone()),
+        &client,
         scope,
         workspace,
         message,
-        operation_id,
+        Some(operation_id.clone()),
     )
     .await?;
-    print_human(&serde_json::to_value(result)?);
-    Ok(())
+    if wait {
+        wait_for_turn(&client, &operation_id).await
+    } else {
+        print_turn_started(&result);
+        Ok(())
+    }
 }
 
 async fn run_jump(
@@ -739,7 +1108,7 @@ async fn attach_and_jump(
     let result = client
         .request(WorkspaceAttachParams { scope, workspace })
         .await?;
-    jump(paths, &serde_json::to_value(result)?).await
+    jump(paths, client, result).await
 }
 
 async fn show_diff(paths: &CocoPaths, scope: RepositoryScope, workspace: String) -> Result<()> {
@@ -750,7 +1119,7 @@ async fn show_diff(paths: &CocoPaths, scope: RepositoryScope, workspace: String)
             max_bytes: None,
         })
         .await?;
-    print_diff(&serde_json::to_value(result)?);
+    print_diff(&result);
     Ok(())
 }
 

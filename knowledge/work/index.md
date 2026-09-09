@@ -43,4 +43,6 @@ it concise, factual, and useful to the next maintainer.
 
 ## Current records
 
+- [`feature/signals`](feature/signals.md) - Combined control-plane proof and
+  workspace-bound agent signal implementation.
 - [`main`](main.md) - Repository and documentation foundation.

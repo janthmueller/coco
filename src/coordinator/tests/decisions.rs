@@ -26,10 +26,12 @@ async fn normalizes_codex_events_and_allows_an_idempotent_follow_up_turn() {
         EventKind::MessageReceived,
         "Implement the requested behavior",
     );
+    assert_initial_turn_pending(&fixture);
 
     record_and_approve_command(&fixture, &workspace).await;
 
     complete_first_turn(&fixture);
+    assert_initial_turn_finished(&fixture, &workspace);
     let persisted = fixture
         .store
         .workspace_by_id(&workspace.id)
@@ -86,6 +88,38 @@ async fn normalizes_codex_events_and_allows_an_idempotent_follow_up_turn() {
         fixture.coordinator.start_turn(conflict).await,
         Err(CoordinatorError::IdempotencyConflict)
     ));
+}
+
+fn assert_initial_turn_pending(fixture: &Fixture) {
+    assert_eq!(
+        fixture
+            .coordinator
+            .turn_result(TurnResultParams {
+                operation_id: "send-operation-initial".to_owned(),
+            })
+            .unwrap(),
+        TurnResult::Pending {
+            codex_turn_id: Some("turn-1".to_owned()),
+        }
+    );
+}
+
+fn assert_initial_turn_finished(fixture: &Fixture, workspace: &Workspace) {
+    assert_eq!(
+        fixture
+            .coordinator
+            .turn_result(TurnResultParams {
+                operation_id: "send-operation-initial".to_owned(),
+            })
+            .unwrap(),
+        TurnResult::Finished {
+            codex_turn_id: "turn-1".to_owned(),
+            status: TurnTerminalStatus::Completed,
+            response: Some("Done".to_owned()),
+            response_truncated: false,
+        }
+    );
+    assert_workspace_events_exclude(fixture, workspace, EventKind::AgentMessageCompleted, "Done");
 }
 
 fn complete_first_turn(fixture: &Fixture) {

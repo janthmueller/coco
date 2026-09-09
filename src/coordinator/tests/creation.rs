@@ -16,6 +16,11 @@ async fn selects_the_git_base_independently_from_workspace_context() {
     fs::write(source_worktree.join("context-only.txt"), "source commit\n").unwrap();
     run_git(source_worktree, &["add", "context-only.txt"]);
     run_git(source_worktree, &["commit", "-m", "context-only commit"]);
+    let source = fixture
+        .coordinator
+        .materialize_workspace_thread(source)
+        .await
+        .unwrap();
     let main_head = git_output(&fixture.source, &["rev-parse", "main"]);
 
     let created = fixture
@@ -24,8 +29,8 @@ async fn selects_the_git_base_independently_from_workspace_context() {
             repository_path: fixture.source.clone(),
             name: "independent".to_owned(),
             context: WorkspaceContextRequest::Fork {
-                source: WorkspaceContextSource::Workspace {
-                    workspace: source.name.clone(),
+                source: WorkspaceContextSource::Reference {
+                    reference: source.name.clone(),
                 },
                 compact: false,
             },
@@ -46,7 +51,7 @@ async fn selects_the_git_base_independently_from_workspace_context() {
 
     let worktree = created.worktree_path.as_deref().unwrap();
     assert_eq!(created.base_sha.as_deref(), Some(main_head.as_str()));
-    assert_eq!(created.parent_thread_id, source.codex_thread_id);
+    assert!(created.parent_thread_id.is_none());
     assert_eq!(git_output(worktree, &["rev-parse", "HEAD"]), main_head);
     assert!(!worktree.join("context-only.txt").exists());
     assert_eq!(
@@ -57,6 +62,12 @@ async fn selects_the_git_base_independently_from_workspace_context() {
         created.context["resolved"]["context"]["source"]["workspaceId"],
         source.id
     );
+    let materialized = fixture
+        .coordinator
+        .materialize_workspace_thread(created)
+        .await
+        .unwrap();
+    assert_eq!(materialized.parent_thread_id, source.codex_thread_id);
 }
 
 #[tokio::test]
@@ -76,8 +87,76 @@ async fn forks_context_from_an_exact_native_thread_id_without_a_coco_workspace()
     params.name = "from-native-thread".to_owned();
     params.operation_id = "create-from-native-thread".to_owned();
     params.context = WorkspaceContextRequest::Fork {
-        source: WorkspaceContextSource::Thread {
-            thread_id: "native-thread-id".to_owned(),
+        source: WorkspaceContextSource::Reference {
+            reference: "native-thread-id".to_owned(),
+        },
+        compact: false,
+    };
+
+    let created = fixture
+        .coordinator
+        .create_workspace(params)
+        .await
+        .unwrap()
+        .workspace;
+
+    assert!(created.parent_thread_id.is_none());
+    assert_eq!(
+        created.context["resolved"]["context"]["source"],
+        json!({
+            "kind": "thread",
+            "threadId": "native-thread-id",
+            "cwd": native_cwd,
+        })
+    );
+    assert!(matches!(
+        fixture.worker.calls().as_slice(),
+        [WorkerCall::Read { thread_id }] if thread_id == "native-thread-id"
+    ));
+    let materialized = fixture
+        .coordinator
+        .materialize_workspace_thread(created)
+        .await
+        .unwrap();
+    assert_eq!(
+        materialized.parent_thread_id.as_deref(),
+        Some("native-thread-id")
+    );
+    assert!(matches!(
+        fixture.worker.calls().as_slice(),
+        [
+            WorkerCall::Read { thread_id: first },
+            WorkerCall::Read { thread_id: second },
+            WorkerCall::Fork { source_thread_id, .. },
+        ] if first == "native-thread-id"
+            && second == "native-thread-id"
+            && source_thread_id == "native-thread-id"
+    ));
+}
+
+#[tokio::test]
+async fn explicit_context_prefixes_disambiguate_a_workspace_shaped_thread_id() {
+    let fixture = Fixture::new(FakeWorker::default());
+    fixture.register().await;
+    let mut source_params = fixture.create_params();
+    source_params.name = "shared-reference".to_owned();
+    let source = fixture.create_and_materialize(source_params).await;
+
+    let native_cwd = fixture._temp.path().join("explicit-native-thread");
+    fs::create_dir(&native_cwd).unwrap();
+    fixture.worker.remember_native_thread(NativeThread {
+        id: source.name.clone(),
+        cwd: native_cwd.clone(),
+        name: Some("external".to_owned()),
+        status: CodexThreadStatus::NotLoaded,
+        forked_from_id: None,
+    });
+    let mut params = fixture.create_params();
+    params.name = "forced-native-context".to_owned();
+    params.operation_id = "create-forced-native-context".to_owned();
+    params.context = WorkspaceContextRequest::Fork {
+        source: WorkspaceContextSource::Reference {
+            reference: format!("thread:{}", source.name),
         },
         compact: false,
     };
@@ -90,23 +169,66 @@ async fn forks_context_from_an_exact_native_thread_id_without_a_coco_workspace()
         .workspace;
 
     assert_eq!(
-        created.parent_thread_id.as_deref(),
-        Some("native-thread-id")
-    );
-    assert_eq!(
         created.context["resolved"]["context"]["source"],
         json!({
             "kind": "thread",
-            "threadId": "native-thread-id",
+            "threadId": "shared-reference",
             "cwd": native_cwd,
         })
     );
+
+    let mut params = fixture.create_params();
+    params.name = "forced-workspace-context".to_owned();
+    params.operation_id = "create-forced-workspace-context".to_owned();
+    params.context = WorkspaceContextRequest::Fork {
+        source: WorkspaceContextSource::Reference {
+            reference: format!("workspace:{}", source.name),
+        },
+        compact: false,
+    };
+
+    let created = fixture
+        .coordinator
+        .create_workspace(params)
+        .await
+        .unwrap()
+        .workspace;
+    assert_eq!(
+        created.context["resolved"]["context"]["source"],
+        json!({
+            "kind": "workspace",
+            "requestedReference": source.name,
+            "workspaceId": source.id,
+            "workspaceName": "shared-reference",
+            "threadId": source.codex_thread_id,
+            "cwd": source.worktree_path,
+        })
+    );
+}
+
+#[tokio::test]
+async fn reports_when_an_automatic_context_reference_matches_neither_kind() {
+    let fixture = Fixture::new(FakeWorker::default());
+    fixture.register().await;
+    let mut params = fixture.create_params();
+    params.context = WorkspaceContextRequest::Fork {
+        source: WorkspaceContextSource::Reference {
+            reference: "missing-context".to_owned(),
+        },
+        compact: false,
+    };
+
+    let error = fixture
+        .coordinator
+        .create_workspace(params)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), "CONTEXT_REFERENCE_UNRESOLVED");
     assert!(matches!(
-        fixture.worker.calls().as_slice(),
-        [
-            WorkerCall::Read { thread_id },
-            WorkerCall::Fork { source_thread_id, .. },
-        ] if thread_id == "native-thread-id" && source_thread_id == "native-thread-id"
+        error,
+        CoordinatorError::ContextReferenceUnresolved { reference, source }
+            if reference == "missing-context"
+                && matches!(source, WorkerError::InvalidThreadRead(_))
     ));
 }
 

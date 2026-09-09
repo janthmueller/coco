@@ -3,10 +3,11 @@ use serde_json::json;
 use super::*;
 use crate::domain::{
     CodexThreadStatus, DecisionApprovalPrompt, DecisionKind, DecisionOption, DecisionPrompt,
-    DecisionState, Turn, Workspace, WorkspaceLifecycle, WorkspacePhase, WorkspaceWaitReason,
+    DecisionState, Turn, Workspace, WorkspaceAvailability, WorkspaceLifecycle, WorkspacePhase,
+    WorkspaceWaitReason,
 };
 
-fn repository(root: &Path) -> Repository {
+pub(super) fn repository(root: &Path) -> Repository {
     Repository {
         id: "repo-test".to_owned(),
         root_path: root.to_owned(),
@@ -16,6 +17,95 @@ fn repository(root: &Path) -> Repository {
         created_at_ms: 1,
         updated_at_ms: 1,
     }
+}
+
+#[test]
+fn workspace_availability_transitions_and_record_deletion_are_atomic() {
+    let store = Store::in_memory().unwrap();
+    let repo = repository(Path::new("/tmp/source-retirement"));
+    store.register_repository(&repo).unwrap();
+    let workspace = ready_workspace(&store, &repo.id, "retirement");
+    assert_eq!(workspace.availability, WorkspaceAvailability::Open);
+    assert!(!workspace.thread_archived);
+
+    let workspace = store
+        .begin_workspace_close(&workspace.id, "0123456789abcdef", true)
+        .unwrap();
+    assert_eq!(workspace.phase, WorkspacePhase::Closing);
+    assert_eq!(
+        workspace.closed_head_sha.as_deref(),
+        Some("0123456789abcdef")
+    );
+    assert!(workspace.thread_archived);
+    let workspace = store
+        .transition_workspace_availability(
+            &workspace.id,
+            WorkspaceAvailability::Closing,
+            WorkspaceAvailability::Closed,
+            None,
+        )
+        .unwrap();
+    assert_eq!(workspace.phase, WorkspacePhase::Closed);
+    assert!(workspace.closed_at_ms.is_some());
+
+    let workspace = store
+        .transition_workspace_availability(
+            &workspace.id,
+            WorkspaceAvailability::Closed,
+            WorkspaceAvailability::Reopening,
+            None,
+        )
+        .unwrap();
+    assert!(workspace.thread_archived);
+    let workspace = store
+        .transition_workspace_availability(
+            &workspace.id,
+            WorkspaceAvailability::Reopening,
+            WorkspaceAvailability::Open,
+            None,
+        )
+        .unwrap();
+    assert_eq!(workspace.availability, WorkspaceAvailability::Open);
+    assert!(!workspace.thread_archived);
+    assert!(workspace.closed_head_sha.is_none());
+    assert!(workspace.closed_at_ms.is_none());
+
+    let workspace = store
+        .begin_workspace_close(&workspace.id, "0123456789abcdef", false)
+        .unwrap();
+    let workspace = store
+        .transition_workspace_availability(
+            &workspace.id,
+            WorkspaceAvailability::Closing,
+            WorkspaceAvailability::Closed,
+            None,
+        )
+        .unwrap();
+
+    let workspace = store
+        .begin_workspace_deletion(
+            &workspace.id,
+            WorkspaceDeletionIntent {
+                delete_thread: true,
+                delete_branch: true,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        store.workspace_deletion_intent(&workspace.id).unwrap(),
+        WorkspaceDeletionIntent {
+            delete_thread: true,
+            delete_branch: true,
+        }
+    );
+    store.delete_workspace_record(&workspace.id).unwrap();
+    assert!(store.workspace_by_id(&workspace.id).unwrap().is_none());
+    assert!(
+        store
+            .events_after(Some(&workspace.id), 0)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 fn new_workspace(repository_id: &str, name: &str) -> NewWorkspace {
@@ -39,7 +129,7 @@ fn new_workspace(repository_id: &str, name: &str) -> NewWorkspace {
     }
 }
 
-fn ready_workspace(store: &Store, repository_id: &str, name: &str) -> Workspace {
+pub(super) fn ready_workspace(store: &Store, repository_id: &str, name: &str) -> Workspace {
     let (workspace, _) = store
         .create_workspace_with_event(
             new_workspace(repository_id, name),
@@ -191,12 +281,13 @@ fn migrates_v1_tasks_to_workspaces_without_losing_data() {
             .get("goal")
             .is_none()
     );
+    assert_eq!(workspace.worktree_mode, WorktreeMode::NewBranch);
+    assert_default_retirement_columns(&store, &workspace);
     let connection = store.lock().unwrap();
     let version: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 7);
-    assert_eq!(workspace.worktree_mode, WorktreeMode::NewBranch);
+    assert_eq!(version, 10);
     assert_eq!(workspace.lifecycle, WorkspaceLifecycle::Ready);
     assert_eq!(workspace.phase, WorkspacePhase::Unavailable);
     assert_eq!(
@@ -276,6 +367,17 @@ fn migrates_v1_tasks_to_workspaces_without_losing_data() {
         })
         .unwrap();
     assert_eq!(violations, 0);
+}
+
+fn assert_default_retirement_columns(store: &Store, workspace: &Workspace) {
+    assert_eq!(workspace.availability, WorkspaceAvailability::Open);
+    assert_eq!(
+        store.workspace_deletion_intent(&workspace.id).unwrap(),
+        WorkspaceDeletionIntent {
+            delete_thread: false,
+            delete_branch: false,
+        }
+    );
 }
 
 #[test]
@@ -732,7 +834,7 @@ fn migrates_v5_turn_idempotency_into_the_operation_ledger() {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 7);
+        assert_eq!(version, 10);
     }
 
     let operation = store

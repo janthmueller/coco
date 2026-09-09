@@ -5,11 +5,8 @@ async fn forks_committed_code_and_codex_history_from_an_idle_workspace() {
     let fixture = Fixture::new(FakeWorker::default());
     fixture.register().await;
     let source = fixture
-        .coordinator
-        .create_workspace(fixture.create_params())
-        .await
-        .unwrap()
-        .workspace;
+        .create_and_materialize(fixture.create_params())
+        .await;
     let source_worktree = source.worktree_path.as_deref().unwrap();
     fs::write(source_worktree.join("source-commit.txt"), "from source\n").unwrap();
     run_git(source_worktree, &["add", "source-commit.txt"]);
@@ -29,7 +26,11 @@ async fn forks_committed_code_and_codex_history_from_an_idle_workspace() {
         .create_workspace(fork_params.clone())
         .await
         .unwrap();
-    let workspace = created.workspace;
+    let prepared = created.workspace;
+    assert_eq!(prepared.phase, WorkspacePhase::Prepared);
+    assert!(prepared.codex_thread_id.is_none());
+    assert!(prepared.parent_thread_id.is_none());
+    let workspace = fixture.attach(&prepared).await;
     let target_worktree = workspace.worktree_path.as_deref().unwrap();
 
     assert_eq!(workspace.lifecycle, WorkspaceLifecycle::Ready);
@@ -65,9 +66,13 @@ async fn forks_committed_code_and_codex_history_from_an_idle_workspace() {
         [
             WorkerCall::Thread { .. },
             WorkerCall::Read { thread_id },
+            WorkerCall::Read { thread_id: validation_thread_id },
             WorkerCall::Fork { source_thread_id, cwd, config, .. },
+            WorkerCall::Read { thread_id: child_thread_id },
         ] if thread_id == "thread-1"
+            && validation_thread_id == "thread-1"
             && source_thread_id == "thread-1"
+            && child_thread_id == "fork-thread-1"
             && cwd == target_worktree
             && config == &json!({})
     ));
@@ -89,11 +94,8 @@ async fn ignores_uncommitted_context_files_but_rejects_an_active_context_source(
     let dirty_fixture = Fixture::new(FakeWorker::default());
     let repository = dirty_fixture.register().await;
     let source = dirty_fixture
-        .coordinator
-        .create_workspace(dirty_fixture.create_params())
-        .await
-        .unwrap()
-        .workspace;
+        .create_and_materialize(dirty_fixture.create_params())
+        .await;
     fs::write(
         source.worktree_path.as_deref().unwrap().join("dirty.txt"),
         "not committed\n",
@@ -143,7 +145,7 @@ async fn ignores_uncommitted_context_files_but_rejects_an_active_context_source(
             actual: WorkspacePhase::Active,
         })
     ));
-    assert_eq!(active_fixture.worker.calls().len(), 3);
+    assert_eq!(active_fixture.worker.calls().len(), 2);
 }
 
 #[tokio::test]
@@ -151,18 +153,26 @@ async fn compacts_only_the_child_before_it_accepts_a_message() {
     let fixture = Fixture::new(FakeWorker::default());
     fixture.register().await;
     let source = fixture
+        .create_and_materialize(fixture.create_params())
+        .await;
+    let prepared = fixture
         .coordinator
-        .create_workspace(fixture.create_params())
+        .create_workspace(fixture.fork_params(&source, "compact-child", true))
         .await
         .unwrap()
         .workspace;
-    let create =
-        fixture
-            .coordinator
-            .create_workspace(fixture.fork_params(&source, "compact-child", true));
+    let attach = fixture.coordinator.attach_workspace(WorkspaceAttachParams {
+        scope: RepositoryScope::repository(fixture.source.clone()),
+        workspace: prepared.id,
+    });
     let complete_compaction = complete_fake_compaction(&fixture, "fork-thread-1");
-    let (created, ()) = tokio::join!(create, complete_compaction);
-    let workspace = created.unwrap().workspace;
+    let (attached, ()) = tokio::join!(attach, complete_compaction);
+    let attached = attached.unwrap();
+    let lease_id = match &attached.launch {
+        WorkspaceAttachLaunch::Resume { lease_id, .. } => lease_id.clone(),
+        WorkspaceAttachLaunch::Start { .. } => panic!("fork attach must resume its thread"),
+    };
+    let workspace = attached.workspace;
 
     assert_eq!(workspace.lifecycle, WorkspaceLifecycle::Ready);
     assert_eq!(workspace.phase, WorkspacePhase::Idle);
@@ -172,11 +182,14 @@ async fn compacts_only_the_child_before_it_accepts_a_message() {
         [
             WorkerCall::Thread { .. },
             WorkerCall::Read { .. },
+            WorkerCall::Read { .. },
             WorkerCall::Fork { .. },
             WorkerCall::Compact { thread_id },
-            WorkerCall::Read { thread_id: read_thread_id },
+            WorkerCall::Read { thread_id: hydrated_thread_id },
+            WorkerCall::Read { thread_id: attached_thread_id },
         ] if thread_id == "fork-thread-1"
-            && read_thread_id == "fork-thread-1"
+            && hydrated_thread_id == "fork-thread-1"
+            && attached_thread_id == "fork-thread-1"
     ));
     let events = fixture.store.events_after(Some(&workspace.id), 0).unwrap();
     assert_eq!(
@@ -188,6 +201,14 @@ async fn compacts_only_the_child_before_it_accepts_a_message() {
             EventKind::ContextCompacted,
         ]
     );
+
+    fixture
+        .coordinator
+        .release_workspace_attach(WorkspaceAttachReleaseParams {
+            workspace_id: workspace.id.clone(),
+            lease_id,
+        })
+        .unwrap();
 
     fixture
         .coordinator
@@ -269,8 +290,12 @@ async fn retains_a_bound_failed_child_when_compaction_cannot_start() {
     let fixture = Fixture::new(FakeWorker::failing_compact());
     let repository = fixture.register().await;
     let source = fixture
+        .create_and_materialize(fixture.create_params())
+        .await;
+
+    let prepared = fixture
         .coordinator
-        .create_workspace(fixture.create_params())
+        .create_workspace(fixture.fork_params(&source, "failed-compact", true))
         .await
         .unwrap()
         .workspace;
@@ -278,7 +303,10 @@ async fn retains_a_bound_failed_child_when_compaction_cannot_start() {
     assert!(matches!(
         fixture
             .coordinator
-            .create_workspace(fixture.fork_params(&source, "failed-compact", true))
+            .attach_workspace(WorkspaceAttachParams {
+                scope: RepositoryScope::repository(fixture.source.clone()),
+                workspace: prepared.id,
+            })
             .await,
         Err(CoordinatorError::CompactionFailed(_))
     ));
@@ -303,16 +331,18 @@ async fn retains_a_bound_failed_child_when_native_compaction_fails() {
     let fixture = Fixture::new(FakeWorker::default());
     let repository = fixture.register().await;
     let source = fixture
+        .create_and_materialize(fixture.create_params())
+        .await;
+    let prepared = fixture
         .coordinator
-        .create_workspace(fixture.create_params())
+        .create_workspace(fixture.fork_params(&source, "failed-native-compact", true))
         .await
         .unwrap()
         .workspace;
-    let create = fixture.coordinator.create_workspace(fixture.fork_params(
-        &source,
-        "failed-native-compact",
-        true,
-    ));
+    let attach = fixture.coordinator.attach_workspace(WorkspaceAttachParams {
+        scope: RepositoryScope::repository(fixture.source.clone()),
+        workspace: prepared.id,
+    });
     let fail_compaction = async {
         wait_for_compaction_request(&fixture).await;
         for event in [
@@ -334,7 +364,7 @@ async fn retains_a_bound_failed_child_when_native_compaction_fails() {
             fixture.coordinator.record_codex_event(event).unwrap();
         }
     };
-    let (result, ()) = tokio::join!(create, fail_compaction);
+    let (result, ()) = tokio::join!(attach, fail_compaction);
     assert!(matches!(result, Err(CoordinatorError::CompactionFailed(_))));
 
     let failed = fixture
@@ -402,11 +432,8 @@ async fn passive_reads_project_not_loaded_without_resuming_or_persisting_it() {
     let fixture = Fixture::new(FakeWorker::default());
     fixture.register().await;
     let workspace = fixture
-        .coordinator
-        .create_workspace(fixture.create_params())
-        .await
-        .unwrap()
-        .workspace;
+        .create_and_materialize(fixture.create_params())
+        .await;
     fixture.store.reconcile_unfinished().unwrap();
 
     let worker = Arc::new(FakeWorker::default());
@@ -457,12 +484,7 @@ async fn send_loads_a_not_loaded_thread_before_starting_the_turn() {
     fixture.register().await;
     let mut create = fixture.create_params();
     create.model = Some("gpt-resume".to_owned());
-    let workspace = fixture
-        .coordinator
-        .create_workspace(create)
-        .await
-        .unwrap()
-        .workspace;
+    let workspace = fixture.create_and_materialize(create).await;
     fixture.store.reconcile_unfinished().unwrap();
 
     let worker = Arc::new(FakeWorker::default());
@@ -503,11 +525,8 @@ async fn attach_subscribes_when_another_client_already_loaded_the_thread() {
     let fixture = Fixture::new(FakeWorker::default());
     fixture.register().await;
     let workspace = fixture
-        .coordinator
-        .create_workspace(fixture.create_params())
-        .await
-        .unwrap()
-        .workspace;
+        .create_and_materialize(fixture.create_params())
+        .await;
     fixture.store.reconcile_unfinished().unwrap();
     let worker = Arc::new(FakeWorker::default());
     worker.remember_bound_thread(&workspace, CodexThreadStatus::Idle);
@@ -546,11 +565,8 @@ async fn concurrent_attach_resumes_a_not_loaded_thread_once() {
     let fixture = Fixture::new(FakeWorker::default());
     fixture.register().await;
     let workspace = fixture
-        .coordinator
-        .create_workspace(fixture.create_params())
-        .await
-        .unwrap()
-        .workspace;
+        .create_and_materialize(fixture.create_params())
+        .await;
     fixture.store.reconcile_unfinished().unwrap();
     let worker = Arc::new(FakeWorker::default());
     worker.remember_bound_thread(&workspace, CodexThreadStatus::NotLoaded);
@@ -564,8 +580,9 @@ async fn concurrent_attach_resumes_a_not_loaded_thread_once() {
         coordinator.attach_workspace(params.clone()),
         coordinator.attach_workspace(params)
     );
-    first.unwrap();
-    second.unwrap();
+    let first = first.unwrap();
+    let second = second.unwrap();
+    assert_ne!(first.launch, second.launch);
 
     assert_eq!(
         worker
@@ -589,12 +606,7 @@ async fn refuses_on_demand_resume_when_the_named_profile_changed() {
     .unwrap();
     let mut params = fixture.create_params();
     params.profile = "dev".to_owned();
-    let workspace = fixture
-        .coordinator
-        .create_workspace(params)
-        .await
-        .unwrap()
-        .workspace;
+    let workspace = fixture.create_and_materialize(params).await;
     fixture.store.reconcile_unfinished().unwrap();
     fs::write(
         fixture.codex_home.join("dev.config.toml"),
@@ -632,11 +644,8 @@ async fn rejects_a_mismatched_or_still_unloaded_resume_result() {
     let fixture = Fixture::new(FakeWorker::default());
     fixture.register().await;
     let workspace = fixture
-        .coordinator
-        .create_workspace(fixture.create_params())
-        .await
-        .unwrap()
-        .workspace;
+        .create_and_materialize(fixture.create_params())
+        .await;
     fixture.store.reconcile_unfinished().unwrap();
 
     let mismatched = Arc::new(FakeWorker::with_resume_result(
@@ -682,11 +691,8 @@ async fn rejects_a_resume_result_bound_to_another_worktree() {
     let fixture = Fixture::new(FakeWorker::default());
     fixture.register().await;
     let workspace = fixture
-        .coordinator
-        .create_workspace(fixture.create_params())
-        .await
-        .unwrap()
-        .workspace;
+        .create_and_materialize(fixture.create_params())
+        .await;
     fixture.store.reconcile_unfinished().unwrap();
     let worker = Arc::new(FakeWorker::with_resume_result(
         None,
@@ -712,30 +718,34 @@ async fn fork_after_restart_reads_the_source_without_resuming_it() {
     let fixture = Fixture::new(FakeWorker::default());
     fixture.register().await;
     let source = fixture
-        .coordinator
-        .create_workspace(fixture.create_params())
-        .await
-        .unwrap()
-        .workspace;
+        .create_and_materialize(fixture.create_params())
+        .await;
     fixture.store.reconcile_unfinished().unwrap();
     let worker = Arc::new(FakeWorker::default());
     worker.remember_bound_thread(&source, CodexThreadStatus::NotLoaded);
     let coordinator = fixture.recovery_coordinator(worker.clone(), "runtime-restarted");
 
-    let child = coordinator
+    let prepared = coordinator
         .create_workspace(fixture.fork_params(&source, "child-after-restart", false))
         .await
         .unwrap()
         .workspace;
+    assert!(prepared.parent_thread_id.is_none());
+    let child = coordinator
+        .materialize_workspace_thread(prepared)
+        .await
+        .unwrap();
 
     assert_eq!(child.context_mode, ContextMode::Fork);
     assert_eq!(child.parent_thread_id.as_deref(), Some("thread-1"));
     assert!(matches!(
         worker.calls().as_slice(),
         [
-            WorkerCall::Read { thread_id },
+            WorkerCall::Read { thread_id: initial_thread_id },
+            WorkerCall::Read { thread_id: validation_thread_id },
             WorkerCall::Fork { source_thread_id, .. },
-        ] if thread_id == "thread-1"
+        ] if initial_thread_id == "thread-1"
+            && validation_thread_id == "thread-1"
             && source_thread_id == "thread-1"
     ));
 }

@@ -26,7 +26,7 @@ fn normalizes_independent_base_context_and_worktree_choices() {
         "review",
         "--base",
         "main",
-        "--context-workspace",
+        "--context",
         "investigation",
         "--branch",
         "review/custom",
@@ -42,8 +42,8 @@ fn normalizes_independent_base_context_and_worktree_choices() {
     assert_eq!(
         params.context,
         WorkspaceContextRequest::Fork {
-            source: WorkspaceContextSource::Workspace {
-                workspace: "investigation".to_owned(),
+            source: WorkspaceContextSource::Reference {
+                reference: "investigation".to_owned(),
             },
             compact: false,
         }
@@ -63,6 +63,21 @@ fn normalizes_independent_base_context_and_worktree_choices() {
 }
 
 #[test]
+fn unified_context_flag_supports_the_compact_short_cluster() {
+    let explicit = create_args(&["coco", "create", "child", "--context", "parent"]);
+    assert_eq!(explicit.context.as_deref(), Some("parent"));
+    assert!(!explicit.compact_context);
+
+    let compact = create_args(&["coco", "create", "child", "-Cc", "0199-thread"]);
+    assert_eq!(compact.context.as_deref(), Some("0199-thread"));
+    assert!(compact.compact_context);
+
+    assert!(Cli::try_parse_from(["coco", "create", "child", "-cC", "0199-thread"]).is_err());
+    assert!(Cli::try_parse_from(["coco", "create", "child", "-w", "parent"]).is_err());
+    assert!(Cli::try_parse_from(["coco", "create", "child", "-t", "0199-thread"]).is_err());
+}
+
+#[test]
 fn dirty_selects_all_visible_changes_independently_from_detached_mode() {
     let args = create_args(&[
         "coco",
@@ -70,9 +85,9 @@ fn dirty_selects_all_visible_changes_independently_from_detached_mode() {
         "scratch",
         "--base-workspace",
         "source",
-        "--context-thread",
+        "--context",
         "0199-native-thread",
-        "--compact",
+        "--compact-context",
         "--dirty",
         "--detached",
     ]);
@@ -83,8 +98,8 @@ fn dirty_selects_all_visible_changes_independently_from_detached_mode() {
     assert_eq!(
         params.context,
         WorkspaceContextRequest::Fork {
-            source: WorkspaceContextSource::Thread {
-                thread_id: "0199-native-thread".to_owned(),
+            source: WorkspaceContextSource::Reference {
+                reference: "0199-native-thread".to_owned(),
             },
             compact: true,
         }
@@ -164,9 +179,9 @@ fn clap_rejects_ambiguous_workspace_creation_modes() {
             "coco",
             "create",
             "invalid",
-            "--context-workspace",
+            "--context",
             "one",
-            "--context-thread",
+            "--fork-from",
             "two",
         ],
         vec!["coco", "create", "invalid", "--branch", "one", "--detached"],

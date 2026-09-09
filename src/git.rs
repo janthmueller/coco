@@ -12,6 +12,7 @@ mod command;
 mod diff;
 mod local_state;
 mod repository;
+mod retirement;
 mod worktree;
 
 #[cfg(test)]
@@ -42,6 +43,8 @@ pub enum GitError {
     NotAWorktree(PathBuf),
     #[error("repository checkout is dirty: {0}")]
     DirtyRepository(PathBuf),
+    #[error("managed worktree gained local changes after the close check: {0}")]
+    DirtyWorktree(PathBuf),
     #[error("untracked files cannot be carried into a workspace: {0}")]
     UntrackedChanges(PathBuf),
     #[error("local changes are based on {actual}, but the workspace base is {expected}")]
@@ -70,6 +73,14 @@ pub enum GitError {
     InvalidBaseSha(String),
     #[error("worktree binding mismatch: {0}")]
     BindingMismatch(String),
+    #[error("worktree is locked{reason}")]
+    WorktreeLocked { reason: String },
+    #[error("local branch {branch} moved from {expected} to {actual}")]
+    BranchMoved {
+        branch: String,
+        expected: String,
+        actual: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,6 +106,21 @@ pub struct WorktreeBinding {
     pub mode: WorktreeMode,
     pub branch_name: Option<String>,
     pub head_sha: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeRetirementObservation {
+    pub binding: WorktreeBinding,
+    pub tracked_changes: bool,
+    pub untracked_file_count: usize,
+    pub ignored_file_count: usize,
+    pub lock_reason: Option<String>,
+}
+
+impl WorktreeRetirementObservation {
+    pub const fn has_local_changes(&self) -> bool {
+        self.tracked_changes || self.untracked_file_count > 0 || self.ignored_file_count > 0
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

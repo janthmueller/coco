@@ -10,6 +10,7 @@ use crate::protocol::{
 };
 use crate::rpc::RpcClient;
 
+use super::output::print_decision_sent;
 use super::prompt::{Choice, Interaction};
 
 pub(super) async fn decide(
@@ -46,12 +47,7 @@ pub(super) async fn decide(
             submission,
         })
         .await?;
-    let mut output = io::stdout().lock();
-    writeln!(
-        output,
-        "Response sent to Codex for workspace {}.",
-        result.workspace.name
-    )?;
+    print_decision_sent(&result.workspace);
     Ok(())
 }
 
@@ -463,6 +459,10 @@ mod tests {
     }
 
     impl Interaction for ScriptedInteraction {
+        fn confirm(&mut self, _title: &str) -> Result<bool> {
+            panic!("native decisions must retain their original choices")
+        }
+
         fn is_interactive(&self) -> bool {
             true
         }
@@ -482,6 +482,10 @@ mod tests {
     struct NonInteractive;
 
     impl Interaction for NonInteractive {
+        fn confirm(&mut self, _title: &str) -> Result<bool> {
+            panic!("non-interactive decisions must not request confirmation")
+        }
+
         fn is_interactive(&self) -> bool {
             false
         }
@@ -543,6 +547,7 @@ mod tests {
                     effective_settings: json!({}),
                 },
                 lifecycle: WorkspaceLifecycle::Ready,
+                availability: crate::domain::WorkspaceAvailability::Open,
                 thread_runtime: None,
                 phase: WorkspacePhase::Unavailable,
                 wait_reasons: Vec::new(),
@@ -558,6 +563,9 @@ mod tests {
                 created_at_ms: 1,
                 updated_at_ms: 1,
                 completed_at_ms: None,
+                thread_archived: false,
+                closed_head_sha: None,
+                closed_at_ms: None,
             },
             repository: RepositorySummary {
                 id: "repo-1".to_owned(),

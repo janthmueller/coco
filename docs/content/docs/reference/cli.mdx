@@ -31,14 +31,17 @@ coco ../api list
 coco ../api status fix/login
 ```
 
-Use `--all-repos` or `-a` with `list` to include every registered repository:
+Use `--all-repos` or `-a` with `list`, targetless `status`, or targetless
+`signal list` to include every registered repository:
 
 ```bash
 coco list --all-repos
+coco status --all-repos
 ```
 
 Use `--global` or `-g` with a command that targets one workspace. Supply a
-globally unique name, or omit it in a terminal to choose from every repository:
+globally unique name; commands that offer a workspace selector can also omit
+it to choose from every repository:
 
 ```bash
 coco status fix/login --global
@@ -69,7 +72,8 @@ may omit some values:
 
 - `create` asks for a missing workspace name and lets you choose a registered
   repository when the current directory does not select one;
-- `status`, `send`, `jump`, and `diff` let you choose a missing workspace;
+- `send`, `jump`, `diff`, and `close` let you choose a missing open workspace;
+- `reopen` and `delete` let you choose a missing closed workspace;
 - `send` asks for a missing message after the workspace is known; and
 - `decide` uses the same selector for the choices supplied by Codex.
 
@@ -79,8 +83,8 @@ cancel.
 
 CoCo never opens a selector when its input or prompt stream is not attached to
 a terminal, or when `--no-input` is present. In those cases, pass every required
-value explicitly. Collection commands remain non-interactive, and JSON output
-always requires an explicit target.
+value explicitly. Collection commands, including targetless `status`, remain
+non-interactive.
 
 ## Model commands
 
@@ -96,8 +100,8 @@ not repository-scoped.
 ```text
 coco [REPOSITORY_PATH] create [NAME]
   [--base <GIT_REF> | --base-workspace <WORKSPACE>]
-  [--context-workspace <WORKSPACE> | --context-thread <THREAD_ID>]
-  [--compact]
+  [-c, --context <WORKSPACE_OR_THREAD>]
+  [-C, --compact-context]
   [--branch <BRANCH> | --checkout <BRANCH> | --detached/-D]
   [--carry-changes [--carry-untracked] | --dirty/-d]
   [--profile <NAME>]
@@ -114,9 +118,12 @@ or number. Creation requires a clean checkout unless you explicitly carry its
 local changes.
 
 `--base-workspace` selects another workspace's committed `HEAD` as code.
-`--context-workspace` or `--context-thread` independently forks conversation
-history; the latter takes one exact Codex thread ID, not a workspace name.
-`--compact` requires one of those context sources.
+`--context`/`-c` independently forks conversation history from a workspace in
+the selected repository or an exact native Codex thread ID. Workspace matches
+take precedence; `workspace:` and `thread:` prefixes explicitly choose a kind.
+Without this option, the context is fresh. `--compact-context`/`-C` requires a
+context source and affects only the new fork. `-Cc <reference>` is the compact
+form of both options together.
 
 The default creates `coco/<NAME>`. `--branch` chooses another new branch,
 `--checkout` selects an existing local branch, and `--detached` creates no
@@ -128,36 +135,92 @@ branch already checked out elsewhere.
 `--carry-changes`. `--dirty` is shorthand for both carry options; it remains
 independent of `--detached`. Ignored files require `.worktreeinclude`.
 
-`--send` starts the first turn after creation. `--jump` then opens the same
-thread in the Codex terminal UI. Their short forms are independent and may be
-combined.
+`--send` creates native context and starts the first turn after Git preparation.
+`--jump` then opens that thread in the Codex terminal UI. Used alone on a fresh
+prepared workspace, `--jump` lets the TUI create the thread with your first
+action. Their short forms are independent and may be combined.
 
 ## Workspace commands
 
 In the forms below, `<WORKSPACE>` may be a repository-local name or full ID.
 
-| Command                                               | Purpose                                       |
-| ----------------------------------------------------- | --------------------------------------------- |
-| `coco list [--json]` (`ls`)                           | List workspaces in the selected scope         |
-| `coco status [WORKSPACE] [--json]`                    | Choose or show one workspace's current state  |
-| `coco status [WORKSPACE] --follow`                    | Choose or follow one workspace until it stops |
-| `coco send [WORKSPACE] [MESSAGE] [--operation-id ID]` | Choose a workspace and start its next turn    |
-| `coco jump [WORKSPACE]`                               | Choose or open the existing thread in the TUI |
-| `coco diff [WORKSPACE]`                               | Choose or print its bounded change summary    |
+| Command                                                        | Purpose                                         |
+| -------------------------------------------------------------- | ----------------------------------------------- |
+| `coco list [--json]` (`ls`)                                    | List workspaces in the selected scope           |
+| `coco list --closed [--json]`                                  | List closed workspaces instead                  |
+| `coco status [-a] [--json]`                                    | Show workspace states in the selected scope     |
+| `coco status [-a] --follow`                                    | Follow state changes for that collection        |
+| `coco status WORKSPACE [-g] [--json] [--follow]`               | Show or follow one workspace's state            |
+| `coco send [WORKSPACE] [MESSAGE] [--operation-id ID] [--wait]` | Choose a workspace and start its next turn      |
+| `coco jump [WORKSPACE]`                                        | Choose and open the workspace in the Codex TUI  |
+| `coco diff [WORKSPACE]`                                        | Choose or print its bounded change summary      |
+| `coco close [WORKSPACE] [-t] [-n]`                             | Remove a safe worktree and retain its workspace |
+| `coco reopen [WORKSPACE]`                                      | Restore a closed workspace                      |
+| `coco delete [WORKSPACE] [-t] [-b] [-n] [-y]`                  | Permanently remove a closed workspace record    |
 
-Omitted values use interactive input only as described above. `status --follow`
-cannot be combined with `--json`. Quote messages containing spaces. `send`
-returns after Codex accepts the turn; use `status --follow` to watch it. `list`
-and `status` inspect saved conversations without loading them; `send` and
-`jump` load one when needed.
+Omitted values use interactive input only as described above. A targetless
+`status` is an overview rather than a selector. `status --follow` cannot be
+combined with `--json`. Quote messages containing spaces. `send` returns after
+Codex accepts the turn; `send --wait` instead prints that exact turn's final
+response. `status --follow` watches until Ctrl+C, follows state only, and never
+prints conversation messages.
+`list` and `status` inspect without creating or loading conversation context;
+`send` and `jump` activate it when needed.
 
-Add `--global`/`-g` to `status`, `send`, `jump`, or `diff` to resolve one
-workspace name—or populate an omitted-target selector—from all repositories.
-Add `--all-repos`/`-a` only to `list`; it never broadcasts an action.
+Add `--global`/`-g` to `status`, `send`, `jump`, `diff`, `close`, `reopen`, or
+`delete` to resolve one workspace name from all repositories. For commands
+with a selector, it also populates an omitted-target selector from all
+repositories. Add
+`--all-repos`/`-a` to `list` or targetless `status`; it is a read-only
+collection scope and never broadcasts an action.
 
-If a `send` response is interrupted, CoCo prints its operation ID. Retry that
-exact message with `--operation-id <ID>` so CoCo can return the prior result
-without starting it twice. Do not reuse the ID for a different message.
+Every `send` has an operation ID. If CoCo reports that ID after an interrupted
+wait or an unconfirmed request, retry the same workspace and exact message with
+`--operation-id <ID>`; add `--wait` to keep waiting for its result. Do not reuse
+the ID for a different message.
+
+## Close, reopen, and delete
+
+```text
+coco [REPOSITORY_PATH] close [WORKSPACE]
+  [-g, --global]
+  [-t, --archive-thread]
+  [--discard-changes]
+  [-n, --dry-run]
+  [-y, --yes]
+
+coco [REPOSITORY_PATH] reopen [WORKSPACE]
+  [-g, --global]
+
+coco [REPOSITORY_PATH] delete [WORKSPACE]
+  [-g, --global]
+  [-t, --delete-thread]
+  [-b, --delete-branch]
+  [-n, --dry-run]
+  [-y, --yes]
+```
+
+`close` removes the managed worktree while retaining the workspace record,
+branch, and thread. `-t` also archives the thread until `reopen`. Local
+tracked, untracked, or ignored files require `--discard-changes`; without
+`-y`, CoCo asks before discarding them. `--yes` never implies
+`--discard-changes`.
+
+`reopen` restores the exact retained Git binding and thread. `delete` accepts
+only closed workspaces and always deletes their CoCo record. Native thread and
+branch deletion are separate opt-ins. `-b` applies only to a branch created by
+CoCo and still at its recorded closed commit. Short options compose, so
+`delete -tby` selects thread, branch, and non-interactive confirmation.
+
+Interactive confirmation uses `[y/N]`: type `y` and press Enter to proceed.
+Pressing Enter without an answer chooses No.
+
+Both destructive commands support a checked `--dry-run`. No close or delete
+command accepts `--all-repos`.
+
+Closing also checks agents and background terminals using the worktree.
+Deletion stops if a prepared workspace still needs the selected workspace as
+its context source. Changes to the previewed plan require a new review.
 
 ## Answer a request
 
@@ -180,19 +243,48 @@ either repository-scope flag.
 coco repo list --json
 coco model list --json
 coco list --json
+coco list --closed --json
 coco list --all-repos --json
+coco status --json
+coco status --all-repos --json
 coco status feat/first --json
 ```
 
 These commands emit one JSON value to standard output. Human-oriented follow
 mode is intentionally excluded.
 
+Human output uses color only when its output stream is a terminal and honors
+the standard `NO_COLOR` environment variable. Redirected output and JSON never
+contain color codes. `diff` patches and responses from `send --wait` are
+printed unchanged so they remain safe to redirect.
+
 ## MCP commands
 
 ```text
-coco mcp serve --repository <PATH> [--allow-send]
-coco-mcp --repository <PATH> [--allow-send]
+coco mcp serve --repository <PATH> [--allow-send] [--signal-catalog <DIR>] [--allow-emit <SIGNAL>]...
+coco-mcp --repository <PATH> [--allow-send] [--signal-catalog <DIR>] [--allow-emit <SIGNAL>]...
 ```
 
 Both forms expose the same repository-scoped standard input/output server.
 See [Use CoCo through MCP](../../guides/mcp/) before enabling `--allow-send`.
+`--allow-emit NAME@VERSION` grants only that signal version; a bare name grants
+version `1`. It requires `--signal-catalog DIR` and a matching
+`NAME@VERSION.json` schema file. The directory is read at MCP startup; files
+alone do not grant emission permission.
+
+## Signal commands
+
+```text
+coco signal list [<WORKSPACE>] [-g] [--name <SIGNAL>] [--after <CURSOR>] [--limit <NUMBER>] [-f] [--json]
+coco signal list -a [--name <SIGNAL>] [--after <CURSOR>] [--limit <NUMBER>] [-f] [--json]
+```
+
+`list` also accepts the alias `ls`.
+`signal list` reads the current repository unless a leading repository path
+is given. An optional workspace name narrows the history; `--global` (`-g`)
+resolves that name across repositories. A full UUID works globally, including
+the UUID of a deleted workspace. `--all-repos` (`-a`) reads every repository
+without a workspace target. `--follow` (`-f`) runs until interrupted. With
+`--json`, it emits one page per line, including the cursor needed to resume.
+See [Agent signals](../../guides/signals/) for a complete example and retention
+limits.

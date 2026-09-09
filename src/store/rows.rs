@@ -11,8 +11,8 @@ use super::{StoreError, path_text};
 use crate::domain::{Audit, AuditOutcome, Decision, DecisionKind, DecisionPrompt, DecisionState};
 use crate::domain::{
     CodexThreadStatus, ContextMode, EventKind, EventSource, NormalizedEvent, Repository,
-    ThreadRuntimeSnapshot, Turn, TurnPhase, Workspace, WorkspaceLifecycle, WorktreeMode,
-    derive_workspace_runtime,
+    ThreadRuntimeSnapshot, Turn, TurnPhase, Workspace, WorkspaceAvailability, WorkspaceLifecycle,
+    WorktreeMode, derive_workspace_runtime,
 };
 use crate::store::{Operation, OperationKind, OperationState};
 
@@ -21,7 +21,7 @@ pub(super) const WORKSPACE_SELECT: &str = "SELECT id, create_operation_id, repos
     thread_status_generation, thread_status_observed_at_ms, thread_status_is_fresh,
     worktree_mode, branch_name, base_sha, worktree_path, codex_thread_id, parent_thread_id,
     active_turn_id, last_error_code, last_error_message, created_at_ms, updated_at_ms,
-    completed_at_ms FROM workspaces";
+    completed_at_ms, availability, thread_archived, closed_head_sha, closed_at_ms FROM workspaces";
 
 pub(super) const TURN_SELECT: &str = "SELECT id, workspace_id, operation_id, client_message_id,
     codex_turn_id, phase, requested_at_ms, started_at_ms, completed_at_ms, error_json FROM turns";
@@ -60,12 +60,21 @@ pub(super) fn map_workspace(row: &Row<'_>) -> rusqlite::Result<Workspace> {
     let context_mode: String = row.get(4)?;
     let lifecycle: String = row.get(7)?;
     let worktree_mode: String = row.get(12)?;
+    let availability: String = row.get(24)?;
     let lifecycle = WorkspaceLifecycle::parse(&lifecycle)
         .ok_or_else(|| invalid_value(7, "workspace lifecycle", &lifecycle))?;
+    let availability = WorkspaceAvailability::parse(&availability)
+        .ok_or_else(|| invalid_value(24, "workspace availability", &availability))?;
     let thread_runtime = map_thread_status(row)?;
+    let codex_thread_id: Option<String> = row.get(16)?;
     let active_turn_id: Option<String> = row.get(18)?;
-    let (phase, wait_reasons) =
-        derive_workspace_runtime(lifecycle, thread_runtime.as_ref(), active_turn_id.is_some());
+    let (phase, wait_reasons) = derive_workspace_runtime(
+        lifecycle,
+        availability,
+        thread_runtime.as_ref(),
+        active_turn_id.is_some(),
+        codex_thread_id.is_some(),
+    );
     Ok(Workspace {
         id: row.get(0)?,
         create_operation_id: row.get(1)?,
@@ -76,6 +85,7 @@ pub(super) fn map_workspace(row: &Row<'_>) -> rusqlite::Result<Workspace> {
         context: json_from_column(row, 5)?,
         profile: json_from_column(row, 6)?,
         lifecycle,
+        availability,
         thread_runtime,
         phase,
         wait_reasons,
@@ -84,7 +94,7 @@ pub(super) fn map_workspace(row: &Row<'_>) -> rusqlite::Result<Workspace> {
         branch_name: row.get(13)?,
         base_sha: row.get(14)?,
         worktree_path: row.get::<_, Option<String>>(15)?.map(PathBuf::from),
-        codex_thread_id: row.get(16)?,
+        codex_thread_id,
         parent_thread_id: row.get(17)?,
         active_turn_id,
         last_error_code: row.get(19)?,
@@ -92,6 +102,9 @@ pub(super) fn map_workspace(row: &Row<'_>) -> rusqlite::Result<Workspace> {
         created_at_ms: row.get(21)?,
         updated_at_ms: row.get(22)?,
         completed_at_ms: row.get(23)?,
+        thread_archived: row.get(25)?,
+        closed_head_sha: row.get(26)?,
+        closed_at_ms: row.get(27)?,
     })
 }
 

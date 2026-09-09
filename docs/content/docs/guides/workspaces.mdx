@@ -3,22 +3,25 @@ title: Working with workspaces
 description: Create, follow, enter, review, and fork separate Codex work.
 ---
 
-A workspace is one Codex conversation paired with a separate Git worktree.
-CoCo normally creates a branch for it, but you can also select an existing
-branch or start detached. Your current checkout stays untouched while Codex
-works in the managed one.
+A workspace is a separate Git worktree that gains one persistent Codex
+conversation when work begins. CoCo normally creates a branch for it, but you
+can also select an existing branch or start detached. Your current checkout
+stays untouched while Codex works in the managed one.
 
 ## The workspace lifecycle
 
-| Stage    | Command                                           | Result                                         |
-| -------- | ------------------------------------------------- | ---------------------------------------------- |
-| Prepare  | `coco create <name>`                              | Create the worktree, Git binding, and thread   |
-| Start    | `coco send <workspace> <message>`                 | Start the first or next Codex turn             |
-| Observe  | `coco status <workspace> [--follow]`              | Show current activity and required input       |
-| Respond  | `coco decide <decision-id>`                       | Answer an approval or question                 |
-| Enter    | `coco jump <workspace>`                           | Open the same thread in the Codex TUI          |
-| Review   | `coco diff <workspace>`                           | Show its tracked patch and untracked paths     |
-| Continue | `coco create <name> --context-workspace <source>` | Fork conversation history into a new workspace |
+| Stage    | Command                                 | Result                                         |
+| -------- | --------------------------------------- | ---------------------------------------------- |
+| Prepare  | `coco create <name>`                    | Create the worktree and Git binding            |
+| Start    | `coco send <workspace> <message>`       | Create context if needed and start a turn      |
+| Observe  | `coco status [<workspace>] [--follow]`  | Show current activity and required input       |
+| Respond  | `coco decide <decision-id>`             | Answer an approval or question                 |
+| Enter    | `coco jump <workspace>`                 | Open the workspace in the Codex TUI            |
+| Review   | `coco diff <workspace>`                 | Show its tracked patch and untracked paths     |
+| Continue | `coco create <name> --context <source>` | Fork conversation history into a new workspace |
+| Close    | `coco close <workspace>`                | Remove its worktree but retain the workspace   |
+| Reopen   | `coco reopen <workspace>`               | Restore the same worktree and conversation     |
+| Delete   | `coco delete <workspace>`               | Remove a closed workspace record permanently   |
 
 Creating and starting are deliberately separate. You can prepare several
 workspaces without spending a model turn, inspect them with `coco list`, and
@@ -35,8 +38,9 @@ coco create fix/login --base main
 Unless you explicitly carry changes, the selected checkout must be clean.
 Names may contain lowercase ASCII letters, numbers, and hyphens, with single
 slashes between components. Each component must begin and end with a letter or
-number. CoCo creates the branch `coco/fix/login`, its worktree, and a fresh
-Codex thread without starting a turn.
+number. CoCo creates the branch `coco/fix/login` and its worktree. It does not
+create an empty Codex thread; the workspace remains `Prepared` until its first
+`send` or interactive `jump`.
 
 In a terminal, you can run `coco create` without a name and enter one when
 asked. If your current directory does not select a registered repository, CoCo
@@ -53,12 +57,19 @@ A workspace has two independent starting points:
 uses the current committed `HEAD` of another CoCo workspace. Neither option
 copies its Codex conversation.
 
-`--context-workspace <workspace>` forks another workspace in the selected
-repository.
-`--context-thread <thread-id>` does the same from an exact Codex thread ID,
-including a thread that was not created by CoCo. Neither option selects code.
-The source conversation must be idle or unloaded. CoCo always makes a new
-child conversation; it never moves or adopts the source.
+Without `--context`, the new workspace starts a fresh conversation.
+`--context <reference>` (`-c`) instead accepts either a CoCo workspace in the
+selected repository or an exact native Codex thread ID. CoCo resolves a
+workspace first and otherwise tries the value as a thread ID. For the rare
+case where the same value could mean both, use `workspace:<reference>` or
+`thread:<id>` explicitly.
+
+Context selection never selects code. The source conversation must be idle or
+unloaded. CoCo always makes a new child conversation; it never moves or adopts
+the source.
+
+Creation records that choice while leaving the workspace prepared. CoCo makes
+the child conversation when the first `send` or `jump` activates it.
 
 For example, this uses clean code from `main` while retaining the investigation
 conversation:
@@ -66,7 +77,7 @@ conversation:
 ```bash
 coco create review/login \
   --base main \
-  --context-workspace investigate/login
+  --context investigate/login
 ```
 
 To continue from both the committed code and conversation of one workspace,
@@ -75,11 +86,16 @@ select it on both axes:
 ```bash
 coco create review/login \
   --base-workspace fix/login \
-  --context-workspace fix/login
+  --context fix/login
 ```
 
-Add `--compact` with either context option to ask Codex to shorten the copied
-conversation before the workspace accepts its first message.
+Add `--compact-context` (`-C`) to ask Codex to shorten the copied conversation
+before the workspace accepts its first message. The source remains unchanged.
+The short options may be combined when the value follows them:
+
+```bash
+coco create review/login -Cc investigate/login
+```
 
 ## Choose the Git binding
 
@@ -151,19 +167,33 @@ coco create fix/login \
 If opening the UI fails after the message was accepted, the workspace and its
 active turn remain available.
 
+With `-j` alone, the workspace opens prepared. The first action you take in the
+Codex UI creates its persistent thread; leaving without acting keeps it
+prepared.
+
 ## Start or continue work
 
-`send` starts the first turn. Use it again whenever the workspace is ready or
-its Codex thread is unloaded:
+The first `send` creates the persistent thread and starts its first turn in one
+operation. Use it again whenever the workspace is ready or its Codex thread is
+unloaded:
 
 ```bash
 coco send fix/login "Fix the login redirect and run the relevant tests"
-coco send fix/login "Now add a regression test"
+coco send fix/login "Now add a regression test" --wait
 ```
 
 An unloaded thread is loaded before the message starts. CoCo does not queue
 messages while a turn is active; wait until `status` says the workspace is
 ready before sending the next instruction.
+
+You can also use `send` from another terminal while the Codex UI is open.
+The same rule applies: the thread must be ready for another message.
+
+By default, `send` returns once Codex accepts the turn. Add `--wait` to remain
+attached to that exact turn and print its final response. Pressing Ctrl+C stops
+only the wait; the turn continues under `cocod`, and CoCo prints the operation
+ID needed to retry the same wait. Use `status` or `jump` from another terminal
+if Codex needs a decision while you wait.
 
 In a terminal, `coco send` first lets you choose a workspace and then asks for
 the message. `coco send fix/login` keeps the workspace explicit and asks only
@@ -173,34 +203,52 @@ for the message.
 
 ```bash
 coco list
+coco status
 coco status fix/login
 coco status fix/login --follow
 ```
 
 `coco ls` is the equivalent short spelling of `coco list`.
 
-`list` is the compact overview. `status` shows one workspace's detailed current
-state, worktree path, any reported error, and pending decision. In a terminal,
-you may omit the workspace and choose it from a selector. `--follow` adds a
-spinner and follows that workspace until it becomes ready, waits for you, is
-unloaded, or reports a problem.
+`list` and a targetless `status` are compact overviews of the current
+repository. `status <workspace>` shows that workspace's detailed current state,
+worktree path, any reported error, and pending decision. Add `--follow` to keep
+watching until you press Ctrl+C, including after the workspace becomes ready,
+waits for you, is unloaded, or reports a problem.
 
-`list` and `status` only inspect workspaces. They do not load a saved Codex
-conversation after `cocod` restarts. `send` and `jump` load it when needed.
+A targetless `status --follow` watches every workspace in the selected
+repository under the same rule. In a terminal, the current view is updated in
+place. If you redirect the output to another command or file, state changes are
+appended instead. Add `-a` to show or follow every registered repository:
+
+```bash
+coco status -a
+coco status -a --follow
+```
+
+Status output contains state and decision hints only. Conversation messages
+belong to the Codex thread; use `send --wait` for the response to a new turn or
+`jump` to read the conversation.
+
+`list` and `status` only inspect workspaces. They do not create context for a
+prepared workspace or load a saved conversation after `cocod` restarts.
+`send` and `jump` activate it when needed.
 
 Common displayed states are:
 
-| State                    | Meaning                                         |
-| ------------------------ | ----------------------------------------------- |
-| Preparing worktree       | CoCo is creating the separate checkout          |
-| Starting Codex           | The worktree exists and its thread is starting  |
-| Working                  | A Codex turn is active                          |
-| Waiting for approval     | Codex needs approval before it can continue     |
-| Waiting for input        | Codex asked a question                          |
-| Ready                    | You can send, jump, or fork from this workspace |
-| Codex thread is unloaded | The saved conversation is not loaded yet        |
-| Failed                   | Preparation or a Codex operation did not finish |
-| Status unavailable       | CoCo no longer has a current Codex status       |
+| State                    | Meaning                                             |
+| ------------------------ | --------------------------------------------------- |
+| Preparing worktree       | CoCo is creating the separate checkout              |
+| Prepared                 | The worktree is ready; no Codex thread exists yet   |
+| Starting Codex           | CoCo is finishing inherited context setup           |
+| Working                  | A Codex turn is active                              |
+| Waiting for approval     | Codex needs approval before it can continue         |
+| Waiting for input        | Codex asked a question                              |
+| Ready                    | You can send, jump, or fork from this workspace     |
+| Codex thread is unloaded | The saved conversation is not loaded yet            |
+| Closed                   | The worktree was removed; its workspace is retained |
+| Failed                   | Preparation or a Codex operation did not finish     |
+| Status unavailable       | CoCo no longer has a current Codex status           |
 
 Press <kbd>Ctrl</kbd>+<kbd>C</kbd> to stop following. This stops only the
 display; it does not stop the Codex turn.
@@ -228,10 +276,12 @@ restarts before you answer, that old decision can no longer be submitted.
 coco jump fix/login
 ```
 
-`jump` loads the conversation when necessary, then opens it in its managed
-worktree. It does not create another thread. Use `/quit` or `/exit` to leave
-the terminal UI. Work already running continues; explicitly interrupting the
-turn in Codex still cancels it.
+For an existing conversation, `jump` loads and opens that exact thread in its
+managed worktree. For a prepared fresh workspace, it opens an empty Codex UI;
+the first action creates and binds the thread. Leaving before any action keeps
+the workspace prepared. Use `/quit` or `/exit` to leave the terminal UI. Work
+already running continues; explicitly interrupting the turn in Codex still
+cancels it.
 
 ## Review workspace changes
 
@@ -269,16 +319,18 @@ Use `--all-repos` or `-a` for an overview across every registered repository:
 
 ```bash
 coco list -a
+coco status -a
 ```
 
 Use `--global` or `-g` when a command targets one workspace whose name should
-be resolved across every registered repository. Without a name, it opens a
-global workspace selector in a terminal:
+be resolved across every registered repository. Commands with an interactive
+workspace selector, such as `jump` and `send`, use all repositories when their
+name is omitted:
 
 ```bash
 coco status fix/login -g
 coco jump fix/login -g
-coco status -g
+coco jump -g
 ```
 
 The same name may exist in different repositories. If a global name is
@@ -287,18 +339,92 @@ path or full workspace ID. A full ID resolves from any directory.
 
 ## Use the interactive selectors
 
-The same selector is used by `status`, `send`, `jump`, `diff`, and decision
-choices. Use the arrow keys or `j`/`k` to move, Enter to confirm, or `1`–`9` to
-select one of the first nine options immediately. Escape, `q`, and Ctrl+C
-cancel.
+The same selector is used by `send`, `jump`, `diff`, `close`, `reopen`,
+`delete`, and decision choices.
+Use the arrow keys or `j`/`k` to move, Enter to confirm, or `1`–`9` to select
+one of the first nine options immediately. Escape, `q`, and Ctrl+C cancel.
+The selected row has a `›` marker and is highlighted. The marker also shows
+your selection when color is disabled.
+
+Yes/no confirmations use a simple `[y/N]` prompt. Type `y` and press Enter to
+confirm; `n` or Enter alone leaves everything unchanged.
 
 Use `--no-input` when a command must never prompt. CoCo also disables prompts
 when it is not connected to a terminal. Missing values then produce an error,
 so scripts cannot accidentally wait for input.
 
-## What remains on disk
+## Close and reopen a workspace
 
-CoCo does not automatically merge or delete work. Branches and worktrees stay
-in place after you review them, and this alpha has no supported command for
-retiring the corresponding workspace. Do not remove a managed worktree behind
-CoCo while you still use its workspace.
+Closing is the normal way to free the worktree without losing the workspace:
+
+```bash
+coco close fix/login --dry-run
+coco close fix/login
+coco list --closed
+coco reopen fix/login
+```
+
+By default, `close` removes only the managed worktree. It retains the CoCo
+record, Git branch, and Codex conversation. Closed workspaces disappear from
+the normal `list` and workspace selectors; `list --closed` shows them.
+`reopen` restores the same workspace path at the exact retained commit.
+
+Add `-t`/`--archive-thread` when you also want Codex to archive the
+conversation while the workspace is closed. Reopening unarchives that same
+conversation. A workspace with no conversation yet simply keeps its
+`Prepared` state across close and reopen.
+
+CoCo refuses to close a workspace that is working, waiting for a decision,
+open in a Codex terminal UI, running a background terminal, Git-locked, or no
+longer bound to the expected worktree. This alpha also refuses to close a
+detached workspace whose current commit has changed from its original base.
+This includes other agents Codex has started in that worktree: their work and
+background terminals must also be finished before it can be closed.
+
+Tracked, untracked, and ignored local files stop a normal close. Commit or
+move anything you need. To permanently discard all of them, request that
+explicitly and review the displayed plan:
+
+```bash
+coco close fix/login --discard-changes
+```
+
+The terminal asks for confirmation. Scripts may add `--yes`, but `--yes`
+alone never authorizes discarding changes.
+
+## Delete a closed workspace
+
+`delete` is permanent and accepts only a closed workspace. It always shows
+the deletion plan and asks for confirmation:
+
+```bash
+coco delete fix/login --dry-run
+coco delete fix/login
+```
+
+The default deletes only CoCo's workspace record. The Git branch and Codex
+conversation remain with Git and Codex respectively, but CoCo can no longer
+reopen them as that workspace.
+
+If a prepared workspace still needs this workspace as its context source,
+deletion is blocked. Start that dependent workspace first, or close and delete
+it if it is no longer needed.
+
+Add `-t` to delete the Codex conversation and `-b` to delete the branch. CoCo
+deletes a branch only when it originally created that branch and the branch is
+still at the commit recorded during close:
+
+```bash
+# Delete the record, conversation, and CoCo-created branch.
+coco delete fix/login -tb
+
+# The same operation without an interactive confirmation.
+coco delete fix/login -tby
+```
+
+CoCo refuses native thread deletion when it would affect spawned threads or a
+known workspace that inherited the conversation. Retire those dependants
+first. There is deliberately no bulk-delete form.
+
+If the workspace or deletion plan changes while confirmation is open, CoCo
+stops. Run the command again to review the updated plan.

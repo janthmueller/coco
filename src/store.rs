@@ -25,6 +25,7 @@ mod events;
 mod migrations;
 mod operations;
 mod rows;
+mod signals;
 mod workspaces;
 
 use migrations::migrate;
@@ -34,6 +35,8 @@ use rows::{
 
 #[derive(Debug, Error)]
 pub enum StoreError {
+    #[error(transparent)]
+    Signal(#[from] crate::domain::signals::SignalError),
     #[error("database error: {0}")]
     Database(#[from] rusqlite::Error),
     #[error("database filesystem error for {path}: {source}")]
@@ -74,6 +77,14 @@ pub enum StoreError {
     #[error("operation {operation_id} already resolved to another native result")]
     OperationResultConflict { operation_id: String },
     #[error(
+        "operation {operation_id} belongs to workspace {actual_workspace_id}, not {expected_workspace_id}"
+    )]
+    OperationWorkspaceMismatch {
+        operation_id: String,
+        expected_workspace_id: String,
+        actual_workspace_id: String,
+    },
+    #[error(
         "event turn {turn_id} belongs to workspace {turn_workspace_id}, not {event_workspace_id}"
     )]
     EventCorrelation {
@@ -99,6 +110,12 @@ pub struct NewWorkspace {
     pub branch_name: Option<String>,
     pub base_sha: Option<String>,
     pub worktree_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct WorkspaceDeletionIntent {
+    pub(crate) delete_thread: bool,
+    pub(crate) delete_branch: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -210,6 +227,16 @@ pub struct NewOperation {
 pub struct NewThreadBinding {
     pub thread_id: String,
     pub parent_thread_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ThreadOperationAcceptance {
+    pub workspace_id: String,
+    pub profile: ProfileSnapshot,
+    pub binding: NewThreadBinding,
+    pub event: EventDraft,
+    pub operation_id: String,
+    pub native_result_id: String,
 }
 
 #[cfg(test)]

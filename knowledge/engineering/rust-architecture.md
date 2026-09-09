@@ -138,12 +138,19 @@ src/
   coordinator.rs                 # Coordinator and stable application API
   coordinator/
     workspace.rs                 # register/create/list/status/diff use cases
+    retirement.rs                # checked close/reopen/delete sagas and recovery
+    retirement/
+      safety.rs                  # path, descendant activity, and context dependency guards
     turn.rs                      # turn start and idempotency
     codex_events.rs              # App Server event projection
     error.rs
     tests.rs                     # shared Coordinator fake and fixture
     tests/
       workspace.rs              # creation, status, scope, and diff behavior
+      retirement.rs             # close/reopen/delete policy and recovery behavior
+      retirement_safety.rs      # worktree, runtime, TUI, and recovery safety
+      retirement_confirmation.rs # acknowledged target and resource-plan identity
+      retirement_dependencies.rs # prepared context references and deletion races
       context.rs                # fork, compact, attach, and activation behavior
       operations.rs             # turn-start idempotency and ambiguous dispatch
       decisions.rs              # approvals and structured-input behavior
@@ -170,6 +177,7 @@ src/
     command.rs                   # bounded subprocess execution
     repository.rs
     worktree.rs
+    retirement.rs                # checked removal, restoration, owned-branch deletion
     diff.rs
     tests.rs
 
@@ -186,6 +194,10 @@ src/
       status.rs
       jump.rs
     output.rs
+    prompt.rs                    # interaction contract, selection state, and line input
+    prompt/
+      terminal.rs                # owned inline frame and terminal-mode cleanup
+      tests.rs                   # input/layout tests and opt-in interactive probes
     tests.rs
 
   mcp.rs                         # keep until production code grows materially
@@ -280,7 +292,9 @@ operations were then separated into `store/workspaces.rs` and `store/events.rs`
 without weakening their atomic boundaries. Schema v6 adds
 `store/operations.rs` as the narrow durable turn-start intent/dispatch/result
 state machine; schema v7 extends workspace rows with the typed worktree mode.
-Legacy turn helpers remain test-only for migration coverage.
+Schema v8 adds durable open/closing/closed/reopening availability and
+close-time binding evidence; schema v9 adds recoverable thread/branch deletion
+intent. Legacy turn helpers remain test-only for migration coverage.
 Cross-module Store tests live in `store/tests.rs`; `store.rs` is now the
 connection, repository, shared-type, filesystem-safety, and facade layer.
 The Codex adapter split completed next: `codex/process.rs` owns child startup,

@@ -1,0 +1,174 @@
+---
+title: Agent signals
+description: Let a Codex workspace report structured updates and follow them from another terminal.
+---
+
+A **signal** is a short, structured update from an agent, such as “this change
+is ready for review.” CoCo saves the update so you or another application can
+read it later. It does not automatically start work, change a workspace's
+state, or mark anything complete.
+
+## Define a signal
+
+Create a folder for your signal definitions, outside the workspaces your agents
+edit. For example:
+
+```bash
+mkdir -p ~/.config/coco/signals
+```
+
+Save this file in that folder. Its name identifies the signal
+`review.requested`, version `1`. Its contents are a standard JSON Schema
+2020-12 document describing the payload an agent may send:
+
+```json title="review.requested@1.json"
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "A pull request is ready for review",
+  "type": "object",
+  "properties": {
+    "pr": { "type": "integer", "minimum": 1 }
+  },
+  "required": ["pr"],
+  "additionalProperties": false
+}
+```
+
+This accepts `{ "pr": 42 }` and rejects `{ "pr": "42" }`, missing `pr`, or
+extra fields. The agent receives an error pointing to the invalid field and
+schema rule, so it can correct the payload and retry. Rejected signals are not
+saved. CoCo checks the shape, not whether the agent's claim is true.
+
+Choose your own fields, required values, enums, and nested structures. Use
+`true` as the entire schema if you intentionally want to accept any JSON value.
+Schemas must be self-contained; schema references (`$ref` and related keywords)
+are not supported. Standard `format` annotations do not enforce formats.
+
+## Allow a workspace to publish
+
+With `cocod` running and your [repository added](../../getting-started/), add a
+CoCo MCP entry to a [named profile](../execution-profiles/). For example:
+
+```toml title="~/.codex/reviewer.config.toml"
+[mcp_servers.coco]
+command = "coco-mcp"
+args = [
+  "--repository", "/absolute/path/to/project",
+  "--signal-catalog", "/absolute/path/to/signals",
+  "--allow-emit", "review.requested@1"
+]
+```
+
+Replace both paths with your repository and the folder containing your schema
+files. CoCo reads only direct `NAME@VERSION.json` files, not nested folders or
+symlinks. The catalog is explicitly selected, never discovered automatically
+in a workspace.
+
+Repeat `--allow-emit` for each name/version you want to allow. A bare name means
+version `1`; `review.requested@2` means only version `2`. Each grant must have a
+matching file in the selected catalog. Loading files alone grants no publication
+permission and does not enable `workspaces.send`.
+
+Create a workspace with that profile:
+
+```bash
+coco create review/widget --profile reviewer --jump
+```
+
+The agent can discover definitions with `signals.types`; `emitAllowed` tells it
+which versions it may publish through `signals.emit`. A tool input could be:
+
+```json
+{
+  "name": "review.requested",
+  "version": 1,
+  "payload": { "pr": 42 },
+  "idempotencyKey": "review-pr-42-first-pass"
+}
+```
+
+Ask the agent to emit the signal when the agreed condition is met. It must use
+a Codex thread bound to a CoCo workspace in that repository; an unrelated
+standalone chat cannot publish on the workspace's behalf. If a first `jump`
+has not yet bound its conversation, retry after its first action is registered.
+
+Use the same `idempotencyKey` when retrying the same emission after an uncertain
+response. CoCo returns the saved signal instead of creating a duplicate while
+that signal is retained. Use a new key for a genuinely new update.
+
+### Change a definition
+
+Once loaded, a version cannot be overwritten. Add a new file such as
+`review.requested@2.json` and explicitly grant that version to agents that
+should use it. Reformatting an unchanged schema is fine; changing its description
+or rules requires a new version.
+
+Files are loaded when the MCP server starts, not continuously. A running server
+keeps its selected definitions. Invalid files or conflicting versions make the
+new server fail to start without loading a partial catalog. Removing a file
+does not erase old signals or revoke a running server's existing permission.
+
+Without `--signal-catalog`, the read-only `signals.types` tool shows previously
+loaded definitions for that repository; none are enabled for publication.
+The CLI reads published updates, not definitions.
+
+## Read or follow signals
+
+```bash
+coco signal list
+coco signal list review/widget
+coco signal ls review/widget -g
+coco signal list --name review.requested
+coco signal ls -af
+```
+
+`list` and `ls` are interchangeable. Without a workspace, they read signals in
+the current repository; `--all-repos` (`-a`) reads across repositories. Supply
+a workspace name to narrow the history. Add `--global` (`-g`) to resolve that
+name across repositories; duplicate names produce an error showing the matches.
+A full workspace UUID works from any directory without `-g`. You can also put
+a repository path first: `coco ../api signal ls review/widget`.
+
+Use `-a` without a workspace, or `-g` with one. Neither combines with an explicit
+repository path. `--name` independently filters by the signal name.
+
+`--follow` (`-f`) stays open until Ctrl-C. It displays saved signals and then
+new ones, not Codex chat messages. Different readers do not consume each
+other's updates.
+
+### Resume a reader
+
+For another application or a script, use JSON output:
+
+```bash
+coco signal list --limit 20 --json
+coco signal list --after '<nextCursor>' --json
+coco signal list --follow --json
+```
+
+Each page contains `signals`, `nextCursor`, and `hasMore`. Save `nextCursor`
+after processing the page, and pass it as `--after` with the same filters.
+Continue reading while `hasMore` is true. JSON follow emits one page per line;
+unchanged pages are not repeated. After a disconnect, run the command again
+with the saved cursor. Consumers should recognize repeated records by their
+`id` before performing an external action.
+
+## Retention and privacy
+
+CoCo retains the newest **10,000 signals across all repositories**. Older
+records are removed as new ones arrive. An expired cursor produces an error;
+remove `--after` only when you intend to restart from the retained history.
+
+Closing or deleting a workspace does not immediately erase its signals. Use
+`coco signal list <workspace-uuid>` to find them after deletion.
+Reusing its name creates a different workspace and does not inherit its history.
+
+Payloads and schemas may each contain at most 16 KiB, with at most 32 nesting
+levels and 2,048 values. A repository supports 128 loaded signal versions;
+each workspace may publish 10 new signals per second. These limits also apply
+when a schema accepts any JSON value.
+
+Signal payloads are saved locally and readable by trusted MCP hosts configured
+for the repository. Keep secrets out of them. Publication permissions are for
+trusted local applications, not a security boundary between users on a shared
+remote service.

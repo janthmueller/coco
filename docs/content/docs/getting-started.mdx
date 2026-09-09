@@ -26,15 +26,21 @@ not create a commit, branch, or worktree.
 coco create feat/first --base HEAD
 ```
 
-CoCo creates a separate worktree, the branch `coco/feat/first`, and a Codex
-thread. Your current checkout remains unchanged, and no model turn starts yet.
+CoCo creates a separate worktree and the branch `coco/feat/first`. Your current
+checkout remains unchanged. The workspace is now `Prepared`: no Codex thread
+or model turn exists yet.
 
 ## 3. Send the first instruction
 
 ```bash
 coco send feat/first \
-  "Inspect this project and propose one focused improvement"
+  "Inspect this project and propose one focused improvement" \
+  --wait
 ```
+
+This creates the persistent Codex thread, starts its first real turn, waits for
+that exact turn, and prints its final response. Omit `--wait` when you want the
+command to return as soon as Codex accepts the turn.
 
 You can also create and send in one command:
 
@@ -43,15 +49,24 @@ coco create feat/second \
   --send "Review the command-line interface"
 ```
 
-## 4. Follow the work
+## 4. Check or follow state
+
+Show every workspace in the current repository:
+
+```bash
+coco status
+```
+
+Inspect one workspace, or follow only its state changes:
 
 ```bash
 coco status feat/first --follow
 ```
 
-The command updates until the workspace becomes ready, needs your input, or
-reports a problem. Press <kbd>Ctrl</kbd>+<kbd>C</kbd> to stop following; the
-Codex turn continues.
+The follow command keeps the current state visible as it changes, including
+when the workspace becomes ready, needs your input, or reports a problem. It
+never prints conversation messages. Press `Ctrl+C` to stop following; the Codex
+turn continues.
 
 When CoCo supports the request Codex is waiting on, `status` prints a decision
 ID and the next command:
@@ -80,4 +95,4 @@ Your original checkout is still on its original branch. CoCo's worktree and
 UI or restart `cocod`.
 
 Continue with [Working with workspaces](../guides/workspaces/) for status,
-diffs, forks, compaction, and multi-repository use.
+diffs, forks, compaction, multi-repository use, and safe workspace retirement.

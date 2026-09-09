@@ -14,6 +14,13 @@ allow = [
   "Zlib",
 ]
 
+# Inline JSON Schema validation uses this transitive fluent-uri dependency.
+# Reviewed MIT No Attribution; keep the exception limited to this exact crate.
+[[licenses.exceptions]]
+name = "borrow-or-share"
+version = "=0.2.4"
+allow = ["MIT-0"]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"

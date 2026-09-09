@@ -22,6 +22,8 @@ agents.
 - [MCP catalog and worker runtime boundary](mcp-runtime.md) - Separates CoCo's
   control MCP server from worker-facing MCP tools and records native Codex as
   the initial runtime with Agentgateway as a deferred optional adapter.
+- [Agent-emitted signals](signals.md) - Defines explicit opt-in publication,
+  native thread attribution, validation, bounded retention, and independent replay.
 - [CoCo v0 product specification](../product/v0-spec.md) - Defines the user and
   domain contract that the architecture must satisfy.
 - [Documentation boundaries](../documentation.md) - Defines what belongs in

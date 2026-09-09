@@ -64,14 +64,16 @@ coco mcp serve --repository /absolute/path/to/project
 The repository is fixed when the server starts. By default it offers only
 read-only tools:
 
-| Tool                | What it does                            |
-| ------------------- | --------------------------------------- |
-| `workspaces.list`   | List workspaces in the repository       |
-| `workspaces.status` | Show the current state of one workspace |
-| `workspaces.diff`   | Show changes made by one workspace      |
+| Tool                | What it does                                |
+| ------------------- | ------------------------------------------- |
+| `workspaces.list`   | List workspaces in the repository           |
+| `workspaces.status` | Show the current state of one workspace     |
+| `workspaces.diff`   | Show changes made by one workspace          |
+| `signals.types`     | Discover signal definitions and permissions |
+| `signals.list`      | Read retained updates from agents           |
 
 Read-only does not mean content-free: the connected host can see workspace
-metadata, repository paths, and diffs returned by these tools. Enable the
+metadata, repository paths, diffs, and saved signal payloads. Enable the
 server only in hosts you trust with that information.
 
 ## Allow messages
@@ -95,6 +97,10 @@ later turn under that workspace's Codex permissions and account usage. Leave
 it disabled unless that is the access you intend to grant.
 
 ## What this integration controls
+
+To let a Codex workspace publish structured updates, select schema files with
+`--signal-catalog DIR` and grant specific versions with `--allow-emit NAME@VERSION`.
+See [Agent signals](../signals/) for setup, permissions, and reading the updates.
 
 This MCP server lets another application control existing CoCo workspaces.
 CoCo does not currently provide its own registry or per-workspace selector for

@@ -8,8 +8,114 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-09-09
+
+- **File-defined signal catalog**: Selected JSON Schema 2020-12 as the fixed
+  dialect and replaced the draft per-type registration CLI with explicitly
+  selected `NAME@VERSION.json` files at control-MCP startup. Catalog loading is
+  atomic, accepted versions remain immutable, and `emitAllowed` separates
+  definitions from exact-version grants. Running snapshots and retained history
+  do not change when files are edited or removed; no watcher or auto-grant.
+
+- **Signal slice and MCP capability correction**: Added the small operator-owned
+  signal contract, native `_meta.threadId` attribution, optional inline schema
+  validation, count-bounded retention, and independent cursor replay. Kept ticket
+  interpretation and automatic reactions outside CoCo. The combined real-MCP
+  process test exposed a default-router bug that bypassed `--allow-send`; the
+  actual handler now uses its filtered instance. Separate model-free Codex
+  0.153.4 evidence covers actual signal calls, scoped profiles, forks, and restart.
+
+- **Task-management boundary**: Confirmed CoCo as the agent working-environment
+  and control/communication layer, with tickets and business workflow owned by
+  a separate product. Direct task-system integration and a separate composing
+  service remain alternatives. The signal implementation is a separate slice;
+  hooks and external references remain unimplemented, not an embedded ticket
+  model.
+- **Terminal interaction repair**: Replaced CoCo's yes/no menus with `y/N`
+  line input and a safe No default. The shared picker reserves real scrollable
+  lines, fits short terminals, measures Unicode display width, and marks only
+  the selected row with `›` and cyan/bold highlighting. Inactive rows retain
+  blank marker space; selection stays clear without color or a blinking cursor.
+  Cleanup restores the terminal on acceptance, cancellation, and errors.
+  Added an isolated real-terminal probe alongside focused Rust regressions.
+- **Checked workspace retirement**: Implemented reversible `close`/`reopen`
+  with native thread retention by default, plus closed-only record deletion
+  and explicit native-thread/owned-branch opt-ins. Follow-up review tightened
+  managed-path identity, pinned confirmation plans, descendant worktree
+  activity, prepared context-source protection, and recovery checks. Bound
+  TUI presence protects against retirement without excluding `send` on an
+  idle thread or additional TUI clients; only fresh adoption remains exclusive.
+
+## 2026-09-08
+
+- **Persistent live status view**: Unified targeted and collection
+  `status --follow` as observation that ends only on Ctrl-C. A capable terminal
+  replaces one saved live region in place, while redirected or piped stdout
+  remains ANSI-free and appends only changed snapshots. Ready, wait, unloaded,
+  unavailable, and failure states stay visible without ending the follower;
+  conversation output remains exclusive to `send --wait`.
+- **Large native context-fork repair**: Negotiated Codex's experimental API
+  capability because CoCo deliberately uses deferred goal continuation, and
+  requested metadata-only fork/resume responses so a large retained history
+  does not exceed the shared WebSocket frame limit. The thread still inherits
+  or loads its full native context. Bounded Codex RPC rejection messages now
+  reach the CLI without exposing structured error data, the fake server
+  enforces the negotiated contract, and the model-free real-Codex test covers
+  first activation of an inherited-context workspace. Omitted interactive
+  workspace arguments now show the picker even when only one candidate exists.
+- **Concise Codex-style terminal presentation**: Replaced generic object
+  dumps and tab-separated UUID-heavy collections with command-specific success
+  summaries and bounded aligned tables. Human lists retain names, states,
+  branches, and repository paths while opaque IDs remain in JSON and
+  actionable recovery/decision hints. The shared picker now uses a cyan `›`
+  selection, bold headings, and dim detail without persistent key help or
+  post-selection echoes. Styling follows Codex's standard cyan/green/red/
+  magenta palette, is terminal-only, honors `NO_COLOR`, sanitizes dynamic
+  one-line fields, and never touches JSON, raw patches, or exact agent output.
+- **Unified context reference**: Replaced source-specific creation options
+  with `--context`/`-c`. The daemon resolves a destination-repository workspace
+  first and otherwise validates an exact native thread ID; `workspace:` and
+  `thread:` prefixes disambiguate deliberately. `--compact-context`/`-C`
+  modifies only the child fork and composes as `-Cc <reference>`. Git-base
+  selection remains independent.
+- **State/output CLI separation**: Made targetless `coco status` the current
+  repository overview and `status -a` the all-repository overview; either can
+  follow collection state changes until Ctrl-C, while an explicit workspace
+  retains detailed and bounded follow behavior. Status no longer opens a
+  workspace picker or prints conversation messages. Added `coco send --wait`
+  to wait for the exact accepted client operation and print its last final
+  agent response. Each response is bounded to 1 MiB and the current-generation
+  cache to 256 entries/8 MiB; none is written to SQLite.
+  Direct-response/notification races remain safe, including completion
+  that overtakes `turn.start`; `event.list` remains only as an unconsumed
+  compatibility method.
+- **Native first activation and Codex 0.153.4 baseline**: Changed workspace
+  creation to persist only the verified Git worktree and derive a new public
+  `prepared` phase while no native thread is bound. The first fresh `send`
+  binds the exact `thread/start` result atomically with the accepted real turn;
+  inherited context materializes on first activation. A first fresh `jump`
+  now launches the official TUI through a one-use authenticated correlation
+  relay, leaves an empty candidate unbound, and adopts only an exact candidate
+  with a non-empty native rollout before subscribing the daemon. Bound jumps
+  continue through exact `resume --remote`; a liveness heartbeat keeps a fresh
+  jump exclusive while its TUI remains open, and TUI exit does not interrupt
+  an accepted turn. The model-free real-process gate now passes against released
+  `codex-cli 0.153.4`, including the empty/durable distinction, history, daemon
+  and App Server restart, model selection, and exact resume. Process coverage
+  additionally proves profile/model/cwd propagation and detach behavior. CLI
+  JSON schema 6 records the new `prepared` value; public compatibility and usage
+  documentation moved to the same baseline.
+
 ## 2026-09-07
 
+- **Codex 0.153.4 compatibility finding**: Replaced the real-process test's
+  byte-for-byte generated-schema snapshot gate with validation of the concrete
+  App Server behavior CoCo consumes. The model-free probe then exposed a real
+  incompatibility: a prepared empty legacy thread remains visible to
+  metadata-only `thread/read` but is no longer materialized before its first
+  user message, so a fresh App Server rejects `thread/resume`. CoCo retains
+  0.147.0 as its supported baseline while native-thread creation is redesigned
+  to occur on first `send` or `jump`; no hidden synthetic turn is accepted.
 - **Terminal-gated CLI interaction**: Added one reusable picker for omitted
   repository/workspace targets and native decision options. Arrow keys and
   `j`/`k` move immediately, Enter confirms, keys 1 through 9 select directly,

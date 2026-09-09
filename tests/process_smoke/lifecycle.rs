@@ -65,7 +65,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     assert_mode(&paths.database, 0o600)?;
 
     let models = cli_json(&run_cli(&paths, &repository, &["model", "list", "--json"]).await?)?;
-    assert_eq!(models["schemaVersion"], 5);
+    assert_eq!(models["schemaVersion"], 7);
     assert_eq!(models["models"].as_array().map(Vec::len), Some(2));
     assert_eq!(models["models"][0]["model"], DEFAULT_MODEL);
     assert_eq!(models["models"][0]["isDefault"], true);
@@ -73,7 +73,10 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     let human_models = run_cli(&paths, &repository, &["model", "ls"]).await?;
     let human_models = String::from_utf8_lossy(&human_models.stdout);
     ensure!(
-        human_models.contains("MODEL\tNAME\tDEFAULT\tREASONING")
+        human_models.contains("MODEL")
+            && human_models.contains("NAME")
+            && human_models.contains("REASONING")
+            && human_models.contains("(default)")
             && human_models.contains(DEFAULT_MODEL)
             && human_models.contains(MODEL_OVERRIDE),
         "coco model ls did not render the App Server catalog: {human_models}"
@@ -81,7 +84,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
 
     run_cli(&paths, &repository, &["repo", "add", "."]).await?;
     let repositories = cli_json(&run_cli(&paths, &repository, &["repo", "ls", "--json"]).await?)?;
-    assert_eq!(repositories["schemaVersion"], 5);
+    assert_eq!(repositories["schemaVersion"], 7);
     assert_eq!(
         repositories["repositories"].as_array().map(Vec::len),
         Some(1)
@@ -92,14 +95,27 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
             repository.canonicalize()?.to_string_lossy().into_owned()
         ))
     );
-
-    let missing_status = capture_cli(&paths, &repository, &["status"], None).await?;
+    let human_repositories = run_cli(&paths, &repository, &["repo", "list"]).await?;
+    let human_repositories = String::from_utf8_lossy(&human_repositories.stdout);
     ensure!(
-        !missing_status.status.success()
-            && String::from_utf8_lossy(&missing_status.stderr)
-                .contains("workspace is required without interactive input"),
-        "non-terminal status unexpectedly prompted or returned an unclear error: {}",
-        String::from_utf8_lossy(&missing_status.stderr)
+        human_repositories.contains("REPOSITORY")
+            && human_repositories.contains("PATH")
+            && !human_repositories.contains(
+                repositories["repositories"][0]["id"]
+                    .as_str()
+                    .context("registered repository had no ID")?
+            )
+            && !human_repositories.contains('\u{1b}'),
+        "human repository output was noisy or terminal-dependent: {human_repositories}"
+    );
+
+    let empty_status = capture_cli(&paths, &repository, &["status"], None).await?;
+    ensure!(
+        empty_status.status.success()
+            && String::from_utf8_lossy(&empty_status.stdout).contains("No workspaces."),
+        "targetless status did not show the repository collection: stdout={} stderr={}",
+        String::from_utf8_lossy(&empty_status.stdout),
+        String::from_utf8_lossy(&empty_status.stderr)
     );
     let missing_name = capture_cli(&paths, &repository, &["create"], None).await?;
     ensure!(
@@ -129,6 +145,14 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         23,
     )
     .await?;
+    let failed_jump_output = String::from_utf8_lossy(&failed_jump.stdout);
+    ensure!(
+        failed_jump_output.contains(&format!("Created {WORKSPACE_NAME}"))
+            && !failed_jump_output.contains(THREAD_ID)
+            && !failed_jump_output.contains("profile:")
+            && !failed_jump_output.contains('\u{1b}'),
+        "create printed noisy or terminal-dependent output: {failed_jump_output}"
+    );
     let failed_jump_error = String::from_utf8_lossy(&failed_jump.stderr);
     ensure!(
         failed_jump_error.contains(
@@ -138,7 +162,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     );
 
     let listed = cli_json(&run_cli(&paths, &repository, &["list", "--json"]).await?)?;
-    assert_eq!(listed["schemaVersion"], 5);
+    assert_eq!(listed["schemaVersion"], 7);
     let workspaces = listed["workspaces"]
         .as_array()
         .context("coco list did not return a workspaces array")?;
@@ -147,6 +171,34 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         "coco list returned an unexpected workspace count"
     );
     let workspace = &workspaces[0];
+    let human_workspaces = run_cli(&paths, &repository, &["list"]).await?;
+    let human_workspaces = String::from_utf8_lossy(&human_workspaces.stdout);
+    ensure!(
+        human_workspaces.contains("WORKSPACE")
+            && human_workspaces.contains("STATE")
+            && human_workspaces.contains("BRANCH")
+            && human_workspaces.contains(WORKSPACE_NAME)
+            && !human_workspaces.contains(
+                workspace["id"]
+                    .as_str()
+                    .context("listed workspace had no ID")?
+            )
+            && !human_workspaces.contains('\u{1b}'),
+        "human workspace output was noisy or terminal-dependent: {human_workspaces}"
+    );
+    let status_overview = cli_json(&run_cli(&paths, &repository, &["status", "--json"]).await?)?;
+    assert_eq!(status_overview["schemaVersion"], 7);
+    assert_eq!(
+        status_overview["workspaces"].as_array().map(Vec::len),
+        Some(1)
+    );
+    let followed_collection =
+        run_cli_until_interrupt(&paths, &repository, &["status", "-a", "--follow"]).await?;
+    let followed_collection = String::from_utf8_lossy(&followed_collection.stdout);
+    ensure!(
+        followed_collection.contains("REPOSITORY") && followed_collection.contains(WORKSPACE_NAME),
+        "all-repository status follow did not print its initial state: {followed_collection}"
+    );
     assert_eq!(workspace["name"], WORKSPACE_NAME);
     assert_eq!(workspace["repository"]["displayName"], "repository");
     assert_eq!(workspace["lifecycle"], "ready");
@@ -212,7 +264,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     let human_status = run_cli(&paths, &repository, &["status", WORKSPACE_NAME]).await?;
     ensure!(
         String::from_utf8_lossy(&human_status.stdout)
-            .contains(&format!("next: coco decide {decision_id}")),
+            .contains(&format!("coco decide {decision_id}")),
         "human status did not show the decision command"
     );
     let decided = run_cli(
@@ -296,15 +348,36 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         .map_err(|_| anyhow::anyhow!("fake App Server stopped before turn completion"))?;
     let completed = wait_for_workspace_phase(&paths, &repository, "idle").await?;
     assert_eq!(completed["workspace"]["activeTurnId"], Value::Null);
-    let followed = run_cli(&paths, &repository, &["status", WORKSPACE_NAME, "--follow"]).await?;
+    let followed =
+        run_cli_until_interrupt(&paths, &repository, &["status", WORKSPACE_NAME, "--follow"])
+            .await?;
     ensure!(
-        String::from_utf8_lossy(&followed.stdout).contains("Fake Codex completed the turn."),
-        "status --follow did not print the bounded native final response"
+        !String::from_utf8_lossy(&followed.stdout).contains("Fake Codex completed the turn."),
+        "status --follow leaked a completed Codex message"
+    );
+    let waited = run_cli(
+        &paths,
+        &repository,
+        &["send", WORKSPACE_NAME, "Complete another turn", "--wait"],
+    )
+    .await?;
+    assert_eq!(
+        String::from_utf8_lossy(&waited.stdout),
+        "Fake Codex completed the waited turn.\n"
+    );
+    let followed_after_wait =
+        run_cli_until_interrupt(&paths, &repository, &["status", WORKSPACE_NAME, "--follow"])
+            .await?;
+    ensure!(
+        !String::from_utf8_lossy(&followed_after_wait.stdout)
+            .contains("Fake Codex completed the waited turn."),
+        "status --follow repeated the response owned by send --wait"
     );
     let initial_generation = completed["workspace"]["threadRuntime"]["runtimeGeneration"]
         .as_str()
         .context("workspace had no initial runtime generation")?
         .to_owned();
+    let second_worktree = super::multi_client::exercise(&paths, temporary.path()).await?;
 
     interrupt(&daemon).await?;
     let daemon_status = timeout(PROCESS_TIMEOUT, daemon.wait())
@@ -379,9 +452,11 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         Arc::clone(&recovery_authorization),
         Arc::clone(&recovery_requests),
         worktree.clone(),
+        second_worktree,
     ));
 
     wait_for_file(&paths.socket, &mut recovered_daemon, &recovery_log).await?;
+    super::multi_client::verify_replay(&paths, temporary.path()).await?;
     let recovered = workspace_status(&paths, &repository).await?;
     assert_eq!(recovered["workspace"]["phase"], "not_loaded");
     assert_eq!(recovered["workspace"]["threadRuntime"]["isFresh"], true);

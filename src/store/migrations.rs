@@ -2,12 +2,14 @@ use rusqlite::Connection;
 
 use super::StoreError;
 
+mod signals;
+
 pub(super) fn migrate(connection: &Connection) -> Result<(), StoreError> {
     let mut version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if version > 7 {
+    if version > 10 {
         return Err(StoreError::UnsupportedSchema(version));
     }
-    if version == 7 {
+    if version == 10 {
         return Ok(());
     }
     if version == 1 {
@@ -31,9 +33,21 @@ pub(super) fn migrate(connection: &Connection) -> Result<(), StoreError> {
         version = 6;
     }
     if version == 6 {
-        return migrate_worktree_modes(connection);
+        migrate_worktree_modes(connection)?;
+        version = 7;
     }
-    create_current_schema(connection)
+    if version == 7 {
+        migrate_workspace_availability(connection)?;
+        version = 8;
+    }
+    if version == 8 {
+        migrate_workspace_deletion_intent(connection)?;
+        version = 9;
+    }
+    if version == 0 {
+        create_current_schema(connection)?;
+    }
+    signals::migrate(connection)
 }
 
 #[expect(
@@ -84,6 +98,16 @@ fn create_current_schema(connection: &Connection) -> Result<(), StoreError> {
             created_at_ms INTEGER NOT NULL,
             updated_at_ms INTEGER NOT NULL,
             completed_at_ms INTEGER,
+            availability TEXT NOT NULL DEFAULT 'open'
+                CHECK (availability IN ('open', 'closing', 'closed', 'reopening', 'deleting')),
+            thread_archived INTEGER NOT NULL DEFAULT 0
+                CHECK (thread_archived IN (0, 1)),
+            closed_head_sha TEXT,
+            closed_at_ms INTEGER,
+            delete_thread_requested INTEGER NOT NULL DEFAULT 0
+                CHECK (delete_thread_requested IN (0, 1)),
+            delete_branch_requested INTEGER NOT NULL DEFAULT 0
+                CHECK (delete_branch_requested IN (0, 1)),
             CHECK (
                 (thread_status_json IS NULL AND thread_status_generation IS NULL
                     AND thread_status_observed_at_ms IS NULL
@@ -194,10 +218,64 @@ fn create_current_schema(connection: &Connection) -> Result<(), StoreError> {
          );
          CREATE INDEX IF NOT EXISTS audit_workspace_sequence_idx
             ON audit_events(workspace_id, sequence);
-         PRAGMA user_version = 7;
+         PRAGMA user_version = 9;
          COMMIT;",
     )?;
     Ok(())
+}
+
+fn migrate_workspace_deletion_intent(connection: &Connection) -> Result<(), StoreError> {
+    let migration = (|| -> Result<(), StoreError> {
+        connection.execute_batch("BEGIN IMMEDIATE;")?;
+        if !table_has_columns(connection, "workspaces", &["delete_thread_requested"])? {
+            connection.execute_batch(
+                "ALTER TABLE workspaces ADD COLUMN delete_thread_requested INTEGER NOT NULL
+                    DEFAULT 0 CHECK (delete_thread_requested IN (0, 1));",
+            )?;
+        }
+        if !table_has_columns(connection, "workspaces", &["delete_branch_requested"])? {
+            connection.execute_batch(
+                "ALTER TABLE workspaces ADD COLUMN delete_branch_requested INTEGER NOT NULL
+                    DEFAULT 0 CHECK (delete_branch_requested IN (0, 1));",
+            )?;
+        }
+        connection.execute_batch("PRAGMA user_version = 9; COMMIT;")?;
+        Ok(())
+    })();
+    if migration.is_err() {
+        let _ = connection.execute_batch("ROLLBACK;");
+    }
+    migration
+}
+
+fn migrate_workspace_availability(connection: &Connection) -> Result<(), StoreError> {
+    let migration = (|| -> Result<(), StoreError> {
+        connection.execute_batch("BEGIN IMMEDIATE;")?;
+        if !table_has_columns(connection, "workspaces", &["availability"])? {
+            connection.execute_batch(
+                "ALTER TABLE workspaces ADD COLUMN availability TEXT NOT NULL DEFAULT 'open'
+                    CHECK (availability IN ('open', 'closing', 'closed', 'reopening', 'deleting'));",
+            )?;
+        }
+        if !table_has_columns(connection, "workspaces", &["thread_archived"])? {
+            connection.execute_batch(
+                "ALTER TABLE workspaces ADD COLUMN thread_archived INTEGER NOT NULL DEFAULT 0
+                    CHECK (thread_archived IN (0, 1));",
+            )?;
+        }
+        if !table_has_columns(connection, "workspaces", &["closed_head_sha"])? {
+            connection.execute_batch("ALTER TABLE workspaces ADD COLUMN closed_head_sha TEXT;")?;
+        }
+        if !table_has_columns(connection, "workspaces", &["closed_at_ms"])? {
+            connection.execute_batch("ALTER TABLE workspaces ADD COLUMN closed_at_ms INTEGER;")?;
+        }
+        connection.execute_batch("PRAGMA user_version = 8; COMMIT;")?;
+        Ok(())
+    })();
+    if migration.is_err() {
+        let _ = connection.execute_batch("ROLLBACK;");
+    }
+    migration
 }
 
 fn migrate_worktree_modes(connection: &Connection) -> Result<(), StoreError> {

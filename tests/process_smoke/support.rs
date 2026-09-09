@@ -102,14 +102,22 @@ pub(super) fn write_fake_codex(path: &Path) -> Result<()> {
         path,
         r#"#!/bin/sh
 set -eu
+kind=""
 case "${1:-}" in
   app-server)
     : "${COCO_TEST_CODEX_ARGS:?}"
     destination="${COCO_TEST_CODEX_ARGS}"
+    kind="app-server"
     ;;
   resume)
     : "${COCO_TEST_JUMP_ARGS:?}"
     destination="${COCO_TEST_JUMP_ARGS}"
+    kind="resume"
+    ;;
+  --remote)
+    : "${COCO_TEST_JUMP_ARGS:?}"
+    destination="${COCO_TEST_JUMP_ARGS}"
+    kind="fresh"
     ;;
   *)
     exit 64
@@ -118,11 +126,17 @@ esac
 arguments_tmp="${destination}.tmp"
 printf '%s\n' "$@" > "$arguments_tmp"
 mv "$arguments_tmp" "$destination"
-if [ "$1" = "app-server" ]; then
+if [ "$kind" = "app-server" ]; then
   exec sleep 3600
 fi
-if [ "$1" = "resume" ]; then
+if [ "$kind" = "resume" ]; then
   exit "${COCO_TEST_JUMP_EXIT:-0}"
+fi
+if [ "$kind" = "fresh" ]; then
+  : "${COCO_TEST_FAKE_TUI_BINARY:?}"
+  remote_endpoint="${2:?missing fresh --remote endpoint}"
+  export COCO_TEST_FRESH_REMOTE="$remote_endpoint"
+  exec "$COCO_TEST_FAKE_TUI_BINARY" --exact fresh_jump::fake_tui_process --nocapture
 fi
 "#,
     )?;
@@ -224,6 +238,67 @@ pub(super) async fn run_cli_with_jump_exit(
     Ok(output)
 }
 
+pub(super) async fn run_cli_with_fresh_tui(
+    paths: &TestPaths,
+    repository: &Path,
+    arguments: &[&str],
+    mode: &str,
+) -> Result<Output> {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_coco"));
+    paths.apply(&mut command);
+    command
+        .args(arguments)
+        .current_dir(repository)
+        .env("COCO_TEST_FAKE_TUI_BINARY", std::env::current_exe()?)
+        .env("COCO_TEST_FRESH_TUI_MODE", mode)
+        .kill_on_drop(true);
+    let output = timeout(PROCESS_TIMEOUT, command.output())
+        .await
+        .with_context(|| format!("coco {} timed out", arguments.join(" ")))??;
+    ensure!(
+        output.status.success(),
+        "coco {} failed:\nstdout: {}\nstderr: {}",
+        arguments.join(" "),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(output)
+}
+
+pub(super) async fn run_cli_until_interrupt(
+    paths: &TestPaths,
+    repository: &Path,
+    arguments: &[&str],
+) -> Result<Output> {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_coco"));
+    paths.apply(&mut command);
+    command
+        .args(arguments)
+        .current_dir(repository)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = command.spawn().context("could not start coco follower")?;
+    sleep(Duration::from_millis(750)).await;
+    ensure!(
+        child.try_wait()?.is_none(),
+        "coco {} stopped following before it was interrupted",
+        arguments.join(" ")
+    );
+    interrupt(&child).await?;
+    let output = timeout(PROCESS_TIMEOUT, child.wait_with_output())
+        .await
+        .with_context(|| format!("coco {} did not detach", arguments.join(" ")))??;
+    ensure!(
+        output.status.success(),
+        "coco {} failed:\nstdout: {}\nstderr: {}",
+        arguments.join(" "),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(output)
+}
+
 pub(super) async fn capture_cli(
     paths: &TestPaths,
     repository: &Path,
@@ -250,7 +325,15 @@ pub(super) fn cli_json(output: &Output) -> Result<Value> {
 }
 
 pub(super) async fn workspace_status(paths: &TestPaths, repository: &Path) -> Result<Value> {
-    cli_json(&run_cli(paths, repository, &["status", WORKSPACE_NAME, "--json"]).await?)
+    named_workspace_status(paths, repository, WORKSPACE_NAME).await
+}
+
+pub(super) async fn named_workspace_status(
+    paths: &TestPaths,
+    repository: &Path,
+    workspace: &str,
+) -> Result<Value> {
+    cli_json(&run_cli(paths, repository, &["status", workspace, "--json"]).await?)
 }
 
 pub(super) async fn wait_for_workspace_phase(
@@ -258,9 +341,18 @@ pub(super) async fn wait_for_workspace_phase(
     repository: &Path,
     expected: &str,
 ) -> Result<Value> {
+    wait_for_named_workspace_phase(paths, repository, WORKSPACE_NAME, expected).await
+}
+
+pub(super) async fn wait_for_named_workspace_phase(
+    paths: &TestPaths,
+    repository: &Path,
+    workspace: &str,
+    expected: &str,
+) -> Result<Value> {
     let deadline = Instant::now() + PROCESS_TIMEOUT;
     loop {
-        let status = workspace_status(paths, repository).await?;
+        let status = named_workspace_status(paths, repository, workspace).await?;
         if status.pointer("/workspace/phase").and_then(Value::as_str) == Some(expected) {
             return Ok(status);
         }
@@ -338,6 +430,11 @@ pub(super) fn verify_codex_requests(requests: &[Value], worktree: &Path) -> Resu
     assert_eq!(
         initialize.pointer("/params/clientInfo/name"),
         Some(&json!("coco"))
+    );
+    assert_eq!(
+        initialize.pointer("/params/capabilities/experimentalApi"),
+        Some(&json!(true)),
+        "CoCo uses an experimental thread/fork field without negotiating its capability"
     );
 
     let model_requests = requests
@@ -418,6 +515,10 @@ pub(super) fn verify_codex_requests(requests: &[Value], worktree: &Path) -> Resu
             .is_some_and(|value| value.starts_with("coco-")),
         "turn/start had no CoCo message id"
     );
+    verify_bound_thread_reads(requests)
+}
+
+fn verify_bound_thread_reads(requests: &[Value]) -> Result<()> {
     let thread_reads = requests
         .iter()
         .filter(|request| request.get("method") == Some(&json!("thread/read")))
@@ -427,12 +528,37 @@ pub(super) fn verify_codex_requests(requests: &[Value], worktree: &Path) -> Resu
         "workspace reads did not consult native thread state"
     );
     for read in thread_reads {
-        assert_eq!(read.pointer("/params/threadId"), Some(&json!(THREAD_ID)));
+        ensure!(
+            matches!(
+                read.pointer("/params/threadId").and_then(Value::as_str),
+                Some(THREAD_ID | super::multi_client::SECOND_THREAD)
+            ),
+            "unexpected workspace was read"
+        );
     }
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|frame| frame["method"] == "thread/start")
+            .count(),
+        2
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|frame| frame["method"] == "turn/start")
+            .count(),
+        4
+    );
     Ok(())
 }
 
 pub(super) fn verify_fork_requests(requests: &[Value], child_worktree: &Path) -> Result<()> {
+    assert_eq!(
+        request(requests, "initialize")?.pointer("/params/capabilities/experimentalApi"),
+        Some(&json!(true)),
+        "context forks require the negotiated experimental API capability"
+    );
     let methods = requests
         .iter()
         .filter_map(|frame| frame.get("method").and_then(Value::as_str))
@@ -445,6 +571,7 @@ pub(super) fn verify_fork_requests(requests: &[Value], child_worktree: &Path) ->
             "initialized",
             "thread/start",
             "thread/name/set",
+            "turn/start",
             "thread/fork",
             "thread/name/set",
             "thread/compact/start",
@@ -468,6 +595,7 @@ pub(super) fn verify_fork_requests(requests: &[Value], child_worktree: &Path) ->
     assert_eq!(fork.pointer("/params/config"), Some(&json!({})));
     assert_eq!(fork.pointer("/params/model"), Some(&json!(MODEL_OVERRIDE)));
     assert_eq!(fork.pointer("/params/ephemeral"), Some(&json!(false)));
+    assert_eq!(fork.pointer("/params/excludeTurns"), Some(&json!(true)));
     assert_eq!(
         fork.pointer("/params/deferGoalContinuation"),
         Some(&json!(true))
@@ -476,7 +604,13 @@ pub(super) fn verify_fork_requests(requests: &[Value], child_worktree: &Path) ->
         request(requests, "thread/compact/start")?.pointer("/params/threadId"),
         Some(&json!(FORK_CHILD_THREAD_ID))
     );
-    let turn = request(requests, "turn/start")?;
+    let turn = requests
+        .iter()
+        .find(|request| {
+            request.get("method") == Some(&json!("turn/start"))
+                && request.pointer("/params/threadId") == Some(&json!(FORK_CHILD_THREAD_ID))
+        })
+        .context("fake App Server did not receive the child turn/start")?;
     assert_eq!(
         turn.pointer("/params/threadId"),
         Some(&json!(FORK_CHILD_THREAD_ID))
@@ -507,6 +641,10 @@ pub(super) fn verify_fork_requests(requests: &[Value], child_worktree: &Path) ->
 }
 
 pub(super) fn verify_recovery_requests(requests: &[Value], worktree: &Path) -> Result<()> {
+    assert_eq!(
+        request(requests, "initialize")?.pointer("/params/capabilities/experimentalApi"),
+        Some(&json!(true))
+    );
     let methods = requests
         .iter()
         .filter_map(|request| request.get("method").and_then(Value::as_str))
@@ -527,12 +665,16 @@ pub(super) fn verify_recovery_requests(requests: &[Value], worktree: &Path) -> R
         resume.pointer("/params/model"),
         Some(&json!(MODEL_OVERRIDE))
     );
+    assert_eq!(resume.pointer("/params/excludeTurns"), Some(&json!(true)));
     ensure!(
         request(requests, "thread/start").is_err(),
         "recovery created a replacement thread"
     );
-    let read = request(requests, "thread/read")?;
-    assert_eq!(read.pointer("/params/threadId"), Some(&json!(THREAD_ID)));
+    ensure!(
+        requests.iter().any(|read| read["method"] == "thread/read"
+            && read.pointer("/params/threadId") == Some(&json!(THREAD_ID))),
+        "main workspace was not read after restart"
+    );
     let resume_index = requests
         .iter()
         .position(|request| request.get("method") == Some(&json!("thread/resume")))

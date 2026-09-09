@@ -136,12 +136,9 @@ async fn assert_native_nonactive_statuses(fixture: &Fixture, workspace: &Workspa
 async fn projects_external_tui_turns_from_native_status_without_persisting_them() {
     let fixture = Fixture::new(FakeWorker::default());
     fixture.register().await;
-    let created = fixture
-        .coordinator
-        .create_workspace(fixture.create_params())
-        .await
-        .unwrap();
-    let workspace = created.workspace;
+    let workspace = fixture
+        .create_and_materialize(fixture.create_params())
+        .await;
     let started = CodexEvent::Notification {
         method: "turn/started".to_owned(),
         params: json!({

@@ -15,10 +15,13 @@ which files.
 CoCo adds durable, named workspaces around Codex. It can:
 
 - prepare several separate pieces of work before starting any model turns;
-- start and follow Codex work from short terminal commands;
+- start Codex work, wait for its response, and follow its state from short
+  terminal commands;
 - surface approvals and questions that need your answer;
-- reopen the same conversation in the Codex terminal UI; and
-- find workspaces across several registered repositories.
+- reopen the same conversation in the Codex terminal UI;
+- close and later restore a workspace without deleting its branch or thread;
+- retire a closed workspace with separate choices for its branch and thread;
+- and find workspaces across several registered repositories.
 
 Codex still performs the actual reasoning, tool calls, and file changes, and
 raises approval requests for you to decide. CoCo keeps their surrounding
@@ -30,7 +33,7 @@ A workspace is one unit of Codex work. It contains:
 
 - a registered repository;
 - a separate Git worktree, normally on a `coco/<name>` branch;
-- one persistent Codex thread; and
+- one persistent Codex thread after work begins; and
 - its selected model and Codex profile.
 
 The code base, conversation context, and Git branch binding are separate
@@ -39,23 +42,28 @@ conversation, use an existing branch, or run detached without coupling those
 decisions.
 
 The worktree prevents changes from being mixed into your current checkout.
-The stored thread means `send`, `status`, and `jump` all continue the same
-conversation instead of starting unrelated sessions.
+The first `send` or interactive `jump` creates the thread. After that, `send`,
+`status`, and `jump` all continue the same conversation instead of starting
+unrelated sessions.
 
 ## How the workflow fits together
 
-| You want to…                               | Use…          |
-| ------------------------------------------ | ------------- |
-| Prepare work in a separate checkout        | `coco create` |
-| Start or continue a Codex turn             | `coco send`   |
-| Check once or follow live activity         | `coco status` |
-| Answer an approval or question             | `coco decide` |
-| Enter the existing Codex terminal UI       | `coco jump`   |
-| Review tracked changes and untracked paths | `coco diff`   |
+| You want to…                                 | Use…                          |
+| -------------------------------------------- | ----------------------------- |
+| Prepare work in a separate checkout          | `coco create`                 |
+| Start or continue a Codex turn               | `coco send`                   |
+| Check once or follow live activity           | `coco status`                 |
+| Answer an approval or question               | `coco decide`                 |
+| Enter the existing Codex terminal UI         | `coco jump`                   |
+| Review tracked changes and untracked paths   | `coco diff`                   |
+| Free a worktree without losing its workspace | `coco close`                  |
+| Restore or permanently retire closed work    | `coco reopen` / `coco delete` |
 
-The `coco` command exits after each operation. Keep `cocod` running while you
-use CoCo so ongoing work remains available to later commands. Leaving
-`status --follow` or the terminal UI does not by itself cancel an active turn.
+The `coco` command normally exits after each operation. Add `--wait` to `send`
+to print that turn's final response. Keep `cocod` running while you use CoCo so
+ongoing work remains available to later commands. `status` reports state only;
+leaving `status --follow` or the terminal UI does not by itself cancel an
+active turn.
 
 For automation, `coco-mcp` can expose a repository-scoped view of the same
 workspaces to an MCP host. Its default tools are read-only.

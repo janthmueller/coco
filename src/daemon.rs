@@ -69,6 +69,13 @@ pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<
         runtime_generation,
     ));
     let event_task = tokio::spawn(pump_codex_events(Arc::clone(&coordinator), events));
+    let recovered_retirements = coordinator.recover_workspace_retirements().await;
+    if recovered_retirements > 0 {
+        warn!(
+            recovered_retirements,
+            "recovered interrupted workspace retirement state"
+        );
+    }
 
     let handler: Arc<dyn RpcHandler> = Arc::new(DaemonHandler::new(Arc::clone(&coordinator)));
     let server = match RpcServer::bind(&paths.socket_path, handler).await {

@@ -14,6 +14,7 @@ const requiredPages = [
   "docs/guides/workspaces/index.html",
   "docs/guides/execution-profiles/index.html",
   "docs/guides/mcp/index.html",
+  "docs/guides/signals/index.html",
   "docs/reference/cli/index.html",
   "docs/reference/current-limitations/index.html",
 ];

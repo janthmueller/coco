@@ -1,6 +1,7 @@
 use super::app_server::*;
 use super::support::*;
 use super::*;
+use tokio::task::JoinHandle;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn real_daemon_and_cli_create_a_compacted_native_fork() -> Result<()> {
@@ -32,7 +33,18 @@ async fn real_daemon_and_cli_create_a_compacted_native_fork() -> Result<()> {
 
     wait_for_file(&paths.socket, &mut daemon, &daemon_log).await?;
     run_cli(&paths, &repository, &["repo", "add", "."]).await?;
-    run_cli(&paths, &repository, &["create", FORK_SOURCE_WORKSPACE]).await?;
+    run_cli(
+        &paths,
+        &repository,
+        &[
+            "create",
+            FORK_SOURCE_WORKSPACE,
+            "--send",
+            "Prepare the source context",
+        ],
+    )
+    .await?;
+    wait_for_named_workspace_phase(&paths, &repository, FORK_SOURCE_WORKSPACE, "idle").await?;
     run_cli(
         &paths,
         &repository,
@@ -41,9 +53,9 @@ async fn real_daemon_and_cli_create_a_compacted_native_fork() -> Result<()> {
             FORK_CHILD_WORKSPACE,
             "--base-workspace",
             FORK_SOURCE_WORKSPACE,
-            "--context-workspace",
+            "--context",
             FORK_SOURCE_WORKSPACE,
-            "--compact",
+            "--compact-context",
             "--model",
             MODEL_OVERRIDE,
             "--send",
@@ -83,19 +95,7 @@ async fn real_daemon_and_cli_create_a_compacted_native_fork() -> Result<()> {
     );
     ensure!(child_worktree.is_dir(), "forked worktree does not exist");
 
-    interrupt(&daemon).await?;
-    let daemon_status = timeout(PROCESS_TIMEOUT, daemon.wait())
-        .await
-        .context("cocod did not stop after fork smoke test")??;
-    ensure!(
-        daemon_status.success(),
-        "cocod exited with {daemon_status}: {}",
-        read_log(&daemon_log)
-    );
-    timeout(PROCESS_TIMEOUT, app_server)
-        .await
-        .context("fork App Server did not stop")?
-        .context("fork App Server panicked")??;
+    stop_fork_processes(daemon, &daemon_log, app_server).await?;
 
     verify_fork_requests(
         &observed_requests
@@ -108,5 +108,26 @@ async fn real_daemon_and_cli_create_a_compacted_native_fork() -> Result<()> {
         .expect("fork authorization capture mutex was poisoned");
     assert_eq!(authorizations.len(), 1);
     assert_eq!(authorizations[0], format!("Bearer {capability_token}"));
+    Ok(())
+}
+
+async fn stop_fork_processes(
+    mut daemon: Child,
+    daemon_log: &Path,
+    app_server: JoinHandle<Result<()>>,
+) -> Result<()> {
+    interrupt(&daemon).await?;
+    let daemon_status = timeout(PROCESS_TIMEOUT, daemon.wait())
+        .await
+        .context("cocod did not stop after fork smoke test")??;
+    ensure!(
+        daemon_status.success(),
+        "cocod exited with {daemon_status}: {}",
+        read_log(daemon_log)
+    );
+    timeout(PROCESS_TIMEOUT, app_server)
+        .await
+        .context("fork App Server did not stop")?
+        .context("fork App Server panicked")??;
     Ok(())
 }

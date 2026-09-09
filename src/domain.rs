@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub(crate) mod signals;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContextMode {
@@ -65,6 +67,44 @@ pub enum WorkspaceLifecycle {
     Ready,
     Completed,
     Failed,
+}
+
+/// Whether the workspace's Git worktree is currently available for work.
+///
+/// This is intentionally separate from [`WorkspaceLifecycle`]: lifecycle
+/// describes provisioning and terminal failures, while availability describes
+/// the reversible open/closed resource boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceAvailability {
+    Open,
+    Closing,
+    Closed,
+    Reopening,
+    Deleting,
+}
+
+impl WorkspaceAvailability {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Closing => "closing",
+            Self::Closed => "closed",
+            Self::Reopening => "reopening",
+            Self::Deleting => "deleting",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "open" => Some(Self::Open),
+            "closing" => Some(Self::Closing),
+            "closed" => Some(Self::Closed),
+            "reopening" => Some(Self::Reopening),
+            "deleting" => Some(Self::Deleting),
+            _ => None,
+        }
+    }
 }
 
 impl WorkspaceLifecycle {
@@ -131,6 +171,7 @@ pub struct ThreadRuntimeSnapshot {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkspacePhase {
+    Prepared,
     Active,
     WaitingForApproval,
     WaitingForInput,
@@ -142,11 +183,16 @@ pub enum WorkspacePhase {
     Starting,
     Completed,
     Failed,
+    Closing,
+    Closed,
+    Reopening,
+    Deleting,
 }
 
 impl WorkspacePhase {
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Prepared => "prepared",
             Self::Active => "active",
             Self::WaitingForApproval => "waiting_for_approval",
             Self::WaitingForInput => "waiting_for_input",
@@ -158,11 +204,16 @@ impl WorkspacePhase {
             Self::Starting => "starting",
             Self::Completed => "completed",
             Self::Failed => "failed",
+            Self::Closing => "closing",
+            Self::Closed => "closed",
+            Self::Reopening => "reopening",
+            Self::Deleting => "deleting",
         }
     }
 
     pub fn parse(value: &str) -> Option<Self> {
         match value {
+            "prepared" => Some(Self::Prepared),
             "active" => Some(Self::Active),
             "waiting_for_approval" => Some(Self::WaitingForApproval),
             "waiting_for_input" => Some(Self::WaitingForInput),
@@ -174,6 +225,10 @@ impl WorkspacePhase {
             "starting" => Some(Self::Starting),
             "completed" => Some(Self::Completed),
             "failed" => Some(Self::Failed),
+            "closing" => Some(Self::Closing),
+            "closed" => Some(Self::Closed),
+            "reopening" => Some(Self::Reopening),
+            "deleting" => Some(Self::Deleting),
             _ => None,
         }
     }
@@ -188,9 +243,22 @@ pub enum WorkspaceWaitReason {
 
 pub fn derive_workspace_runtime(
     lifecycle: WorkspaceLifecycle,
+    availability: WorkspaceAvailability,
     thread_runtime: Option<&ThreadRuntimeSnapshot>,
     has_active_turn: bool,
+    has_thread: bool,
 ) -> (WorkspacePhase, Vec<WorkspaceWaitReason>) {
+    let availability_phase = match availability {
+        WorkspaceAvailability::Open => None,
+        WorkspaceAvailability::Closing => Some(WorkspacePhase::Closing),
+        WorkspaceAvailability::Closed => Some(WorkspacePhase::Closed),
+        WorkspaceAvailability::Reopening => Some(WorkspacePhase::Reopening),
+        WorkspaceAvailability::Deleting => Some(WorkspacePhase::Deleting),
+    };
+    if let Some(phase) = availability_phase {
+        return (phase, Vec::new());
+    }
+
     let lifecycle_phase = match lifecycle {
         WorkspaceLifecycle::Provisioning => Some(WorkspacePhase::Provisioning),
         WorkspaceLifecycle::Starting => Some(WorkspacePhase::Starting),
@@ -200,6 +268,10 @@ pub fn derive_workspace_runtime(
     };
     if let Some(phase) = lifecycle_phase {
         return (phase, Vec::new());
+    }
+
+    if !has_thread {
+        return (WorkspacePhase::Prepared, Vec::new());
     }
 
     let Some(snapshot) = thread_runtime.filter(|snapshot| snapshot.is_fresh) else {
@@ -330,6 +402,7 @@ pub struct Workspace {
     pub context: Value,
     pub profile: ProfileSnapshot,
     pub lifecycle: WorkspaceLifecycle,
+    pub availability: WorkspaceAvailability,
     pub thread_runtime: Option<ThreadRuntimeSnapshot>,
     /// Derived on every storage read; never persisted as mutable state.
     pub phase: WorkspacePhase,
@@ -347,6 +420,11 @@ pub struct Workspace {
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
     pub completed_at_ms: Option<i64>,
+    /// Whether CoCo archived the bound native thread while this workspace was closed.
+    pub thread_archived: bool,
+    /// Worktree HEAD captured immediately before a successful close.
+    pub closed_head_sha: Option<String>,
+    pub closed_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -756,7 +834,13 @@ mod tests {
             is_fresh: true,
         };
         assert_eq!(
-            derive_workspace_runtime(WorkspaceLifecycle::Ready, Some(&snapshot), true),
+            derive_workspace_runtime(
+                WorkspaceLifecycle::Ready,
+                WorkspaceAvailability::Open,
+                Some(&snapshot),
+                true,
+                true,
+            ),
             (
                 WorkspacePhase::WaitingForApproval,
                 vec![
@@ -768,13 +852,25 @@ mod tests {
         assert_eq!(
             derive_workspace_runtime(
                 WorkspaceLifecycle::Ready,
+                WorkspaceAvailability::Open,
                 Some(&ThreadRuntimeSnapshot {
                     is_fresh: false,
                     ..snapshot
                 }),
                 true,
+                true,
             ),
             (WorkspacePhase::Unavailable, Vec::new())
+        );
+        assert_eq!(
+            derive_workspace_runtime(
+                WorkspaceLifecycle::Ready,
+                WorkspaceAvailability::Open,
+                None,
+                false,
+                false,
+            ),
+            (WorkspacePhase::Prepared, Vec::new())
         );
     }
 }

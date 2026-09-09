@@ -13,7 +13,7 @@ async fn lists_the_app_server_model_catalog_without_repository_state() {
 }
 
 #[tokio::test]
-async fn prepares_an_idle_workspace_without_starting_a_turn_and_replays_operation_ids() {
+async fn prepares_a_workspace_without_starting_a_native_thread_and_replays_operation_ids() {
     let fixture = Fixture::new(FakeWorker::default());
     let repository = fixture.register().await;
 
@@ -24,48 +24,24 @@ async fn prepares_an_idle_workspace_without_starting_a_turn_and_replays_operatio
         .unwrap();
     let workspace = created.workspace.clone();
     assert_eq!(workspace.lifecycle, WorkspaceLifecycle::Ready);
-    assert_eq!(workspace.phase, WorkspacePhase::Idle);
-    assert_eq!(
-        workspace
-            .thread_runtime
-            .as_ref()
-            .map(|snapshot| &snapshot.status),
-        Some(&CodexThreadStatus::Idle)
-    );
-    assert!(workspace.thread_runtime.as_ref().unwrap().is_fresh);
-    assert_eq!(workspace.codex_thread_id.as_deref(), Some("thread-1"));
+    assert_eq!(workspace.phase, WorkspacePhase::Prepared);
+    assert!(workspace.thread_runtime.is_none());
+    assert!(workspace.codex_thread_id.is_none());
     assert!(created.turn_id.is_none());
-    assert_eq!(workspace.profile.effective_settings["model"], "gpt-test");
+    assert_eq!(workspace.profile.effective_settings, json!({}));
     let worktree = workspace.worktree_path.as_deref().unwrap();
     assert!(worktree.starts_with(fixture.worktrees.join(&repository.id)));
     assert!(worktree.join("README.md").is_file());
 
-    let calls = fixture.worker.calls();
-    assert_eq!(calls.len(), 1);
-    assert!(matches!(
-        &calls[0],
-        WorkerCall::Thread {
-            name,
-            cwd,
-            config,
-            model,
-        } if name == "first-workspace"
-            && cwd == worktree
-            && config == &json!({})
-            && model.is_none()
-    ));
+    assert!(fixture.worker.calls().is_empty());
     let replay = fixture
         .coordinator
         .create_workspace(fixture.create_params())
         .await
         .unwrap();
     assert_eq!(replay.workspace.id, workspace.id);
-    assert_eq!(replay.workspace.phase, WorkspacePhase::Idle);
-    assert!(matches!(
-        fixture.worker.calls().as_slice(),
-        [WorkerCall::Thread { .. }, WorkerCall::Read { thread_id }]
-            if thread_id == "thread-1"
-    ));
+    assert_eq!(replay.workspace.phase, WorkspacePhase::Prepared);
+    assert!(fixture.worker.calls().is_empty());
 
     let mut conflict = fixture.create_params();
     conflict.worktree = WorkspaceWorktreeRequest::NewBranch {
@@ -82,11 +58,7 @@ async fn prepares_an_idle_workspace_without_starting_a_turn_and_replays_operatio
     let events = fixture.store.events_after(Some(&workspace.id), 0).unwrap();
     assert_eq!(
         events.iter().map(|event| event.kind).collect::<Vec<_>>(),
-        [
-            EventKind::WorkspaceCreated,
-            EventKind::WorktreeCreated,
-            EventKind::AgentStarted,
-        ]
+        [EventKind::WorkspaceCreated, EventKind::WorktreeCreated]
     );
 }
 
@@ -116,8 +88,17 @@ async fn passes_an_explicit_model_separately_from_the_selected_profile() {
     );
     assert_eq!(
         created.workspace.profile.effective_settings["model"],
-        "gpt-explicit"
+        "gpt-profile"
     );
+    assert!(fixture.worker.calls().is_empty());
+
+    let attached = fixture
+        .coordinator
+        .materialize_workspace_thread(created.workspace.clone())
+        .await
+        .unwrap();
+    assert_eq!(attached.phase, WorkspacePhase::Idle);
+    assert_eq!(attached.profile.effective_settings["model"], "gpt-explicit");
     assert!(matches!(
         fixture.worker.calls().as_slice(),
         [WorkerCall::Thread { config, model, .. }]
@@ -134,27 +115,80 @@ async fn passes_an_explicit_model_separately_from_the_selected_profile() {
 }
 
 #[tokio::test]
-async fn preserves_the_worktree_and_marks_the_workspace_failed_after_worker_failure() {
+async fn preserves_a_prepared_worktree_when_deferred_thread_start_fails() {
     let fixture = Fixture::new(FakeWorker::failing_thread_start());
     let repository = fixture.register().await;
 
+    let prepared = fixture
+        .coordinator
+        .create_workspace(fixture.create_params())
+        .await
+        .unwrap()
+        .workspace;
     assert!(matches!(
         fixture
             .coordinator
-            .create_workspace(fixture.create_params())
+            .start_turn(TurnStartParams {
+                scope: RepositoryScope::repository(fixture.source.clone()),
+                workspace: prepared.id.clone(),
+                message: "activate the prepared workspace".to_owned(),
+                operation_id: "activate-prepared".to_owned(),
+            })
             .await,
         Err(CoordinatorError::Worker(WorkerError::Runtime(_)))
     ));
     let workspace = fixture
         .store
-        .workspace_by_name(&repository.id, "first-workspace")
+        .workspace_by_id(&prepared.id)
         .unwrap()
         .unwrap();
-    assert_eq!(workspace.phase, WorkspacePhase::Failed);
-    assert_eq!(workspace.lifecycle, WorkspaceLifecycle::Failed);
-    assert_eq!(workspace.last_error_code.as_deref(), Some("CODEX_ERROR"));
+    assert_eq!(workspace.phase, WorkspacePhase::Prepared);
+    assert_eq!(workspace.lifecycle, WorkspaceLifecycle::Ready);
+    assert_eq!(workspace.last_error_code, None);
     assert!(workspace.worktree_path.unwrap().is_dir());
+    assert!(
+        fixture
+            .store
+            .workspace_by_name(&repository.id, "first-workspace")
+            .unwrap()
+            .is_some()
+    );
     assert_eq!(fixture.worker.calls().len(), 1);
+}
+
+#[tokio::test]
+async fn fresh_attach_returns_a_start_lease_without_creating_a_native_thread() {
+    let fixture = Fixture::new(FakeWorker::default());
+    fixture.register().await;
+    let prepared = fixture
+        .coordinator
+        .create_workspace(fixture.create_params())
+        .await
+        .unwrap()
+        .workspace;
+
+    let attached = fixture
+        .coordinator
+        .attach_workspace(WorkspaceAttachParams {
+            scope: RepositoryScope::repository(fixture.source.clone()),
+            workspace: prepared.id.clone(),
+        })
+        .await
+        .unwrap();
+    let WorkspaceAttachLaunch::Start { lease_id } = attached.launch else {
+        panic!("a fresh workspace must launch a new remote TUI thread");
+    };
+    assert_eq!(attached.workspace.phase, WorkspacePhase::Prepared);
+    assert!(attached.workspace.codex_thread_id.is_none());
+    assert!(fixture.worker.calls().is_empty());
+
+    fixture
+        .coordinator
+        .release_workspace_attach(WorkspaceAttachReleaseParams {
+            workspace_id: prepared.id,
+            lease_id,
+        })
+        .unwrap();
 }
 
 #[tokio::test]
@@ -162,11 +196,8 @@ async fn passive_native_idle_preserves_the_local_mutation_guard() {
     let fixture = Fixture::new(FakeWorker::default());
     fixture.register().await;
     let workspace = fixture
-        .coordinator
-        .create_workspace(fixture.create_params())
-        .await
-        .unwrap()
-        .workspace;
+        .create_and_materialize(fixture.create_params())
+        .await;
     fixture
         .coordinator
         .start_turn(TurnStartParams {
@@ -254,11 +285,8 @@ async fn native_thread_read_failure_projects_unavailable_without_serving_or_pers
     let fixture = Fixture::new(FakeWorker::default());
     fixture.register().await;
     let workspace = fixture
-        .coordinator
-        .create_workspace(fixture.create_params())
-        .await
-        .unwrap()
-        .workspace;
+        .create_and_materialize(fixture.create_params())
+        .await;
     fixture.worker.fail_thread_read("thread-1");
 
     let shown = fixture
@@ -284,17 +312,27 @@ async fn native_thread_read_failure_projects_unavailable_without_serving_or_pers
 
 #[tokio::test]
 async fn failed_lifecycle_remains_failed_without_a_native_thread_read() {
-    let fixture = Fixture::new(FakeWorker::failing_thread_start());
-    let repository = fixture.register().await;
-    fixture
+    let fixture = Fixture::new(FakeWorker::default());
+    fixture.register().await;
+    let prepared = fixture
         .coordinator
         .create_workspace(fixture.create_params())
         .await
-        .unwrap_err();
-    let failed = fixture
-        .store
-        .workspace_by_name(&repository.id, "first-workspace")
         .unwrap()
+        .workspace;
+    let (failed, _) = fixture
+        .store
+        .transition_workspace_lifecycle_with_event(
+            &prepared.id,
+            WorkspaceLifecycle::Ready,
+            WorkspaceLifecycle::Failed,
+            Some(("TEST_FAILURE", "injected failure")),
+            crate::store::EventDraft::workspace(
+                EventKind::AgentFailed,
+                EventSource::Coco,
+                json!({"stage": "test"}),
+            ),
+        )
         .unwrap();
 
     let shown = fixture
@@ -322,15 +360,12 @@ async fn workspace_list_filters_after_hydrating_every_native_phase() {
     let fixture = Fixture::new(FakeWorker::default());
     fixture.register().await;
     let waiting = fixture
-        .coordinator
-        .create_workspace(fixture.create_params())
-        .await
-        .unwrap()
-        .workspace;
+        .create_and_materialize(fixture.create_params())
+        .await;
     let mut second = fixture.create_params();
     second.name = "second-workspace".to_owned();
     second.operation_id = "create-operation-2".to_owned();
-    fixture.coordinator.create_workspace(second).await.unwrap();
+    fixture.create_and_materialize(second).await;
     fixture.worker.set_native_status(
         "thread-1",
         CodexThreadStatus::Active {
@@ -367,11 +402,8 @@ async fn event_list_uses_one_metadata_only_native_read() {
     let fixture = Fixture::new(FakeWorker::default());
     fixture.register().await;
     let workspace = fixture
-        .coordinator
-        .create_workspace(fixture.create_params())
-        .await
-        .unwrap()
-        .workspace;
+        .create_and_materialize(fixture.create_params())
+        .await;
     let calls_before = fixture.worker.calls().len();
 
     let result = fixture
@@ -410,7 +442,7 @@ async fn serves_repository_views_events_and_bounded_diffs() {
         .coordinator
         .list_workspaces(WorkspaceListParams {
             scope: RepositoryScope::repository(fixture.source.clone()),
-            phases: Some(vec!["idle".to_owned()]),
+            phases: Some(vec!["prepared".to_owned()]),
         })
         .await
         .unwrap();
@@ -438,7 +470,7 @@ async fn serves_repository_views_events_and_bounded_diffs() {
         })
         .await
         .unwrap();
-    assert_eq!(events.events.len(), 3);
+    assert_eq!(events.events.len(), 2);
 
     let diff = fixture
         .coordinator

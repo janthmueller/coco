@@ -1,5 +1,7 @@
 use super::{Coordinator, CoordinatorError, NativeThread, StartedThread, WorkerError};
-use crate::domain::{CodexThreadStatus, ProfileSnapshot, Workspace, WorkspaceLifecycle};
+use crate::domain::{
+    CodexThreadStatus, ProfileSnapshot, Workspace, WorkspaceAvailability, WorkspaceLifecycle,
+};
 use crate::profile::load_profile;
 
 impl Coordinator {
@@ -41,11 +43,17 @@ impl Coordinator {
         &self,
         workspace: Workspace,
     ) -> Result<Workspace, CoordinatorError> {
-        if workspace.lifecycle != WorkspaceLifecycle::Ready {
+        if workspace.lifecycle != WorkspaceLifecycle::Ready
+            || workspace.availability != WorkspaceAvailability::Open
+        {
             return Err(CoordinatorError::InvalidWorkspaceState {
-                expected: "ready",
+                expected: "ready and open",
                 actual: workspace.phase,
             });
+        }
+
+        if workspace.codex_thread_id.is_none() {
+            return self.materialize_workspace_thread(workspace).await;
         }
 
         let native = self.read_bound_thread(&workspace).await?;
@@ -110,7 +118,7 @@ impl Coordinator {
     }
 }
 
-fn same_profile_source(current: &ProfileSnapshot, stored: &ProfileSnapshot) -> bool {
+pub(super) fn same_profile_source(current: &ProfileSnapshot, stored: &ProfileSnapshot) -> bool {
     current.name == stored.name
         && current.source_path == stored.source_path
         && current.source_hash == stored.source_hash

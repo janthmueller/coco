@@ -19,13 +19,18 @@ mod codex_events;
 mod context;
 mod decision;
 mod error;
+mod jump;
 mod recovery;
+mod retirement;
+mod signals;
 mod turn;
 mod worker;
 mod workspace;
 
 pub(crate) use error::{CoordinatorError, WorkspaceReferenceCandidate};
-pub(crate) use worker::{NativeThread, StartedThread, StartedTurn, WorkerError, WorkerRuntime};
+pub(crate) use worker::{
+    LocatedNativeThread, NativeThread, StartedThread, StartedTurn, WorkerError, WorkerRuntime,
+};
 
 pub(crate) struct Coordinator {
     store: Arc<Store>,
@@ -35,11 +40,14 @@ pub(crate) struct Coordinator {
     codex_home: PathBuf,
     runtime_generation: String,
     repository_locks: AsyncMutex<HashMap<String, Arc<AsyncMutex<()>>>>,
+    context_dependencies: AsyncMutex<()>,
     decisions: StdMutex<decision::DecisionRegistry>,
     subscribed_threads: StdMutex<HashSet<String>>,
     active_turn_operations: StdMutex<HashMap<String, turn::RuntimeTurnOperation>>,
+    completed_turn_results: StdMutex<turn::TurnResultRegistry>,
     pending_compactions: StdMutex<HashMap<String, context::PendingCompaction>>,
     file_change_previews: StdMutex<HashMap<(String, String), Vec<DecisionFileChange>>>,
+    jump_leases: StdMutex<jump::JumpLeaseRegistry>,
 }
 
 impl Coordinator {
@@ -59,11 +67,14 @@ impl Coordinator {
             codex_home,
             runtime_generation,
             repository_locks: AsyncMutex::new(HashMap::new()),
+            context_dependencies: AsyncMutex::new(()),
             decisions: StdMutex::new(decision::DecisionRegistry::default()),
             subscribed_threads: StdMutex::new(HashSet::new()),
             active_turn_operations: StdMutex::new(HashMap::new()),
+            completed_turn_results: StdMutex::new(turn::TurnResultRegistry::default()),
             pending_compactions: StdMutex::new(HashMap::new()),
             file_change_previews: StdMutex::new(HashMap::new()),
+            jump_leases: StdMutex::new(jump::JumpLeaseRegistry::default()),
         }
     }
 
@@ -207,6 +218,13 @@ impl Coordinator {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert(thread_id.to_owned());
+    }
+
+    fn mark_thread_unsubscribed(&self, thread_id: &str) {
+        self.subscribed_threads
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(thread_id);
     }
 
     fn workspace_response(

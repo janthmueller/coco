@@ -2,17 +2,16 @@ use std::ffi::OsStr;
 use std::path::PathBuf;
 
 use clap::{CommandFactory, Parser};
-use serde_json::json;
 
-use crate::paths::CocoPaths;
+use crate::protocol::{WorkspaceAttachLaunch, WorkspaceDiffResult};
 
 use super::args::{Cli, Command};
-use super::jump::{jump_command, load_jump_target};
+use super::jump::{JumpTarget, fresh_command, resume_command};
 use super::output::{phase_label, render_diff};
-use super::status::{FollowAction, follow_stops_at, next_follow_action};
 
 mod collections;
 mod creation;
+mod retirement;
 
 #[test]
 fn create_help_describes_the_codex_named_profile_file() {
@@ -27,8 +26,8 @@ fn create_help_describes_the_codex_named_profile_file() {
     assert!(!help.contains("[profiles.<PROFILE>]"));
     for option in [
         "--base-workspace",
-        "--context-workspace",
-        "--context-thread",
+        "--context",
+        "--compact-context",
         "--branch",
         "--checkout",
         "--detached",
@@ -38,6 +37,8 @@ fn create_help_describes_the_codex_named_profile_file() {
     ] {
         assert!(help.contains(option), "create help omitted {option}");
     }
+    assert!(help.contains("-c, --context"));
+    assert!(help.contains("-C, --compact-context"));
     assert!(!help.contains("--fork-from"));
 }
 
@@ -69,11 +70,11 @@ fn diff_help_and_human_output_disclose_bounded_patches() {
     assert!(help.contains("bounded tracked patch"));
     assert!(!help.contains("Show all tracked"));
 
-    let rendered = render_diff(&json!({
-        "patch": "diff --git a/file b/file\n",
-        "patchTruncated": true,
-        "untrackedPaths": ["new.txt"],
-    }));
+    let rendered = render_diff(&WorkspaceDiffResult {
+        patch: "diff --git a/file b/file\n".to_owned(),
+        patch_truncated: true,
+        untracked_paths: vec![PathBuf::from("new.txt")],
+    });
     assert_eq!(
         rendered,
         concat!(
@@ -85,19 +86,19 @@ fn diff_help_and_human_output_disclose_bounded_patches() {
     );
 
     assert_eq!(
-        render_diff(&json!({
-            "patch": "",
-            "patchTruncated": true,
-            "untrackedPaths": [],
-        })),
+        render_diff(&WorkspaceDiffResult {
+            patch: String::new(),
+            patch_truncated: true,
+            untracked_paths: Vec::new(),
+        }),
         "Warning: tracked patch output was truncated.\n"
     );
     assert_eq!(
-        render_diff(&json!({
-            "patch": "",
-            "patchTruncated": false,
-            "untrackedPaths": [],
-        })),
+        render_diff(&WorkspaceDiffResult {
+            patch: String::new(),
+            patch_truncated: false,
+            untracked_paths: Vec::new(),
+        }),
         "No changes.\n"
     );
 }
@@ -165,9 +166,23 @@ fn parses_workspace_creation_with_an_optional_profile() {
     assert!(!send_only.jump);
 
     assert!(Cli::try_parse_from(["coco", "create", "auth", "--goal", "work"]).is_err());
-    assert!(Cli::try_parse_from(["coco", "create", "auth", "--context", "fresh"]).is_err());
+    let with_context =
+        Cli::try_parse_from(["coco", "create", "auth", "--context", "fresh"]).unwrap();
+    assert!(matches!(
+        with_context.command,
+        Command::Create(super::args::CreateArgs {
+            context: Some(reference),
+            ..
+        }) if reference == "fresh"
+    ));
+    assert!(Cli::try_parse_from(["coco", "create", "auth", "--context", "  "]).is_err());
     assert!(Cli::try_parse_from(["coco", "create", "auth", "--send", "  "]).is_err());
     assert!(Cli::try_parse_from(["coco", "create", "auth", "--model", "  "]).is_err());
+    assert!(Cli::try_parse_from(["coco", "new", "auth"]).is_err());
+}
+
+#[test]
+fn parses_prompted_replayable_and_waited_sends() {
     assert!(Cli::try_parse_from(["coco", "send", "auth", ""]).is_err());
     let prompted_send = Cli::try_parse_from(["coco", "send"]).unwrap();
     assert!(matches!(
@@ -203,12 +218,13 @@ fn parses_workspace_creation_with_an_optional_profile() {
             ..
         } if operation_id == "send-auth-1"
     ));
+    let waited = Cli::try_parse_from(["coco", "send", "auth", "continue", "--wait"]).unwrap();
+    assert!(matches!(waited.command, Command::Send { wait: true, .. }));
     assert!(
         Cli::try_parse_from(["coco", "send", "auth", "continue", "--operation-id", " "]).is_err()
     );
     assert!(Cli::try_parse_from(["coco", "--no-input", "status", "auth"]).is_ok());
     assert!(Cli::try_parse_from(["coco", "status", "auth", "--no-input"]).is_ok());
-    assert!(Cli::try_parse_from(["coco", "new", "auth"]).is_err());
 }
 
 #[test]
@@ -226,14 +242,14 @@ fn parses_deterministic_approval_choices() {
 }
 
 #[test]
-fn parses_native_workspace_forks_and_requires_an_explicit_source_for_compaction() {
+fn parses_native_workspace_forks_and_requires_an_explicit_context_for_compaction() {
     let fork = Cli::try_parse_from([
         "coco",
         "create",
         "review/follow-up",
         "--fork-from",
         "feat/source",
-        "--compact",
+        "--compact-context",
         "-s",
         "Continue from the review",
     ])
@@ -243,10 +259,10 @@ fn parses_native_workspace_forks_and_requires_an_explicit_source_for_compaction(
     };
     assert_eq!(fork.base, None);
     assert_eq!(fork.fork_from.as_deref(), Some("feat/source"));
-    assert!(fork.compact);
+    assert!(fork.compact_context);
     assert_eq!(fork.send.as_deref(), Some("Continue from the review"));
 
-    let no_source = Cli::try_parse_from(["coco", "create", "child", "--compact"]).unwrap();
+    let no_source = Cli::try_parse_from(["coco", "create", "child", "--compact-context"]).unwrap();
     let Command::Create(no_source) = no_source.command else {
         panic!("create did not parse as the create command");
     };
@@ -281,71 +297,29 @@ fn presents_stable_user_facing_workspace_states() {
     assert_eq!(phase_label("waiting_for_approval"), "Waiting for approval");
     assert_eq!(phase_label("idle"), "Ready");
     assert_eq!(phase_label("unavailable"), "Status unavailable");
-    assert!(follow_stops_at("waiting_for_input"));
-    assert!(follow_stops_at("system_error"));
-    assert!(!follow_stops_at("active"));
+    assert_eq!(phase_label("closed"), "Closed");
 }
 
 #[test]
-fn status_follow_waits_for_a_stable_terminal_poll() {
-    assert_eq!(
-        next_follow_action("active", false, true),
-        FollowAction::Continue
-    );
-    assert_eq!(
-        next_follow_action("idle", false, false),
-        FollowAction::Continue
-    );
-    assert_eq!(
-        next_follow_action("idle", false, true),
-        FollowAction::Finish
-    );
-    assert_eq!(
-        next_follow_action("waiting_for_approval", true, false),
-        FollowAction::Finish,
-        "open decisions are ready to present immediately"
-    );
-    assert_eq!(
-        next_follow_action("waiting_for_input", false, false),
-        FollowAction::Continue,
-        "a native waiting status gets one poll for its server request to arrive"
-    );
-    assert_eq!(
-        next_follow_action("waiting_for_input", false, true),
-        FollowAction::Finish,
-        "a stable unsupported wait is reported after the grace poll"
-    );
-}
-
-#[tokio::test]
-async fn builds_an_authenticated_jump_into_the_managed_worktree() {
+fn builds_authenticated_resume_and_fresh_jump_commands() {
     let directory = tempfile::tempdir().unwrap();
     let worktree = directory.path().join("worktree");
     std::fs::create_dir(&worktree).unwrap();
-    let paths = CocoPaths {
-        data_dir: directory.path().join("data"),
-        database_path: directory.path().join("coco.db"),
-        socket_path: directory.path().join("cocod.sock"),
-        codex_endpoint_path: directory.path().join("codex-app-server.json"),
-        codex_token_path: directory.path().join("codex-app-server.token"),
-        worktrees_dir: directory.path().join("worktrees"),
+    let target = JumpTarget {
+        workspace_id: "workspace-123".to_owned(),
+        worktree,
+        profile: "dev".to_owned(),
+        model: Some("gpt-explicit".to_owned()),
+        launch: WorkspaceAttachLaunch::Resume {
+            thread_id: "thread-123".to_owned(),
+            lease_id: "lease-123".to_owned(),
+        },
+        endpoint_url: "ws://127.0.0.1:45123".to_owned(),
+        capability_token: "test-capability".to_owned(),
         codex_home: directory.path().join("codex-home"),
     };
-    std::fs::write(
-        &paths.codex_endpoint_path,
-        r#"{"schemaVersion":1,"url":"ws://127.0.0.1:45123"}"#,
-    )
-    .unwrap();
-    std::fs::write(&paths.codex_token_path, "test-capability\n").unwrap();
-    let response = json!({
-        "workspace": {
-            "worktreePath": worktree,
-            "codexThreadId": "thread-123"
-        }
-    });
 
-    let target = load_jump_target(&paths, &response).await.unwrap();
-    let command = jump_command(&target, PathBuf::from("/opt/codex"));
+    let command = resume_command(&target, "thread-123", PathBuf::from("/opt/codex"));
     let command = command.as_std();
     let arguments = command
         .get_args()
@@ -370,5 +344,39 @@ async fn builds_an_authenticated_jump_into_the_managed_worktree() {
     assert!(command.get_envs().any(|(name, value)| {
         name == OsStr::new("COCO_CODEX_REMOTE_CAPABILITY_TOKEN")
             && value == Some(OsStr::new("test-capability"))
+    }));
+    assert!(command.get_envs().any(|(name, value)| {
+        name == OsStr::new("CODEX_HOME") && value == Some(target.codex_home.as_os_str())
+    }));
+
+    let command = fresh_command(
+        &target,
+        PathBuf::from("/opt/codex"),
+        "ws://127.0.0.1:45234",
+        "relay-capability",
+    );
+    let command = command.as_std();
+    let arguments = command
+        .get_args()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        arguments,
+        [
+            "--remote",
+            "ws://127.0.0.1:45234",
+            "--remote-auth-token-env",
+            "COCO_CODEX_REMOTE_CAPABILITY_TOKEN",
+            "-C",
+            target.worktree.to_str().unwrap(),
+            "--profile",
+            "dev",
+            "--model",
+            "gpt-explicit",
+        ]
+    );
+    assert!(command.get_envs().any(|(name, value)| {
+        name == OsStr::new("COCO_CODEX_REMOTE_CAPABILITY_TOKEN")
+            && value == Some(OsStr::new("relay-capability"))
     }));
 }

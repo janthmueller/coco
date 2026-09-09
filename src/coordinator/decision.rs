@@ -145,7 +145,10 @@ impl Coordinator {
             );
             return false;
         };
-        if workspace.codex_thread_id.as_deref() != Some(codex_thread_id.as_str()) {
+        let binding_matches = workspace.codex_thread_id.as_deref()
+            == Some(codex_thread_id.as_str())
+            || self.runtime_thread_matches_workspace(&codex_thread_id, &workspace.id);
+        if !binding_matches {
             warn!(
                 method,
                 "ignoring a decision request with a mismatched thread binding"

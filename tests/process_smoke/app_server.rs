@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) struct CaptureAuthorization(Arc<Mutex<Vec<String>>>);
+pub(super) struct CaptureAuthorization(pub(super) Arc<Mutex<Vec<String>>>);
 
 impl Callback for CaptureAuthorization {
     fn on_request(self, request: &Request, response: Response) -> Result<Response, ErrorResponse> {
@@ -78,6 +78,7 @@ pub(super) async fn run_fake_fork_server(
     let mut source_cwd = Value::Null;
     let mut child_cwd = Value::Null;
     let mut child_active = false;
+    let mut experimental_api = false;
     while let Some(message) = websocket.next().await {
         let frame = match message? {
             Message::Text(text) => serde_json::from_str::<Value>(&text)?,
@@ -94,7 +95,13 @@ pub(super) async fn run_fake_fork_server(
             .expect("fork request capture mutex was poisoned")
             .push(frame.clone());
         match frame.get("method").and_then(Value::as_str) {
-            Some("initialize") => send_result(&mut websocket, &frame, json!({})).await?,
+            Some("initialize") => {
+                experimental_api = frame
+                    .pointer("/params/capabilities/experimentalApi")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                send_result(&mut websocket, &frame, json!({})).await?;
+            }
             Some("initialized") => {}
             Some("thread/start") => {
                 source_cwd = frame.pointer("/params/cwd").cloned().unwrap_or(Value::Null);
@@ -107,6 +114,14 @@ pub(super) async fn run_fake_fork_server(
             }
             Some("thread/name/set") => send_result(&mut websocket, &frame, json!({})).await?,
             Some("thread/fork") => {
+                ensure!(
+                    experimental_api,
+                    "thread/fork.deferGoalContinuation requires experimentalApi capability"
+                );
+                ensure!(
+                    frame.pointer("/params/excludeTurns") == Some(&json!(true)),
+                    "the fake large source thread requires metadata-only fork output"
+                );
                 child_cwd = frame.pointer("/params/cwd").cloned().unwrap_or(Value::Null);
                 send_result(
                     &mut websocket,
@@ -183,13 +198,41 @@ pub(super) async fn run_fake_fork_server(
                 }
             }
             Some("turn/start") => {
-                child_active = true;
-                send_result(
-                    &mut websocket,
-                    &frame,
-                    json!({"turn": {"id": "turn-fork-child"}}),
-                )
-                .await?;
+                let thread_id = frame
+                    .pointer("/params/threadId")
+                    .and_then(Value::as_str)
+                    .context("turn/start had no threadId")?;
+                match thread_id {
+                    FORK_SOURCE_THREAD_ID => {
+                        send_result(
+                            &mut websocket,
+                            &frame,
+                            json!({"turn": {"id": "turn-fork-source"}}),
+                        )
+                        .await?;
+                        send_json(
+                            &mut websocket,
+                            json!({
+                                "method": "turn/completed",
+                                "params": {
+                                    "threadId": FORK_SOURCE_THREAD_ID,
+                                    "turn": {"id": "turn-fork-source", "status": "completed"}
+                                }
+                            }),
+                        )
+                        .await?;
+                    }
+                    FORK_CHILD_THREAD_ID => {
+                        child_active = true;
+                        send_result(
+                            &mut websocket,
+                            &frame,
+                            json!({"turn": {"id": "turn-fork-child"}}),
+                        )
+                        .await?;
+                    }
+                    other => bail!("turn/start used unknown fork thread {other:?}"),
+                }
             }
             Some(other) => bail!("unexpected fork App Server method {other:?}"),
             None => bail!("received a fork App Server frame without a method: {frame}"),
@@ -215,6 +258,7 @@ pub(super) async fn run_fake_recovery_server(
     observed_authorization: Arc<Mutex<Vec<String>>>,
     observed_requests: Arc<Mutex<Vec<Value>>>,
     expected_cwd: PathBuf,
+    second_cwd: PathBuf,
 ) -> Result<()> {
     let (stream, peer) = listener.accept().await?;
     ensure!(
@@ -239,6 +283,10 @@ pub(super) async fn run_fake_recovery_server(
             .lock()
             .expect("recovery request capture mutex was poisoned")
             .push(frame.clone());
+        if let Some(result) = super::multi_client::recovery_read(&frame, &second_cwd) {
+            send_result(&mut websocket, &frame, result).await?;
+            continue;
+        }
         match frame.get("method").and_then(Value::as_str) {
             Some("initialize") => send_result(&mut websocket, &frame, json!({})).await?,
             Some("initialized") => {}
@@ -288,6 +336,8 @@ pub(super) async fn handle_daemon_connection(
     let mut completion = Some(completion);
     let mut thread_cwd = Value::Null;
     let mut completed_turns = Vec::new();
+    let mut turn_count = 0_u8;
+    let mut second_thread = super::multi_client::SecondThread::default();
 
     while let Some(message) = websocket.next().await {
         let message = message?;
@@ -306,6 +356,9 @@ pub(super) async fn handle_daemon_connection(
             .expect("request capture mutex was poisoned")
             .push(frame.clone());
         let method = frame.get("method").and_then(Value::as_str);
+        if !thread_cwd.is_null() && second_thread.handle(&mut websocket, &frame).await? {
+            continue;
+        }
         match method {
             Some("initialize") => {
                 send_result(&mut websocket, &frame, json!({})).await?;
@@ -349,23 +402,73 @@ pub(super) async fn handle_daemon_connection(
                 send_result(&mut websocket, &frame, json!({})).await?;
             }
             Some("turn/start") => {
-                let completion = completion
-                    .take()
-                    .context("received more than one turn/start request")?;
-                completed_turns = complete_fake_turn(
-                    &mut websocket,
-                    &frame,
-                    completion,
-                    &observed_requests,
-                    &thread_cwd,
-                )
-                .await?;
+                turn_count += 1;
+                if turn_count == 1 {
+                    let completion = completion
+                        .take()
+                        .context("first turn/start had no completion signal")?;
+                    completed_turns = complete_fake_turn(
+                        &mut websocket,
+                        &frame,
+                        completion,
+                        &observed_requests,
+                        &thread_cwd,
+                    )
+                    .await?;
+                } else if turn_count == 2 {
+                    completed_turns.push(complete_waited_fake_turn(&mut websocket, &frame).await?);
+                } else {
+                    bail!("received an unexpected third turn/start request");
+                }
             }
             Some(other) => bail!("unexpected App Server method {other:?}"),
             None => bail!("received an App Server frame without a method: {frame}"),
         }
     }
     Ok(())
+}
+
+async fn complete_waited_fake_turn(
+    websocket: &mut WebSocketStream<TcpStream>,
+    request: &Value,
+) -> Result<Value> {
+    send_result(websocket, request, json!({"turn": {"id": WAITED_TURN_ID}})).await?;
+    send_json(
+        websocket,
+        json!({
+            "method": "item/completed",
+            "params": {
+                "threadId": THREAD_ID,
+                "turnId": WAITED_TURN_ID,
+                "item": {
+                    "id": "message-process-smoke-waited",
+                    "type": "agentMessage",
+                    "text": "Fake Codex completed the waited turn."
+                }
+            }
+        }),
+    )
+    .await?;
+    send_json(
+        websocket,
+        json!({
+            "method": "turn/completed",
+            "params": {
+                "threadId": THREAD_ID,
+                "turn": {"id": WAITED_TURN_ID, "status": "completed"}
+            }
+        }),
+    )
+    .await?;
+    Ok(json!({
+        "id": WAITED_TURN_ID,
+        "status": "completed",
+        "items": [{
+            "id": "message-process-smoke-waited",
+            "type": "agentMessage",
+            "text": "Fake Codex completed the waited turn."
+        }]
+    }))
 }
 
 pub(super) async fn complete_fake_turn(

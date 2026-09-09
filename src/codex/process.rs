@@ -276,6 +276,9 @@ async fn initialize_client(
                 "clientInfo": {
                     "name": options.client_name,
                     "version": options.client_version,
+                },
+                "capabilities": {
+                    "experimentalApi": true,
                 }
             }),
         )

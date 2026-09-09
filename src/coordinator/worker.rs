@@ -34,6 +34,12 @@ pub(crate) struct NativeThread {
     pub(crate) forked_from_id: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LocatedNativeThread {
+    pub(crate) thread: NativeThread,
+    pub(crate) archived: bool,
+}
+
 #[derive(Debug, Error)]
 pub(crate) enum WorkerError {
     #[error(transparent)]
@@ -71,6 +77,37 @@ pub(crate) trait WorkerRuntime: Send + Sync + 'static {
             "thread/read is not supported by this worker".to_owned(),
         ))
     }
+
+    /// Finds a thread only after Codex has materialized durable history for it.
+    /// A newly started empty thread must return `None` even while it is loaded.
+    async fn find_materialized_thread(
+        &self,
+        thread_id: &str,
+        _cwd: &Path,
+    ) -> Result<Option<NativeThread>, WorkerError> {
+        self.read_thread(thread_id).await.map(Some)
+    }
+
+    async fn set_thread_name(&self, thread_id: &str, name: &str) -> Result<(), WorkerError>;
+
+    /// Locates a persisted thread without loading it, including archived storage.
+    async fn locate_thread(
+        &self,
+        thread_id: &str,
+    ) -> Result<Option<LocatedNativeThread>, WorkerError>;
+
+    /// Lists every native descendant because archive/delete cascade in Codex.
+    async fn list_thread_descendants(&self, thread_id: &str) -> Result<Vec<String>, WorkerError>;
+
+    async fn background_terminal_count(&self, thread_id: &str) -> Result<usize, WorkerError>;
+
+    async fn unsubscribe_thread(&self, thread_id: &str) -> Result<(), WorkerError>;
+
+    async fn archive_thread(&self, thread_id: &str) -> Result<(), WorkerError>;
+
+    async fn unarchive_thread(&self, thread_id: &str) -> Result<NativeThread, WorkerError>;
+
+    async fn delete_thread(&self, thread_id: &str) -> Result<(), WorkerError>;
 
     async fn start_thread(
         &self,

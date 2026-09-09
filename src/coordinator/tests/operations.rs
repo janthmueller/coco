@@ -151,7 +151,8 @@ async fn an_ambiguous_operation_blocks_new_sends_until_the_generation_is_lost() 
 
     assert_eq!(fixture.coordinator.record_codex_disconnected().unwrap(), 0);
     let status = read_workspace(&fixture, &workspace.id).await;
-    assert_eq!(status.phase, WorkspacePhase::Idle);
+    assert_eq!(status.phase, WorkspacePhase::Prepared);
+    assert!(status.codex_thread_id.is_none());
     assert!(status.active_turn_id.is_none());
     assert_eq!(
         fixture
@@ -290,6 +291,28 @@ async fn a_completion_notification_may_overtake_the_confirming_response() {
     let start = fixture.coordinator.start_turn(send);
     let complete_before_response = async {
         entered.notified().await;
+        let still_prepared = fixture
+            .store
+            .workspace_by_id(&workspace.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(still_prepared.phase, WorkspacePhase::Prepared);
+        assert!(still_prepared.codex_thread_id.is_none());
+        fixture
+            .coordinator
+            .record_codex_event(CodexEvent::Notification {
+                method: "item/completed".to_owned(),
+                params: json!({
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "item": {
+                        "id": "message-fast",
+                        "type": "agentMessage",
+                        "text": "Fast response",
+                    },
+                }),
+            })
+            .unwrap();
         fixture
             .coordinator
             .record_codex_event(CodexEvent::Notification {
@@ -305,6 +328,21 @@ async fn a_completion_notification_may_overtake_the_confirming_response() {
     let (result, ()) = tokio::join!(start, complete_before_response);
     let result = result.unwrap();
     assert_eq!(result.codex_turn_id.as_deref(), Some("turn-1"));
+    assert_eq!(
+        result.workspace.codex_thread_id.as_deref(),
+        Some("thread-1")
+    );
+    assert_eq!(
+        fixture
+            .store
+            .operation_by_client_id("fast-send")
+            .unwrap()
+            .unwrap()
+            .state,
+        OperationState::Accepted
+    );
+    assert_fast_turn_result(&fixture);
+    assert_completed_output_is_generation_local(&fixture);
 
     fixture
         .worker
@@ -319,4 +357,53 @@ async fn a_completion_notification_may_overtake_the_confirming_response() {
         .unwrap();
     assert_eq!(status.workspace.phase, WorkspacePhase::Idle);
     assert!(status.workspace.active_turn_id.is_none());
+}
+
+fn assert_fast_turn_result(fixture: &Fixture) {
+    assert_eq!(
+        fixture
+            .coordinator
+            .turn_result(TurnResultParams {
+                operation_id: "fast-send".to_owned(),
+            })
+            .unwrap(),
+        TurnResult::Finished {
+            codex_turn_id: "turn-1".to_owned(),
+            status: TurnTerminalStatus::Completed,
+            response: Some("Fast response".to_owned()),
+            response_truncated: false,
+        }
+    );
+}
+
+fn assert_completed_output_is_generation_local(fixture: &Fixture) {
+    let next_generation = fixture.recovery_coordinator(
+        Arc::clone(&fixture.worker),
+        "runtime-without-completed-output",
+    );
+    assert_eq!(
+        next_generation
+            .turn_result(TurnResultParams {
+                operation_id: "fast-send".to_owned(),
+            })
+            .unwrap(),
+        TurnResult::Unavailable {
+            reason: "this daemon generation no longer has this turn's output".to_owned(),
+        }
+    );
+}
+
+#[test]
+fn turn_response_bound_never_splits_utf8() {
+    let mut response = "a".repeat(super::super::turn::MAX_TURN_RESPONSE_BYTES - 1);
+    response.push('é');
+    response.push('z');
+    let (bounded, truncated) = super::super::turn::bounded_turn_response(&response);
+
+    assert!(truncated);
+    assert_eq!(
+        bounded.len(),
+        super::super::turn::MAX_TURN_RESPONSE_BYTES - 1
+    );
+    assert!(bounded.ends_with('a'));
 }

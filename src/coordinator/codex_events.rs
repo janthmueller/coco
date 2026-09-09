@@ -1,10 +1,11 @@
-use serde_json::{Value, json};
+use serde_json::Value;
 use tracing::{debug, warn};
 
 use super::Coordinator;
 use crate::codex::CodexEvent;
-use crate::domain::{EventKind, EventSource, Workspace};
-use crate::store::{EventDraft, StoreError};
+use crate::domain::Workspace;
+use crate::protocol::TurnTerminalStatus;
+use crate::store::StoreError;
 
 impl Coordinator {
     pub(crate) fn record_codex_event(&self, event: CodexEvent) -> Result<(), StoreError> {
@@ -19,6 +20,7 @@ impl Coordinator {
     }
 
     pub(crate) fn record_codex_disconnected(&self) -> Result<usize, StoreError> {
+        self.clear_jump_leases();
         self.clear_file_change_previews();
         self.fail_pending_compactions();
         self.clear_runtime_turns();
@@ -76,22 +78,21 @@ impl Coordinator {
             "item/completed"
                 if params.pointer("/item/type").and_then(Value::as_str) == Some("agentMessage") =>
             {
-                self.store.append_event(EventDraft {
-                    workspace_id: Some(workspace.id),
-                    // The compatibility event table still references the
-                    // retired turns table. Native correlation stays in the
-                    // payload until a bounded native output read replaces it.
-                    turn_id: None,
-                    kind: EventKind::AgentMessageCompleted,
-                    source: EventSource::Codex,
-                    source_method: Some(method.to_owned()),
-                    occurred_at_ms: params.get("completedAtMs").and_then(Value::as_i64),
-                    payload: json!({
-                        "itemId": params.pointer("/item/id"),
-                        "turnId": params.get("turnId"),
-                        "text": params.pointer("/item/text"),
-                    }),
-                })?;
+                let Some(thread_id) = params
+                    .get("threadId")
+                    .and_then(Value::as_str)
+                    .or(workspace.codex_thread_id.as_deref())
+                else {
+                    return Ok(());
+                };
+                let Some(native_turn_id) = params.get("turnId").and_then(Value::as_str) else {
+                    warn!(workspace_id = %workspace.id, "ignoring agent output without a native turn id");
+                    return Ok(());
+                };
+                let Some(text) = params.pointer("/item/text").and_then(Value::as_str) else {
+                    return Ok(());
+                };
+                self.observe_native_agent_message(thread_id, native_turn_id, text);
             }
             _ => {}
         }
@@ -107,21 +108,27 @@ impl Coordinator {
             .pointer("/turn/status")
             .and_then(Value::as_str)
             .unwrap_or("failed");
-        match status {
-            "completed" | "interrupted" | "failed" => {}
+        let status = match status {
+            "completed" => TurnTerminalStatus::Completed,
+            "interrupted" => TurnTerminalStatus::Interrupted,
+            "failed" => TurnTerminalStatus::Failed,
             _ => {
                 warn!(status, "ignoring non-terminal turn/completed payload");
                 return Ok(());
             }
-        }
-        let Some(thread_id) = workspace.codex_thread_id.as_deref() else {
+        };
+        let Some(thread_id) = params
+            .get("threadId")
+            .and_then(Value::as_str)
+            .or(workspace.codex_thread_id.as_deref())
+        else {
             return Ok(());
         };
         let Some(native_turn_id) = params.pointer("/turn/id").and_then(Value::as_str) else {
             warn!(workspace_id = %workspace.id, "ignoring turn completion without a native turn id");
             return Ok(());
         };
-        self.observe_native_turn_completed(thread_id, native_turn_id);
+        self.observe_native_turn_completed(thread_id, native_turn_id, status);
         Ok(())
     }
 
@@ -153,7 +160,15 @@ impl Coordinator {
             .or_else(|| params.pointer("/thread/id"))
             .and_then(Value::as_str);
         match thread_id {
-            Some(thread_id) => self.store.workspace_by_thread_id(thread_id),
+            Some(thread_id) => {
+                if let Some(workspace) = self.store.workspace_by_thread_id(thread_id)? {
+                    return Ok(Some(workspace));
+                }
+                let Some(workspace_id) = self.runtime_workspace_id_for_thread(thread_id) else {
+                    return Ok(None);
+                };
+                self.store.workspace_by_id(&workspace_id)
+            }
             None => Ok(None),
         }
     }

@@ -160,7 +160,15 @@ impl Git {
         expected_mode: WorktreeMode,
         expected_branch: Option<&str>,
     ) -> Result<WorktreeBinding, GitError> {
-        let worktree_path = canonicalize(worktree_path.as_ref())?;
+        let supplied_path = worktree_path.as_ref();
+        let worktree_path = canonicalize(supplied_path)?;
+        if worktree_path != supplied_path {
+            return Err(GitError::BindingMismatch(format!(
+                "worktree path {} redirects to {}",
+                supplied_path.display(),
+                worktree_path.display()
+            )));
+        }
         let discovered = self.discover(&worktree_path)?;
         if discovered.git_common_dir != repository.git_common_dir {
             return Err(GitError::BindingMismatch(
@@ -251,7 +259,7 @@ impl Git {
         }
     }
 
-    fn branch_checkout_path(
+    pub(super) fn branch_checkout_path(
         &self,
         repository: &GitRepository,
         branch_name: &str,
@@ -353,7 +361,10 @@ fn valid_workspace_name_component(component: &str) -> bool {
             .is_some_and(|byte| byte.is_ascii_alphanumeric())
 }
 
-fn workspace_path(repository_root: &Path, workspace_name: &str) -> Result<PathBuf, GitError> {
+pub(super) fn workspace_path(
+    repository_root: &Path,
+    workspace_name: &str,
+) -> Result<PathBuf, GitError> {
     let mut components = workspace_name.split('/').peekable();
     let mut parent = repository_root.to_path_buf();
     while let Some(component) = components.next() {
@@ -392,7 +403,7 @@ fn secure_child_directory(parent: &Path, component: &str) -> Result<PathBuf, Git
     Ok(canonical)
 }
 
-fn secure_directory(path: &Path) -> Result<PathBuf, GitError> {
+pub(super) fn secure_directory(path: &Path) -> Result<PathBuf, GitError> {
     fs::create_dir_all(path).map_err(|source| GitError::Io {
         path: path.to_owned(),
         source,

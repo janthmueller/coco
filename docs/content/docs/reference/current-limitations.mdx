@@ -26,7 +26,7 @@ Check the Codex command that CoCo will find:
 codex --version
 ```
 
-This alpha is tested with `codex-cli 0.147.0`. If `codex` is installed outside
+This alpha is tested with `codex-cli 0.153.4`. If `codex` is installed outside
 `PATH`, set its absolute path before starting `cocod` and before using `jump`:
 
 ```bash
@@ -71,8 +71,9 @@ repository path:
 coco ../api status fix/login
 ```
 
-You can also use the full workspace ID shown by `coco list --all-repos`; IDs
-resolve from any directory.
+You can also use a full workspace ID from `coco list --all-repos --json`; IDs
+resolve from any directory. The normal terminal overview leaves opaque IDs out
+so the workspace name, state, repository, and branch remain easy to scan.
 
 ## A workspace is already working
 
@@ -92,6 +93,13 @@ This is expected for an inactive workspace after restarting `cocod`. `list` and
 `status` do not load saved conversations. Use `send` to continue the work or
 `jump` to enter its terminal UI; CoCo loads the conversation before continuing.
 
+## A workspace stays Prepared after jump
+
+`Prepared` means the worktree is ready but no persistent Codex thread exists
+yet. The first `send` creates it with the first turn. A first `jump` opens the
+workspace interactively and binds the thread after your first action; if you
+leave the empty UI, the workspace correctly remains prepared.
+
 ## A named profile changed
 
 When `send` or `jump` needs to load a workspace, CoCo verifies
@@ -107,11 +115,12 @@ settings that a loaded workspace does not override in its named profile.
 
 ## Local data and secrets
 
-CoCo keeps workspace details and a limited activity history in your local user
-data. For now, that history includes completed agent messages so
-`status --follow` can show the final response. CoCo does not add the text passed
-to `coco send` to its own activity history. Codex still owns and retains the
-conversation itself, and Git changes remain in the managed worktrees.
+CoCo keeps workspace details and a limited operational history in your local
+user data. It does not add the text passed to `coco send` or completed Codex
+messages to that history. To support `send --wait`, the current `cocod` process
+temporarily retains a bounded set of recent final responses in memory. Codex
+still owns and retains the conversation itself, and Git changes remain in the
+managed worktrees.
 
 Pending approval and question details exist only while the current `cocod`
 connection is alive. Secret answers entered through `coco decide` are hidden
@@ -119,6 +128,11 @@ while typing and are not retained by CoCo.
 
 An MCP host can receive repository paths, workspace metadata, and code diffs.
 Configure `coco-mcp` only in applications you trust with that information.
+
+If you enable [agent signals](../../guides/signals/), CoCo also saves their
+payloads locally. Trusted repository-scoped MCP hosts can read them. The newest
+10,000 signals are retained globally, including signals from closed or deleted
+workspaces; do not put secrets in their payloads.
 
 ## Current alpha limitations
 
@@ -128,19 +142,30 @@ Configure `coco-mcp` only in applications you trust with that information.
 - `coco decide` handles known command approvals, file-change approvals, and
   Codex questions. An unknown request type remains blocked instead of being
   answered unsafely.
-- Prepared conversations are loaded only when `send` or `jump`
-  needs them. A turn active during a `cocod` restart is interrupted and does
-  not continue automatically. A pending decision from the old process can no
-  longer be answered.
+- Prepared workspaces create their conversation only when `send` or `jump`
+  needs it; saved conversations are likewise loaded on demand. A turn active
+  during a `cocod` restart is interrupted and does not continue automatically.
+  A pending decision from the old process can no longer be answered.
 - If Codex disconnects while accepting a `send`, CoCo reports that operation
   as uncertain instead of retrying it automatically. Inspect the workspace
   with `status` or `jump` before choosing to start another turn.
-- CoCo has no commands to cancel, complete, remove, merge, or clean up a
-  workspace. Created branches, worktrees, and workspace records remain.
+- `send --wait` can print a response only while the `cocod` generation that
+  accepted the turn remains available. Stopping the wait does not cancel the
+  turn; use `jump` to read its conversation later.
+- CoCo does not merge or mark work complete. `close` can remove a safely idle
+  worktree, and closed records can be deleted explicitly; neither action
+  integrates the branch into another branch.
+- Closing does not preserve uncommitted files. Commit or move them first, or
+  explicitly choose `--discard-changes`. Detached commits cannot be discarded
+  through CoCo. Branch deletion is limited to unchanged branches that CoCo
+  created, and native thread deletion may be refused while another thread or
+  workspace depends on it.
 - A conversation context source must be idle or unloaded. Detached workspaces
   have no branch, and this alpha cannot yet promote one through CoCo; keep
   durable work on a branch-backed workspace.
-- CoCo's MCP server can inspect or continue existing workspaces. CoCo does not
+- CoCo's MCP server can inspect or continue existing workspaces and read or
+  explicitly publish agent signals. Signals do not start follow-up work or
+  update tickets automatically. CoCo does not
   currently provide its own MCP registry or per-workspace tool selector.
 
 Review workspace changes before relying on them, and do not depend on active

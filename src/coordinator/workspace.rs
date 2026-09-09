@@ -7,21 +7,22 @@ use tracing::warn;
 use super::{Coordinator, CoordinatorError, validate_non_empty, validate_operation_id};
 use crate::domain::{
     Audit, ContextMode, EventKind, EventSource, ProfileSnapshot, Repository, ThreadRuntimeSnapshot,
-    Workspace, WorkspaceLifecycle, WorkspacePhase, WorktreeMode, derive_workspace_runtime,
+    Workspace, WorkspaceAvailability, WorkspaceLifecycle, WorkspacePhase, WorktreeMode,
+    derive_workspace_runtime,
 };
-use crate::git::{
-    GitRepository, LocalStateSnapshot, WorktreeBinding, WorktreePlan, WorktreeTarget,
-};
+use crate::git::{GitRepository, LocalStateSnapshot, WorktreePlan, WorktreeTarget};
 use crate::profile::{load_profile, with_effective_thread_settings};
 use crate::protocol::{
     AuditRecordParams, EventListParams, EventListResult, GitIncomplete, GitObservationError,
     GitUnavailable, RepositoryListParams, RepositoryRegisterParams, RepositoryResolveParams,
-    RepositoryScope, RepositorySummary, WorkspaceAttachParams, WorkspaceBaseRequest,
-    WorkspaceContextRequest, WorkspaceContextSource, WorkspaceCreateParams, WorkspaceDiffParams,
-    WorkspaceDiffResult, WorkspaceGetParams, WorkspaceGitStatus, WorkspaceListItem,
-    WorkspaceListParams, WorkspaceResult, WorkspaceStatusResult, WorkspaceWorktreeRequest,
+    RepositoryScope, RepositorySummary, WorkspaceBaseRequest, WorkspaceContextRequest,
+    WorkspaceContextSource, WorkspaceCreateParams, WorkspaceDiffParams, WorkspaceDiffResult,
+    WorkspaceGetParams, WorkspaceGitStatus, WorkspaceListItem, WorkspaceListParams,
+    WorkspaceResult, WorkspaceStatusResult, WorkspaceWorktreeRequest,
 };
-use crate::store::{AuditDraft, EventDraft, NewThreadBinding, NewWorkspace};
+use crate::store::{
+    AuditDraft, EventDraft, NewThreadBinding, NewWorkspace, Operation, ThreadOperationAcceptance,
+};
 
 const DEFAULT_DIFF_BYTES: usize = 4 * 1024 * 1024;
 const MAX_DIFF_BYTES: usize = 16 * 1024 * 1024;
@@ -29,6 +30,16 @@ const MAX_DIFF_BYTES: usize = 16 * 1024 * 1024;
 struct CreationContext {
     mode: ContextMode,
     fork: Option<ForkContext>,
+}
+
+pub(super) struct PendingFreshThread {
+    pub(super) started: super::StartedThread,
+    profile: ProfileSnapshot,
+}
+
+pub(super) struct PendingContextDependency {
+    pub(super) thread_id: String,
+    pub(super) workspace_id: Option<String>,
 }
 
 struct CreationBase {
@@ -142,6 +153,9 @@ impl Coordinator {
             params.changes.carries_tracked(),
             params.changes.carries_untracked(),
         )?;
+        // Cross-repository thread context can race source deletion. Hold the
+        // dependency guard until the resolved source is durably recorded.
+        let dependencies = self.context_dependencies.lock().await;
         let context = self.resolve_creation_context(&params, &repository).await?;
         if self
             .store
@@ -166,55 +180,173 @@ impl Coordinator {
 
         let workspace =
             self.persist_prepared_workspace(&params, &repository, &loaded_profile, &creation)?;
+        drop(dependencies);
 
-        let binding = self.create_workspace_worktree(
+        let workspace = self.create_workspace_worktree(
             &git_repository,
             &creation.worktree,
             &creation.local_state,
             &workspace.id,
         )?;
+        drop(guard);
+        self.workspace_response(workspace)
+    }
 
-        let started_thread = match self
-            .start_context_thread(
-                &params.name,
-                &creation.context,
-                &binding.path,
-                loaded_profile.thread_config,
-                params.model.as_deref(),
-            )
-            .await
+    /// Materializes the native Codex conversation on the first activating
+    /// operation. A prepared Git workspace deliberately has no empty native
+    /// thread: current Codex versions do not persist one until its first turn.
+    pub(super) async fn materialize_workspace_thread(
+        &self,
+        workspace: Workspace,
+    ) -> Result<Workspace, CoordinatorError> {
+        if workspace.lifecycle != WorkspaceLifecycle::Ready
+            || workspace.availability != WorkspaceAvailability::Open
         {
-            Ok(thread) => thread,
-            Err(source) => {
-                let error = CoordinatorError::Worker(source);
-                self.mark_workspace_failed(
-                    &workspace.id,
-                    if creation.context.fork.is_some() {
-                        "thread.fork"
-                    } else {
-                        "thread.start"
-                    },
-                    &error,
-                    EventSource::Codex,
-                );
-                return Err(error);
-            }
-        };
-        let compact = creation
-            .context
-            .fork
-            .as_ref()
-            .is_some_and(|fork| fork.compact);
+            return Err(CoordinatorError::InvalidWorkspaceState {
+                expected: "ready and open",
+                actual: workspace.phase,
+            });
+        }
+        if workspace.codex_thread_id.is_some() {
+            return Ok(workspace);
+        }
+        let worktree = workspace
+            .worktree_path
+            .as_deref()
+            .ok_or(CoordinatorError::IncompleteWorkspace("worktree"))?;
+        let context = stored_creation_context(&workspace)?;
+        self.validate_materialization_context(&context).await?;
+
+        let mut loaded_profile = load_profile(&workspace.profile.name, &self.codex_home)?;
+        if !super::recovery::same_profile_source(&loaded_profile.snapshot, &workspace.profile) {
+            return Err(CoordinatorError::ProfileChanged(
+                workspace.profile.name.clone(),
+            ));
+        }
+        loaded_profile.snapshot.model_override = workspace.profile.model_override.clone();
+        let started_thread = self
+            .start_context_thread(
+                &workspace.name,
+                &context,
+                worktree,
+                loaded_profile.thread_config,
+                workspace.profile.model_override.as_deref(),
+            )
+            .await?;
+        let compact = context.fork.as_ref().is_some_and(|fork| fork.compact);
         let workspace = self.bind_context_thread(
             &workspace.id,
-            &creation.context,
+            &context,
             loaded_profile.snapshot,
             &started_thread,
             compact,
         )?;
-        drop(guard);
-        self.finish_context_preparation(workspace, &started_thread.id, compact)
+        self.finish_context_materialization(workspace, &started_thread.id, compact)
             .await
+    }
+
+    /// Starts a fresh native thread for an immediately following first turn,
+    /// but deliberately leaves SQLite unbound until that turn is accepted.
+    pub(super) async fn start_fresh_workspace_thread(
+        &self,
+        workspace: &Workspace,
+    ) -> Result<PendingFreshThread, CoordinatorError> {
+        if workspace.lifecycle != WorkspaceLifecycle::Ready
+            || workspace.availability != WorkspaceAvailability::Open
+        {
+            return Err(CoordinatorError::InvalidWorkspaceState {
+                expected: "ready and open",
+                actual: workspace.phase,
+            });
+        }
+        if workspace.codex_thread_id.is_some() || workspace.context_mode != ContextMode::Fresh {
+            return Err(CoordinatorError::InvalidWorkspaceState {
+                expected: "an unbound fresh workspace",
+                actual: workspace.phase,
+            });
+        }
+        let worktree = workspace
+            .worktree_path
+            .as_deref()
+            .ok_or(CoordinatorError::IncompleteWorkspace("worktree"))?;
+        let context = stored_creation_context(workspace)?;
+        if context.mode != ContextMode::Fresh || context.fork.is_some() {
+            return Err(CoordinatorError::InvalidParams(
+                "stored fresh workspace context unexpectedly contains a fork source".to_owned(),
+            ));
+        }
+        let mut loaded_profile = load_profile(&workspace.profile.name, &self.codex_home)?;
+        if !super::recovery::same_profile_source(&loaded_profile.snapshot, &workspace.profile) {
+            return Err(CoordinatorError::ProfileChanged(
+                workspace.profile.name.clone(),
+            ));
+        }
+        loaded_profile.snapshot.model_override = workspace.profile.model_override.clone();
+        let started = self
+            .worker
+            .start_thread(
+                &workspace.name,
+                worktree,
+                loaded_profile.thread_config,
+                workspace.profile.model_override.as_deref(),
+            )
+            .await?;
+        Ok(PendingFreshThread {
+            started,
+            profile: loaded_profile.snapshot,
+        })
+    }
+
+    pub(super) fn accept_fresh_thread_turn(
+        &self,
+        workspace: &Workspace,
+        pending: &PendingFreshThread,
+        operation_id: &str,
+        native_turn_id: &str,
+    ) -> Result<(Workspace, Operation), CoordinatorError> {
+        let profile =
+            with_effective_thread_settings(pending.profile.clone(), &pending.started.response);
+        let (workspace, operation, _) =
+            self.store
+                .bind_thread_and_accept_operation(ThreadOperationAcceptance {
+                    workspace_id: workspace.id.clone(),
+                    profile,
+                    binding: NewThreadBinding {
+                        thread_id: pending.started.id.clone(),
+                        parent_thread_id: None,
+                    },
+                    event: thread_started_event(
+                        &pending.started.id,
+                        None,
+                        ContextMode::Fresh,
+                        false,
+                    ),
+                    operation_id: operation_id.to_owned(),
+                    native_result_id: native_turn_id.to_owned(),
+                })?;
+        self.mark_thread_subscribed(&pending.started.id);
+        Ok((
+            self.project_native_thread_runtime(workspace, pending.started.status.clone()),
+            operation,
+        ))
+    }
+
+    pub(super) fn bind_materialized_fresh_thread(
+        &self,
+        workspace: &Workspace,
+        pending: &PendingFreshThread,
+    ) -> Result<Workspace, CoordinatorError> {
+        let context = CreationContext {
+            mode: ContextMode::Fresh,
+            fork: None,
+        };
+        self.bind_context_thread(
+            &workspace.id,
+            &context,
+            pending.profile.clone(),
+            &pending.started,
+            false,
+        )
     }
 
     fn bind_context_thread(
@@ -237,21 +369,17 @@ impl Coordinator {
             .store
             .bind_thread_with_event(
                 workspace_id,
-                WorkspaceLifecycle::Starting,
+                WorkspaceLifecycle::Ready,
                 next_lifecycle,
                 NewThreadBinding {
                     thread_id: started_thread.id.clone(),
                     parent_thread_id: context.fork.as_ref().map(|fork| fork.thread_id.clone()),
                 },
-                EventDraft::workspace(
-                    EventKind::AgentStarted,
-                    EventSource::Codex,
-                    json!({
-                        "threadId": started_thread.id,
-                        "parentThreadId": context.fork.as_ref().map(|fork| &fork.thread_id),
-                        "contextMode": context.mode,
-                        "compactRequested": compact,
-                    }),
+                thread_started_event(
+                    &started_thread.id,
+                    context.fork.as_ref().map(|fork| fork.thread_id.as_str()),
+                    context.mode,
+                    compact,
                 ),
             )?
             .0;
@@ -261,14 +389,14 @@ impl Coordinator {
         Ok(workspace)
     }
 
-    async fn finish_context_preparation(
+    async fn finish_context_materialization(
         &self,
         workspace: Workspace,
         thread_id: &str,
         compact: bool,
-    ) -> Result<WorkspaceResult, CoordinatorError> {
+    ) -> Result<Workspace, CoordinatorError> {
         if !compact {
-            return self.workspace_response(workspace);
+            return Ok(workspace);
         }
         if let Err(error) = self.compact_thread(thread_id).await {
             self.mark_workspace_failed(&workspace.id, "thread.compact", &error, EventSource::Codex);
@@ -289,8 +417,7 @@ impl Coordinator {
                 payload: json!({"threadId": thread_id}),
             },
         )?;
-        let workspace = self.hydrate_native_thread_runtime(workspace).await;
-        self.workspace_response(workspace)
+        Ok(self.hydrate_native_thread_runtime(workspace).await)
     }
 
     fn resolve_creation_worktree(
@@ -381,41 +508,7 @@ impl Coordinator {
             });
         };
 
-        let (native, source) = match source {
-            WorkspaceContextSource::Workspace { workspace } => {
-                let source = self.resolve_workspace_in_repository(repository, workspace)?;
-                let source = self.project_current_runtime_turn(source);
-                if source.active_turn_id.is_some() {
-                    return Err(CoordinatorError::InvalidWorkspaceState {
-                        expected: "an idle or unloaded source workspace",
-                        actual: source.phase,
-                    });
-                }
-                let native = self.read_bound_thread(&source).await?;
-                let source = ResolvedContextSource::Workspace {
-                    requested_reference: workspace.clone(),
-                    workspace_id: source.id,
-                    workspace_name: source.name,
-                    source_cwd: native.cwd.clone(),
-                };
-                (native, source)
-            }
-            WorkspaceContextSource::Thread { thread_id } => {
-                let native = self.worker.read_thread(thread_id).await?;
-                if native.id != *thread_id {
-                    return Err(CoordinatorError::Worker(
-                        super::WorkerError::ThreadIdMismatch {
-                            expected: thread_id.clone(),
-                            actual: native.id,
-                        },
-                    ));
-                }
-                let source = ResolvedContextSource::Thread {
-                    source_cwd: native.cwd.clone(),
-                };
-                (native, source)
-            }
-        };
+        let (native, source) = self.resolve_context_source(source, repository).await?;
         if !matches!(
             native.status,
             crate::domain::CodexThreadStatus::Idle | crate::domain::CodexThreadStatus::NotLoaded
@@ -432,6 +525,122 @@ impl Coordinator {
                 compact: *compact,
             }),
         })
+    }
+
+    async fn resolve_context_source(
+        &self,
+        source: &WorkspaceContextSource,
+        repository: &Repository,
+    ) -> Result<(super::NativeThread, ResolvedContextSource), CoordinatorError> {
+        match source {
+            WorkspaceContextSource::Reference { reference } => {
+                self.resolve_automatic_context_reference(repository, reference)
+                    .await
+            }
+            WorkspaceContextSource::Workspace { workspace } => {
+                self.resolve_workspace_context_source(repository, workspace)
+                    .await
+            }
+            WorkspaceContextSource::Thread { thread_id } => {
+                self.resolve_thread_context_source(thread_id).await
+            }
+        }
+    }
+
+    async fn resolve_automatic_context_reference(
+        &self,
+        repository: &Repository,
+        reference: &str,
+    ) -> Result<(super::NativeThread, ResolvedContextSource), CoordinatorError> {
+        if let Some(workspace) = reference.strip_prefix("workspace:") {
+            validate_non_empty("context.reference", workspace)?;
+            return self
+                .resolve_workspace_context_source(repository, workspace)
+                .await;
+        }
+        if let Some(thread_id) = reference.strip_prefix("thread:") {
+            validate_non_empty("context.reference", thread_id)?;
+            return self.resolve_thread_context_source(thread_id).await;
+        }
+        match self.resolve_workspace_in_repository(repository, reference) {
+            Ok(workspace) => {
+                self.resolve_resolved_workspace_context_source(workspace, reference)
+                    .await
+            }
+            Err(error)
+                if matches!(
+                    &error,
+                    CoordinatorError::WorkspaceNotFound { candidates, .. }
+                        if !candidates.is_empty()
+                ) =>
+            {
+                Err(error)
+            }
+            Err(CoordinatorError::WorkspaceNotFound { .. }) => self
+                .resolve_thread_context_source(reference)
+                .await
+                .map_err(|error| match error {
+                    CoordinatorError::Worker(source) => {
+                        CoordinatorError::ContextReferenceUnresolved {
+                            reference: reference.to_owned(),
+                            source,
+                        }
+                    }
+                    error => error,
+                }),
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn resolve_workspace_context_source(
+        &self,
+        repository: &Repository,
+        reference: &str,
+    ) -> Result<(super::NativeThread, ResolvedContextSource), CoordinatorError> {
+        let source = self.resolve_workspace_in_repository(repository, reference)?;
+        self.resolve_resolved_workspace_context_source(source, reference)
+            .await
+    }
+
+    async fn resolve_resolved_workspace_context_source(
+        &self,
+        source: Workspace,
+        requested_reference: &str,
+    ) -> Result<(super::NativeThread, ResolvedContextSource), CoordinatorError> {
+        let source = self.project_current_runtime_turn(source);
+        if source.active_turn_id.is_some() {
+            return Err(CoordinatorError::InvalidWorkspaceState {
+                expected: "an idle or unloaded source workspace",
+                actual: source.phase,
+            });
+        }
+        let native = self.read_bound_thread(&source).await?;
+        let source = ResolvedContextSource::Workspace {
+            requested_reference: requested_reference.to_owned(),
+            workspace_id: source.id,
+            workspace_name: source.name,
+            source_cwd: native.cwd.clone(),
+        };
+        Ok((native, source))
+    }
+
+    async fn resolve_thread_context_source(
+        &self,
+        thread_id: &str,
+    ) -> Result<(super::NativeThread, ResolvedContextSource), CoordinatorError> {
+        let native = self.worker.read_thread(thread_id).await?;
+        if native.id != thread_id {
+            return Err(CoordinatorError::Worker(
+                super::WorkerError::ThreadIdMismatch {
+                    expected: thread_id.to_owned(),
+                    actual: native.id,
+                },
+            ));
+        }
+        let source = ResolvedContextSource::Thread {
+            source_cwd: native.cwd.clone(),
+        };
+        Ok((native, source))
     }
 
     async fn start_context_thread(
@@ -452,13 +661,84 @@ impl Coordinator {
         }
     }
 
+    async fn validate_materialization_context(
+        &self,
+        context: &CreationContext,
+    ) -> Result<(), CoordinatorError> {
+        let Some(fork) = &context.fork else {
+            return Ok(());
+        };
+        let native = match &fork.source {
+            ResolvedContextSource::Workspace {
+                workspace_id,
+                source_cwd,
+                ..
+            } => {
+                let source = self.store.workspace_by_id(workspace_id)?.ok_or_else(|| {
+                    CoordinatorError::WorkspaceNotFound {
+                        reference: workspace_id.clone(),
+                        candidates: Vec::new(),
+                    }
+                })?;
+                let source = self.project_current_runtime_turn(source);
+                if source.active_turn_id.is_some() {
+                    return Err(CoordinatorError::InvalidWorkspaceState {
+                        expected: "an idle or unloaded source workspace",
+                        actual: source.phase,
+                    });
+                }
+                if source.codex_thread_id.as_deref() != Some(&fork.thread_id) {
+                    return Err(CoordinatorError::InvalidParams(
+                        "the context source workspace no longer has its recorded Codex thread"
+                            .to_owned(),
+                    ));
+                }
+                let native = self.read_bound_thread(&source).await?;
+                if &native.cwd != source_cwd {
+                    return Err(CoordinatorError::Worker(super::WorkerError::CwdMismatch {
+                        expected: source_cwd.clone(),
+                        actual: native.cwd,
+                    }));
+                }
+                native
+            }
+            ResolvedContextSource::Thread { source_cwd } => {
+                let native = self.worker.read_thread(&fork.thread_id).await?;
+                if native.id != fork.thread_id {
+                    return Err(CoordinatorError::Worker(
+                        super::WorkerError::ThreadIdMismatch {
+                            expected: fork.thread_id.clone(),
+                            actual: native.id,
+                        },
+                    ));
+                }
+                if &native.cwd != source_cwd {
+                    return Err(CoordinatorError::Worker(super::WorkerError::CwdMismatch {
+                        expected: source_cwd.clone(),
+                        actual: native.cwd,
+                    }));
+                }
+                native
+            }
+        };
+        if !matches!(
+            native.status,
+            crate::domain::CodexThreadStatus::Idle | crate::domain::CodexThreadStatus::NotLoaded
+        ) {
+            return Err(CoordinatorError::InvalidParams(
+                "context source thread must be idle or not loaded".to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
     fn create_workspace_worktree(
         &self,
         repository: &GitRepository,
         plan: &WorktreePlan,
         local_state: &crate::git::LocalStateSnapshot,
         workspace_id: &str,
-    ) -> Result<WorktreeBinding, CoordinatorError> {
+    ) -> Result<Workspace, CoordinatorError> {
         let binding = self
             .git
             .create_worktree(repository, plan)
@@ -484,10 +764,10 @@ impl Coordinator {
                 );
                 error
             })?;
-        self.store.transition_workspace_lifecycle_with_event(
+        let (workspace, _) = self.store.transition_workspace_lifecycle_with_event(
             workspace_id,
             WorkspaceLifecycle::Provisioning,
-            WorkspaceLifecycle::Starting,
+            WorkspaceLifecycle::Ready,
             None,
             EventDraft::workspace(
                 EventKind::WorktreeCreated,
@@ -501,7 +781,7 @@ impl Coordinator {
                 }),
             ),
         )?;
-        Ok(binding)
+        Ok(workspace)
     }
 
     fn persist_prepared_workspace(
@@ -606,7 +886,7 @@ impl Coordinator {
             }
             RepositoryScope::AllRepositories => None,
         };
-        let workspaces = self.store.list_workspaces(repository_id.as_deref())?;
+        let mut workspaces = self.store.list_workspaces(repository_id.as_deref())?;
         let phases = params
             .phases
             .map(|phases| {
@@ -622,6 +902,9 @@ impl Coordinator {
                     .collect::<Result<Vec<_>, _>>()
             })
             .transpose()?;
+        if phases.is_none() {
+            workspaces.retain(|workspace| workspace.availability != WorkspaceAvailability::Closed);
+        }
         let mut hydrated = Vec::with_capacity(workspaces.len());
         for workspace in workspaces {
             hydrated.push(self.hydrate_native_thread_runtime(workspace).await);
@@ -642,29 +925,36 @@ impl Coordinator {
         let workspace = self.resolve_workspace(&params.scope, &params.workspace)?;
         let workspace = self.hydrate_native_thread_runtime(workspace).await;
         let (_, git_repository) = self.git_repository_for_workspace(&workspace)?;
-        let git = match workspace_git_binding(&workspace) {
-            Some((worktree, mode, branch, base)) => {
-                match self
-                    .git
-                    .observe(&git_repository, worktree, mode, branch, base)
-                {
-                    Ok(observation) => WorkspaceGitStatus::Observed(observation),
-                    Err(source) => {
-                        warn!(workspace_id = %workspace.id, %source, "could not refresh workspace Git state");
-                        WorkspaceGitStatus::Unavailable(GitUnavailable {
-                            observed: false,
-                            error: GitObservationError {
-                                code: "GIT_OBSERVATION_FAILED".to_owned(),
-                                message: "Git state could not be refreshed".to_owned(),
-                            },
-                        })
+        let git = if workspace.availability == WorkspaceAvailability::Closed {
+            WorkspaceGitStatus::Incomplete(GitIncomplete {
+                observed: false,
+                reason: "workspace is closed".to_owned(),
+            })
+        } else {
+            match workspace_git_binding(&workspace) {
+                Some((worktree, mode, branch, base)) => {
+                    match self
+                        .git
+                        .observe(&git_repository, worktree, mode, branch, base)
+                    {
+                        Ok(observation) => WorkspaceGitStatus::Observed(observation),
+                        Err(source) => {
+                            warn!(workspace_id = %workspace.id, %source, "could not refresh workspace Git state");
+                            WorkspaceGitStatus::Unavailable(GitUnavailable {
+                                observed: false,
+                                error: GitObservationError {
+                                    code: "GIT_OBSERVATION_FAILED".to_owned(),
+                                    message: "Git state could not be refreshed".to_owned(),
+                                },
+                            })
+                        }
                     }
                 }
+                None => WorkspaceGitStatus::Incomplete(GitIncomplete {
+                    observed: false,
+                    reason: "workspace has no complete Git binding".to_owned(),
+                }),
             }
-            None => WorkspaceGitStatus::Incomplete(GitIncomplete {
-                observed: false,
-                reason: "workspace has no complete Git binding".to_owned(),
-            }),
         };
         let events = self.store.events_after(Some(&workspace.id), 0)?;
         let next_sequence = events.last().map_or(0, |event| event.sequence);
@@ -675,18 +965,6 @@ impl Coordinator {
             open_decisions,
             next_sequence,
         })
-    }
-
-    pub(crate) async fn attach_workspace(
-        &self,
-        params: WorkspaceAttachParams,
-    ) -> Result<WorkspaceResult, CoordinatorError> {
-        let resolved = self.resolve_workspace(&params.scope, &params.workspace)?;
-        let repository_lock = self.repository_lock(&resolved.repository_id).await;
-        let _guard = repository_lock.lock().await;
-        let workspace = self.resolve_workspace(&params.scope, &params.workspace)?;
-        let workspace = self.ensure_workspace_thread_loaded(workspace).await?;
-        self.workspace_response(workspace)
     }
 
     pub(crate) async fn list_events(
@@ -714,8 +992,15 @@ impl Coordinator {
         &self,
         mut workspace: Workspace,
     ) -> Workspace {
-        if workspace.lifecycle != WorkspaceLifecycle::Ready {
+        if workspace.lifecycle != WorkspaceLifecycle::Ready
+            || workspace.availability != WorkspaceAvailability::Open
+        {
             return workspace;
+        }
+
+        if workspace.codex_thread_id.is_none() {
+            clear_native_thread_projection(&mut workspace);
+            return self.project_current_runtime_turn(workspace);
         }
 
         let thread_id = workspace.codex_thread_id.clone();
@@ -765,8 +1050,10 @@ impl Coordinator {
         // arrive. The same guard is used by send and fork mutations.
         (workspace.phase, workspace.wait_reasons) = derive_workspace_runtime(
             workspace.lifecycle,
+            workspace.availability,
             workspace.thread_runtime.as_ref(),
             has_accepted_turn,
+            workspace.codex_thread_id.is_some(),
         );
         if runtime.is_some_and(|runtime| runtime.uncertain) {
             workspace.phase = WorkspacePhase::Unavailable;
@@ -780,6 +1067,12 @@ impl Coordinator {
         params: WorkspaceDiffParams,
     ) -> Result<WorkspaceDiffResult, CoordinatorError> {
         let workspace = self.resolve_workspace(&params.scope, &params.workspace)?;
+        if workspace.availability != WorkspaceAvailability::Open {
+            return Err(CoordinatorError::InvalidWorkspaceState {
+                expected: "open",
+                actual: workspace.phase,
+            });
+        }
         let worktree = workspace
             .worktree_path
             .as_deref()
@@ -836,10 +1129,112 @@ impl Coordinator {
     }
 }
 
+fn thread_started_event(
+    thread_id: &str,
+    parent_thread_id: Option<&str>,
+    context_mode: ContextMode,
+    compact: bool,
+) -> EventDraft {
+    EventDraft::workspace(
+        EventKind::AgentStarted,
+        EventSource::Codex,
+        json!({
+            "threadId": thread_id,
+            "parentThreadId": parent_thread_id,
+            "contextMode": context_mode,
+            "compactRequested": compact,
+        }),
+    )
+}
+
 fn clear_native_thread_projection(workspace: &mut Workspace) {
     workspace.thread_runtime = None;
-    (workspace.phase, workspace.wait_reasons) =
-        derive_workspace_runtime(workspace.lifecycle, None, false);
+    (workspace.phase, workspace.wait_reasons) = derive_workspace_runtime(
+        workspace.lifecycle,
+        workspace.availability,
+        None,
+        false,
+        workspace.codex_thread_id.is_some(),
+    );
+}
+
+pub(super) fn pending_context_dependency(
+    workspace: &Workspace,
+) -> Result<Option<PendingContextDependency>, CoordinatorError> {
+    if workspace.codex_thread_id.is_some() || workspace.context_mode != ContextMode::Fork {
+        return Ok(None);
+    }
+    let context = stored_creation_context(workspace)?;
+    Ok(context.fork.map(|fork| PendingContextDependency {
+        thread_id: fork.thread_id,
+        workspace_id: match fork.source {
+            ResolvedContextSource::Workspace { workspace_id, .. } => Some(workspace_id),
+            ResolvedContextSource::Thread { .. } => None,
+        },
+    }))
+}
+
+fn stored_creation_context(workspace: &Workspace) -> Result<CreationContext, CoordinatorError> {
+    match workspace.context_mode {
+        ContextMode::Fresh => Ok(CreationContext {
+            mode: ContextMode::Fresh,
+            fork: None,
+        }),
+        ContextMode::Fork => {
+            let source = workspace
+                .context
+                .pointer("/resolved/context/source")
+                .and_then(Value::as_object)
+                .ok_or_else(|| invalid_stored_context("missing resolved context source"))?;
+            let string = |field: &str| {
+                source
+                    .get(field)
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .ok_or_else(|| {
+                        invalid_stored_context(&format!("missing context source {field}"))
+                    })
+            };
+            let thread_id = string("threadId")?;
+            let source_cwd = std::path::PathBuf::from(string("cwd")?);
+            let source = match string("kind")?.as_str() {
+                "workspace" => ResolvedContextSource::Workspace {
+                    requested_reference: string("requestedReference")?,
+                    workspace_id: string("workspaceId")?,
+                    workspace_name: string("workspaceName")?,
+                    source_cwd,
+                },
+                "thread" => ResolvedContextSource::Thread { source_cwd },
+                kind => {
+                    return Err(invalid_stored_context(&format!(
+                        "unknown context source kind {kind:?}"
+                    )));
+                }
+            };
+            let compact = workspace
+                .context
+                .pointer("/resolved/context/compact")
+                .and_then(Value::as_bool)
+                .ok_or_else(|| invalid_stored_context("missing context compact flag"))?;
+            Ok(CreationContext {
+                mode: ContextMode::Fork,
+                fork: Some(ForkContext {
+                    source,
+                    thread_id,
+                    compact,
+                }),
+            })
+        }
+        ContextMode::Handoff => Err(invalid_stored_context(
+            "handoff materialization is not implemented",
+        )),
+    }
+}
+
+fn invalid_stored_context(message: &str) -> CoordinatorError {
+    CoordinatorError::InvalidParams(format!(
+        "workspace contains invalid stored context: {message}"
+    ))
 }
 
 fn ensure_create_replay_matches(
@@ -881,6 +1276,9 @@ fn validate_create_request(params: &WorkspaceCreateParams) -> Result<(), Coordin
     match &params.context {
         WorkspaceContextRequest::Fresh => Ok(()),
         WorkspaceContextRequest::Fork { source, .. } => match source {
+            WorkspaceContextSource::Reference { reference } => {
+                validate_non_empty("context.source.reference", reference)
+            }
             WorkspaceContextSource::Workspace { workspace } => {
                 validate_non_empty("context.source.workspace", workspace)
             }

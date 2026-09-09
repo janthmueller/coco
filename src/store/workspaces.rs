@@ -8,14 +8,15 @@ use super::rows::{TURN_SELECT, map_turn, require_turn};
 use super::rows::{WORKSPACE_SELECT, get_workspace_by_id, map_workspace, require_workspace};
 use super::{
     EventDraft, NewThreadBinding, NewWorkspace, ReconciliationSummary, Store, StoreError,
-    json_to_sql_error, new_id, now_ms, path_text,
+    WorkspaceDeletionIntent, json_to_sql_error, new_id, now_ms, path_text,
 };
 #[cfg(test)]
 use super::{NewTurn, TurnCompletion, sanitized_error_columns};
 #[cfg(test)]
 use crate::domain::{CodexThreadStatus, Turn, TurnPhase};
 use crate::domain::{
-    EventKind, EventSource, NormalizedEvent, ProfileSnapshot, Workspace, WorkspaceLifecycle,
+    EventKind, EventSource, NormalizedEvent, ProfileSnapshot, Workspace, WorkspaceAvailability,
+    WorkspaceLifecycle,
 };
 
 impl Store {
@@ -138,6 +139,14 @@ impl Store {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         assert_workspace_lifecycle(&transaction, workspace_id, &[expected])?;
+        let current = require_workspace(&transaction, workspace_id)?;
+        if current.codex_thread_id.is_some() {
+            return Err(StoreError::InvalidWorkspaceTransition {
+                workspace_id: workspace_id.to_owned(),
+                expected: "no bound Codex thread".to_owned(),
+                actual: "bound Codex thread".to_owned(),
+            });
+        }
         let now = now_ms();
         transaction.execute(
             "UPDATE workspaces SET codex_thread_id = ?1, parent_thread_id = ?2,
@@ -372,8 +381,8 @@ impl Store {
             .map_err(StoreError::from)
     }
 
-    /// Replaces a provisional profile with the effective, non-secret App Server settings.
-    /// Profiles become immutable once the first turn is active.
+    /// Replaces a provisional profile with effective, non-secret App Server settings.
+    /// A ready workspace may change only while its native thread is still unbound.
     pub fn update_workspace_profile(
         &self,
         workspace_id: &str,
@@ -382,14 +391,20 @@ impl Store {
         let profile_json = serde_json::to_string(profile).map_err(json_to_sql_error)?;
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        assert_workspace_lifecycle(
-            &transaction,
-            workspace_id,
-            &[
-                WorkspaceLifecycle::Provisioning,
-                WorkspaceLifecycle::Starting,
-            ],
-        )?;
+        let current = require_workspace(&transaction, workspace_id)?;
+        let mutable = matches!(
+            current.lifecycle,
+            WorkspaceLifecycle::Provisioning | WorkspaceLifecycle::Starting
+        ) || (current.lifecycle == WorkspaceLifecycle::Ready
+            && current.codex_thread_id.is_none()
+            && current.active_turn_id.is_none());
+        if !mutable {
+            return Err(StoreError::InvalidWorkspaceTransition {
+                workspace_id: workspace_id.to_owned(),
+                expected: "a workspace awaiting native thread binding".to_owned(),
+                actual: current.lifecycle.as_str().to_owned(),
+            });
+        }
         transaction.execute(
             "UPDATE workspaces SET profile_json = ?1, updated_at_ms = ?2 WHERE id = ?3",
             params![profile_json, now_ms(), workspace_id],
@@ -454,6 +469,220 @@ impl Store {
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(StoreError::from)
         }
+    }
+
+    pub fn transition_workspace_availability(
+        &self,
+        workspace_id: &str,
+        expected: WorkspaceAvailability,
+        next: WorkspaceAvailability,
+        closed_head_sha: Option<&str>,
+    ) -> Result<Workspace, StoreError> {
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = require_workspace(&transaction, workspace_id)?;
+        if current.availability != expected {
+            return Err(StoreError::InvalidWorkspaceTransition {
+                workspace_id: workspace_id.to_owned(),
+                expected: expected.as_str().to_owned(),
+                actual: current.availability.as_str().to_owned(),
+            });
+        }
+        let now = now_ms();
+        let closed_at_ms = (next == WorkspaceAvailability::Closed).then_some(now);
+        transaction.execute(
+            "UPDATE workspaces SET availability = ?1,
+                closed_head_sha = CASE
+                    WHEN ?1 = 'open' THEN NULL
+                    WHEN ?2 IS NOT NULL THEN ?2
+                    ELSE closed_head_sha END,
+                thread_archived = CASE
+                    WHEN ?1 = 'open' THEN 0
+                    ELSE thread_archived END,
+                closed_at_ms = CASE
+                    WHEN ?1 = 'closed' THEN ?3
+                    WHEN ?1 = 'open' THEN NULL
+                    ELSE closed_at_ms END,
+                updated_at_ms = ?3 WHERE id = ?4",
+            params![
+                next.as_str(),
+                closed_head_sha,
+                closed_at_ms.unwrap_or(now),
+                workspace_id
+            ],
+        )?;
+        let workspace = require_workspace(&transaction, workspace_id)?;
+        transaction.commit()?;
+        Ok(workspace)
+    }
+
+    pub fn begin_workspace_close(
+        &self,
+        workspace_id: &str,
+        closed_head_sha: &str,
+        archive_thread: bool,
+    ) -> Result<Workspace, StoreError> {
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = require_workspace(&transaction, workspace_id)?;
+        if current.availability != WorkspaceAvailability::Open {
+            return Err(StoreError::InvalidWorkspaceTransition {
+                workspace_id: workspace_id.to_owned(),
+                expected: WorkspaceAvailability::Open.as_str().to_owned(),
+                actual: current.availability.as_str().to_owned(),
+            });
+        }
+        let now = now_ms();
+        transaction.execute(
+            "UPDATE workspaces SET availability = 'closing', closed_head_sha = ?1,
+                thread_archived = ?2, closed_at_ms = NULL, updated_at_ms = ?3
+             WHERE id = ?4",
+            params![closed_head_sha, archive_thread, now, workspace_id],
+        )?;
+        let workspace = require_workspace(&transaction, workspace_id)?;
+        transaction.commit()?;
+        Ok(workspace)
+    }
+
+    pub fn begin_workspace_deletion(
+        &self,
+        workspace_id: &str,
+        intent: WorkspaceDeletionIntent,
+    ) -> Result<Workspace, StoreError> {
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = require_workspace(&transaction, workspace_id)?;
+        if current.availability != WorkspaceAvailability::Closed {
+            return Err(StoreError::InvalidWorkspaceTransition {
+                workspace_id: workspace_id.to_owned(),
+                expected: WorkspaceAvailability::Closed.as_str().to_owned(),
+                actual: current.availability.as_str().to_owned(),
+            });
+        }
+        transaction.execute(
+            "UPDATE workspaces SET availability = 'deleting',
+                delete_thread_requested = ?1, delete_branch_requested = ?2,
+                updated_at_ms = ?3 WHERE id = ?4",
+            params![
+                intent.delete_thread,
+                intent.delete_branch,
+                now_ms(),
+                workspace_id
+            ],
+        )?;
+        let workspace = require_workspace(&transaction, workspace_id)?;
+        transaction.commit()?;
+        Ok(workspace)
+    }
+
+    pub fn workspace_deletion_intent(
+        &self,
+        workspace_id: &str,
+    ) -> Result<WorkspaceDeletionIntent, StoreError> {
+        let connection = self.lock()?;
+        require_workspace(&connection, workspace_id)?;
+        connection
+            .query_row(
+                "SELECT delete_thread_requested, delete_branch_requested
+                 FROM workspaces WHERE id = ?1",
+                [workspace_id],
+                |row| {
+                    Ok(WorkspaceDeletionIntent {
+                        delete_thread: row.get(0)?,
+                        delete_branch: row.get(1)?,
+                    })
+                },
+            )
+            .map_err(StoreError::from)
+    }
+
+    pub fn clear_workspace_thread_binding(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Workspace, StoreError> {
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = require_workspace(&transaction, workspace_id)?;
+        if current.availability != WorkspaceAvailability::Deleting {
+            return Err(StoreError::InvalidWorkspaceTransition {
+                workspace_id: workspace_id.to_owned(),
+                expected: WorkspaceAvailability::Deleting.as_str().to_owned(),
+                actual: current.availability.as_str().to_owned(),
+            });
+        }
+        transaction.execute(
+            "UPDATE workspaces SET codex_thread_id = NULL, thread_archived = 0,
+                thread_status_json = NULL, thread_status_generation = NULL,
+                thread_status_observed_at_ms = NULL, thread_status_is_fresh = 0,
+                updated_at_ms = ?1 WHERE id = ?2",
+            params![now_ms(), workspace_id],
+        )?;
+        let workspace = require_workspace(&transaction, workspace_id)?;
+        transaction.commit()?;
+        Ok(workspace)
+    }
+
+    pub fn delete_workspace_record(&self, workspace_id: &str) -> Result<(), StoreError> {
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let workspace = require_workspace(&transaction, workspace_id)?;
+        if workspace.availability != WorkspaceAvailability::Deleting {
+            return Err(StoreError::InvalidWorkspaceTransition {
+                workspace_id: workspace_id.to_owned(),
+                expected: WorkspaceAvailability::Deleting.as_str().to_owned(),
+                actual: workspace.availability.as_str().to_owned(),
+            });
+        }
+        transaction.execute(
+            "DELETE FROM decisions WHERE workspace_id = ?1",
+            [workspace_id],
+        )?;
+        transaction.execute("DELETE FROM events WHERE workspace_id = ?1", [workspace_id])?;
+        transaction.execute(
+            "DELETE FROM audit_events WHERE workspace_id = ?1",
+            [workspace_id],
+        )?;
+        transaction.execute(
+            "DELETE FROM operations WHERE workspace_id = ?1",
+            [workspace_id],
+        )?;
+        transaction.execute("DELETE FROM turns WHERE workspace_id = ?1", [workspace_id])?;
+        transaction.execute("DELETE FROM workspaces WHERE id = ?1", [workspace_id])?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn cancel_workspace_deletion(&self, workspace_id: &str) -> Result<Workspace, StoreError> {
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = require_workspace(&transaction, workspace_id)?;
+        if current.availability != WorkspaceAvailability::Deleting {
+            return Err(StoreError::InvalidWorkspaceTransition {
+                workspace_id: workspace_id.to_owned(),
+                expected: WorkspaceAvailability::Deleting.as_str().to_owned(),
+                actual: current.availability.as_str().to_owned(),
+            });
+        }
+        transaction.execute(
+            "UPDATE workspaces SET availability = 'closed', delete_thread_requested = 0,
+                delete_branch_requested = 0, updated_at_ms = ?1 WHERE id = ?2",
+            params![now_ms(), workspace_id],
+        )?;
+        let workspace = require_workspace(&transaction, workspace_id)?;
+        transaction.commit()?;
+        Ok(workspace)
+    }
+
+    pub fn transitional_workspaces(&self) -> Result<Vec<Workspace>, StoreError> {
+        let connection = self.lock()?;
+        let mut statement = connection.prepare(&format!(
+            "{} WHERE availability IN ('closing', 'reopening', 'deleting') ORDER BY id",
+            WORKSPACE_SELECT
+        ))?;
+        statement
+            .query_map([], map_workspace)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::from)
     }
 
     #[cfg(test)]

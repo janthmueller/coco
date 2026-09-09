@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use super::WorkerError;
 use crate::domain::WorkspacePhase;
+use crate::domain::signals::SignalError;
 use crate::git::GitError;
 use crate::profile::ProfileError;
 use crate::store::StoreError;
@@ -20,6 +21,8 @@ pub(crate) struct WorkspaceReferenceCandidate {
 
 #[derive(Debug, Error)]
 pub(crate) enum CoordinatorError {
+    #[error(transparent)]
+    Signal(#[from] SignalError),
     #[error("invalid request parameters: {0}")]
     InvalidParams(String),
     #[error("repository is not registered: {0}")]
@@ -36,6 +39,14 @@ pub(crate) enum CoordinatorError {
         reference: String,
         candidates: Vec<WorkspaceReferenceCandidate>,
     },
+    #[error(
+        "context reference {reference:?} did not match a workspace in the destination repository and could not be read as a native Codex thread: {source}"
+    )]
+    ContextReferenceUnresolved {
+        reference: String,
+        #[source]
+        source: WorkerError,
+    },
     #[error("operation ID was already used with different parameters")]
     IdempotencyConflict,
     #[error(
@@ -49,6 +60,12 @@ pub(crate) enum CoordinatorError {
     },
     #[error("workspace has no bound {0}")]
     IncompleteWorkspace(&'static str),
+    #[error("workspace is already being opened in the Codex terminal UI")]
+    WorkspaceAttachInProgress,
+    #[error("workspace cannot be retired safely: {blockers}", blockers = .0.join("; "))]
+    WorkspaceRetirementBlocked(Vec<String>),
+    #[error("the temporary workspace attach lease is missing, expired, or does not match")]
+    InvalidWorkspaceAttachLease,
     #[error("profile {0:?} changed since this workspace was created")]
     ProfileChanged(String),
     #[error("Codex thread compaction failed: {0}")]
@@ -68,15 +85,20 @@ pub(crate) enum CoordinatorError {
 impl CoordinatorError {
     pub(crate) fn code(&self) -> &'static str {
         match self {
+            Self::Signal(error) | Self::Store(StoreError::Signal(error)) => error.code(),
             Self::InvalidParams(_) => "INVALID_PARAMS",
             Self::RepositoryNotRegistered(_) => "REPOSITORY_NOT_REGISTERED",
             Self::WorkspaceExists(_) => "WORKSPACE_EXISTS",
             Self::WorkspaceNotFound { .. } => "WORKSPACE_NOT_FOUND",
             Self::WorkspaceReferenceAmbiguous { .. } => "WORKSPACE_REFERENCE_AMBIGUOUS",
+            Self::ContextReferenceUnresolved { .. } => "CONTEXT_REFERENCE_UNRESOLVED",
             Self::IdempotencyConflict => "IDEMPOTENCY_CONFLICT",
             Self::OperationUncertain { .. } => "OPERATION_UNCERTAIN",
             Self::InvalidWorkspaceState { .. } => "INVALID_WORKSPACE_STATE",
             Self::IncompleteWorkspace(_) => "INCOMPLETE_WORKSPACE",
+            Self::WorkspaceAttachInProgress => "WORKSPACE_BUSY",
+            Self::WorkspaceRetirementBlocked(_) => "WORKSPACE_RETIREMENT_BLOCKED",
+            Self::InvalidWorkspaceAttachLease => "ATTACH_LEASE_INVALID",
             Self::ProfileChanged(_) => "PROFILE_CHANGED",
             Self::CompactionFailed(_) => "CODEX_COMPACTION_FAILED",
             Self::CompactionTimedOut => "CODEX_COMPACTION_TIMEOUT",
@@ -107,6 +129,7 @@ impl CoordinatorError {
                 Some(json!({"matches": candidates}))
             }
             Self::OperationUncertain { operation_id } => Some(json!({"operationId": operation_id})),
+            Self::WorkspaceRetirementBlocked(blockers) => Some(json!({"blockers": blockers})),
             _ => None,
         }
     }

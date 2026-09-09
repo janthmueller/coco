@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::process::Command;
 use std::sync::Mutex as StdMutex;
@@ -12,28 +12,65 @@ use super::*;
 use crate::codex::CodexEvent;
 use crate::domain::{
     CodexModel, CodexReasoningEffort, CodexThreadStatus, ContextMode, DecisionKind, DecisionPrompt,
-    DecisionState, Workspace, WorkspaceLifecycle, WorkspacePhase, WorkspaceWaitReason,
+    DecisionState, Workspace, WorkspaceAvailability, WorkspaceLifecycle, WorkspacePhase,
+    WorkspaceWaitReason,
 };
 use crate::protocol::{
     DecisionGetParams, DecisionRespondParams, DecisionSubmission, EventListParams,
-    RepositoryRegisterParams, RepositoryScope, TurnStartParams, WorkspaceAttachParams,
-    WorkspaceBaseRequest, WorkspaceChangesRequest, WorkspaceContextRequest, WorkspaceContextSource,
-    WorkspaceCreateParams, WorkspaceDiffParams, WorkspaceGetParams, WorkspaceGitStatus,
-    WorkspaceListParams, WorkspaceWorktreeRequest,
+    RepositoryRegisterParams, RepositoryScope, TurnResult, TurnResultParams, TurnStartParams,
+    TurnTerminalStatus, WorkspaceAttachLaunch, WorkspaceAttachParams, WorkspaceAttachReleaseParams,
+    WorkspaceBaseRequest, WorkspaceChangesRequest, WorkspaceCloseParams, WorkspaceContextRequest,
+    WorkspaceContextSource, WorkspaceCreateParams, WorkspaceDeleteParams, WorkspaceDiffParams,
+    WorkspaceGetParams, WorkspaceGitStatus, WorkspaceListParams, WorkspaceReopenParams,
+    WorkspaceThreadDisposition, WorkspaceWorktreeRequest,
 };
-use crate::store::OperationState;
+use crate::store::{OperationState, WorkspaceDeletionIntent};
 
 mod context;
 mod creation;
 mod decisions;
 mod events;
+mod jump;
 mod operations;
+mod retirement;
+mod retirement_confirmation;
+mod retirement_dependencies;
+mod retirement_safety;
 mod workspace;
 
 #[derive(Debug, Clone, PartialEq)]
 enum WorkerCall {
     Models,
     Read {
+        thread_id: String,
+    },
+    FindMaterialized {
+        thread_id: String,
+        cwd: PathBuf,
+    },
+    Name {
+        thread_id: String,
+        name: String,
+    },
+    Locate {
+        thread_id: String,
+    },
+    Descendants {
+        thread_id: String,
+    },
+    BackgroundTerminals {
+        thread_id: String,
+    },
+    Unsubscribe {
+        thread_id: String,
+    },
+    Archive {
+        thread_id: String,
+    },
+    Unarchive {
+        thread_id: String,
+    },
+    DeleteThread {
         thread_id: String,
     },
     Thread {
@@ -75,13 +112,22 @@ enum WorkerCall {
 struct FakeWorker {
     calls: StdMutex<Vec<WorkerCall>>,
     native_threads: StdMutex<BTreeMap<String, NativeThread>>,
+    materialized_threads: StdMutex<HashSet<String>>,
+    archived_threads: StdMutex<HashSet<String>>,
+    descendants: StdMutex<BTreeMap<String, Vec<String>>>,
+    background_terminals: StdMutex<BTreeMap<String, usize>>,
     failed_thread_reads: StdMutex<Vec<String>>,
     fail_thread_start: bool,
     fail_turn_start: bool,
     turn_start_entered: Option<Arc<Notify>>,
     turn_start_release: Option<Arc<Notify>>,
+    thread_read_entered: Option<Arc<Notify>>,
+    thread_read_release: Option<Arc<Notify>>,
     fail_resume_thread: Option<String>,
     fail_compact: bool,
+    fail_delete_thread: bool,
+    fail_delete_thread_after_removal: bool,
+    activate_on_unsubscribe: StdMutex<Option<String>>,
     resumed_thread_id: Option<String>,
     resumed_cwd: Option<PathBuf>,
     resumed_status: Option<CodexThreadStatus>,
@@ -110,9 +156,31 @@ impl FakeWorker {
         }
     }
 
+    fn paused_thread_read(entered: Arc<Notify>, release: Arc<Notify>) -> Self {
+        Self {
+            thread_read_entered: Some(entered),
+            thread_read_release: Some(release),
+            ..Self::default()
+        }
+    }
+
     fn failing_compact() -> Self {
         Self {
             fail_compact: true,
+            ..Self::default()
+        }
+    }
+
+    fn failing_delete_thread() -> Self {
+        Self {
+            fail_delete_thread: true,
+            ..Self::default()
+        }
+    }
+
+    fn ambiguously_deleted_thread() -> Self {
+        Self {
+            fail_delete_thread_after_removal: true,
             ..Self::default()
         }
     }
@@ -141,14 +209,22 @@ impl FakeWorker {
             .insert(thread.id.clone(), thread);
     }
 
+    fn remember_materialized_thread(&self, thread: NativeThread) {
+        let thread_id = thread.id.clone();
+        self.remember_native_thread(thread);
+        self.materialized_threads.lock().unwrap().insert(thread_id);
+    }
+
     fn remember_bound_thread(&self, workspace: &Workspace, status: CodexThreadStatus) {
+        let thread_id = workspace.codex_thread_id.clone().unwrap();
         self.remember_native_thread(NativeThread {
-            id: workspace.codex_thread_id.clone().unwrap(),
+            id: thread_id.clone(),
             cwd: workspace.worktree_path.clone().unwrap(),
             name: Some(workspace.name.clone()),
             status,
             forked_from_id: workspace.parent_thread_id.clone(),
         });
+        self.materialized_threads.lock().unwrap().insert(thread_id);
     }
 
     fn set_native_status(&self, thread_id: &str, status: CodexThreadStatus) {
@@ -165,6 +241,23 @@ impl FakeWorker {
             .lock()
             .unwrap()
             .push(thread_id.to_owned());
+    }
+
+    fn set_descendants(&self, thread_id: &str, descendants: &[&str]) {
+        self.descendants.lock().unwrap().insert(
+            thread_id.to_owned(),
+            descendants
+                .iter()
+                .map(|value| (*value).to_owned())
+                .collect(),
+        );
+    }
+
+    fn set_background_terminals(&self, thread_id: &str, count: usize) {
+        self.background_terminals
+            .lock()
+            .unwrap()
+            .insert(thread_id.to_owned(), count);
     }
 }
 
@@ -192,6 +285,12 @@ impl WorkerRuntime for FakeWorker {
         self.calls.lock().unwrap().push(WorkerCall::Read {
             thread_id: thread_id.to_owned(),
         });
+        if let Some(entered) = &self.thread_read_entered {
+            entered.notify_one();
+        }
+        if let Some(release) = &self.thread_read_release {
+            release.notified().await;
+        }
         if self
             .failed_thread_reads
             .lock()
@@ -211,6 +310,159 @@ impl WorkerRuntime for FakeWorker {
             .ok_or_else(|| {
                 WorkerError::InvalidThreadRead("fake native thread does not exist".to_owned())
             })
+    }
+
+    async fn find_materialized_thread(
+        &self,
+        thread_id: &str,
+        cwd: &Path,
+    ) -> Result<Option<NativeThread>, WorkerError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(WorkerCall::FindMaterialized {
+                thread_id: thread_id.to_owned(),
+                cwd: cwd.to_owned(),
+            });
+        if !self
+            .materialized_threads
+            .lock()
+            .unwrap()
+            .contains(thread_id)
+        {
+            return Ok(None);
+        }
+        self.native_threads
+            .lock()
+            .unwrap()
+            .get(thread_id)
+            .cloned()
+            .map(Some)
+            .ok_or_else(|| {
+                WorkerError::InvalidThreadRead(
+                    "materialized fake native thread does not exist".to_owned(),
+                )
+            })
+    }
+
+    async fn set_thread_name(&self, thread_id: &str, name: &str) -> Result<(), WorkerError> {
+        self.calls.lock().unwrap().push(WorkerCall::Name {
+            thread_id: thread_id.to_owned(),
+            name: name.to_owned(),
+        });
+        let mut threads = self.native_threads.lock().unwrap();
+        let thread = threads.get_mut(thread_id).ok_or_else(|| {
+            WorkerError::InvalidThreadRead("fake native thread does not exist".to_owned())
+        })?;
+        thread.name = Some(name.to_owned());
+        Ok(())
+    }
+
+    async fn locate_thread(
+        &self,
+        thread_id: &str,
+    ) -> Result<Option<LocatedNativeThread>, WorkerError> {
+        self.calls.lock().unwrap().push(WorkerCall::Locate {
+            thread_id: thread_id.to_owned(),
+        });
+        let thread = self.native_threads.lock().unwrap().get(thread_id).cloned();
+        Ok(thread.map(|thread| LocatedNativeThread {
+            archived: self.archived_threads.lock().unwrap().contains(thread_id),
+            thread,
+        }))
+    }
+
+    async fn list_thread_descendants(&self, thread_id: &str) -> Result<Vec<String>, WorkerError> {
+        self.calls.lock().unwrap().push(WorkerCall::Descendants {
+            thread_id: thread_id.to_owned(),
+        });
+        Ok(self
+            .descendants
+            .lock()
+            .unwrap()
+            .get(thread_id)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    async fn background_terminal_count(&self, thread_id: &str) -> Result<usize, WorkerError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(WorkerCall::BackgroundTerminals {
+                thread_id: thread_id.to_owned(),
+            });
+        Ok(*self
+            .background_terminals
+            .lock()
+            .unwrap()
+            .get(thread_id)
+            .unwrap_or(&0))
+    }
+
+    async fn unsubscribe_thread(&self, thread_id: &str) -> Result<(), WorkerError> {
+        self.calls.lock().unwrap().push(WorkerCall::Unsubscribe {
+            thread_id: thread_id.to_owned(),
+        });
+        if let Some(child) = self.activate_on_unsubscribe.lock().unwrap().take() {
+            self.set_native_status(
+                &child,
+                CodexThreadStatus::Active {
+                    active_flags: Vec::new(),
+                },
+            );
+        }
+        Ok(())
+    }
+
+    async fn archive_thread(&self, thread_id: &str) -> Result<(), WorkerError> {
+        self.calls.lock().unwrap().push(WorkerCall::Archive {
+            thread_id: thread_id.to_owned(),
+        });
+        if !self.native_threads.lock().unwrap().contains_key(thread_id) {
+            return Err(WorkerError::InvalidThreadRead(
+                "fake native thread does not exist".to_owned(),
+            ));
+        }
+        self.archived_threads
+            .lock()
+            .unwrap()
+            .insert(thread_id.to_owned());
+        Ok(())
+    }
+
+    async fn unarchive_thread(&self, thread_id: &str) -> Result<NativeThread, WorkerError> {
+        self.calls.lock().unwrap().push(WorkerCall::Unarchive {
+            thread_id: thread_id.to_owned(),
+        });
+        self.archived_threads.lock().unwrap().remove(thread_id);
+        self.native_threads
+            .lock()
+            .unwrap()
+            .get(thread_id)
+            .cloned()
+            .ok_or_else(|| {
+                WorkerError::InvalidThreadRead("fake native thread does not exist".to_owned())
+            })
+    }
+
+    async fn delete_thread(&self, thread_id: &str) -> Result<(), WorkerError> {
+        self.calls.lock().unwrap().push(WorkerCall::DeleteThread {
+            thread_id: thread_id.to_owned(),
+        });
+        if self.fail_delete_thread {
+            return Err(WorkerError::InvalidThreadRead(
+                "injected native thread deletion failure".to_owned(),
+            ));
+        }
+        self.archived_threads.lock().unwrap().remove(thread_id);
+        self.native_threads.lock().unwrap().remove(thread_id);
+        if self.fail_delete_thread_after_removal {
+            return Err(WorkerError::InvalidThreadRead(
+                "injected ambiguous native thread deletion".to_owned(),
+            ));
+        }
+        Ok(())
     }
 
     async fn start_thread(
@@ -297,6 +549,10 @@ impl WorkerRuntime for FakeWorker {
             status: resumed_status.clone(),
             forked_from_id: None,
         });
+        self.materialized_threads
+            .lock()
+            .unwrap()
+            .insert(resumed_thread_id.clone());
         Ok(StartedThread {
             id: resumed_thread_id,
             status: resumed_status,
@@ -338,6 +594,7 @@ impl WorkerRuntime for FakeWorker {
             status: CodexThreadStatus::Idle,
             forked_from_id: Some(source_thread_id.to_owned()),
         });
+        self.materialized_threads.lock().unwrap().insert(id.clone());
         Ok(StartedThread {
             id: id.clone(),
             status: CodexThreadStatus::Idle,
@@ -405,6 +662,10 @@ impl WorkerRuntime for FakeWorker {
                 active_flags: Vec::new(),
             },
         );
+        self.materialized_threads
+            .lock()
+            .unwrap()
+            .insert(thread_id.to_owned());
         Ok(StartedTurn {
             id: format!("turn-{sequence}"),
         })
@@ -471,6 +732,30 @@ impl Fixture {
             .register_repository(RepositoryRegisterParams {
                 path: self.source.clone(),
             })
+            .unwrap()
+    }
+
+    async fn attach(&self, workspace: &Workspace) -> Workspace {
+        self.coordinator
+            .attach_workspace(WorkspaceAttachParams {
+                scope: RepositoryScope::repository(self.source.clone()),
+                workspace: workspace.id.clone(),
+            })
+            .await
+            .unwrap()
+            .workspace
+    }
+
+    async fn create_and_materialize(&self, params: WorkspaceCreateParams) -> Workspace {
+        let prepared = self
+            .coordinator
+            .create_workspace(params)
+            .await
+            .unwrap()
+            .workspace;
+        self.coordinator
+            .materialize_workspace_thread(prepared)
+            .await
             .unwrap()
     }
 

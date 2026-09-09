@@ -7,14 +7,6 @@ use super::{AuditDraft, EventDraft, Store, StoreError, json_to_sql_error, new_id
 use crate::domain::{Audit, NormalizedEvent};
 
 impl Store {
-    pub fn append_event(&self, event: EventDraft) -> Result<NormalizedEvent, StoreError> {
-        let mut connection = self.lock()?;
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let event = insert_event(&transaction, event)?;
-        transaction.commit()?;
-        Ok(event)
-    }
-
     pub fn append_audit(&self, input: AuditDraft) -> Result<Audit, StoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;

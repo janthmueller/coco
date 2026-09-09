@@ -7,7 +7,10 @@ mod decision;
 mod jump;
 mod output;
 mod prompt;
+mod signals;
 mod status;
+mod style;
+mod turn;
 
 #[cfg(test)]
 mod tests;

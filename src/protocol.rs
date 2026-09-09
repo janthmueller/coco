@@ -10,6 +10,9 @@ use crate::domain::{
     Repository, Workspace,
 };
 
+mod signals;
+pub(crate) use signals::*;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DaemonMethod {
     Health,
@@ -18,35 +21,57 @@ pub enum DaemonMethod {
     RepositoryResolve,
     RepositoryList,
     WorkspaceCreate,
+    WorkspaceClose,
+    WorkspaceReopen,
+    WorkspaceDelete,
     WorkspaceList,
     WorkspaceGet,
     WorkspaceAttach,
+    WorkspaceAttachRenew,
+    WorkspaceAttachAdopt,
+    WorkspaceAttachRelease,
     TurnStart,
+    TurnResult,
     EventList,
     WorkspaceDiff,
     DecisionGet,
     DecisionRespond,
     AuditRecord,
+    SignalCatalogLoad,
+    SignalTypeList,
+    SignalEmit,
+    SignalList,
 }
 
 impl DaemonMethod {
     #[cfg(test)]
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 26] = [
         Self::Health,
         Self::ModelList,
         Self::RepositoryRegister,
         Self::RepositoryResolve,
         Self::RepositoryList,
         Self::WorkspaceCreate,
+        Self::WorkspaceClose,
+        Self::WorkspaceReopen,
+        Self::WorkspaceDelete,
         Self::WorkspaceList,
         Self::WorkspaceGet,
         Self::WorkspaceAttach,
+        Self::WorkspaceAttachRenew,
+        Self::WorkspaceAttachAdopt,
+        Self::WorkspaceAttachRelease,
         Self::TurnStart,
+        Self::TurnResult,
         Self::EventList,
         Self::WorkspaceDiff,
         Self::DecisionGet,
         Self::DecisionRespond,
         Self::AuditRecord,
+        Self::SignalCatalogLoad,
+        Self::SignalTypeList,
+        Self::SignalEmit,
+        Self::SignalList,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -57,15 +82,26 @@ impl DaemonMethod {
             Self::RepositoryResolve => "repository.resolve",
             Self::RepositoryList => "repository.list",
             Self::WorkspaceCreate => "workspace.create",
+            Self::WorkspaceClose => "workspace.close",
+            Self::WorkspaceReopen => "workspace.reopen",
+            Self::WorkspaceDelete => "workspace.delete",
             Self::WorkspaceList => "workspace.list",
             Self::WorkspaceGet => "workspace.get",
             Self::WorkspaceAttach => "workspace.attach",
+            Self::WorkspaceAttachRenew => "workspace.attach.renew",
+            Self::WorkspaceAttachAdopt => "workspace.attach.adopt",
+            Self::WorkspaceAttachRelease => "workspace.attach.release",
             Self::TurnStart => "turn.start",
+            Self::TurnResult => "turn.result",
             Self::EventList => "event.list",
             Self::WorkspaceDiff => "workspace.diff",
             Self::DecisionGet => "decision.get",
             Self::DecisionRespond => "decision.respond",
             Self::AuditRecord => "audit.record",
+            Self::SignalCatalogLoad => "signal.catalog.load",
+            Self::SignalTypeList => "signal.type.list",
+            Self::SignalEmit => "signal.emit",
+            Self::SignalList => "signal.list",
         }
     }
 
@@ -77,15 +113,26 @@ impl DaemonMethod {
             "repository.resolve" => Some(Self::RepositoryResolve),
             "repository.list" => Some(Self::RepositoryList),
             "workspace.create" => Some(Self::WorkspaceCreate),
+            "workspace.close" => Some(Self::WorkspaceClose),
+            "workspace.reopen" => Some(Self::WorkspaceReopen),
+            "workspace.delete" => Some(Self::WorkspaceDelete),
             "workspace.list" => Some(Self::WorkspaceList),
             "workspace.get" => Some(Self::WorkspaceGet),
             "workspace.attach" => Some(Self::WorkspaceAttach),
+            "workspace.attach.renew" => Some(Self::WorkspaceAttachRenew),
+            "workspace.attach.adopt" => Some(Self::WorkspaceAttachAdopt),
+            "workspace.attach.release" => Some(Self::WorkspaceAttachRelease),
             "turn.start" => Some(Self::TurnStart),
+            "turn.result" => Some(Self::TurnResult),
             "event.list" => Some(Self::EventList),
             "workspace.diff" => Some(Self::WorkspaceDiff),
             "decision.get" => Some(Self::DecisionGet),
             "decision.respond" => Some(Self::DecisionRespond),
             "audit.record" => Some(Self::AuditRecord),
+            "signal.catalog.load" => Some(Self::SignalCatalogLoad),
+            "signal.type.list" => Some(Self::SignalTypeList),
+            "signal.emit" => Some(Self::SignalEmit),
+            "signal.list" => Some(Self::SignalList),
             _ => None,
         }
     }
@@ -162,6 +209,7 @@ pub enum WorkspaceBaseRequest {
     deny_unknown_fields
 )]
 pub enum WorkspaceContextSource {
+    Reference { reference: String },
     Workspace { workspace: String },
     Thread { thread_id: String },
 }
@@ -245,6 +293,43 @@ pub struct WorkspaceListParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceCloseParams {
+    pub scope: RepositoryScope,
+    pub workspace: String,
+    #[serde(default)]
+    pub archive_thread: bool,
+    #[serde(default)]
+    pub discard_changes: bool,
+    #[serde(default)]
+    pub dry_run: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_plan: Option<WorkspaceRetirementPlan>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceReopenParams {
+    pub scope: RepositoryScope,
+    pub workspace: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceDeleteParams {
+    pub scope: RepositoryScope,
+    pub workspace: String,
+    #[serde(default)]
+    pub delete_thread: bool,
+    #[serde(default)]
+    pub delete_branch: bool,
+    #[serde(default)]
+    pub dry_run: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_plan: Option<WorkspaceRetirementPlan>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkspaceGetParams {
     pub scope: RepositoryScope,
     pub workspace: String,
@@ -259,10 +344,38 @@ pub struct WorkspaceAttachParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceAttachRenewParams {
+    pub workspace_id: String,
+    pub lease_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceAttachAdoptParams {
+    pub workspace_id: String,
+    pub lease_id: String,
+    pub thread_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceAttachReleaseParams {
+    pub workspace_id: String,
+    pub lease_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TurnStartParams {
     pub scope: RepositoryScope,
     pub workspace: String,
     pub message: String,
+    pub operation_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TurnResultParams {
     pub operation_id: String,
 }
 
@@ -334,6 +447,87 @@ pub struct WorkspaceResult {
     pub codex_turn_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TurnTerminalStatus {
+    Completed,
+    Interrupted,
+    Failed,
+}
+
+impl TurnTerminalStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::Interrupted => "interrupted",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "state",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum TurnResult {
+    Pending {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        codex_turn_id: Option<String>,
+    },
+    Finished {
+        codex_turn_id: String,
+        status: TurnTerminalStatus,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        response: Option<String>,
+        response_truncated: bool,
+    },
+    Unavailable {
+        reason: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceAttachResult {
+    pub workspace: Workspace,
+    pub launch: WorkspaceAttachLaunch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum WorkspaceAttachLaunch {
+    Resume { thread_id: String, lease_id: String },
+    Start { lease_id: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "state",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum WorkspaceAttachAdoptResult {
+    Pending,
+    Bound { workspace: Box<Workspace> },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceAttachRenewResult {}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceAttachReleaseResult {}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RepositorySummary {
@@ -358,6 +552,64 @@ pub struct WorkspaceListItem {
     #[serde(flatten)]
     pub workspace: Workspace,
     pub repository: RepositorySummary,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceThreadDisposition {
+    Retain,
+    Archive,
+    Delete,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceRetirementPlan {
+    pub workspace_id: String,
+    pub workspace_name: String,
+    pub worktree_path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<String>,
+    pub thread_disposition: WorkspaceThreadDisposition,
+    pub delete_branch: bool,
+    pub tracked_changes: bool,
+    pub untracked_file_count: usize,
+    pub ignored_file_count: usize,
+    pub detached_commits: bool,
+    pub descendant_thread_count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blockers: Vec<String>,
+}
+
+impl WorkspaceRetirementPlan {
+    pub const fn has_local_changes(&self) -> bool {
+        self.tracked_changes || self.untracked_file_count > 0 || self.ignored_file_count > 0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceCloseResult {
+    pub workspace: Workspace,
+    pub plan: WorkspaceRetirementPlan,
+    pub applied: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceReopenResult {
+    pub workspace: Workspace,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceDeleteResult {
+    pub plan: WorkspaceRetirementPlan,
+    pub applied: bool,
 }
 
 impl WorkspaceResult {
@@ -465,10 +717,41 @@ daemon_request!(
 );
 daemon_request!(RepositoryListParams, RepositoryList, Vec<RepositorySummary>);
 daemon_request!(WorkspaceCreateParams, WorkspaceCreate, WorkspaceResult);
+daemon_request!(WorkspaceCloseParams, WorkspaceClose, WorkspaceCloseResult);
+daemon_request!(
+    WorkspaceReopenParams,
+    WorkspaceReopen,
+    WorkspaceReopenResult
+);
+daemon_request!(
+    WorkspaceDeleteParams,
+    WorkspaceDelete,
+    WorkspaceDeleteResult
+);
 daemon_request!(WorkspaceListParams, WorkspaceList, Vec<WorkspaceListItem>);
 daemon_request!(WorkspaceGetParams, WorkspaceGet, WorkspaceStatusResult);
-daemon_request!(WorkspaceAttachParams, WorkspaceAttach, WorkspaceResult);
+daemon_request!(
+    WorkspaceAttachParams,
+    WorkspaceAttach,
+    WorkspaceAttachResult
+);
+daemon_request!(
+    WorkspaceAttachRenewParams,
+    WorkspaceAttachRenew,
+    WorkspaceAttachRenewResult
+);
+daemon_request!(
+    WorkspaceAttachAdoptParams,
+    WorkspaceAttachAdopt,
+    WorkspaceAttachAdoptResult
+);
+daemon_request!(
+    WorkspaceAttachReleaseParams,
+    WorkspaceAttachRelease,
+    WorkspaceAttachReleaseResult
+);
 daemon_request!(TurnStartParams, TurnStart, WorkspaceResult);
+daemon_request!(TurnResultParams, TurnResult, TurnResult);
 daemon_request!(EventListParams, EventList, EventListResult);
 daemon_request!(WorkspaceDiffParams, WorkspaceDiff, WorkspaceDiffResult);
 daemon_request!(DecisionGetParams, DecisionGet, DecisionResult);
@@ -496,15 +779,26 @@ mod tests {
                 "repository.resolve",
                 "repository.list",
                 "workspace.create",
+                "workspace.close",
+                "workspace.reopen",
+                "workspace.delete",
                 "workspace.list",
                 "workspace.get",
                 "workspace.attach",
+                "workspace.attach.renew",
+                "workspace.attach.adopt",
+                "workspace.attach.release",
                 "turn.start",
+                "turn.result",
                 "event.list",
                 "workspace.diff",
                 "decision.get",
                 "decision.respond",
                 "audit.record",
+                "signal.catalog.load",
+                "signal.type.list",
+                "signal.emit",
+                "signal.list",
             ]
         );
         for method in DaemonMethod::ALL {
@@ -573,8 +867,8 @@ mod tests {
                 repository_path: PathBuf::from("/repo"),
                 name: "child".to_owned(),
                 context: WorkspaceContextRequest::Fork {
-                    source: WorkspaceContextSource::Thread {
-                        thread_id: "thread-source".to_owned(),
+                    source: WorkspaceContextSource::Reference {
+                        reference: "thread-source".to_owned(),
                     },
                     compact: true,
                 },
@@ -594,7 +888,7 @@ mod tests {
                 "name": "child",
                 "context": {
                     "kind": "fork",
-                    "source": {"kind": "thread", "threadId": "thread-source"},
+                    "source": {"kind": "reference", "reference": "thread-source"},
                     "compact": true
                 },
                 "worktree": {
@@ -623,12 +917,66 @@ mod tests {
             json!({"scope": {"kind": "repository", "path": "/repo"}}),
         );
         assert_request(
+            WorkspaceCloseParams {
+                scope: RepositoryScope::repository("/repo"),
+                workspace: "workspace".to_owned(),
+                archive_thread: true,
+                discard_changes: true,
+                dry_run: true,
+                expected_plan: None,
+            },
+            DaemonMethod::WorkspaceClose,
+            json!({
+                "scope": {"kind": "repository", "path": "/repo"},
+                "workspace": "workspace",
+                "archiveThread": true,
+                "discardChanges": true,
+                "dryRun": true,
+            }),
+        );
+        assert_request(
+            WorkspaceReopenParams {
+                scope: RepositoryScope::repository("/repo"),
+                workspace: "workspace".to_owned(),
+            },
+            DaemonMethod::WorkspaceReopen,
+            json!({
+                "scope": {"kind": "repository", "path": "/repo"},
+                "workspace": "workspace",
+            }),
+        );
+        assert_request(
+            WorkspaceDeleteParams {
+                scope: RepositoryScope::AllRepositories,
+                workspace: "workspace".to_owned(),
+                delete_thread: true,
+                delete_branch: true,
+                dry_run: false,
+                expected_plan: None,
+            },
+            DaemonMethod::WorkspaceDelete,
+            json!({
+                "scope": {"kind": "allRepositories"},
+                "workspace": "workspace",
+                "deleteThread": true,
+                "deleteBranch": true,
+                "dryRun": false,
+            }),
+        );
+        assert_request(
             WorkspaceGetParams {
                 scope: RepositoryScope::AllRepositories,
                 workspace: "workspace".to_owned(),
             },
             DaemonMethod::WorkspaceGet,
             json!({"scope": {"kind": "allRepositories"}, "workspace": "workspace"}),
+        );
+        assert_request(
+            TurnResultParams {
+                operation_id: "send-1".to_owned(),
+            },
+            DaemonMethod::TurnResult,
+            json!({"operationId": "send-1"}),
         );
         assert_request(
             WorkspaceAttachParams {
@@ -640,6 +988,35 @@ mod tests {
                 "scope": {"kind": "repository", "path": "/repo"},
                 "workspace": "workspace",
             }),
+        );
+        assert_request(
+            WorkspaceAttachRenewParams {
+                workspace_id: "workspace-1".to_owned(),
+                lease_id: "lease-1".to_owned(),
+            },
+            DaemonMethod::WorkspaceAttachRenew,
+            json!({"workspaceId": "workspace-1", "leaseId": "lease-1"}),
+        );
+        assert_request(
+            WorkspaceAttachAdoptParams {
+                workspace_id: "workspace-1".to_owned(),
+                lease_id: "lease-1".to_owned(),
+                thread_id: "thread-1".to_owned(),
+            },
+            DaemonMethod::WorkspaceAttachAdopt,
+            json!({
+                "workspaceId": "workspace-1",
+                "leaseId": "lease-1",
+                "threadId": "thread-1",
+            }),
+        );
+        assert_request(
+            WorkspaceAttachReleaseParams {
+                workspace_id: "workspace-1".to_owned(),
+                lease_id: "lease-1".to_owned(),
+            },
+            DaemonMethod::WorkspaceAttachRelease,
+            json!({"workspaceId": "workspace-1", "leaseId": "lease-1"}),
         );
         assert_request(
             TurnStartParams {
@@ -780,6 +1157,17 @@ mod tests {
     }
 
     #[test]
+    fn turn_result_preserves_exact_output_correlation_fields() {
+        assert_response::<TurnResultParams>(json!({
+            "state": "finished",
+            "codexTurnId": "codex-turn-1",
+            "status": "completed",
+            "response": "Done",
+            "responseTruncated": false,
+        }));
+    }
+
+    #[test]
     fn response_dtos_preserve_every_wrapper_wire_field() {
         assert_response::<HealthParams>(json!({"status": "ok"}));
         assert_response::<RepositoryRegisterParams>(json!({
@@ -826,7 +1214,7 @@ mod tests {
             "openDecisions": [],
             "nextSequence": 3,
         }));
-        assert_response::<WorkspaceAttachParams>(json!({"workspace": workspace()}));
+        assert_attach_responses();
         assert_response::<TurnStartParams>(json!({
             "workspace": workspace(),
             "turnId": "turn-1",
@@ -883,6 +1271,24 @@ mod tests {
         );
     }
 
+    fn assert_attach_responses() {
+        assert_response::<WorkspaceAttachParams>(json!({
+            "workspace": workspace(),
+            "launch": {
+                "kind": "resume",
+                "threadId": "thread-1",
+                "leaseId": "lease-1"
+            },
+        }));
+        assert_response::<WorkspaceAttachRenewParams>(json!({}));
+        assert_response::<WorkspaceAttachAdoptParams>(json!({"state": "pending"}));
+        assert_response::<WorkspaceAttachAdoptParams>(json!({
+            "state": "bound",
+            "workspace": workspace(),
+        }));
+        assert_response::<WorkspaceAttachReleaseParams>(json!({}));
+    }
+
     fn assert_request<R>(request: R, expected_method: DaemonMethod, expected_params: Value)
     where
         R: DaemonRequest,
@@ -914,6 +1320,7 @@ mod tests {
                 "effectiveSettings": {},
             },
             "lifecycle": "ready",
+            "availability": "open",
             "threadRuntime": {
                 "status": {"type": "idle"},
                 "runtimeGeneration": "runtime-1",
@@ -934,6 +1341,9 @@ mod tests {
             "createdAtMs": 1,
             "updatedAtMs": 2,
             "completedAtMs": null,
+            "threadArchived": false,
+            "closedHeadSha": null,
+            "closedAtMs": null,
         })
     }
 
