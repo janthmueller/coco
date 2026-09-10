@@ -5,10 +5,10 @@ description: Let a Codex workspace report structured updates and follow them fro
 
 A **signal** is a short, structured update from an agent, such as “this change
 is ready for review.” CoCo saves the update so you or another application can
-read it later. It does not automatically start work, change a workspace's
-state, or mark anything complete. You can separately configure a
-[CoCo hook](../hooks/) to run a trusted local command after a matching signal
-is accepted.
+read it later. Signals give humans and integrations a durable update channel:
+use `coco send` to start another model turn, or configure a [CoCo
+hook](../hooks/) to run a trusted local command after a matching signal is
+accepted.
 
 ## Define a signal
 

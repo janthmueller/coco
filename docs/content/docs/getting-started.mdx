@@ -29,7 +29,7 @@ coco create feat/first --base HEAD
 
 CoCo creates a separate worktree and the branch `coco/feat/first`. Your current
 checkout remains unchanged. The workspace is now `Prepared`: no Codex thread
-or model turn exists yet.
+exists yet, no workspace exec server is running, and no model turn has started.
 
 ## 3. Send the first instruction
 
@@ -38,10 +38,11 @@ coco send feat/first \
   "Inspect this project and propose one focused improvement"
 ```
 
-This creates the persistent Codex thread and starts its first real turn. The
-command returns as soon as Codex accepts the work; `cocod` keeps the workspace
-available while the turn continues. Add `--wait` to the command when you want
-to stay attached and print that turn's final response instead.
+This starts one dedicated `codex exec-server` for the workspace, creates its
+persistent Codex thread, and starts the first real turn. CoCo reuses that exec
+server for later turns. The command returns as soon as Codex accepts the work;
+`cocod` keeps the workspace available while the turn continues. Add `--wait`
+when you want to stay attached and print that turn's final response instead.
 
 You can also create and send in one command:
 
@@ -93,8 +94,9 @@ an explicit Codex interrupt does.
 ## What you created
 
 Your original checkout is still on its original branch. CoCo's worktree and
-`coco/feat/first` branch remain available for review even after you leave the
-UI or restart `cocod`.
+`coco/feat/first` branch remain available for review after you leave the UI.
+If you restart `cocod`, CoCo retains the workspace and thread and starts a new
+exec server when you next use `send` or `jump`.
 
 Continue with [Working with workspaces](../guides/workspaces/) for status,
 diffs, forks, compaction, multi-repository use, and safe workspace retirement.

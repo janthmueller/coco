@@ -8,11 +8,11 @@ version.
 
 ## Installed commands
 
-| Command    | Purpose                                                  |
-| ---------- | -------------------------------------------------------- |
-| `coco`     | Create, inspect, and control workspaces                  |
-| `cocod`    | Keep CoCo and its Codex work available between CLI calls |
-| `coco-mcp` | Expose repository-scoped workspace tools to an MCP host  |
+| Command    | Purpose                                                 |
+| ---------- | ------------------------------------------------------- |
+| `coco`     | Create, inspect, and control workspaces                 |
+| `cocod`    | Keep threads and active Codex work reachable            |
+| `coco-mcp` | Expose repository-scoped workspace tools to an MCP host |
 
 Start `cocod` before using either of the other commands.
 
@@ -135,28 +135,29 @@ branch already checked out elsewhere.
 `--carry-changes`. `--dirty` is shorthand for both carry options; it remains
 independent of `--detached`. Ignored files require `.worktreeinclude`.
 
-`--send` creates native context and starts the first turn after Git preparation.
-`--jump` then opens that thread in the Codex terminal UI. Used alone on a fresh
-prepared workspace, `--jump` lets the TUI create the thread with your first
+`--send` starts the workspace exec server, prepares the selected conversation
+context, and starts the first turn after Git preparation. `--jump` then opens
+that thread in the Codex terminal UI. Used alone on a fresh prepared workspace,
+`--jump` starts the exec server and lets the TUI bind the thread with your first
 action. Their short forms are independent and may be combined.
 
 ## Workspace commands
 
 In the forms below, `<WORKSPACE>` may be a repository-local name or full ID.
 
-| Command                                                        | Purpose                                         |
-| -------------------------------------------------------------- | ----------------------------------------------- |
-| `coco list [--json]` (`ls`)                                    | List workspaces in the selected scope           |
-| `coco list --closed [--json]`                                  | List closed workspaces instead                  |
-| `coco status [-a] [--json]`                                    | Show workspace states in the selected scope     |
-| `coco status [-a] --follow`                                    | Follow state changes for that collection        |
-| `coco status WORKSPACE [-g] [--json] [--follow]`               | Show or follow one workspace's state            |
-| `coco send [WORKSPACE] [MESSAGE] [--operation-id ID] [--wait]` | Choose a workspace and start its next turn      |
-| `coco jump [WORKSPACE]`                                        | Choose and open the workspace in the Codex TUI  |
-| `coco diff [WORKSPACE]`                                        | Choose or print its bounded change summary      |
-| `coco close [WORKSPACE] [-t] [-n]`                             | Remove a safe worktree and retain its workspace |
-| `coco reopen [WORKSPACE]`                                      | Restore a closed workspace                      |
-| `coco delete [WORKSPACE] [-t] [-b] [-n] [-y]`                  | Permanently remove a closed workspace record    |
+| Command                                                             | Purpose                                         |
+| ------------------------------------------------------------------- | ----------------------------------------------- |
+| `coco list [--json]` (`ls`)                                         | List workspaces in the selected scope           |
+| `coco list --closed [--json]`                                       | List closed workspaces instead                  |
+| `coco status [-a] [--json]`                                         | Show workspace states in the selected scope     |
+| `coco status [-a] --follow`                                         | Follow state changes for that collection        |
+| `coco status WORKSPACE [-g] [--json] [--follow]`                    | Show or follow one workspace's state            |
+| `coco send [WORKSPACE] [MESSAGE] [-g] [--operation-id ID] [--wait]` | Choose a workspace and start its next turn      |
+| `coco jump [WORKSPACE] [-g]`                                        | Choose and open the workspace in the Codex TUI  |
+| `coco diff [WORKSPACE] [-g]`                                        | Choose or print its bounded change summary      |
+| `coco close [WORKSPACE] [-g] [-t] [-n] [-y]`                        | Remove a safe worktree and retain its workspace |
+| `coco reopen [WORKSPACE] [-g]`                                      | Restore a closed workspace                      |
+| `coco delete [WORKSPACE] [-g] [-t] [-b] [-n] [-y]`                  | Permanently remove a closed workspace record    |
 
 Omitted values use interactive input only as described above. A targetless
 `status` is an overview rather than a selector. `status --follow` cannot be
@@ -167,7 +168,7 @@ prints conversation messages.
 `list` and `status` inspect without creating or loading conversation context;
 `send` and `jump` activate it when needed.
 
-Detailed `status WORKSPACE` also reports the workspace execution process. On
+Detailed `status WORKSPACE` also reports the workspace exec-server state. On
 Linux this includes its current descendant count, aggregate RSS, and interval
 CPU use. Collection status intentionally omits resource sampling.
 
@@ -204,17 +205,18 @@ coco [REPOSITORY_PATH] delete [WORKSPACE]
   [-y, --yes]
 ```
 
-`close` removes the managed worktree while retaining the workspace record,
-branch, and thread. `-t` also archives the thread until `reopen`. Local
-tracked, untracked, or ignored files require `--discard-changes`; without
-`-y`, CoCo asks before discarding them. `--yes` never implies
-`--discard-changes`.
+`close` stops the workspace exec server and removes the managed worktree while
+retaining the workspace record, branch, and thread. `-t` also archives the
+thread until `reopen`. Local tracked, untracked, or ignored files require
+`--discard-changes`; without `-y`, CoCo asks before discarding them. `--yes`
+never implies `--discard-changes`.
 
-`reopen` restores the exact retained Git binding and thread. `delete` accepts
-only closed workspaces and always deletes their CoCo record. Native thread and
-branch deletion are separate opt-ins. `-b` applies only to a branch created by
-CoCo and still at its recorded closed commit. Short options compose, so
-`delete -tby` selects thread, branch, and non-interactive confirmation.
+`reopen` restores the exact retained Git binding and thread; its exec server
+starts on the next `send` or `jump`. `delete` accepts only closed workspaces
+and always deletes their CoCo record. Native thread and branch deletion are
+separate opt-ins. `-b` applies only to a branch created by CoCo and still at
+its recorded closed commit. Short options compose, so `delete -tby` selects
+thread, branch, and non-interactive confirmation.
 
 Interactive confirmation uses `[y/N]`: type `y` and press Enter to proceed.
 Pressing Enter without an answer chooses No.

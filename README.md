@@ -3,10 +3,12 @@
 A local control plane for Codex work that you want to start, leave running,
 and return to.
 
-CoCo gives each piece of work a durable name and keeps its Codex conversation,
-Git worktree, model, and profile together. Start work from a short-lived CLI
-command, inspect or continue it from another terminal or MCP client, and enter
-the same conversation later through the native Codex terminal UI.
+CoCo gives each piece of work a durable name. Its workspace keeps a Git
+worktree, persistent Codex thread, model, and profile together. By default,
+activation gives that workspace one dedicated `codex exec-server` that is
+reused for later turns. Start from a short-lived CLI command, inspect or
+continue from another terminal or MCP client, and return through the native
+Codex terminal UI.
 
 Codex still performs the reasoning, tool calls, approvals, and file changes.
 CoCo coordinates where that work lives and how you reach it.
@@ -30,9 +32,9 @@ client that started them:
   accepts a turn while `cocod` keeps the work available.
 - **Return to the exact place.** A named workspace keeps the Codex thread,
   worktree, repository, and selected settings together.
-- **Supervise work from another client.** Check state and workspace resource
-  use, answer supported approvals and questions, send another instruction, or
-  enter the native TUI.
+- **Supervise work from another client.** Check state, inspect current resource
+  use on Linux, answer supported approvals and questions, send another
+  instruction, or enter the native TUI.
 - **Work across repositories.** List everything together or address one
   workspace without first changing directories.
 - **Control the lifecycle safely.** Prepare without starting a model turn,
@@ -103,10 +105,11 @@ Leaving the status view or the TUI does not cancel an active turn. Add `--wait`
 to `send` when you want that command to remain attached and print the final
 response. Stopping `cocod` while a turn is active interrupts that turn.
 
-CoCo starts a lightweight Codex execution process only when a workspace first
-needs it. Detailed `status` shows that process and, on Linux, its current
-process count, memory, and CPU use. These are observations, not resource
-limits.
+By default, the first `send` or `jump` starts one dedicated
+`codex exec-server` for that workspace. CoCo reuses it for later turns and
+stops it when the workspace is closed or `cocod` exits normally.
+Detailed `status` shows the process and, on Linux, its current process count,
+memory, and CPU use. These are observations, not resource limits.
 
 ## Work with a workspace
 
@@ -123,11 +126,12 @@ The common commands follow one lifecycle:
 | Free and later restore the worktree   | `coco close` / `coco reopen`           |
 | Permanently retire a closed record    | `coco delete`                          |
 
-By default, `create` makes a `coco/<workspace>` branch and does not create a
-Codex thread until the first `send` or interactive action in `jump`. Code base
-and conversation context are independent: a new workspace can use one Git
-revision while inheriting context from another CoCo workspace or exact Codex
-thread ID.
+By default, `create` makes a `coco/<workspace>` branch. The workspace remains
+prepared without a Codex thread or exec server until the first `send` or
+`jump`. A fresh `jump` binds the thread only after your first interactive
+action. Code base and conversation context are independent: a new workspace
+can use one Git revision while inheriting context from another CoCo workspace
+or exact Codex thread ID.
 
 ## Connect another application
 

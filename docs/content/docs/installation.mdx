@@ -3,7 +3,7 @@ title: Installation
 description: Install the CoCo alpha with Cargo or Nix and start its coordinator.
 ---
 
-CoCo supports Linux and macOS. It uses your existing Codex login and
+CoCo targets Linux and macOS. It uses your existing Codex login and
 configuration; it does not require a separate API key.
 
 ## Requirements
@@ -84,11 +84,11 @@ can continue and remain reachable from a later `status`, `decide`, or `jump`.
 With the default paths, a second `cocod` process exits instead of competing for
 the same workspaces.
 
-When a workspace first needs Codex execution, `cocod` starts one additional
-`codex exec-server` for it. The process remains available until you close the
-workspace or stop `cocod`; merely creating or listing a workspace does not
-start it. In the current Linux test environment an idle exec server used about
-48 MiB of resident memory, though actual use varies by system and workload.
+The first `send` or `jump` for a workspace starts one dedicated
+`codex exec-server`. CoCo reuses that process for later turns until you close
+the workspace or stop `cocod`. Creating, listing, and inspecting a prepared
+workspace leave it inactive. Detailed `status` shows whether its exec server is
+running and, on Linux, its current process count, memory, and CPU use.
 
 Stop the coordinator with <kbd>Ctrl</kbd>+<kbd>C</kbd>. Workspaces remain listed
 the next time it starts. `list` and `status` neither create prepared context nor
@@ -103,6 +103,7 @@ older shared execution mode:
 COCO_WORKSPACE_EXECUTION=shared cocod
 ```
 
-This compatibility mode does not provide per-workspace resource observations.
+This compatibility mode runs workspace tools through the shared Codex App
+Server process and therefore has no per-workspace resource observations.
 
 Next, [run your first workspace](../getting-started/).

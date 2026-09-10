@@ -18,13 +18,13 @@ const features = [
   },
   {
     description:
-      "A stable name keeps the Codex conversation, Git worktree, repository, and settings together.",
+      "A stable name binds the Codex thread, Git worktree, repository, and settings; active work runs through a dedicated Codex process.",
     icon: GitBranch,
     title: "Return to the exact place",
   },
   {
     description:
-      "Inspect state and resource use, answer a request, continue from another terminal, or enter the same work through the native Codex UI.",
+      "Inspect state and Linux resource use, answer a request, continue from another terminal, or enter the same work through the native Codex UI.",
     icon: ShieldCheck,
     title: "Stay in control",
   },
@@ -48,9 +48,9 @@ export default function HomePage() {
           <h1>Run Codex work without staying attached.</h1>
           <p className="coco-hero-copy">
             CoCo turns each piece of work into a named workspace that keeps its
-            Codex conversation, Git worktree, and settings together. Start it
-            from one terminal, inspect it from another, and return through the
-            native Codex UI.
+            Codex thread, Git worktree, and settings together, with its own
+            execution process while active. Start it from one terminal, inspect
+            it from another, and return through the native Codex UI.
           </p>
           <div className="coco-actions">
             <Link

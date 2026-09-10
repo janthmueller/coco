@@ -103,5 +103,6 @@ To let a Codex workspace publish structured updates, select schema files with
 See [Agent signals](../signals/) for setup, permissions, and reading the updates.
 
 This MCP server lets another application control existing CoCo workspaces.
-CoCo does not currently provide its own registry or per-workspace selector for
-the MCP tools available _inside_ a Codex workspace.
+Configure tools that should be available _inside_ a Codex workspace through
+its selected Codex profile; that is a separate setting from the tools
+`coco-mcp` exposes to its host.

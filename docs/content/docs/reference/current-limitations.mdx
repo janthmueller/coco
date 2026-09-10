@@ -182,8 +182,8 @@ same event.
 - `send --wait` can print a response only while the `cocod` generation that
   accepted the turn remains available. Stopping the wait does not cancel the
   turn; use `jump` to read its conversation later.
-- CoCo does not merge or mark work complete. `close` can remove a safely idle
-  worktree, and closed records can be deleted explicitly; neither action
+- Review and merge a workspace branch with Git. `close` frees a safely idle
+  worktree, while `delete` retires its closed CoCo record; neither command
   integrates the branch into another branch.
 - Closing does not preserve uncommitted files. Commit or move them first, or
   explicitly choose `--discard-changes`. Detached commits cannot be discarded
@@ -195,9 +195,8 @@ same event.
   durable work on a branch-backed workspace.
 - CoCo's MCP server can inspect or continue existing workspaces and read or
   explicitly publish agent signals. A configured hook can react with a trusted
-  local command. Start a follow-up model turn explicitly with `send`. The
-  current MCP integration has no user-managed server registry or per-workspace
-  tool selector.
+  local command, and `send` starts a follow-up model turn. Configure MCP tools
+  available inside a workspace through its selected Codex profile.
 - Normal `cocod` shutdown and workspace close stop tracked exec servers. A hard
   process kill can leave one behind because the current Codex local listener
   has no parent-lifetime option; CoCo does not yet provide OS-enforced

@@ -4,8 +4,9 @@ description: Start Codex work, leave it running, and return to the exact workspa
 ---
 
 CoCo stands for **Codex Coordinator**. It is a local control plane that gives
-each piece of Codex work a durable name and keeps its conversation, Git
-worktree, repository, and settings together.
+each piece of Codex work a durable name. A workspace keeps its Git worktree,
+persistent Codex thread, repository, and settings together. By default, an
+active workspace uses its own Codex execution process.
 
 The workspace remains addressable after the CLI command or Codex terminal UI
 that started it exits. You can inspect it from another terminal, answer a
@@ -17,8 +18,8 @@ the native Codex UI.
 Use CoCo when you want to:
 
 - run several separate pieces of Codex work across one or more repositories;
-- start work from a short-lived command and supervise its state and resource
-  use separately;
+- start work from a short-lived command and supervise its state separately,
+  including current resource use on Linux;
 - move between CLI commands, an MCP client, and the native Codex terminal UI
   without losing the exact conversation or checkout;
 - prepare code and conversation context independently; or
@@ -43,19 +44,28 @@ coordinates the environment around that work and keeps it reachable.
 | Restore or permanently retire closed work    | `coco reopen` / `coco delete` |
 
 `coco` commands normally exit after returning their result. `cocod` stays
-running and owns the active Codex process, so leaving `send`, `status
---follow`, or a TUI opened by `jump` does not by itself cancel a turn. Add
-`--wait` to `send` only when that command should remain attached and print the
-final response.
+running and keeps the Codex connections and workspace execution processes
+available, so leaving `send`, `status --follow`, or a TUI opened by `jump` does
+not by itself cancel a turn. Add `--wait` to `send` only when that command
+should remain attached and print the final response.
 
 ## What a workspace keeps together
 
 A workspace has:
 
-- one registered Git repository and a separate worktree;
-- one persistent Codex thread after work begins;
+- one registered Git repository and a separate worktree while it is open;
+- one persistent Codex thread once Codex work begins;
+- one dedicated `codex exec-server` while the workspace is activated in the
+  default execution mode;
 - the model and Codex profile selected for that thread; and
 - a fixed Git base plus the chosen conversation context.
+
+`create` prepares the worktree without starting Codex. The first `send` or
+`jump` starts the workspace's exec server and materializes its thread when
+needed; in a fresh `jump`, the first interactive action binds that thread.
+CoCo reuses the server until you close the workspace or stop `cocod`. Closing
+frees the worktree and execution process while retaining the workspace record
+and conversation for `reopen`.
 
 The code base and conversation context are independent choices. You can start
 from clean code on `main` while inheriting an investigation from another CoCo
@@ -102,8 +112,13 @@ workspace lifecycle change, while guards can stop a checked close or deletion.
     href="/docs/guides/mcp"
   />
   <Card
-    title="React to agent signals"
-    description="Publish validated updates and run trusted local reactions after they are saved."
+    title="Publish agent signals"
+    description="Let a workspace publish validated updates that humans and integrations can follow."
+    href="/docs/guides/signals"
+  />
+  <Card
+    title="Run reactions and guards"
+    description="React to saved events and protect destructive workspace actions with trusted commands."
     href="/docs/guides/hooks"
   />
 </Cards>

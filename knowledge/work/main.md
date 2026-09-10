@@ -3319,6 +3319,71 @@ for the runtime work yet.
   `thread/fork`; the documented routing boundary remains accurate for the
   pinned `codex-cli 0.154.0` behavior suite.
 
+## Public documentation coherence review — 2026-09-10
+
+Status: complete after checkpoint `c14bda4`; this is a documentation-only
+working-tree slice and has not been committed.
+
+Scope: re-read every rendered MDX page and `README.md`, compare command claims
+with the generated CLI help, and make the workspace/runtime mental model
+consistent without exposing internal architecture. Preserve the existing
+static site structure unless a page fails to answer a user question.
+
+Initial findings:
+
+- Public entry points correctly lead with durable, addressable Codex work, but
+  several still describe a workspace only as worktree plus thread/settings.
+  Since detailed status now exposes it, the minimal user model should also say
+  that the first activating action starts one dedicated `codex exec-server`,
+  reuses it for later turns, and stops it on close or normal daemon shutdown.
+- Generic claims about "resource use" overstate cross-platform behavior. The
+  execution process is visible on supported hosts; process-count, RSS, and CPU
+  measurements are currently Linux-specific.
+- The README phrase "a lightweight Codex execution process only when a
+  workspace first needs it" is ambiguous. Name the process and the activating
+  commands explicitly instead of asking the reader to infer whether normal
+  workspace execution uses it.
+- Generated help for the root command and every public subcommand was compared
+  with the reference. Command names and core semantics match; the compact
+  workspace table should expose the existing global and confirmation flags
+  more consistently.
+- The official Codex hooks page remains the correct target for session-level
+  hooks. Keep CoCo's saved lifecycle/signal reactions and retirement guards
+  clearly separate in user language.
+
+Outcome:
+
+- README, landing page, overview, quickstart, installation, workspace guide,
+  profiles, MCP, signals, hooks, CLI reference, and troubleshooting were all
+  reviewed as one public journey. The existing ten-page navigation remains
+  small and every page still has a concrete user purpose.
+- The entry points now explain one consistent workspace model: `create`
+  prepares the worktree; the first `send` or `jump` starts one dedicated
+  `codex exec-server` in the default mode; CoCo reuses it; `close` or orderly
+  daemon shutdown stops it; and reopen activates a replacement lazily. Fresh
+  jump's thread remains bound only after the first interactive action.
+- Resource claims now distinguish the visible executor from Linux-only process
+  count, RSS, and CPU sampling. The environment-specific 48 MiB observation was
+  removed from public installation prose and remains internal engineering
+  evidence.
+- Agent signals now have their own overview next step rather than being folded
+  into the hooks card. MCP prose directs worker-side tools to the selected
+  Codex profile, while the hooks guide retains the verified official Codex
+  hooks link and keeps both hook systems distinct.
+- The compact CLI table now includes the shipped global and confirmation flags
+  consistently. All command semantics were checked against generated help,
+  not inferred from earlier prose.
+
+Verification:
+
+- `pnpm --dir docs run check` passes type generation, TypeScript, Oxlint, and
+  Prettier.
+- The production build with `DOCS_BASE_PATH=/coco` and the repository URL
+  passes. It statically exports 103 files and all ten pages, verifies search
+  and project-subpath routing, and proves the public-only boundary.
+- Root `README.md` separately passes Prettier and `git diff --check` reports no
+  whitespace errors.
+
 ## Open questions and handoff
 
 - The `janthmueller/coco` repository and protected `crates.io` environment

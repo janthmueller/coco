@@ -50,7 +50,9 @@ sandbox_mode = "workspace-write"
 For a profile named `dev`, the filename must be `dev.config.toml` below
 `$CODEX_HOME`, normally `~/.codex`. The file itself is the configuration layer;
 do not wrap it in a `[profiles.dev]` table. Use keys supported by your installed
-Codex version.
+Codex version; the [Codex configuration
+reference](https://developers.openai.com/codex/config-reference) lists the
+available settings.
 
 ## Apply a profile
 
@@ -80,8 +82,7 @@ CoCo records which named profile was applied when the workspace was created.
 When a command needs to load that conversation again, CoCo checks that the
 parsed profile still matches. If you changed or removed its settings, `send`
 and `jump` refuse to load it. Comments and formatting do not affect this check.
-`list` and `status` do not
-load the conversation or run this check.
+`list` and `status` do not load the conversation or run this check.
 
 When you want different settings, create another profile name and use it for a
 new workspace. CoCo checks the named profile file, not Codex's base
