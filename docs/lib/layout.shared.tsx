@@ -6,6 +6,13 @@ import { site } from "@/lib/site";
 export function baseOptions(): BaseLayoutProps {
   return {
     githubUrl: site.repositoryUrl,
+    links: [
+      {
+        active: "nested-url",
+        text: "Docs",
+        url: "/docs",
+      },
+    ],
     nav: {
       title: <Brand />,
     },

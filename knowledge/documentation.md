@@ -153,16 +153,15 @@ serve a CoCo user.
 
 ## Static GitHub Pages deployment contract
 
-CoCo is currently in private incubation. The GitHub repository is private, the
-Pages site is deleted, and the Documentation workflow is disabled server-side.
-Do not re-enable remote documentation publication without an explicit user
-decision. The remainder of this section defines the dormant deployment
-contract and remains useful for local static-export verification.
+CoCo is published as a public alpha. The GitHub repository is public, and the
+active Documentation workflow deploys the static site to GitHub Pages from the
+default branch. Changes to repository visibility or publication still require
+an explicit user decision.
 
 The user-facing documentation must continue to build as static HTML, CSS,
-JavaScript, and assets. If public deployment is later authorized, it must use
-**GitHub Pages** without a long-running Node.js server. This remains a product
-requirement, not an optional deployment optimization.
+JavaScript, and assets. Its **GitHub Pages** deployment must not depend on a
+long-running Node.js server. This remains a product requirement, not an
+optional deployment optimization.
 
 The site scaffold must therefore:
 
@@ -187,8 +186,8 @@ The site scaffold must therefore:
   credentials, local paths, and private operational metadata must never be
   copied into the Pages artifact.
 
-When public deployment is authorized, it uses a GitHub Actions Pages workflow
-rather than committing build output to a `gh-pages` branch. The workflow builds
+Deployment uses a GitHub Actions Pages workflow rather than committing build
+output to a `gh-pages` branch. The workflow builds
 the pinned documentation dependencies, verifies the static export, uploads
 only `out/` with `actions/upload-pages-artifact`, and deploys it with
 `actions/deploy-pages` from the protected default branch. Pull requests build

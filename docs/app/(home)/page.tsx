@@ -45,12 +45,11 @@ export default function HomePage() {
             <span className="coco-eyebrow-dot" />
             Codex Coordinator · alpha
           </div>
-          <h1>Run Codex work without staying attached.</h1>
+          <h1>Codex work, coordinated.</h1>
           <p className="coco-hero-copy">
-            CoCo turns each piece of work into a named workspace that keeps its
-            Codex thread, Git worktree, and settings together, with its own
-            execution process while active. Start it from one terminal, inspect
-            it from another, and return through the native Codex UI.
+            CoCo gives each piece of work a named workspace for its Codex
+            thread, Git worktree, and settings. Start it from one terminal,
+            check in from another, and return through the native Codex UI.
           </p>
           <div className="coco-actions">
             <Link

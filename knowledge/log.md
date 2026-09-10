@@ -10,6 +10,13 @@ status: stable
 
 ## 2026-09-10
 
+- **Public alpha publication**: At the user's explicit direction, made the
+  repository public, activated its static GitHub Pages deployment, and enabled
+  crates.io releases. Published `v0.1.0-alpha.1` with Linux and macOS binaries
+  and `codex-coordinator 0.1.0-alpha.1` on crates.io. The live landing-page
+  review added a visible `Docs` destination and replaced the overly tight,
+  negative hero with a concise positive product statement.
+
 - **Per-workspace Codex execution and observation**: Kept one shared App Server
   as CoCo's control plane and added one lazy `codex exec-server` per activated
   workspace. Fresh threads, normal turns, and TUI turns select the matching

@@ -3435,13 +3435,49 @@ Verification:
   not credential material. The ignored browser, build, and Nix artifacts are
   absent from Git.
 
+## Public alpha release and landing-page refinement — 2026-09-10
+
+Status: complete locally; the public repository and release are live, and the
+landing-page correction is ready for its documentation-only push.
+
+Outcome:
+
+- The user explicitly authorized public visibility and publication. The
+  repository is public, GitHub Pages deploys from the active Documentation
+  workflow, and the first release is tagged `v0.1.0-alpha.1` with Linux and
+  macOS artifacts.
+- The first crates.io attempt reached the registry but was rejected because
+  the account email was not yet verified. After verification, retrying only
+  the failed job published `codex-coordinator 0.1.0-alpha.1` successfully; no
+  second version or tag was created.
+- A screenshot of the first live landing page exposed two presentation issues:
+  the header had no visible documentation destination, and the oversized,
+  tightly tracked negative headline collapsed word boundaries. The shared
+  navigation now includes a `Docs` link, while the hero positively states
+  `Codex work, coordinated.` and uses more restrained type with explicit word
+  spacing.
+- The supporting copy was shortened to the minimum workspace model needed on
+  the landing page. No internal architecture or roadmap material was added.
+- Canonical documentation knowledge now reflects the authorized public-alpha
+  state instead of the superseded private-incubation state.
+
+Verification:
+
+- `pnpm --dir docs run check` passes type generation, TypeScript, Oxlint, and
+  Prettier.
+- The production build with `DOCS_BASE_PATH=/coco` and the public repository
+  URL exports and verifies 103 static files, ten pages, search, project-subpath
+  routing, and the public-only boundary.
+- Headless Chrome renders the production export at `1678x873` and `390x844`.
+  The desktop header exposes `Docs`, the headline has clear word boundaries,
+  and both layouts retain their intended hierarchy without clipping.
+
 ## Open questions and handoff
 
-- The `janthmueller/coco` repository remains private, but its Pages site and
-  Documentation workflow are enabled again. The credential name is present
-  without exposing its value, and `COCO_RELEASE_ENABLED` is now true at the
-  user's explicit direction. The next qualifying successful Rust run on a
-  current `main` push can therefore publish an alpha automatically.
+- `janthmueller/coco` is now public, its Pages site and Documentation workflow
+  are active, and `COCO_RELEASE_ENABLED` remains true at the user's explicit
+  direction. Release `v0.1.0-alpha.1`, its Linux/macOS artifacts, and
+  `codex-coordinator 0.1.0-alpha.1` on crates.io are published.
 - The release workflow still requires the Rust result for the exact candidate
   SHA but not the separate Documentation result. With automatic release now
   enabled, a successful Rust run can publish while Documentation is still
@@ -3450,8 +3486,8 @@ Verification:
 - The earlier crates.io pause is resolved: the narrower headless,
   multi-repository control-plane direction, native-first reduction, dedicated
   workspace runtime, and released-Codex behavioral proof are complete. The
-  user has reauthorized automatic alpha publication; repository visibility
-  remains private until a separate explicit visibility change.
+  user explicitly authorized both automatic alpha publication and public
+  repository visibility.
 - The user withdrew the follow-up issue search and upstream-comment idea after
   the private checkpoint was completed. Do not pursue or post either unless
   explicitly requested again.

@@ -108,12 +108,14 @@ html > body[data-scroll-locked] {
 }
 
 .coco-hero h1 {
-  max-width: 13ch;
+  max-width: 12ch;
   margin-top: 1.6rem;
-  font-size: clamp(3rem, 7vw, 5.75rem);
-  font-weight: 690;
-  letter-spacing: -0.065em;
-  line-height: 0.98;
+  font-size: clamp(3rem, 6vw, 5.25rem);
+  font-weight: 680;
+  letter-spacing: -0.045em;
+  line-height: 1;
+  text-wrap: balance;
+  word-spacing: 0.08em;
 }
 
 .coco-hero-copy {
