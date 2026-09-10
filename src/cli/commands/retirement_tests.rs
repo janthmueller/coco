@@ -66,6 +66,7 @@ async fn deletion_confirmation_sends_the_previewed_id_and_resource_plan() {
         codex_token_path: root.join("token"),
         worktrees_dir: root.join("worktrees"),
         codex_home: root.join("codex"),
+        hooks_path: root.join("hooks.json"),
     };
     let plan = WorkspaceRetirementPlan {
         workspace_id: "exact-previewed-id".to_owned(),

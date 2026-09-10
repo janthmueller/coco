@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use tracing::warn;
 
 use super::{Coordinator, CoordinatorError, validate_non_empty, validate_operation_id};
+use crate::domain::hooks::{HookDispatch, HookEventKind};
 use crate::domain::{
     Audit, ContextMode, EventKind, EventSource, ProfileSnapshot, Repository, ThreadRuntimeSnapshot,
     Workspace, WorkspaceAvailability, WorkspaceLifecycle, WorkspacePhase, WorktreeMode,
@@ -182,12 +183,26 @@ impl Coordinator {
             self.persist_prepared_workspace(&params, &repository, &loaded_profile, &creation)?;
         drop(dependencies);
 
+        let hook = self.hooks.event(
+            HookEventKind::WorkspaceCreated,
+            &repository,
+            &workspace,
+            json!({
+                "worktreeMode": creation.worktree.mode,
+                "baseSha": creation.worktree.base_sha,
+            }),
+        );
+        let notify_hook = hook.is_some();
         let workspace = self.create_workspace_worktree(
             &git_repository,
             &creation.worktree,
             &creation.local_state,
             &workspace.id,
+            hook,
         )?;
+        if notify_hook {
+            self.hooks.notify();
+        }
         drop(guard);
         self.workspace_response(workspace)
     }
@@ -738,6 +753,7 @@ impl Coordinator {
         plan: &WorktreePlan,
         local_state: &crate::git::LocalStateSnapshot,
         workspace_id: &str,
+        hook: Option<HookDispatch>,
     ) -> Result<Workspace, CoordinatorError> {
         let binding = self
             .git
@@ -764,23 +780,26 @@ impl Coordinator {
                 );
                 error
             })?;
-        let (workspace, _) = self.store.transition_workspace_lifecycle_with_event(
-            workspace_id,
-            WorkspaceLifecycle::Provisioning,
-            WorkspaceLifecycle::Ready,
-            None,
-            EventDraft::workspace(
-                EventKind::WorktreeCreated,
-                EventSource::Git,
-                json!({
-                    "path": binding.path,
-                    "branchName": binding.branch_name,
-                    "worktreeMode": binding.mode,
-                    "headSha": binding.head_sha,
-                    "localState": local_state.manifest(),
-                }),
-            ),
-        )?;
+        let (workspace, _) = self
+            .store
+            .transition_workspace_lifecycle_with_event_and_hook(
+                workspace_id,
+                WorkspaceLifecycle::Provisioning,
+                WorkspaceLifecycle::Ready,
+                None,
+                EventDraft::workspace(
+                    EventKind::WorktreeCreated,
+                    EventSource::Git,
+                    json!({
+                        "path": binding.path,
+                        "branchName": binding.branch_name,
+                        "worktreeMode": binding.mode,
+                        "headSha": binding.head_sha,
+                        "localState": local_state.manifest(),
+                    }),
+                ),
+                hook,
+            )?;
         Ok(workspace)
     }
 

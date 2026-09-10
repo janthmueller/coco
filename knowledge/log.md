@@ -8,6 +8,40 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-09-10
+
+- **Hook lifecycle controls and retirement guards**: Added offline
+  configuration validation, atomic daemon reload with last-known-good
+  preservation, and a shared visible registry for post-event reactions and
+  synchronous guards. `workspace.close` and `workspace.delete` guards receive
+  the already checked plan before any effect, run once in stable ID order, and
+  can only allow or deny under an explicit fail-open/fail-closed policy.
+  Dry-runs and recovery do not execute them; delivery history remains scoped to
+  durable post-event reactions.
+
+- **Durable CoCo hook slice**: Added a versioned, operator-owned local command
+  reaction layer for accepted signals and successful workspace create, close,
+  reopen, and delete transitions. Matching delivery rows commit atomically with
+  their source fact, retry with bounded at-least-once semantics, recover after
+  daemon restart, and expose definition/history views without commands or
+  payloads. Kept prompt, tool, permission, compaction, subagent, and session
+  lifecycle policy in native Codex hooks; a model-free App Server test against
+  0.154.0 proves that boundary at the first ordinary turn.
+
+- **Public positioning correction**: Reframed CoCo's README, site landing page,
+  overview, quickstart, package description, and CLI tagline around its durable
+  local control-plane role. Named workspaces remain addressable outside the
+  initiating client and across CLI, native TUI, and MCP; Git worktrees are the
+  supporting separation mechanism rather than the primary product claim.
+  Moved MCP and signals into an integration section and made the quickstart
+  demonstrate detached observation instead of beginning with a blocking wait.
+
+- **Codex 0.154.0 compatibility baseline**: Advanced the selected native
+  compatibility pin after both model-free real-process contracts passed against
+  the installed release. Preparation/adoption, restart and resume, context
+  fork, retirement, per-thread MCP isolation, profile restoration, and signal
+  attribution required no CoCo protocol change.
+
 ## 2026-09-09
 
 - **File-defined signal catalog**: Selected JSON Schema 2020-12 as the fixed

@@ -22,6 +22,7 @@ use crate::domain::{Decision, DecisionKind, DecisionPrompt, TurnPhase};
 #[cfg(test)]
 mod decisions;
 mod events;
+mod hooks;
 mod migrations;
 mod operations;
 mod rows;

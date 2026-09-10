@@ -288,3 +288,23 @@ without a workspace target. `--follow` (`-f`) runs until interrupted. With
 `--json`, it emits one page per line, including the cursor needed to resume.
 See [Agent signals](../../guides/signals/) for a complete example and retention
 limits.
+
+## Hook commands
+
+```text
+coco hook (list | ls) [--json]
+coco hook validate [--json]
+coco hook reload [--json]
+coco hook (history | deliveries) [--limit <NUMBER>] [--json]
+```
+
+Hook commands are daemon-wide and do not accept a repository path,
+`--all-repos`, or `--global`. `list` shows loaded reactions and guards without
+revealing their command arguments. `validate` checks the configured file
+without executing commands or contacting the daemon. `reload` validates and
+atomically replaces the running configuration; a failed reload keeps the old
+one. `history` shows the newest 20 post-event delivery outcomes by default;
+set `--limit` from 1 through 100. Its `deliveries` alias is equivalent.
+
+See [Run reactions and guards](../../guides/hooks/) to configure commands,
+guard close or deletion, and understand retries.

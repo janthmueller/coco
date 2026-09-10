@@ -24,6 +24,8 @@ agents.
   the initial runtime with Agentgateway as a deferred optional adapter.
 - [Agent-emitted signals](signals.md) - Defines explicit opt-in publication,
   native thread attribution, validation, bounded retention, and independent replay.
+- [CoCo hooks and guards](hooks.md) - Separates native Codex lifecycle hooks
+  from durable CoCo reactions and synchronous retirement guards.
 - [CoCo v0 product specification](../product/v0-spec.md) - Defines the user and
   domain contract that the architecture must satisfy.
 - [Documentation boundaries](../documentation.md) - Defines what belongs in

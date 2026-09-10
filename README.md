@@ -1,54 +1,58 @@
 # CoCo — Codex Coordinator
 
-Run several Codex conversations side by side without mixing their files or
-losing which thread belongs to which branch.
+A local control plane for Codex work that you want to start, leave running,
+and return to.
 
-CoCo is a local orchestration layer for the
-[Codex App Server](https://developers.openai.com/codex/app-server). Codex still
-reasons, asks for approval, and edits code; CoCo gives that work a durable,
-named workspace with its own Git worktree.
+CoCo gives each piece of work a durable name and keeps its Codex conversation,
+Git worktree, model, and profile together. Start work from a short-lived CLI
+command, inspect or continue it from another terminal or MCP client, and enter
+the same conversation later through the native Codex terminal UI.
 
-[Documentation](https://janthmueller.github.io/coco/) ·
-[Quickstart](https://janthmueller.github.io/coco/docs/getting-started/) ·
-[Current limitations](https://janthmueller.github.io/coco/docs/reference/current-limitations/)
+Codex still performs the reasoning, tool calls, approvals, and file changes.
+CoCo coordinates where that work lives and how you reach it.
+
+[Quickstart](docs/content/docs/getting-started.mdx) ·
+[Workspace guide](docs/content/docs/guides/workspaces.mdx) ·
+[Command reference](docs/content/docs/reference/cli.mdx) ·
+[Limitations](docs/content/docs/reference/current-limitations.mdx)
 
 > **Alpha software:** CoCo is intended for supervised local use on Linux and
-> macOS. Read the current limitations before using it on important work.
+> macOS. Keep `cocod` running while work is active and review the limitations
+> before relying on it for important work.
 
-## What CoCo adds
+## Why CoCo
 
-A CoCo workspace keeps together:
+Codex owns each conversation and performs the work. CoCo adds a stable layer
+around several pieces of Codex work so they remain addressable outside the
+client that started them:
 
-- a registered Git repository;
-- a separate worktree with a new, existing, or detached Git binding;
-- one persistent Codex thread after work begins; and
-- the model and Codex profile selected for that thread.
+- **Leave the initiating command.** `coco send` can return as soon as Codex
+  accepts a turn while `cocod` keeps the work available.
+- **Return to the exact place.** A named workspace keeps the Codex thread,
+  worktree, repository, and selected settings together.
+- **Supervise work from another client.** Check state, answer supported
+  approvals and questions, send another instruction, or enter the native TUI.
+- **Work across repositories.** List everything together or address one
+  workspace without first changing directories.
+- **Control the lifecycle safely.** Prepare without starting a model turn,
+  review changes, close and reopen a worktree, or explicitly choose what to
+  delete.
+- **Connect the work.** Agents can publish schema-validated signals, and
+  trusted local commands can react afterward or guard workspace retirement.
 
-This lets you prepare work without starting a model turn, inspect or follow
-state from another terminal, wait for a turn's response, answer Codex
-approvals and questions, and later enter the same conversation through the
-normal Codex terminal UI. Workspaces can
-also be found across multiple repositories. Their Git base and Codex
-conversation context can be selected independently, including from another
-CoCo workspace or an exact native Codex thread ID.
-When a worktree is no longer needed, it can be closed and later restored
-without deleting its branch or conversation; permanent record, branch, and
-thread deletion remain separate choices.
-
-Agents can also publish explicitly enabled, structured signals such as
-`review.requested`. Read or follow those updates from the CLI or MCP, with
-optional payload validation. Signals report a claim; they do not automatically
-start work or mark a task complete.
+A workspace is an execution environment, not a ticket or task record. CoCo
+coordinates Codex work; it does not decide what work should be done or whether
+it is complete.
 
 ## Install
 
-You need Git and a configured `codex` command on `PATH`. Cargo installation
-requires Rust 1.98.1 or newer; Nix is an alternative that supplies the build
-toolchain.
+You need Git and a configured `codex` command on `PATH`. The current alpha is
+tested with `codex-cli 0.154.0`.
 
 ### Cargo
 
-Install the current alpha from its Git repository:
+Cargo is the recommended installation method and requires Rust 1.98.1 or
+newer:
 
 ```bash
 cargo install --locked \
@@ -56,12 +60,11 @@ cargo install --locked \
   codex-coordinator
 ```
 
-The Cargo package is named `codex-coordinator`. It installs all three commands:
-`coco`, `cocod`, and `coco-mcp`.
+The package installs `coco`, `cocod`, and `coco-mcp`.
 
 ### Nix
 
-With Nix flakes enabled, Rust does not need to be installed separately:
+With Nix flakes enabled, no separate Rust toolchain is required:
 
 ```bash
 nix profile add github:janthmueller/coco
@@ -75,43 +78,67 @@ cd coco
 cargo install --path . --locked
 ```
 
-## Start CoCo
+## Run the core workflow
 
-Keep the coordinator running in one terminal:
+Keep the coordinator open in one terminal:
 
 ```bash
 cocod
 ```
 
-Then use `coco` from another terminal. Each CLI command exits after returning
-its result; `cocod` stays alive so active Codex work remains reachable by later
-commands and by `coco jump`. The alpha does not install or enable a background
-service automatically.
-
-## Create your first workspace
-
-From a clean Git repository with at least one commit:
+Then, from a clean Git repository with at least one commit:
 
 ```bash
 coco repo add .
-coco model list
+coco create fix/login --base main \
+  --send "Fix the login redirect and run the relevant tests"
 
-coco create feat/first --base HEAD \
-  --send "Inspect the project and propose one focused improvement"
-coco status
-coco status feat/first --follow
-coco send feat/first "Summarize the result" --wait
-coco jump feat/first
+coco status fix/login --follow
+coco jump fix/login
 ```
 
-`create` prepares only the separate checkout and Git binding. `--send` creates
-the Codex thread with its first real turn. A first `jump` can instead create it
-interactively; leaving an empty TUI keeps the workspace prepared. `status`
-shows state only. Add `--wait` to `send` when that command should stay attached
-and print the final response. `status --follow` keeps its live view open until
-Ctrl+C. Leaving it, stopping a wait, or leaving a TUI opened by `jump` does not
-cancel an active turn; stopping `cocod` while it is active does.
+`create --send` prepares a separate checkout and starts the first Codex turn.
+The command returns after Codex accepts the work. `status --follow` watches
+state without printing chat messages; stop it with Ctrl+C. `jump` opens the
+same conversation in the native Codex UI and the workspace's worktree.
 
-Continue with the
-[quickstart](https://janthmueller.github.io/coco/docs/getting-started/) or the
-[workspace guide](https://janthmueller.github.io/coco/docs/guides/workspaces/).
+Leaving the status view or the TUI does not cancel an active turn. Add `--wait`
+to `send` when you want that command to remain attached and print the final
+response. Stopping `cocod` while a turn is active interrupts that turn.
+
+## Work with a workspace
+
+The common commands follow one lifecycle:
+
+| Intent                                | Command                                |
+| ------------------------------------- | -------------------------------------- |
+| Prepare a separate workspace          | `coco create <name>`                   |
+| Start or continue a Codex turn        | `coco send <workspace> <message>`      |
+| Inspect or follow current state       | `coco status [<workspace>] [--follow]` |
+| Answer a supported request            | `coco decide <decision-id>`            |
+| Enter the existing Codex conversation | `coco jump <workspace>`                |
+| Review changes from the fixed base    | `coco diff <workspace>`                |
+| Free and later restore the worktree   | `coco close` / `coco reopen`           |
+| Permanently retire a closed record    | `coco delete`                          |
+
+By default, `create` makes a `coco/<workspace>` branch and does not create a
+Codex thread until the first `send` or interactive action in `jump`. Code base
+and conversation context are independent: a new workspace can use one Git
+revision while inheriting context from another CoCo workspace or exact Codex
+thread ID.
+
+## Connect another application
+
+`coco-mcp` exposes the same repository-scoped workspaces to an MCP-capable
+application. Inspection is read-only by default; starting turns requires an
+explicit `--allow-send` capability. See the
+[MCP guide](docs/content/docs/guides/mcp.mdx).
+
+Agents can also publish explicitly enabled, schema-validated signals such as
+`review.requested`. Signals are retained updates for humans or integrations;
+they do not change workspace state or wake another model by themselves.
+Operator-configured hooks can run a trusted local command after a matching
+signal or workspace lifecycle event. Synchronous guards can stop a checked
+workspace close or deletion before it changes anything. See the
+[signals guide](docs/content/docs/guides/signals.mdx) and
+[hooks guide](docs/content/docs/guides/hooks.mdx).

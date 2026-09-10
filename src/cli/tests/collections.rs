@@ -250,6 +250,8 @@ fn collection_and_reference_flags_do_not_parse_on_the_wrong_commands() {
         vec!["coco", "create", "auth", "-g"],
         vec!["coco", "decide", "decision-123", "-g"],
         vec!["coco", "mcp", "serve", "--repository", ".", "-g"],
+        vec!["coco", "hook", "list", "-a"],
+        vec!["coco", "hook", "history", "-g"],
     ] {
         assert!(
             Cli::try_parse_from(&arguments).is_err(),
@@ -273,6 +275,8 @@ async fn leading_scope_flags_are_rejected_by_incompatible_commands() {
         vec!["coco", "-g", "create", "auth"],
         vec!["coco", "-a", "signal", "list", "auth"],
         vec!["coco", "-g", "signal", "list"],
+        vec!["coco", "-a", "hook", "list"],
+        vec!["coco", "-g", "hook", "history"],
     ] {
         let cli = Cli::try_parse_from(&arguments).unwrap();
         let error = super::super::commands::run(cli)

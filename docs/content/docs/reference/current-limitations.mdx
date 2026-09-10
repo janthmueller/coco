@@ -26,7 +26,7 @@ Check the Codex command that CoCo will find:
 codex --version
 ```
 
-This alpha is tested with `codex-cli 0.153.4`. If `codex` is installed outside
+This alpha is tested with `codex-cli 0.154.0`. If `codex` is installed outside
 `PATH`, set its absolute path before starting `cocod` and before using `jump`:
 
 ```bash
@@ -134,6 +134,17 @@ payloads locally. Trusted repository-scoped MCP hosts can read them. The newest
 10,000 signals are retained globally, including signals from closed or deleted
 workspaces; do not put secrets in their payloads.
 
+If you configure [CoCo hooks](../../guides/hooks/), their commands run as your
+operating-system user. CoCo clears the inherited environment except for
+`PATH`, but this is not a filesystem sandbox. Recent delivery outcomes are
+saved locally together with matching event bodies so interrupted deliveries
+can retry; command arguments and event payloads are not shown by the hook
+history command. Use `coco hook reload` after editing the configuration; CoCo
+does not watch it automatically. Guards can deny closing or deletion, but they
+are trusted commands rather than a sandbox or multi-user authorization
+boundary. This alpha does not detect a reaction that recursively produces the
+same event.
+
 ## Current alpha limitations
 
 - Keep `cocod` running while workspaces are active. Installation does not
@@ -164,9 +175,10 @@ workspaces; do not put secrets in their payloads.
   have no branch, and this alpha cannot yet promote one through CoCo; keep
   durable work on a branch-backed workspace.
 - CoCo's MCP server can inspect or continue existing workspaces and read or
-  explicitly publish agent signals. Signals do not start follow-up work or
-  update tickets automatically. CoCo does not
-  currently provide its own MCP registry or per-workspace tool selector.
+  explicitly publish agent signals. A configured hook can react with a trusted
+  local command, but CoCo does not automatically start follow-up model work or
+  update tickets. CoCo does not currently provide its own MCP registry or
+  per-workspace tool selector.
 
 Review workspace changes before relying on them, and do not depend on active
 work surviving a coordinator restart or on automatic cleanup.

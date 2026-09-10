@@ -1,4 +1,10 @@
-import { ArrowRight, GitBranch, ShieldCheck, Terminal } from "lucide-react";
+import {
+  ArrowRight,
+  GitBranch,
+  Radio,
+  ShieldCheck,
+  Terminal,
+} from "lucide-react";
 import Link from "next/link";
 
 import { site } from "@/lib/site";
@@ -6,21 +12,27 @@ import { site } from "@/lib/site";
 const features = [
   {
     description:
-      "Each workspace uses a separate Git checkout, so your current branch stays untouched.",
-    icon: GitBranch,
-    title: "Keep changes separate",
+      "Send a turn and leave the command. The coordinator keeps the workspace available while you do something else.",
+    icon: Terminal,
+    title: "Leave work running",
   },
   {
     description:
-      "Prepare a workspace, send work when you are ready, and see its current state from the terminal.",
-    icon: Terminal,
+      "A stable name keeps the Codex conversation, Git worktree, repository, and settings together.",
+    icon: GitBranch,
+    title: "Return to the exact place",
+  },
+  {
+    description:
+      "Inspect state, answer a request, continue from another terminal, or enter the same work through the native Codex UI.",
+    icon: ShieldCheck,
     title: "Stay in control",
   },
   {
     description:
-      "Other applications can inspect CoCo through MCP. Sending more work stays disabled unless you enable it.",
-    icon: ShieldCheck,
-    title: "Connect safely",
+      "Publish validated agent signals, react with local commands, and guard destructive workspace actions.",
+    icon: Radio,
+    title: "Connect the work",
   },
 ] as const;
 
@@ -33,11 +45,12 @@ export default function HomePage() {
             <span className="coco-eyebrow-dot" />
             Codex Coordinator · alpha
           </div>
-          <h1>Run Codex workspaces side by side.</h1>
+          <h1>Run Codex work without staying attached.</h1>
           <p className="coco-hero-copy">
-            CoCo gives every workspace its own Git worktree and keeps its Codex
-            conversation and changes together. Start another workspace without
-            disturbing the branch you are using now.
+            CoCo turns each piece of work into a named workspace that keeps its
+            Codex conversation, Git worktree, and settings together. Start it
+            from one terminal, inspect it from another, and return through the
+            native Codex UI.
           </p>
           <div className="coco-actions">
             <Link
@@ -67,14 +80,9 @@ export default function HomePage() {
               {"\n\n"}
               <span className="coco-terminal-prompt">$ </span>
               <span className="coco-terminal-command">
-                coco create fix/login --base main
+                coco create fix/login -s &quot;Fix the redirect&quot;
               </span>
               {"\n\n"}
-              <span className="coco-terminal-prompt">$ </span>
-              <span className="coco-terminal-command">
-                coco send fix/login &quot;Fix the login redirect&quot;
-              </span>
-              {"\n"}
               <span className="coco-terminal-prompt">$ </span>
               <span className="coco-terminal-command">
                 coco status fix/login --follow
@@ -90,12 +98,12 @@ export default function HomePage() {
       <section className="coco-section">
         <div className="coco-container">
           <div className="coco-section-heading">
-            <p className="coco-section-kicker">A calmer parallel workflow</p>
-            <h2>Give each workspace its own place to work.</h2>
+            <p className="coco-section-kicker">A local control plane</p>
+            <h2>One workspace, several ways to work with it.</h2>
             <p className="coco-section-lead">
-              CoCo handles the separate checkout and remembers which Codex
-              conversation belongs to it. You decide what to start, continue,
-              and keep.
+              Codex does the coding. CoCo remembers where the work belongs and
+              makes the same workspace available to short-lived CLI commands,
+              the native terminal UI, and MCP clients.
             </p>
           </div>
           <div className="coco-feature-grid">

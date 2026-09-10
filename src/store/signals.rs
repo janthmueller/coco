@@ -2,7 +2,9 @@ use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde::de::DeserializeOwned;
 
+use super::hooks::insert_hook_dispatch;
 use super::{Store, StoreError, json_to_sql_error};
+use crate::domain::hooks::HookDispatch;
 use crate::domain::signals::{MAX_SIGNAL_TYPES, SIGNAL_RETENTION, Signal, SignalError, SignalType};
 
 mod read;
@@ -74,7 +76,18 @@ impl Store {
     }
 
     /// Definition validation happens before this call. Its version is immutable.
-    pub(crate) fn emit_signal(&self, mut signal: Signal) -> Result<Signal, StoreError> {
+    #[cfg(test)]
+    pub(crate) fn emit_signal(&self, signal: Signal) -> Result<Signal, StoreError> {
+        self.emit_signal_with_hook(signal, None)
+    }
+
+    /// Definition and hook matching happen before this call. Accepted retries
+    /// return their original record without enqueueing another delivery.
+    pub(crate) fn emit_signal_with_hook(
+        &self,
+        mut signal: Signal,
+        hook: Option<HookDispatch>,
+    ) -> Result<Signal, StoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let prior: Option<String> = transaction
@@ -111,6 +124,7 @@ impl Store {
         signal.occurred_at_ms = now;
         signal.sequence = transaction.query_row("UPDATE signal_stream SET high_water = high_water + 1 WHERE singleton = 1 RETURNING high_water", [], |row| row.get(0))?;
         transaction.execute("INSERT INTO signals(sequence, repository_id, workspace_id, name, version, idempotency_key, occurred_at_ms, body_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)", params![signal.sequence, signal.repository_id, signal.workspace_id, signal.name, signal.version, signal.idempotency_key, signal.occurred_at_ms, serde_json::to_string(&signal).map_err(json_to_sql_error)?])?;
+        insert_hook_dispatch(&transaction, hook)?;
         let expired = (signal.sequence - SIGNAL_RETENTION).max(0);
         transaction.execute("DELETE FROM signals WHERE sequence <= ?1", [expired])?;
         transaction.execute(

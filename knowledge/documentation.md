@@ -49,6 +49,12 @@ data.
   worktree, Codex thread, and selected configuration. This helps users
   understand prerequisites and process lifetime; storage, RPC, schema, and
   adapter details remain internal.
+- Lead public entry points with the durable user benefit: a named Codex
+  workspace remains addressable outside the client that started it and can be
+  supervised through CLI, the native TUI, or MCP. Worktree creation supports
+  that control-plane promise but is not the product definition. Treat signals
+  and their optional local hooks as an advanced integration rather than a
+  competing onboarding story.
 
 ## Strict public/internal boundary
 

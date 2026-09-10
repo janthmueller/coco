@@ -13,6 +13,11 @@ pub(super) struct TestPaths {
     pub(super) fake_codex: PathBuf,
     pub(super) codex_args: PathBuf,
     pub(super) jump_args: PathBuf,
+    pub(super) hooks: PathBuf,
+    pub(super) hook_handler: PathBuf,
+    pub(super) hook_capture: PathBuf,
+    pub(super) guard_handler: PathBuf,
+    pub(super) guard_capture: PathBuf,
 }
 
 impl TestPaths {
@@ -30,6 +35,11 @@ impl TestPaths {
             fake_codex: root.join("fake-codex"),
             codex_args: root.join("fake-codex.args"),
             jump_args: root.join("fake-jump.args"),
+            hooks: root.join("hooks.json"),
+            hook_handler: root.join("hook-handler"),
+            hook_capture: root.join("hook-events.jsonl"),
+            guard_handler: root.join("guard-handler"),
+            guard_capture: root.join("guard-requests.jsonl"),
             data_dir,
         }
     }
@@ -47,6 +57,7 @@ impl TestPaths {
             .env("COCO_CODEX_BINARY", &self.fake_codex)
             .env("COCO_TEST_CODEX_ARGS", &self.codex_args)
             .env("COCO_TEST_JUMP_ARGS", &self.jump_args)
+            .env("COCO_HOOKS_PATH", &self.hooks)
             .env("RUST_LOG", "warn");
     }
 }

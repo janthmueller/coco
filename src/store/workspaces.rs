@@ -2,6 +2,7 @@ use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde_json::json;
 
 use super::events::insert_event;
+use super::hooks::insert_hook_dispatch;
 use super::operations::reconcile_unconfirmed_operations;
 #[cfg(test)]
 use super::rows::{TURN_SELECT, map_turn, require_turn};
@@ -12,6 +13,7 @@ use super::{
 };
 #[cfg(test)]
 use super::{NewTurn, TurnCompletion, sanitized_error_columns};
+use crate::domain::hooks::HookDispatch;
 #[cfg(test)]
 use crate::domain::{CodexThreadStatus, Turn, TurnPhase};
 use crate::domain::{
@@ -84,12 +86,32 @@ impl Store {
         last_error: Option<(&str, &str)>,
         event: EventDraft,
     ) -> Result<(Workspace, NormalizedEvent), StoreError> {
-        self.transition_workspace_lifecycle_from_with_event(
+        self.transition_workspace_lifecycle_from_with_event_and_hook(
             workspace_id,
             &[expected],
             next,
             last_error,
             event,
+            None,
+        )
+    }
+
+    pub(crate) fn transition_workspace_lifecycle_with_event_and_hook(
+        &self,
+        workspace_id: &str,
+        expected: WorkspaceLifecycle,
+        next: WorkspaceLifecycle,
+        last_error: Option<(&str, &str)>,
+        event: EventDraft,
+        hook: Option<HookDispatch>,
+    ) -> Result<(Workspace, NormalizedEvent), StoreError> {
+        self.transition_workspace_lifecycle_from_with_event_and_hook(
+            workspace_id,
+            &[expected],
+            next,
+            last_error,
+            event,
+            hook,
         )
     }
 
@@ -99,7 +121,26 @@ impl Store {
         expected: &[WorkspaceLifecycle],
         next: WorkspaceLifecycle,
         last_error: Option<(&str, &str)>,
+        event: EventDraft,
+    ) -> Result<(Workspace, NormalizedEvent), StoreError> {
+        self.transition_workspace_lifecycle_from_with_event_and_hook(
+            workspace_id,
+            expected,
+            next,
+            last_error,
+            event,
+            None,
+        )
+    }
+
+    fn transition_workspace_lifecycle_from_with_event_and_hook(
+        &self,
+        workspace_id: &str,
+        expected: &[WorkspaceLifecycle],
+        next: WorkspaceLifecycle,
+        last_error: Option<(&str, &str)>,
         mut event: EventDraft,
+        hook: Option<HookDispatch>,
     ) -> Result<(Workspace, NormalizedEvent), StoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -123,6 +164,7 @@ impl Store {
         )?;
         event.workspace_id = Some(workspace_id.to_owned());
         let event = insert_event(&transaction, event)?;
+        insert_hook_dispatch(&transaction, hook)?;
         let workspace = require_workspace(&transaction, workspace_id)?;
         transaction.commit()?;
         Ok((workspace, event))
@@ -478,6 +520,23 @@ impl Store {
         next: WorkspaceAvailability,
         closed_head_sha: Option<&str>,
     ) -> Result<Workspace, StoreError> {
+        self.transition_workspace_availability_with_hook(
+            workspace_id,
+            expected,
+            next,
+            closed_head_sha,
+            None,
+        )
+    }
+
+    pub(crate) fn transition_workspace_availability_with_hook(
+        &self,
+        workspace_id: &str,
+        expected: WorkspaceAvailability,
+        next: WorkspaceAvailability,
+        closed_head_sha: Option<&str>,
+        hook: Option<HookDispatch>,
+    ) -> Result<Workspace, StoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = require_workspace(&transaction, workspace_id)?;
@@ -511,6 +570,7 @@ impl Store {
                 workspace_id
             ],
         )?;
+        insert_hook_dispatch(&transaction, hook)?;
         let workspace = require_workspace(&transaction, workspace_id)?;
         transaction.commit()?;
         Ok(workspace)
@@ -622,7 +682,16 @@ impl Store {
         Ok(workspace)
     }
 
+    #[cfg(test)]
     pub fn delete_workspace_record(&self, workspace_id: &str) -> Result<(), StoreError> {
+        self.delete_workspace_record_with_hook(workspace_id, None)
+    }
+
+    pub(crate) fn delete_workspace_record_with_hook(
+        &self,
+        workspace_id: &str,
+        hook: Option<HookDispatch>,
+    ) -> Result<(), StoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let workspace = require_workspace(&transaction, workspace_id)?;
@@ -647,6 +716,7 @@ impl Store {
             [workspace_id],
         )?;
         transaction.execute("DELETE FROM turns WHERE workspace_id = ?1", [workspace_id])?;
+        insert_hook_dispatch(&transaction, hook)?;
         transaction.execute("DELETE FROM workspaces WHERE id = ?1", [workspace_id])?;
         transaction.commit()?;
         Ok(())

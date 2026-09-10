@@ -47,6 +47,8 @@ mod app_server;
 mod fork;
 #[path = "process_smoke/fresh_jump.rs"]
 mod fresh_jump;
+#[path = "process_smoke/hooks.rs"]
+mod hooks;
 #[path = "process_smoke/lifecycle.rs"]
 mod lifecycle;
 #[path = "support/mcp_client.rs"]

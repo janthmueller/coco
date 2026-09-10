@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::codex::{CodexClient, CodexClientOptions, CodexEvent, SharedAppServerOptions};
 use crate::coordinator::Coordinator;
 use crate::git::Git;
+use crate::hooks::{HookRegistry, run_dispatcher};
 use crate::paths::CocoPaths;
 use crate::rpc::{RpcHandler, RpcServer};
 use crate::store::Store;
@@ -45,6 +46,19 @@ pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<
         Store::open(&paths.database_path)
             .with_context(|| format!("could not open {}", paths.database_path.display()))?,
     );
+    let hooks = Arc::new(
+        HookRegistry::load(&paths.hooks_path)
+            .with_context(|| format!("could not load {}", paths.hooks_path.display()))?,
+    );
+    let recovered_hook_deliveries = store
+        .recover_hook_deliveries()
+        .context("could not recover interrupted hook deliveries")?;
+    if recovered_hook_deliveries > 0 {
+        warn!(
+            recovered_hook_deliveries,
+            "requeued interrupted hook deliveries after daemon restart"
+        );
+    }
     let reconciled = store
         .reconcile_unfinished()
         .context("could not reconcile unfinished workspaces")?;
@@ -61,11 +75,12 @@ pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<
         .context("could not start the Codex App Server")?;
     let runtime_generation = Uuid::new_v4().to_string();
     let coordinator = Arc::new(Coordinator::new(
-        store,
+        Arc::clone(&store),
         Git::default(),
         Arc::new(CodexWorker::new(codex.clone())),
         paths.worktrees_dir,
         paths.codex_home,
+        Arc::clone(&hooks),
         runtime_generation,
     ));
     let event_task = tokio::spawn(pump_codex_events(Arc::clone(&coordinator), events));
@@ -90,6 +105,11 @@ pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<
     info!(socket = %paths.socket_path.display(), "cocod is ready");
 
     let (shutdown_sender, shutdown_receiver) = watch::channel(false);
+    let hook_task = tokio::spawn(run_dispatcher(
+        Arc::clone(&store),
+        Arc::clone(&hooks),
+        shutdown_sender.subscribe(),
+    ));
     let mut server_task = tokio::spawn(server.run(shutdown_receiver));
     let server_result = tokio::select! {
         signal = tokio::signal::ctrl_c() => {
@@ -99,6 +119,11 @@ pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<
         }
         result = &mut server_task => result.context("daemon RPC task panicked")?,
     };
+    let _ = shutdown_sender.send(true);
+
+    if let Err(source) = hook_task.await {
+        error!(%source, "hook dispatcher panicked");
+    }
 
     if let Err(source) = codex.close().await {
         error!(%source, "could not close the Codex App Server cleanly");
@@ -178,6 +203,7 @@ mod tests {
         let error = acquire_daemon_lock(directory.path()).unwrap_err();
         assert!(error.to_string().contains("another cocod process"));
 
+        first.unlock().unwrap();
         drop(first);
         acquire_daemon_lock(directory.path()).unwrap();
 

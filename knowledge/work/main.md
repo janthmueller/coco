@@ -5,7 +5,7 @@ description: Tracks repository bootstrap, the Rust baseline, and early CoCo arch
 tags: [work, branch, bootstrap, rust, mcp, architecture]
 status: active
 branch: main
-updated: 2026-09-09
+updated: 2026-09-10
 ---
 
 # main — repository foundation
@@ -17,14 +17,46 @@ architectural baseline for CoCo.
 
 ## Active work
 
+- [x] Assess per-workspace resource observation and containment without
+  implementing a runtime change.
+  - [x] Compare current Orca accounting and concurrency behavior against its
+    fresh source rather than relying on product wording.
+  - [x] Identify the attribution boundary imposed by CoCo's one shared Codex
+    App Server and distinguish monitoring, admission control, and hard limits.
+  - [x] Record a staged direction and the unresolved containment choice.
+- [x] Extend the first hook slice with explicit operator lifecycle controls and
+  synchronous guards.
+  - [x] Add offline hook configuration validation and atomic daemon reload
+    without replacing a valid active registry on failure.
+  - [x] Add bounded, command-backed `workspace.close` and `workspace.delete`
+    guards that can only allow or deny the exact checked action.
+  - [x] Keep guards synchronous, non-retrying, non-mutating, and distinct from
+    durable post-commit hook deliveries; record their timeout and error policy.
+  - [x] Cover signal-filtered reactions, reload behavior, guard decisions,
+    recovery boundaries, CLI presentation, and public/internal documentation.
+- [x] Reassess CoCo's public product presentation against the implemented CLI.
+  - [x] Inventory the actual user workflows and distinguish core value from
+    supporting controls and advanced integrations.
+  - [x] Audit the README, landing page, navigation, guides, and reference for a
+    coherent first-time-user story and verified claims.
+  - [x] Rewrite the public entry points around one clear product promise,
+    preserving the strict public/internal knowledge boundary and static site.
+  - [x] Verify public documentation and record remaining positioning questions.
+- [x] Validate CoCo against the locally installed `codex-cli 0.154.0`.
+  - [x] Advance the intentionally pinned, model-free App Server compatibility
+    fixture from `0.153.4` only after confirming the active executable.
+  - [x] Run both real-Codex compatibility contracts sequentially and record
+    any upstream protocol changes or required CoCo adaptations.
 - History-maintenance checkpoint: the user requested consolidating the nine
   `main` commits from September 8–9 into one freshly dated commit, preserving
   the earlier parent `1580fae` and the verified implementation. Local recovery
   refs and other worktrees remain unchanged; only `main` is rewritten. Remote
   replacement uses an exact expected-head force lease. This maintenance push
   skips CI rather than changing workflow settings or rerunning unchanged code.
-  Actions cleanup is restricted to explicitly selected runs; older runs require
-  resolving the user's whole-history versus two-day deletion scope. Repository
+  The user subsequently requested the complete Actions-history cleanup: all 26
+  completed runs were deleted, and the GitHub API confirms zero remaining runs
+  and zero artifacts. No logs/artifacts were backed up, no workflow settings
+  changed, and no new commit or push accompanies this cleanup note. Repository
   privacy and disabled Pages remain unchanged. This is history maintenance, not
   a guarantee that all GitHub/external traces or dates in documents disappear.
 - The verified signal slice is complete on 2026-09-09. The user requested its
@@ -526,13 +558,19 @@ architectural baseline for CoCo.
   - [x] Implement explicit tracked and ordinary-untracked carry, the
     `-d`/`--dirty` shorthand, and Codex-compatible `.worktreeinclude` for
     selected ignored files without mutating the source checkout.
-- [ ] Design user-configurable lifecycle hooks as a separate future feature.
+- [x] Design and implement the first user-configurable CoCo hook slice.
   Before defining CoCo hooks, inventory the pinned Codex CLI and App Server's
   native hooks, notifications, and lifecycle events so CoCo can expose or
   extend existing signals instead of duplicating them. Cover workspace creation,
   thread/turn start, agent state transitions and terminal outcomes, then decide
   execution context, filtering, ordering, retries, timeouts, failure policy,
   secret handling, auditability, and platform behavior.
+  - [x] Leave in-session lifecycle policy with native Codex hooks and prove the
+    App Server execution boundary against installed `codex-cli 0.154.0`.
+  - [x] Add a narrow durable outbox and trusted asynchronous command reactions
+    for accepted signals and successful workspace lifecycle transitions.
+  - [x] Bound configuration, process environment, concurrency, timeout,
+    retries, retention, restart recovery, and delivery observability.
 
 ## Proposed next CoCo work sequence — 2026-09-09
 
@@ -1874,6 +1912,17 @@ Status: confirmed and implemented on 2026-09-08.
 
 ## Findings
 
+- The public entry points correctly listed most shipped commands but framed
+  CoCo primarily as a parallel worktree launcher. That boundary is now too
+  weak and undersells implemented behavior: short-lived clients can start,
+  observe, continue, and enter the same named workspace; repository, worktree,
+  native thread, and settings stay bound across those clients and repositories.
+  Worktree creation is a supporting mechanism. Signals are useful for advanced
+  integrations but should not compete with that first-use story.
+- The README linked only to the currently disabled GitHub Pages site, and the
+  quickstart used `send --wait` before teaching `status --follow`. Relative
+  source-document links now remain usable while the repository is private, and
+  the quickstart demonstrates the distinguishing non-blocking workflow first.
 - Exact retirement lookup cannot use default `thread/list`: Codex 0.153.4
   filters out CoCo's App-Server-origin root threads there. Exact `thread/read`
   finds both active and archived threads and returns the rollout path; the
@@ -2356,6 +2405,28 @@ Status: confirmed and implemented on 2026-09-08.
 
 ## Verification
 
+- The public-positioning revision passes Rustfmt, all 28 focused CLI tests,
+  `git diff --check`, and the documentation typecheck, Oxlint, and Prettier
+  gate. The production static export passes with 98 files, all ten pages,
+  search, `/coco` project-path routing, and the public-only boundary. The
+  README also passes the documentation toolchain's Prettier check; the rebuilt
+  CLI exposes the new tagline, and `nix flake show . --no-write-lock-file`
+  accepts the aligned flake metadata. No release, commit, push, Pages change,
+  or deployment was performed.
+- The selected real-Codex gate now targets installed `codex-cli 0.154.0`.
+  Both model-free compatibility tests pass sequentially against the actual
+  executable: preparation/adoption, native reads and history, daemon/App Server
+  restart, resume, context fork, retirement, per-thread MCP isolation, profile
+  restoration, and signal attribution remain compatible. The first sandboxed
+  attempt failed before reaching Codex because loopback binding was forbidden;
+  the identical test command passed with local loopback permission. No model
+  turn or user workspace was used. Rustfmt, `git diff --check`, and the public
+  documentation typecheck/lint/format gate also pass. No release, commit, push,
+  or deployment was used. The subsequent locked, single-job,
+  all-target/all-feature suite passes 244 of 247 regular tests with three
+  deliberate ignores, plus all five process smokes; the two real-Codex tests
+  remain ignored in that normal run because they were already exercised
+  explicitly against 0.154.0.
 - The workspace-retirement slice passes Rustfmt, locked Cargo check, and
   all-target/all-feature Clippy with warnings denied. The complete serialized
   Rust suite passes 200 of 201 library tests (the remaining test is the
@@ -2844,6 +2915,306 @@ Status: confirmed and implemented on 2026-09-08.
   above the unchanged remote base `78835b2`. This is a local history rewrite;
   no remote ref, release, publication, or deployment is changed.
 
+## Signal and hook boundary review — 2026-09-10
+
+Status: the user approved the narrow hook/reaction MVP. Runtime implementation,
+canonical/public documentation, and all sequential quality gates are complete
+in the existing dirty `main` working tree. Release, commit, push, and deployment
+remain outside this scope.
+
+- Signals are a major orchestration primitive even though the public
+  navigation currently places them under integrations. The implemented half is
+  intentionally passive: a bound agent can publish a typed, schema-validated,
+  durable, replayable claim, while readers independently inspect or follow it.
+  It does not yet cause an external effect.
+- Current Codex provides its own lifecycle-hook framework for command and MCP
+  tool handlers around session, prompt, tool, permission, compaction,
+  subagent, stop, interrupt, and session-end events. Codex can use synchronous
+  handlers to influence its own loop and asynchronous handlers for advisory
+  work. CoCo must reuse or expose that native facility for in-session policy
+  and context rather than recreating its event vocabulary or control behavior.
+- A distinct CoCo reaction layer remains useful for durable, cross-workspace
+  and cross-repository facts that Codex does not own: accepted signals and a
+  deliberately small set of committed CoCo lifecycle changes. It must not
+  mirror all App Server notifications, infer ticket semantics, wake models by
+  default, or grow into a workflow engine.
+- Implemented one versioned CoCo event envelope and a narrow transactional
+  outbox for `signal.emitted`, `workspace.created`, `workspace.closed`,
+  `workspace.reopened`, and `workspace.deleted`. Loaded exact definitions
+  select delivery in the same transaction as the source fact. Signal
+  idempotency retries enqueue nothing twice; effect failure cannot roll back
+  coordinator state.
+- `cocod` loads a version-1 operator file from the standard config path, rejects
+  unsafe/invalid configuration, and executes absolute command arrays without a
+  shell. It clears the environment except `PATH`, sends compact JSON on stdin,
+  discards process output, caps concurrency at four, enforces 1–300 second
+  timeouts and 1–5 attempts, recovers interrupted rows, and cancels deliveries
+  whose exact definition hash no longer exists after restart.
+- Added daemon-wide `coco hook list|ls` and `coco hook
+  history|deliveries`. These expose definitions and bounded delivery outcomes
+  while deliberately hiding command arguments and event payloads. Terminal
+  event groups retain the newest 10,000 completed groups without pruning
+  pending or running work.
+- The exact native boundary was checked in a fresh matching upstream clone at
+  `/tmp/codex-upstream-0.154.0` and through the installed binary. Source shows
+  `SessionStart` is queued when the session is created and executed at the
+  first ordinary turn; `thread/start` alone and `thread/shellCommand` do not run
+  it. The ignored real-App-Server proof passes using an isolated unreachable
+  provider and test-only hook-trust bypass; production CoCo never bypasses
+  native hook trust.
+- Focused Rust hook tests, lifecycle/retirement process tests, and all three
+  installed-Codex 0.154.0 compatibility proofs pass. The process tests cover
+  signal/workspace envelopes, exact idempotency, successful history, and every
+  initial workspace transition. `cargo clippy --locked --all-targets
+  --all-features -- -D warnings`, all `258` library tests plus `5` process
+  scenarios, `cargo machete`, and `cargo deny check` pass. Dependency-policy
+  output contains only the already accepted duplicate-version warnings.
+- Final review moved stdin writing under the hook timeout so a child that never
+  reads its event cannot block dispatch indefinitely, included the canonical
+  config working directory in definition identity, and added explicit tests
+  for v10-to-v11 migration, oversized config, unsafe permissions, symlinks,
+  and a full pipe backpressure timeout. Delivery is now serialized in commit
+  order per hook ID, including retries, while distinct hooks retain bounded
+  parallelism.
+- Public docs now explain the native/CoCo hook choice, one complete command
+  configuration, event shape, retries, idempotency, security, and CLI
+  observability. TypeScript, Oxlint, Prettier, and the production static export
+  pass; the export verifies `103` static files, `10` pages, search, `/coco`
+  project-subpath routing, and the public/internal boundary. `nix flake check .
+  --no-write-lock-file` and `git diff --check` pass. New files are marked only
+  with Git intent-to-add so the dirty Flake source includes them; no file
+  content is staged.
+- Product sequencing recommendation: complete the signal-to-reaction loop
+  first, harden daemon/App Server supervision before presenting it as
+  unattended automation, and validate the boundary through one real external
+  consumer. Detached branch promotion, handoff artifacts, Windows named pipes,
+  and worker MCP registry/gateway work remain independent follow-ups.
+
+Official source reviewed: [Codex hooks](https://learn.chatgpt.com/docs/hooks).
+
+## Hook lifecycle controls and guards — 2026-09-10
+
+Status: complete in the existing dirty `main` working tree. No commit, push,
+release, deployment, or external integration was performed.
+
+- Kept the existing post-event reaction contract intact. A reaction selects
+  `signal.emitted` and may add an exact `NAME@VERSION` filter, or it can select
+  one of the committed workspace lifecycle events. These deliveries remain a
+  durable, retrying, at-least-once outbox after the source fact succeeds.
+- Added `guards` to the same version-1 `hooks.json`, but kept them a distinct
+  synchronous policy mechanism. The first bounded actions are
+  `workspace.close` and `workspace.delete`; a guard cannot subscribe to a
+  signal, mutate a retirement request, or replace CoCo's built-in safety
+  checks.
+- The coordinator resolves and validates the current retirement plan, rejects
+  built-in blockers, and verifies any client-confirmed plan before running a
+  matching guard. It still holds the repository operation lock, and no Store,
+  Git, or Codex effect has begun. A dry-run returns before guards. Once a saga
+  reaches `closing` or `deleting`, recovery converges it without rerunning an
+  external policy check that could strand recovery.
+- Matching guards use one coherent registry snapshot, run synchronously in
+  stable ID order, and short-circuit on the first explicit denial. Commands
+  receive bounded JSON through stdin and must return strict JSON allow/deny;
+  deny requires a sanitized, bounded reason, while allow forbids one. They do
+  not retry. Each definition must explicitly choose `onError: allow|deny` for
+  spawn, output, exit, or timeout failures.
+- `coco hook validate` now performs the complete safety and syntax check
+  offline without constructing a daemon client. `coco hook reload` validates a
+  replacement before atomically swapping the shared hook/guard snapshot; a
+  rejected reload retains the last known good snapshot. There is deliberately
+  no file watcher. `hook list` exposes both definition kinds without commands;
+  `hook history` remains only the durable post-event delivery history.
+- Guard outcomes are visible through daemon logs, and denials/fail-closed
+  failures return `GUARD_DENIED` or `GUARD_FAILED_CLOSED` with bounded
+  `guardId`, `action`, and `reason` metadata. They are not persisted as a new
+  audit/history stream in this slice. Add that only for a concrete consumer and
+  retention contract.
+- The command target remains trusted same-user code rather than an
+  authorization sandbox. HTTP/MCP targets, model wakeup, workflow chaining,
+  declarative repository/workspace selectors, manual delivery retry, more
+  guarded actions, and durable guard history remain unscheduled extensions.
+
+Verification:
+
+- `cargo fmt --all -- --check` passes.
+- `cargo clippy --locked --all-targets --all-features -- -D warnings` passes.
+- `cargo test --locked --all-targets --quiet` passes: `271` Rust tests pass,
+  `3` are intentionally ignored, all `5` process scenarios pass, and the `3`
+  opt-in real-Codex tests remain intentionally ignored in the ordinary suite.
+- Focused hook/guard coverage passes `22` tests, including exact signal
+  filtering, safe configuration, atomic reload, stable guard ordering,
+  short-circuit denial, fail-open/fail-closed behavior, bounded output and
+  timeouts. Four coordinator tests prove the dry-run, pre-effect, error, and
+  recovery boundaries. The retirement process scenario proves daemon-free
+  validation, last-known-good reload, and exactly one guard invocation per
+  applied operation.
+- `cargo machete` passes. `cargo deny check` passes all advisories, bans,
+  licenses, and source policy with only the already accepted duplicate-version
+  warnings.
+- Public docs pass Next type generation, TypeScript, Oxlint, and Prettier. The
+  production static export verifies `103` files, `10` pages, search, `/coco`
+  routing, and the public/internal boundary.
+- `nix flake check . --no-write-lock-file` passes on `x86_64-linux`.
+
+## Workspace resource governance assessment — 2026-09-10
+
+Status: research and design recommendation only. No runtime, CLI, schema,
+configuration, public documentation, dependency, or persistence change was
+made.
+
+- Current CoCo owns one daemon and one shared Codex App Server for all bound
+  workspaces. The App Server process itself is therefore shared overhead and
+  cannot be truthfully divided between workspaces. Parent-process traversal
+  alone also cannot separate commands for concurrent threads when their common
+  ancestor is that shared server.
+- Native Codex 0.154.0 does not expose a local-thread/workspace CPU, RAM, or
+  process quota through the CLI, App Server request surface, or documented
+  `config.toml`. Its sandbox limits filesystem/network access, MCP timeouts
+  limit tool calls, and `agents.max_concurrent_threads_per_session` limits
+  spawned-agent concurrency; none is an OS resource budget for one CoCo
+  workspace. The source does contain an experimental code-mode-host capability
+  named `session-cell-execution-resource-limits`, but its two fields are a
+  JavaScript-cell yield ceiling and heap-size ceiling. Production Codex opens
+  these sessions with defaults, the local in-process host discards the heap
+  limit, and the mechanism does not govern normal shell commands or App Server
+  threads. It is therefore not a reusable solution for this requirement.
+- The experimental App Server background-terminal API is useful but does not
+  change that conclusion. It can list, clean, and terminate the long-running
+  unified-exec terminals retained by one thread. Although the protocol already
+  declares `osPid`, `cpuPercent`, and `rssKb`, Codex 0.154.0 currently fills all
+  three with `null`; the core record only carries the logical process ID,
+  command, and working directory. It also does not cover transient commands or
+  shared App Server/MCP cost. Treat this surface as a future native observation
+  and cleanup seam, not as a complete process-tree or containment boundary.
+- Current Orca source has a Resource Manager that performs a host process-table
+  sweep, walks each registered PTY's descendant tree, and aggregates CPU and
+  memory by session and worktree. It reports unattributed terminals, host
+  pressure, and bounded history; its orchestrator separately defaults to four
+  concurrent workers. No per-worktree cgroup, Job Object CPU/memory quota, or
+  equivalent hard-limit path was found at the reviewed commit. Its Windows Job
+  Object support is presently process-lifecycle containment, not a resource
+  budget.
+- CoCo must distinguish three contracts: observation reports what was measured
+  and explicitly labels shared/unattributed cost; admission control decides
+  whether another turn may start under host pressure or a concurrency cap; hard
+  containment makes the OS enforce a budget. A sampled process scan is useful
+  observability but is not a security or enforcement boundary.
+- Recommended first slice, if scheduled, is truthful on-demand observation plus
+  global safety admission: host available memory/load, CoCo/App Server shared
+  cost, attributable descendants where evidence exists, process count, and an
+  explicit unknown/unattributed bucket. Do not put a high-frequency time series
+  in SQLite initially, and do not make ordinary `status` perform an expensive
+  host sweep. A bounded live resource view can later emit a durable
+  `resource.pressure` signal only after its threshold and deduplication contract
+  is designed.
+- A conservative global guard can protect the machine sooner than pretending
+  to enforce per-workspace limits: cap simultaneously active turns and stop
+  admitting new work below a configured available-memory threshold. It should
+  warn or queue first; automatic killing needs a separate explicit policy and
+  failure/recovery semantics.
+- Real per-workspace CPU, memory, and process limits require a process
+  containment boundary that CoCo can place every descendant into. Linux cgroup
+  v2 is the natural first backend; Windows Job Objects are the corresponding
+  process-tree primitive. The present shared-App-Server topology does not
+  provide that boundary. A global daemon/App-Server cgroup is feasible but
+  limits CoCo as a whole; a separate App Server or isolated execution host per
+  workspace could provide strict attribution and enforcement at the cost of a
+  material lifecycle/attachment architecture change. macOS should remain
+  best-effort monitoring/admission unless a container or VM backend supplies
+  hard isolation.
+- One fallback is to lazily launch an App Server process inside one OS
+  containment scope per active workspace. All descendants that Codex launches
+  within that scope can then be attributed, stopped, and limited together, but
+  this duplicates App Server/configuration overhead and complicates endpoint,
+  event-routing, supervision, and TUI-attachment lifecycle. It is no longer the
+  preferred containment design after the native exec-server finding below.
+- A local idle-cost probe used two separately initialized Codex 0.154.0 App
+  Servers with experimental API support enabled and no loaded thread or turn.
+  Both sampled at `0.0%` CPU while idle. Their resident sets varied between
+  roughly `112` and `142 MiB`, but much of that is shared file-backed code: the
+  combined proportional set size was about `148 MiB`, or approximately
+  `74 MiB` per instance, while private memory varied from about `38` to `68
+  MiB`. This makes a few active isolated runtimes reasonable, but argues against
+  keeping one resident server for every persisted workspace. Use lazy startup
+  and idle retirement if this backend is scheduled.
+- The better native boundary would be a shared App Server control plane with an
+  explicit per-thread or per-execution resource scope: Codex would place every
+  spawned command and owned descendant into the supplied cgroup/Job Object,
+  while the shared server stayed outside. Codex 0.154.0 has no CPU/RAM/PID
+  policy field, but it does already have a more important experimental
+  execution boundary: one App Server can register multiple `codex exec-server`
+  environments, and `thread/start`/`turn/start` can select sticky environment
+  IDs with environment-relative working and workspace roots. The executor owns
+  process, filesystem, sandbox, and supported environment-scoped MCP execution;
+  current Codex tests explicitly prove two exec servers with mutually isolated
+  workspace-write roots. `externalSandbox` is not this router—it only tells
+  Codex that the server process is already externally sandboxed.
+- The preferred first strict-resource spike is consequently one shared host
+  App Server plus one host `codex exec-server` per active CoCo workspace,
+  launched directly inside a workspace cgroup. The exec server is already a
+  distinct process root, so its commands and descendants inherit exact Linux
+  accounting and CPU/memory/PID enforcement without requiring an OCI runtime.
+  CoCo would register that endpoint as an experimental environment and bind the
+  environment to the workspace thread. Keep the shared App Server in a
+  separate global safety scope while leaving `cocod` outside so it can report
+  and recover failures. A local idle probe of `codex exec-server` 0.154.0
+  measured about `48 MiB` RSS, `23 MiB` PSS, `10 MiB` private memory, and `0.0%`
+  CPU—materially lighter than duplicating the full App Server.
+- Treat an OCI container as an optional stronger execution backend behind the
+  same environment/exec-server contract, not as a prerequisite for resource
+  governance. It adds filesystem and network namespaces, image-defined
+  toolchains, more portable quota controls, and a stronger accidental-escape
+  boundary, but also introduces a runtime dependency, image lifecycle, mount
+  and credential policy, slower cold starts, and awkward host-toolchain reuse.
+  The existing host Git worktree can be bind-mounted rather than copied. Git
+  linked worktrees remain compatible only if the worktree's `.git` indirection
+  and the repository common Git directory are both visible at consistent
+  container paths; mounting only the worktree directory commonly breaks Git.
+  An independent clone is the stronger-isolation alternative but changes
+  CoCo's established worktree semantics and should not be introduced merely to
+  obtain resource limits.
+- This environment surface is experimental and only partly described by the
+  public App Server documentation. `environment/add`, thread/turn environment
+  selection, and `codex exec-server` are present in the installed generated
+  protocol/source and integration tests, but there is no resource-policy field
+  or public stability promise. A CoCo spike must therefore capability-check the
+  selected Codex build, pin compatibility, prove start/resume/fork/jump and MCP
+  behavior, bind the endpoint locally and safely, and fall back without
+  corrupting an existing workspace. It must also resolve container image/tool
+  provisioning, credential projection, UID ownership, and Git linked-worktree
+  paths before this becomes a product contract.
+- Upstream issue `#11523` requested per-session/global memory governance and was
+  closed `not planned`; an OpenAI contributor recommended container-level
+  containment and said this likely does not belong in the agent harness. Open
+  reports `#38909` and `#35433` request bounded Linux/Windows shell-process
+  trees after host-exhaustion incidents, while `#43256` reports an App Server
+  PID storm and demonstrates the value of an external daemon cgroup. No
+  announced per-thread cgroup roadmap or active matching implementation PR was
+  found in the targeted search. Treat that as current public evidence, not
+  proof that OpenAI has no internal plan.
+- In the future DAG/CMMN system, scheduling policy belongs to that task system:
+  it decides which ready case gets a slot and may request a resource class.
+  CoCo should own measurement, host-capacity admission, and enforcement for the
+  workspace/runtime it launches. Do not move ticket or workflow state into this
+  layer.
+
+Open decision before implementation: whether the first deliverable is only a
+resource view, or the resource view plus a global `max active turns` and
+low-memory admission policy. Per-workspace hard limits must wait for an explicit
+containment-topology decision rather than being inferred from sampled metrics.
+
+Primary comparison source was fresh Orca commit
+`f2d5711b2d32e9f11277cd63805c76b0b5f9ddf7`: [process statistics
+types](https://github.com/stablyai/orca/blob/f2d5711b2d32e9f11277cd63805c76b0b5f9ddf7/src/shared/process-stats-types.ts),
+[collector](https://github.com/stablyai/orca/blob/f2d5711b2d32e9f11277cd63805c76b0b5f9ddf7/src/main/memory/collector.ts),
+[diagnostics command](https://github.com/stablyai/orca/blob/f2d5711b2d32e9f11277cd63805c76b0b5f9ddf7/src/cli/specs/diagnostics.ts),
+and [coordinator concurrency](https://github.com/stablyai/orca/blob/f2d5711b2d32e9f11277cd63805c76b0b5f9ddf7/src/main/runtime/orchestration/coordinator.ts).
+Platform primitives reviewed: [Linux cgroup
+v2](https://docs.kernel.org/admin-guide/cgroup-v2.html), [Windows Job
+Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects),
+and [Windows CPU rate
+control](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_cpu_rate_control_information).
+
 ## Open questions and handoff
 
 - The `janthmueller/coco` repository and protected `crates.io` environment
@@ -2866,8 +3237,8 @@ Status: confirmed and implemented on 2026-09-08.
 - The user withdrew the follow-up issue search and upstream-comment idea after
   the private checkpoint was completed. Do not pursue or post either unless
   explicitly requested again.
-- Prove native Codex per-thread MCP isolation across start, resume, and fork
-  before scheduling the registry feature.
+- Native Codex per-thread MCP isolation across start, resume, and fork is
+  proven against 0.154.0. The broader worker registry remains unscheduled.
 - Agentgateway is deliberately not scheduled. Reconsider it only when
   federation, centralized credential custody, independent enforcement, or
   gateway observability becomes an actual requirement.
@@ -2894,12 +3265,13 @@ Status: confirmed and implemented on 2026-09-08.
 - The workspace vocabulary/schema migration, create convenience pipeline,
   multi-repository CLI slice, native Git-approval proof, and interactive
   decision closure are complete.
-- Research Codex's native lifecycle extensibility before designing CoCo hooks.
-  Keep the distinction between internal normalized events and executable user
-  automation explicit; hooks must not silently inherit credentials or block
-  coordinator state transitions without a deliberate policy.
+- Codex's current native lifecycle extensibility and CoCo's first durable
+  reaction slice are implemented and documented above. Preserve the
+  distinction between native Codex hooks, durable CoCo signals/events, and
+  executable external effects. HTTP targets, automatic model wakeup, workflow
+  chaining, and broader App Server event mirroring remain unapproved.
 - The reorganized public site now passes a production export under the `/coco`
-  GitHub Pages project subpath with nine total routes. Keep that static-export
+  GitHub Pages project subpath with ten total routes. Keep that static-export
   check when changing its routing or deployment workflow.
 - The earlier Rust module-layout Phase 2 and its review are complete. Do not
   split a workspace now. If cross-platform support is scheduled next, begin

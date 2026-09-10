@@ -43,10 +43,10 @@ fn create_help_describes_the_codex_named_profile_file() {
 }
 
 #[test]
-fn help_describes_separate_worktrees_without_implying_security_isolation() {
+fn help_leads_with_persistent_cross_repository_workspaces_without_security_claim() {
     let mut command = Cli::command();
     let root_help = command.render_long_help().to_string();
-    assert!(root_help.contains("separate worktrees"));
+    assert!(root_help.contains("persistent Codex workspaces across repositories"));
     assert!(!root_help.contains("isolated"));
 
     let mut command = Cli::command();

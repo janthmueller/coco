@@ -9,8 +9,10 @@
     "---Guides---",
     "guides/workspaces",
     "guides/execution-profiles",
+    "---Integrations---",
     "guides/mcp",
     "guides/signals",
+    "guides/hooks",
     "---Reference---",
     "reference/cli",
     "reference/current-limitations"

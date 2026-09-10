@@ -6,7 +6,7 @@ use clap::{Args, Parser, Subcommand};
 #[command(
     name = "coco",
     version,
-    about = "Coordinate Codex work in separate worktrees",
+    about = "Coordinate persistent Codex workspaces across repositories",
     subcommand_precedence_over_arg = true
 )]
 pub struct Cli {
@@ -120,6 +120,11 @@ pub(super) enum Command {
         #[command(subcommand)]
         command: super::signals::SignalCommand,
     },
+    /// Manage configured reactions, guards, and delivery history.
+    Hook {
+        #[command(subcommand)]
+        command: super::hooks::HookCommand,
+    },
 }
 
 impl Cli {
@@ -149,7 +154,8 @@ impl Command {
             | Self::Jump { .. }
             | Self::Decide { .. }
             | Self::Diff { .. }
-            | Self::Mcp { .. } => false,
+            | Self::Mcp { .. }
+            | Self::Hook { .. } => false,
         }
     }
 
@@ -169,7 +175,8 @@ impl Command {
             | Self::Create(_)
             | Self::List { .. }
             | Self::Decide { .. }
-            | Self::Mcp { .. } => false,
+            | Self::Mcp { .. }
+            | Self::Hook { .. } => false,
         }
     }
 }

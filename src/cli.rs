@@ -4,6 +4,7 @@ use clap::Parser;
 mod args;
 mod commands;
 mod decision;
+mod hooks;
 mod jump;
 mod output;
 mod prompt;

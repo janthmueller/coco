@@ -1,11 +1,14 @@
 use std::fs;
 use std::path::Path;
 
+use serde_json::{Value, json};
 use tracing::warn;
 
 use super::{Coordinator, CoordinatorError, NativeThread, WorkerError};
+use crate::domain::hooks::{GuardAction, HookDispatch, HookEventKind};
 use crate::domain::{
-    CodexThreadStatus, Workspace, WorkspaceAvailability, WorkspaceLifecycle, WorktreeMode,
+    CodexThreadStatus, Repository, Workspace, WorkspaceAvailability, WorkspaceLifecycle,
+    WorktreeMode,
 };
 use crate::git::{GitError, GitRepository, WorktreeBinding};
 use crate::protocol::{
@@ -19,6 +22,7 @@ mod safety;
 
 struct PreparedClose {
     workspace: Workspace,
+    registered_repository: Repository,
     repository: GitRepository,
     binding: WorktreeBinding,
     plan: WorkspaceRetirementPlan,
@@ -26,6 +30,7 @@ struct PreparedClose {
 
 struct PreparedDelete {
     workspace: Workspace,
+    registered_repository: Repository,
     repository: GitRepository,
     plan: WorkspaceRetirementPlan,
 }
@@ -63,7 +68,7 @@ impl Coordinator {
                 actual: workspace.phase,
             });
         }
-        let (_, repository) = self.git_repository_for_workspace(&workspace)?;
+        let (registered_repository, repository) = self.git_repository_for_workspace(&workspace)?;
         let worktree_path = workspace
             .worktree_path
             .as_deref()
@@ -91,6 +96,7 @@ impl Coordinator {
         );
         Ok(PreparedClose {
             workspace,
+            registered_repository,
             repository,
             binding: observation.binding,
             plan,
@@ -102,6 +108,19 @@ impl Coordinator {
         prepared: PreparedClose,
         discard_changes: bool,
     ) -> Result<WorkspaceCloseResult, CoordinatorError> {
+        self.hooks
+            .check_guards(
+                GuardAction::WorkspaceClose,
+                &prepared.registered_repository,
+                &prepared.workspace,
+                json!({
+                    "plan": &prepared.plan,
+                    "archiveThread": prepared.plan.thread_disposition
+                        == WorkspaceThreadDisposition::Archive,
+                    "discardChanges": discard_changes,
+                }),
+            )
+            .await?;
         let archive_thread =
             prepared.plan.thread_disposition == WorkspaceThreadDisposition::Archive;
         let closing = self.store.begin_workspace_close(
@@ -131,12 +150,25 @@ impl Coordinator {
             self.rollback_close(&closing).await;
             return Err(source.into());
         }
-        let workspace = self.store.transition_workspace_availability(
+        let hook = self.plan_workspace_hook(
+            HookEventKind::WorkspaceClosed,
+            &closing,
+            json!({
+                "threadDisposition": prepared.plan.thread_disposition,
+                "discardedChanges": discard_changes,
+            }),
+        )?;
+        let notify_hook = hook.is_some();
+        let workspace = self.store.transition_workspace_availability_with_hook(
             &closing.id,
             WorkspaceAvailability::Closing,
             WorkspaceAvailability::Closed,
             None,
+            hook,
         )?;
+        if notify_hook {
+            self.hooks.notify();
+        }
         Ok(WorkspaceCloseResult {
             workspace,
             plan: prepared.plan,
@@ -228,14 +260,23 @@ impl Coordinator {
         if workspace.thread_archived {
             self.ensure_thread_unarchived(workspace).await?;
         }
-        self.store
-            .transition_workspace_availability(
+        let hook =
+            self.plan_workspace_hook(HookEventKind::WorkspaceReopened, workspace, json!({}))?;
+        let notify_hook = hook.is_some();
+        let reopened = self
+            .store
+            .transition_workspace_availability_with_hook(
                 &workspace.id,
                 WorkspaceAvailability::Reopening,
                 WorkspaceAvailability::Open,
                 None,
+                hook,
             )
-            .map_err(CoordinatorError::from)
+            .map_err(CoordinatorError::from)?;
+        if notify_hook {
+            self.hooks.notify();
+        }
+        Ok(reopened)
     }
 
     pub(crate) async fn delete_workspace(
@@ -264,7 +305,7 @@ impl Coordinator {
     ) -> Result<PreparedDelete, CoordinatorError> {
         let workspace = self.resolve_workspace(&params.scope, &params.workspace)?;
         require_availability(&workspace, WorkspaceAvailability::Closed)?;
-        let (_, repository) = self.git_repository_for_workspace(&workspace)?;
+        let (registered_repository, repository) = self.git_repository_for_workspace(&workspace)?;
         let path = workspace
             .worktree_path
             .clone()
@@ -296,6 +337,7 @@ impl Coordinator {
         );
         Ok(PreparedDelete {
             workspace,
+            registered_repository,
             repository,
             plan,
         })
@@ -306,10 +348,31 @@ impl Coordinator {
         prepared: PreparedDelete,
         params: &WorkspaceDeleteParams,
     ) -> Result<WorkspaceDeleteResult, CoordinatorError> {
+        self.hooks
+            .check_guards(
+                GuardAction::WorkspaceDelete,
+                &prepared.registered_repository,
+                &prepared.workspace,
+                json!({
+                    "plan": &prepared.plan,
+                    "deleteThread": params.delete_thread,
+                    "deleteBranch": params.delete_branch,
+                }),
+            )
+            .await?;
         let intent = WorkspaceDeletionIntent {
             delete_thread: params.delete_thread,
             delete_branch: params.delete_branch,
         };
+        let hook = self.plan_workspace_hook(
+            HookEventKind::WorkspaceDeleted,
+            &prepared.workspace,
+            json!({
+                "threadDeleted": intent.delete_thread,
+                "branchDeleted": intent.delete_branch,
+            }),
+        )?;
+        let notify_hook = hook.is_some();
         let deleting = self
             .store
             .begin_workspace_deletion(&prepared.workspace.id, intent)?;
@@ -322,7 +385,11 @@ impl Coordinator {
             let _ = self.store.cancel_workspace_deletion(&deleting.id);
             return Err(source);
         }
-        self.store.delete_workspace_record(&deleting.id)?;
+        self.store
+            .delete_workspace_record_with_hook(&deleting.id, hook)?;
+        if notify_hook {
+            self.hooks.notify();
+        }
         Ok(WorkspaceDeleteResult {
             plan: prepared.plan,
             applied: true,
@@ -655,12 +722,22 @@ impl Coordinator {
             if workspace.thread_archived {
                 self.ensure_thread_archived(workspace).await?;
             }
-            self.store.transition_workspace_availability(
+            let hook = self.plan_workspace_hook(
+                HookEventKind::WorkspaceClosed,
+                workspace,
+                json!({"recovered": true}),
+            )?;
+            let notify_hook = hook.is_some();
+            self.store.transition_workspace_availability_with_hook(
                 &workspace.id,
                 WorkspaceAvailability::Closing,
                 WorkspaceAvailability::Closed,
                 None,
+                hook,
             )?;
+            if notify_hook {
+                self.hooks.notify();
+            }
         }
         Ok(())
     }
@@ -696,6 +773,16 @@ impl Coordinator {
     ) -> Result<(), CoordinatorError> {
         let _dependencies = self.context_dependencies.lock().await;
         let intent = self.store.workspace_deletion_intent(&workspace.id)?;
+        let hook = self.plan_workspace_hook(
+            HookEventKind::WorkspaceDeleted,
+            workspace,
+            json!({
+                "threadDeleted": intent.delete_thread,
+                "branchDeleted": intent.delete_branch,
+                "recovered": true,
+            }),
+        )?;
+        let notify_hook = hook.is_some();
         let (_, repository) = self.git_repository_for_workspace(workspace)?;
         self.validate_retirement_path(workspace, &repository)?;
         let mut blockers = self.closed_workspace_blockers(
@@ -715,8 +802,22 @@ impl Coordinator {
             let _ = self.store.cancel_workspace_deletion(&deleting.id);
             return Err(source);
         }
-        self.store.delete_workspace_record(&deleting.id)?;
+        self.store
+            .delete_workspace_record_with_hook(&deleting.id, hook)?;
+        if notify_hook {
+            self.hooks.notify();
+        }
         Ok(())
+    }
+
+    fn plan_workspace_hook(
+        &self,
+        kind: HookEventKind,
+        workspace: &Workspace,
+        data: Value,
+    ) -> Result<Option<HookDispatch>, CoordinatorError> {
+        let repository = self.repository_by_id(&workspace.repository_id)?;
+        Ok(self.hooks.event(kind, &repository, workspace, data))
     }
 
     fn verify_recovery_worktree(

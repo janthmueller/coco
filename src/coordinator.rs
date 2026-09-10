@@ -10,6 +10,7 @@ use crate::domain::{
     DecisionFileChange, EventKind, EventSource, Repository, Workspace, WorkspaceLifecycle,
 };
 use crate::git::{Git, GitRepository};
+use crate::hooks::HookRegistry;
 use crate::protocol::{RepositoryScope, RepositorySummary, WorkspaceListItem, WorkspaceResult};
 use crate::store::{EventDraft, Store, StoreError};
 
@@ -19,6 +20,7 @@ mod codex_events;
 mod context;
 mod decision;
 mod error;
+mod hooks;
 mod jump;
 mod recovery;
 mod retirement;
@@ -38,6 +40,7 @@ pub(crate) struct Coordinator {
     worker: Arc<dyn WorkerRuntime>,
     worktrees_dir: PathBuf,
     codex_home: PathBuf,
+    hooks: Arc<HookRegistry>,
     runtime_generation: String,
     repository_locks: AsyncMutex<HashMap<String, Arc<AsyncMutex<()>>>>,
     context_dependencies: AsyncMutex<()>,
@@ -57,6 +60,7 @@ impl Coordinator {
         worker: Arc<dyn WorkerRuntime>,
         worktrees_dir: PathBuf,
         codex_home: PathBuf,
+        hooks: Arc<HookRegistry>,
         runtime_generation: String,
     ) -> Self {
         Self {
@@ -65,6 +69,7 @@ impl Coordinator {
             worker,
             worktrees_dir,
             codex_home,
+            hooks,
             runtime_generation,
             repository_locks: AsyncMutex::new(HashMap::new()),
             context_dependencies: AsyncMutex::new(()),

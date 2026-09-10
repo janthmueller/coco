@@ -1,5 +1,5 @@
 {
-  description = "CoCo — local Codex agent orchestration";
+  description = "CoCo — local control plane for Codex workspaces";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -50,7 +50,7 @@
           doCheck = false;
 
           meta = {
-            description = "Coordinate Codex workspaces, Git worktrees, and conversations";
+            description = "Local control plane for persistent Codex workspaces";
             homepage = "https://github.com/janthmueller/coco";
             license = pkgs.lib.licenses.mit;
             mainProgram = "coco";

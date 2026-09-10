@@ -17,6 +17,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     prepare_repository(&repository)?;
     prepare_codex_profile(&paths)?;
     write_fake_codex(&paths.fake_codex)?;
+    super::hooks::prepare(&paths)?;
 
     let mut daemon = spawn_daemon(&paths, &daemon_log)?;
 
@@ -63,6 +64,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     assert_mode(&paths.socket, 0o600)?;
     assert_mode(&paths.endpoint, 0o600)?;
     assert_mode(&paths.database, 0o600)?;
+    super::hooks::verify_loaded(&paths, &repository).await?;
 
     let models = cli_json(&run_cli(&paths, &repository, &["model", "list", "--json"]).await?)?;
     assert_eq!(models["schemaVersion"], 7);
@@ -378,6 +380,19 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         .context("workspace had no initial runtime generation")?
         .to_owned();
     let second_worktree = super::multi_client::exercise(&paths, temporary.path()).await?;
+    let hook_events =
+        super::hooks::wait_for_kinds(&paths, &[("workspace.created", 2), ("signal.emitted", 2)])
+            .await?;
+    ensure!(
+        hook_events.iter().all(|event| {
+            event["schemaVersion"] == 1
+                && event["id"].as_str().is_some_and(|id| !id.is_empty())
+                && event.pointer("/workspace/id").is_some()
+                && event.pointer("/repository/id").is_some()
+        }),
+        "hook commands did not receive complete versioned event envelopes: {hook_events:?}"
+    );
+    super::hooks::verify_history(&paths, &repository, 4).await?;
 
     interrupt(&daemon).await?;
     let daemon_status = timeout(PROCESS_TIMEOUT, daemon.wait())

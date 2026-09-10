@@ -10,11 +10,11 @@ use crate::codex::CodexError;
 use crate::coordinator::{Coordinator, CoordinatorError, WorkerError};
 use crate::protocol::{
     AuditRecordParams, DaemonMethod, DecisionGetParams, DecisionRespondParams, EventListParams,
-    HealthParams, HealthResult, ModelListParams, RepositoryResolveParams, TurnResultParams,
-    TurnStartParams, WorkspaceAttachAdoptParams, WorkspaceAttachParams,
-    WorkspaceAttachReleaseParams, WorkspaceAttachRenewParams, WorkspaceCloseParams,
-    WorkspaceCreateParams, WorkspaceDeleteParams, WorkspaceDiffParams, WorkspaceGetParams,
-    WorkspaceListParams, WorkspaceReopenParams,
+    HealthParams, HealthResult, HookDeliveryListParams, HookListParams, HookReloadParams,
+    ModelListParams, RepositoryResolveParams, TurnResultParams, TurnStartParams,
+    WorkspaceAttachAdoptParams, WorkspaceAttachParams, WorkspaceAttachReleaseParams,
+    WorkspaceAttachRenewParams, WorkspaceCloseParams, WorkspaceCreateParams, WorkspaceDeleteParams,
+    WorkspaceDiffParams, WorkspaceGetParams, WorkspaceListParams, WorkspaceReopenParams,
 };
 use crate::rpc::{RpcErrorPayload, RpcHandler};
 
@@ -59,6 +59,19 @@ impl RpcHandler for DaemonHandler {
             }
             DaemonMethod::SignalEmit => execute(self.coordinator.emit_signal(decode(params)?)),
             DaemonMethod::SignalList => execute(self.coordinator.list_signals(decode(params)?)),
+            DaemonMethod::HookList => {
+                let params = decode::<HookListParams>(params)?;
+                encode(self.coordinator.list_hooks(params))
+            }
+            DaemonMethod::HookReload => execute(self.coordinator.reload_hooks(decode::<
+                HookReloadParams,
+            >(
+                params
+            )?)),
+            DaemonMethod::HookDeliveryList => execute(
+                self.coordinator
+                    .list_hook_deliveries(decode::<HookDeliveryListParams>(params)?),
+            ),
             DaemonMethod::RepositoryResolve => execute(
                 self.coordinator
                     .resolve_repository(decode::<RepositoryResolveParams>(params)?),

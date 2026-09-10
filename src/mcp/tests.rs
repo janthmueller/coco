@@ -49,6 +49,11 @@ fn fake_response(method: DaemonMethod) -> Value {
         | DaemonMethod::SignalTypeList
         | DaemonMethod::SignalEmit
         | DaemonMethod::SignalList => unreachable!("signals use the dedicated process tests"),
+        DaemonMethod::HookList | DaemonMethod::HookReload => json!({
+            "hooks": [],
+            "guards": [],
+        }),
+        DaemonMethod::HookDeliveryList => json!([]),
         DaemonMethod::Health => json!({"status": "ok"}),
         DaemonMethod::ModelList => json!([]),
         DaemonMethod::RepositoryRegister => json!({

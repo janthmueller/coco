@@ -1,4 +1,5 @@
 use super::{Coordinator, CoordinatorError};
+use crate::domain::hooks::HookEventKind;
 use crate::domain::signals::{
     MAX_SIGNAL_PAGE, Signal, SignalError, SignalFilter, SignalPage, SignalType,
 };
@@ -59,20 +60,37 @@ impl Coordinator {
                 )).into());
             }
         }
-        Ok(self.store.emit_signal(Signal {
+        let signal = Signal {
             id: Uuid::now_v7().to_string(),
             sequence: 0,
-            repository_id: repository.id,
-            workspace_id: workspace.id,
-            repository_name: repository.display_name,
-            workspace_name: workspace.name,
+            repository_id: repository.id.clone(),
+            workspace_id: workspace.id.clone(),
+            repository_name: repository.display_name.clone(),
+            workspace_name: workspace.name.clone(),
             thread_id: params.thread_id,
             name: params.name,
             version: params.version,
             payload: params.payload,
             idempotency_key: params.idempotency_key,
             occurred_at_ms: 0,
-        })?)
+        };
+        let hook = self.hooks.event(
+            HookEventKind::SignalEmitted,
+            &repository,
+            &workspace,
+            serde_json::json!({
+                "signalId": signal.id,
+                "name": signal.name,
+                "version": signal.version,
+                "payload": signal.payload,
+            }),
+        );
+        let notify = hook.is_some();
+        let signal = self.store.emit_signal_with_hook(signal, hook)?;
+        if notify {
+            self.hooks.notify();
+        }
+        Ok(signal)
     }
 
     pub(crate) fn list_signals(

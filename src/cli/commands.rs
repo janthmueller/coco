@@ -61,6 +61,10 @@ async fn run_with_interaction(cli: Cli, interaction: &mut dyn Interaction) -> Re
             reject_top_level_scope(has_explicit_scope, "mcp")?;
             run_mcp(command, paths).await
         }
+        Command::Hook { command } => {
+            reject_top_level_scope(has_explicit_scope, "hook")?;
+            super::hooks::run(command, &paths).await
+        }
         Command::Repo { command } => {
             reject_top_level_scope(has_explicit_scope, "repo")?;
             run_repo(command, &paths, &cwd).await

@@ -8,6 +8,7 @@ use super::WorkerError;
 use crate::domain::WorkspacePhase;
 use crate::domain::signals::SignalError;
 use crate::git::GitError;
+use crate::hooks::{GuardRejection, HookConfigError};
 use crate::profile::ProfileError;
 use crate::store::StoreError;
 
@@ -25,6 +26,10 @@ pub(crate) enum CoordinatorError {
     Signal(#[from] SignalError),
     #[error("invalid request parameters: {0}")]
     InvalidParams(String),
+    #[error(transparent)]
+    HookConfig(#[from] HookConfigError),
+    #[error(transparent)]
+    Guard(#[from] GuardRejection),
     #[error("repository is not registered: {0}")]
     RepositoryNotRegistered(PathBuf),
     #[error("workspace already exists: {0}")]
@@ -87,6 +92,8 @@ impl CoordinatorError {
         match self {
             Self::Signal(error) | Self::Store(StoreError::Signal(error)) => error.code(),
             Self::InvalidParams(_) => "INVALID_PARAMS",
+            Self::HookConfig(_) => "HOOK_CONFIG_INVALID",
+            Self::Guard(error) => error.code(),
             Self::RepositoryNotRegistered(_) => "REPOSITORY_NOT_REGISTERED",
             Self::WorkspaceExists(_) => "WORKSPACE_EXISTS",
             Self::WorkspaceNotFound { .. } => "WORKSPACE_NOT_FOUND",
@@ -130,6 +137,14 @@ impl CoordinatorError {
             }
             Self::OperationUncertain { operation_id } => Some(json!({"operationId": operation_id})),
             Self::WorkspaceRetirementBlocked(blockers) => Some(json!({"blockers": blockers})),
+            Self::Guard(error) => {
+                let (guard_id, action, reason) = error.details();
+                Some(json!({
+                    "guardId": guard_id,
+                    "action": action.as_str(),
+                    "reason": reason,
+                }))
+            }
             _ => None,
         }
     }

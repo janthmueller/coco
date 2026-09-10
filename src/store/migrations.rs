@@ -2,15 +2,19 @@ use rusqlite::Connection;
 
 use super::StoreError;
 
+mod hooks;
 mod signals;
 
 pub(super) fn migrate(connection: &Connection) -> Result<(), StoreError> {
     let mut version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if version > 10 {
+    if version > 11 {
         return Err(StoreError::UnsupportedSchema(version));
     }
-    if version == 10 {
+    if version == 11 {
         return Ok(());
+    }
+    if version == 10 {
+        return hooks::migrate(connection);
     }
     if version == 1 {
         migrate_retired_task_goal(connection)?;
@@ -47,7 +51,8 @@ pub(super) fn migrate(connection: &Connection) -> Result<(), StoreError> {
     if version == 0 {
         create_current_schema(connection)?;
     }
-    signals::migrate(connection)
+    signals::migrate(connection)?;
+    hooks::migrate(connection)
 }
 
 #[expect(

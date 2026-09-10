@@ -10,7 +10,9 @@ use crate::domain::{
     Repository, Workspace,
 };
 
+mod hooks;
 mod signals;
+pub(crate) use hooks::*;
 pub(crate) use signals::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -41,11 +43,14 @@ pub enum DaemonMethod {
     SignalTypeList,
     SignalEmit,
     SignalList,
+    HookList,
+    HookReload,
+    HookDeliveryList,
 }
 
 impl DaemonMethod {
     #[cfg(test)]
-    pub const ALL: [Self; 26] = [
+    pub const ALL: [Self; 29] = [
         Self::Health,
         Self::ModelList,
         Self::RepositoryRegister,
@@ -72,6 +77,9 @@ impl DaemonMethod {
         Self::SignalTypeList,
         Self::SignalEmit,
         Self::SignalList,
+        Self::HookList,
+        Self::HookReload,
+        Self::HookDeliveryList,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -102,6 +110,9 @@ impl DaemonMethod {
             Self::SignalTypeList => "signal.type.list",
             Self::SignalEmit => "signal.emit",
             Self::SignalList => "signal.list",
+            Self::HookList => "hook.list",
+            Self::HookReload => "hook.reload",
+            Self::HookDeliveryList => "hook.delivery.list",
         }
     }
 
@@ -133,6 +144,9 @@ impl DaemonMethod {
             "signal.type.list" => Some(Self::SignalTypeList),
             "signal.emit" => Some(Self::SignalEmit),
             "signal.list" => Some(Self::SignalList),
+            "hook.list" => Some(Self::HookList),
+            "hook.reload" => Some(Self::HookReload),
+            "hook.delivery.list" => Some(Self::HookDeliveryList),
             _ => None,
         }
     }
@@ -799,6 +813,9 @@ mod tests {
                 "signal.type.list",
                 "signal.emit",
                 "signal.list",
+                "hook.list",
+                "hook.reload",
+                "hook.delivery.list",
             ]
         );
         for method in DaemonMethod::ALL {
@@ -812,6 +829,13 @@ mod tests {
     fn request_dtos_preserve_all_wire_field_names_and_defaults() {
         assert_request(HealthParams {}, DaemonMethod::Health, json!({}));
         assert_request(ModelListParams {}, DaemonMethod::ModelList, json!({}));
+        assert_request(HookListParams {}, DaemonMethod::HookList, json!({}));
+        assert_request(HookReloadParams {}, DaemonMethod::HookReload, json!({}));
+        assert_request(
+            HookDeliveryListParams { limit: 20 },
+            DaemonMethod::HookDeliveryList,
+            json!({"limit": 20}),
+        );
         assert_request(
             RepositoryRegisterParams {
                 path: PathBuf::from("/repo"),
@@ -1260,7 +1284,6 @@ mod tests {
             "details": {"repositoryPath": "/repo"},
             "occurredAtMs": 4,
         }));
-
         let endpoint = AppServerEndpoint {
             schema_version: 1,
             url: "ws://127.0.0.1:45123".to_owned(),
@@ -1269,6 +1292,40 @@ mod tests {
             serde_json::to_value(endpoint).unwrap(),
             json!({"schemaVersion": 1, "url": "ws://127.0.0.1:45123"})
         );
+    }
+
+    #[test]
+    fn hook_response_dtos_preserve_every_wire_field() {
+        let registry = json!({
+            "hooks": [{
+                "id": "review-notify",
+                "event": "signal.emitted",
+                "signal": "review.requested@1",
+                "timeoutSeconds": 30,
+                "maxAttempts": 3,
+            }],
+            "guards": [{
+                "id": "protect-delete",
+                "action": "workspace.delete",
+                "timeoutSeconds": 5,
+                "onError": "deny",
+            }],
+        });
+        assert_response::<HookListParams>(registry.clone());
+        assert_response::<HookReloadParams>(registry);
+        assert_response::<HookDeliveryListParams>(json!([{
+            "id": "delivery-1",
+            "eventId": "event-1",
+            "hookId": "review-notify",
+            "event": "signal.emitted",
+            "state": "succeeded",
+            "attempts": 1,
+            "createdAtMs": 1,
+            "nextAttemptAtMs": null,
+            "startedAtMs": 2,
+            "finishedAtMs": 3,
+            "lastError": null,
+        }]));
     }
 
     fn assert_attach_responses() {

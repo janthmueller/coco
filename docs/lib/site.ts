@@ -1,6 +1,7 @@
 export const site = {
   name: "CoCo",
-  description: "Run Codex workspaces side by side in separate Git worktrees.",
+  description:
+    "Start Codex work, leave it running, and return to the exact workspace.",
   repositoryUrl:
     process.env.NEXT_PUBLIC_REPOSITORY_URL ??
     "https://github.com/janthmueller/coco",

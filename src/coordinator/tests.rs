@@ -15,6 +15,7 @@ use crate::domain::{
     DecisionState, Workspace, WorkspaceAvailability, WorkspaceLifecycle, WorkspacePhase,
     WorkspaceWaitReason,
 };
+use crate::hooks::HookRegistry;
 use crate::protocol::{
     DecisionGetParams, DecisionRespondParams, DecisionSubmission, EventListParams,
     RepositoryRegisterParams, RepositoryScope, TurnResult, TurnResultParams, TurnStartParams,
@@ -30,6 +31,7 @@ mod context;
 mod creation;
 mod decisions;
 mod events;
+mod guards;
 mod jump;
 mod operations;
 mod retirement;
@@ -692,6 +694,10 @@ struct Fixture {
 
 impl Fixture {
     fn new(worker: FakeWorker) -> Self {
+        Self::new_with_hooks(worker, HookRegistry::empty())
+    }
+
+    fn new_with_hooks(worker: FakeWorker, hooks: HookRegistry) -> Self {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("source");
         run_git(
@@ -714,6 +720,7 @@ impl Fixture {
             worker.clone(),
             worktrees.clone(),
             codex_home.clone(),
+            Arc::new(hooks),
             "runtime-test".to_owned(),
         );
         Self {
@@ -797,6 +804,7 @@ impl Fixture {
             worker,
             self.worktrees.clone(),
             self.codex_home.clone(),
+            Arc::new(HookRegistry::empty()),
             runtime_generation.to_owned(),
         )
     }

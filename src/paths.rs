@@ -12,6 +12,7 @@ pub struct CocoPaths {
     pub codex_token_path: PathBuf,
     pub worktrees_dir: PathBuf,
     pub codex_home: PathBuf,
+    pub hooks_path: PathBuf,
 }
 
 #[derive(Debug, Error)]
@@ -44,6 +45,14 @@ impl CocoPaths {
             Some(path) => path,
             None => get("HOME").ok_or(PathError::MissingHome)?.join(".codex"),
         };
+        let hooks_path = get("COCO_HOOKS_PATH").unwrap_or_else(|| {
+            get("XDG_CONFIG_HOME")
+                .map(|path| path.join("coco").join("hooks.json"))
+                .or_else(|| {
+                    get("HOME").map(|path| path.join(".config").join("coco").join("hooks.json"))
+                })
+                .unwrap_or_else(|| data_dir.join("hooks.json"))
+        });
 
         Ok(Self {
             database_path: get("COCO_DATABASE_PATH").unwrap_or_else(|| data_dir.join("coco.db")),
@@ -54,6 +63,7 @@ impl CocoPaths {
                 .unwrap_or_else(|| runtime_dir.join("codex-app-server.token")),
             worktrees_dir: get("COCO_WORKTREES_DIR").unwrap_or_else(|| data_dir.join("worktrees")),
             codex_home,
+            hooks_path,
             data_dir,
         })
     }
@@ -97,6 +107,10 @@ mod tests {
         );
         assert_eq!(paths.worktrees_dir, PathBuf::from("/data/coco/worktrees"));
         assert_eq!(paths.codex_home, PathBuf::from("/home/test/.codex"));
+        assert_eq!(
+            paths.hooks_path,
+            PathBuf::from("/home/test/.config/coco/hooks.json")
+        );
     }
 
     #[test]
@@ -124,6 +138,10 @@ mod tests {
             PathBuf::from("/home/test/.local/share/coco/codex-app-server.token")
         );
         assert_eq!(paths.codex_home, PathBuf::from("/home/test/.codex"));
+        assert_eq!(
+            paths.hooks_path,
+            PathBuf::from("/home/test/.config/coco/hooks.json")
+        );
     }
 
     #[test]
@@ -137,5 +155,6 @@ mod tests {
 
         assert_eq!(paths.data_dir, PathBuf::from("/state/coco"));
         assert_eq!(paths.codex_home, PathBuf::from("/state/codex"));
+        assert_eq!(paths.hooks_path, PathBuf::from("/state/coco/hooks.json"));
     }
 }

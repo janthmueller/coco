@@ -110,7 +110,7 @@ and fork.
 
 As of 2026-09-09, the model-free test in `tests/real_codex_compat/mcp.rs`
 proves separate repository-scoped instances of the real CoCo MCP process on
-Codex 0.153.4, native start/fork/resume, and restoration through CoCo's named
+Codex 0.154.0, native start/fork/resume, and restoration through CoCo's named
 execution profiles. It also verifies native `_meta.threadId` attribution for
 [agent signals](signals.md), including a CoCo context fork. This is evidence for
 the small control-MCP signal entry, not implementation or exhaustive proof of

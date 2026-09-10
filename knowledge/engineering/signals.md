@@ -12,8 +12,10 @@ status: stable
 
 A signal is an explicit agent claim with a JSON payload, not a Codex state,
 an approval, a ticket transition, or a command. CoCo stores and exposes the
-claim; an external consumer decides what it means. No emission wakes another
-model, creates a turn, runs a hook, or authorizes a side effect.
+claim; an external consumer decides what it means. Emission itself never wakes
+another model, creates a turn, changes workspace state, or authorizes a side
+effect. An operator may separately configure a
+[post-event CoCo hook](hooks.md) that reacts after an accepted signal commits.
 
 ## Contract
 
@@ -44,7 +46,7 @@ model, creates a turn, runs a hook, or authorizes a side effect.
   tool and no permission inferred from a payload or prompt.
 - `signals.emit` takes name, version, payload, and a required idempotency key.
   Sender workspace/thread, record ID, sequence, and time are not tool arguments.
-  Codex 0.153.4 already attaches `_meta.threadId` to both model MCP calls and
+  Codex 0.154.0 attaches `_meta.threadId` to both model MCP calls and
   native `mcpServer/tool/call`; CoCo resolves that ID to an existing bound
   workspace and verifies repository and availability. Missing/unbound/cross-repo
   origin fails closed. No exact native turn ID is inferred from current status.
@@ -120,19 +122,25 @@ CLI follow drains pages and polls until interrupted. JSON follow emits one
 page per line, including the resumable cursor; it does not stream Codex chat
 messages. Reconnect/restart resumes with the saved cursor. Delivery is replayable,
 not a promise of exactly-once external effects; consumers deduplicate by record ID.
+Reader cursors and signal record IDs are independent of CoCo hook event and
+delivery IDs. A signal hook uses its hook event ID for external idempotency;
+replaying the signal list does not enqueue another hook delivery.
 
 ## Evidence and next boundaries
 
 The combined process scenario covers two repositories with identical names,
 real CLI and MCP clients, opted-in continuation, decisions, exact remote attach,
 restart, and operation retry. Its worker is deliberately fake. A separate
-model-free test against installed `codex-cli 0.153.4` proves independent MCP
+model-free test against installed `codex-cli 0.154.0` proves independent MCP
 configuration under native start/fork/resume and calls the real CoCo MCP process.
 It verifies native metadata overriding a supplied incorrect thread claim,
 actual accepted emissions, scoped reads, original-record retry after restart,
 named-profile restoration through CoCo, rejection of an unbound native fork,
-and correct sender identity for a separate CoCo context fork.
-Neither proves model behavior, automated consumers, or a public-release gate.
+and correct sender identity for a separate CoCo context fork. Process coverage
+also proves that a newly accepted signal and its matching hook delivery commit
+once across an idempotent signal retry. A separate real-process 0.154.0 probe
+verifies the native Codex hook boundary through App Server. These tests do not
+prove model behavior, a real external integration, or a public-release gate.
 
 Source audit: matching local upstream tag `rust-v0.153.4`,
 `core/src/mcp_tool_call.rs::with_mcp_tool_call_ids_meta` and

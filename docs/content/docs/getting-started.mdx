@@ -1,10 +1,11 @@
 ---
 title: Quickstart
-description: Create, start, follow, and enter your first separate Codex workspace.
+description: Start Codex work, leave the command, follow its state, and return through the native UI.
 ---
 
-This walkthrough starts one Codex turn in a separate Git worktree and then
-opens the same conversation in the Codex terminal UI.
+This walkthrough starts one Codex turn, leaves it under CoCo's control, follows
+its state from another command, and then opens the same conversation in the
+Codex terminal UI.
 
 Before continuing, [install CoCo](../installation/) and keep `cocod` running in
 another terminal.
@@ -34,13 +35,13 @@ or model turn exists yet.
 
 ```bash
 coco send feat/first \
-  "Inspect this project and propose one focused improvement" \
-  --wait
+  "Inspect this project and propose one focused improvement"
 ```
 
-This creates the persistent Codex thread, starts its first real turn, waits for
-that exact turn, and prints its final response. Omit `--wait` when you want the
-command to return as soon as Codex accepts the turn.
+This creates the persistent Codex thread and starts its first real turn. The
+command returns as soon as Codex accepts the work; `cocod` keeps the workspace
+available while the turn continues. Add `--wait` to the command when you want
+to stay attached and print that turn's final response instead.
 
 You can also create and send in one command:
 
@@ -65,8 +66,8 @@ coco status feat/first --follow
 
 The follow command keeps the current state visible as it changes, including
 when the workspace becomes ready, needs your input, or reports a problem. It
-never prints conversation messages. Press `Ctrl+C` to stop following; the Codex
-turn continues.
+never prints conversation messages. Press `Ctrl+C` to stop following; a Codex
+turn does not stop with the display.
 
 When CoCo supports the request Codex is waiting on, `status` prints a decision
 ID and the next command:

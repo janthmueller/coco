@@ -50,11 +50,16 @@ ticket-specific reason for issuing them.
 Agent-emitted signals and later agent-to-agent communication fit this boundary
 as domain-neutral capabilities. Ticket-specific signal definitions and
 reactions belong to an integration's configuration or implementation, not
-hard-coded CoCo lifecycle rules. The first signal path is now implemented with
-operator-selected JSON Schema 2020-12 files and immutable versions, opt-in publication, native sender mapping,
-validation, retention, and independent reads; see the
-[signal contract](../engineering/signals.md). Hooks, external reference fields,
-and peer-response routing remain separate, unimplemented capabilities.
+hard-coded CoCo lifecycle rules. The first signal path is implemented with
+operator-selected JSON Schema 2020-12 files and immutable versions, opt-in
+publication, native sender mapping, validation, retention, and independent
+reads; see the [signal contract](../engineering/signals.md). The first CoCo
+hook path adds trusted local command reactions to accepted signals and
+committed workspace transitions without interpreting their business meaning.
+Separate synchronous guards may allow or deny a fully checked workspace close
+or deletion before its first effect; see the
+[hook contract](../engineering/hooks.md). External reference fields and
+peer-response routing remain separate, unimplemented capabilities.
 
 ## Evidence and decision classification
 
@@ -63,7 +68,7 @@ and peer-response routing remain separate, unimplemented capabilities.
 - At the specification baseline on 2026-09-05, the repository had no commit
   and no implementation files; it contained the handoff and documentation
   foundation only.
-- The locally installed `codex-cli 0.153.4` is the selected compatibility
+- The locally installed `codex-cli 0.154.0` is the selected compatibility
   baseline. Its model-free real-process test passes preparation, exact native
   materialization/adoption, inherited-context fork, history reads, daemon
   restart, and exact resume.
@@ -74,9 +79,10 @@ and peer-response routing remain separate, unimplemented capabilities.
 - That observed protocol is version-specific. Narrow consumed fields and the
   real behavior test are authoritative; generated schemas remain an upgrade
   review aid and additive schema drift alone is not a compatibility failure.
-- Schema v9 retains schema v6's minimal turn-start operation ledger, schema
+- Schema v11 retains schema v6's minimal turn-start operation ledger, schema
   v7's typed worktree binding, and schema v8/v9's recoverable workspace
-  retirement state and deletion intent. It also retains the old
+  retirement state and deletion intent. Schema v10 adds bounded signals and
+  schema v11 adds the narrow durable hook outbox. It also retains the old
   native-status columns, local turns, normalized events, completed messages,
   MCP audit events, and decisions as a reversible compatibility bridge. The
   retained shapes are not evidence of long-term CoCo ownership.
@@ -92,17 +98,23 @@ and peer-response routing remain separate, unimplemented capabilities.
   start/completion events. It retains only operation dispatch/idempotency
   facts, provisioning evidence, and MCP audit records until their separate
   removal gates pass.
-- Codex 0.153.4 does not make a fresh persistent thread resumable merely because
+- Codex 0.153.4 first established, and the 0.154.0 gate confirms, that a fresh
+  persistent thread is not resumable merely because
   `thread/start` returned an ID. CoCo therefore prepares only Git state, binds
   the first fresh `send` together with its accepted native turn, and adopts a
   fresh-TUI thread only after exact `thread/read` exposes a non-empty rollout.
   The real-process test proves that an empty candidate remains unbound and the
   materialized exact ID survives fresh daemon and App Server processes.
-- The model-free 0.153.4 compatibility path also passes native context-fork
+- The model-free 0.154.0 compatibility path also passes native context-fork
   cleanup, reversible worktree close with native thread archive, exact
   worktree/thread reopen, and explicit native-thread plus CoCo-created-branch
   deletion. Exact `thread/read` is used for archived-state inspection because
   default `thread/list` source filtering omits App-Server-origin threads.
+- Codex 0.154.0 also exposes its own command/MCP lifecycle hooks. A direct
+  App Server proof confirms that a configured `SessionStart` hook runs at the
+  first ordinary turn, not merely at `thread/start`. CoCo leaves prompt, tool,
+  permission, compaction, subagent, stop, interrupt, and session policy with
+  that native facility; its own hooks cover only durable CoCo-owned facts.
 - The 2026-09-07 review of the official
   [App Server](https://developers.openai.com/codex/app-server) and
   [Codex SDK](https://developers.openai.com/codex/sdk) documentation found no
@@ -213,7 +225,7 @@ and peer-response routing remain separate, unimplemented capabilities.
   `coco decide` operation; CoCo never auto-approves them. Their bounded prompt,
   private native correlation, choices, and state live only in the daemon
   generation that owns the App Server request. They are not written to the
-  schema-v9 retained legacy decision table, and raw answers are never retained.
+  schema-v11 retained legacy decision table, and raw answers are never retained.
 - v0 has no publicly reachable network listener. Its App Server endpoint is
   capability-token protected and bound only to `127.0.0.1`.
 - Worktrees may use a new branch, an existing local branch, or detached HEAD.
@@ -236,7 +248,7 @@ release:
 - v0 uses the App Server's base Codex configuration by default, represented by
   an empty per-thread overlay. A non-default `--profile <name>` loads the
   complete `$CODEX_HOME/<name>.config.toml` document as that thread's overlay.
-  Schema v9 retains its name, source path, parsed-configuration hash, explicit
+  Schema v11 retains its name, source path, parsed-configuration hash, explicit
   model override, and non-secret effective settings, never the complete
   overlay. The native-first target keeps only the request provenance proven
   necessary to verify resume. Profile CRUD is not part of v0. Future MCP
@@ -331,7 +343,7 @@ A stable CoCo work unit identified independently of the Codex thread. A
 workspace owns exactly one repository binding, worktree mode, optional branch,
 base SHA, worktree path,
 context descriptor, minimal execution-request provenance, and Codex thread
-binding. Schema v9 currently exposes a broader redacted profile snapshot. In v0
+binding. Schema v11 currently exposes a broader redacted profile snapshot. In v0
 a workspace acquires at most one Codex thread. Its first instruction belongs to
 a turn, not to workspace creation.
 
@@ -456,6 +468,10 @@ coco diff [<workspace>] --global
 coco [<repository-path>] signal (list | ls) [<workspace>] [--follow] [--json]
 coco signal (list | ls) --all-repos [--follow] [--json]
 coco signal (list | ls) <workspace> --global [--follow] [--json]
+coco hook (list | ls) [--json]
+coco hook validate [--json]
+coco hook reload [--json]
+coco hook (history | deliveries) [--limit <number>] [--json]
 coco mcp serve --repository <path> [--allow-send] [--signal-catalog <directory>] [--allow-emit <signal>]...
 ```
 
@@ -487,6 +503,15 @@ only its optional `--json` output flag. `decide` accepts the globally unique
 opaque CoCo decision ID printed by `status` and an optional deterministic
 approval-choice number; a leading repository path or either scope flag is an
 error.
+
+All `hook` commands reject a leading repository path or repository-scope flag.
+`hook validate` checks the complete configured file offline without executing
+commands. `hook reload` asks the running daemon to validate a new complete
+snapshot and swap it atomically; an invalid replacement leaves the current
+snapshot active. `hook list`/`hook ls` show the active reactions and guards
+without exposing command arguments. `hook history`/`hook deliveries` return
+the newest 1–100 post-event delivery summaries without event payloads; they do
+not include synchronous guard checks and are not a manual replay API.
 
 Human terminal commands share one interactive input contract. `create` may
 prompt for a missing name and, when implicit `.` cannot select a registered
@@ -776,7 +801,7 @@ ID must not create duplicate artifacts.
   App Server generation, thread, and native request ID. Never retry a submitted
   or orphaned response against a replacement process.
 - Persist no raw user-input answer. The App Server response necessarily carries
-  it in memory. Schema v9 retains old schema-v6 answer-free submission rows only as
+  it in memory. Schema v11 retains old schema-v6 answer-free submission rows only as
   migration data; all current live correlation is generation-local.
 
 ### `coco diff`
@@ -895,7 +920,7 @@ The public workspace projection contains CoCo's provisioning/binding
 `lifecycle`, a native `threadRuntime` projection, a derived `phase`, zero or
 more `waitReasons`, and a separate Git projection. `threadRuntime.status`
 retains Codex's native status, `runtimeGeneration`, `observedAtMs`, and
-`isFresh`. Schema v9 retains old schema-v6 snapshots only as migration data and can mark
+`isFresh`. Schema v11 retains old schema-v6 snapshots only as migration data and can mark
 them stale on process loss; thread start, resume, and notifications never
 write a new snapshot. An unbound ready workspace projects `prepared` without a
 native read. Bound ready-workspace reads obtain a fresh projection directly
@@ -948,7 +973,7 @@ the handoff does not define.
 
 ## Current normalized-event compatibility surface
 
-Schema v9 can still decode the complete prerelease event vocabulary, including
+Schema v11 can still decode the complete prerelease event vocabulary, including
 rows created by older CoCo builds. The current runtime writes only this reduced
 subset:
 
@@ -973,8 +998,9 @@ status, while `send --wait` correlates completion and a bounded final response
 generation-locally without writing conversation text to SQLite. Retain
 CoCo-owned provisioning/context events that serve an implemented consumer.
 Remove the now-unconsumed `event.list` compatibility method only through a
-versioned daemon-protocol change. A future hooks feature must define a narrow
-transactional outbox rather than revive full native event mirroring.
+versioned daemon-protocol change. Schema v11's hook tables are a separate,
+narrow transactional outbox for matching CoCo-owned events; they do not revive
+full native event mirroring.
 
 ## Safety and lifecycle behavior
 
@@ -987,6 +1013,11 @@ transactional outbox rather than revive full native event mirroring.
 - The CoCo MCP server uses local stdio, is read-only unless the operator starts
   it with send or per-signal publication capabilities, and never bypasses daemon authorization or
   validation.
+- CoCo hook and guard commands are trusted operator programs, invoked directly
+  without a shell. They receive a restricted environment and bounded JSON
+  input, but remain same-user code rather than a security sandbox. A hook runs
+  after its source fact and cannot change it; a guard runs before a supported
+  destructive action and can only allow or deny that exact checked request.
 - Supported correlated server requests become generation-bound decisions and
   are never auto-approved. The daemon registers them in memory, performs a
   lock-protected pending-to-submitted transition before the native response,
@@ -1009,7 +1040,7 @@ transactional outbox rather than revive full native event mirroring.
   Explicit branch deletion uses `git branch -D` only for a branch CoCo created
   and only while its tip still equals the close-time `HEAD`.
 - Workspace bindings, provisioning failures, and idempotent operation evidence
-  survive daemon or App Server restarts. Schema v9 fails unfinished workspace
+  survive daemon or App Server restarts. Schema v11 fails unfinished workspace
   preparation and marks a turn-start dispatch without a proven response
   `uncertain`; it never retries that operation automatically. Live decision IDs
   deliberately disappear with the daemon generation because the corresponding
@@ -1115,7 +1146,7 @@ The following are intentionally outside v0:
 - Fake App Server process tests exercise Git-only preparation, atomic first
   send, native fork/compaction, event correlation, one-use fresh-TUI relay,
   exact adoption, detach, and completion/failure. A separate opt-in real Codex
-  compatibility test consumes no model turn: it checks 0.153.4, proves an empty
+  compatibility test consumes no model turn: it checks 0.154.0, proves an empty
   remote candidate remains unbound, materializes one exact candidate with a
   native shell action, then verifies history and exact resume through fresh
   daemon and App Server processes. Generated-schema drift is reviewed
@@ -1171,6 +1202,37 @@ The following are intentionally outside v0:
   running workspace.
 - No A2A or integration tool is advertised in v0.
 
+### Hooks
+
+- Daemon startup accepts an absent hook file as no configuration and rejects an
+  invalid, oversized, symlinked, group/world-writable, or unsupported-version
+  configuration before serving clients. Offline validation and atomic reload
+  apply the same checks; failed reload preserves the active snapshot. The
+  daemon does not watch the file, and command arguments are absent from CLI
+  output.
+- A new accepted signal and each successful final workspace create, close,
+  reopen, or delete transition atomically commit any matching hook event and
+  delivery rows. An idempotent signal retry creates no second delivery, and a
+  failed hook cannot roll back the source fact.
+- Command hooks run without a shell, with bounded input, time, attempts, and
+  concurrency and with the inherited environment cleared except for `PATH`.
+  One hook ID observes commit order and blocks its own newer deliveries during
+  a retry, while different hook IDs may execute concurrently.
+  Interrupted running deliveries become pending after restart; a missing or
+  changed exact hook definition cancels its old queued delivery rather than
+  executing different code under the same ID.
+- `workspace.close` and `workspace.delete` guards run after CoCo has resolved
+  and checked the exact retirement plan but before the stored saga or an
+  external effect begins. Matching guards run once in stable ID order, stop at
+  the first denial, never rewrite or retry a request, and use their required
+  `onError` policy for execution failures. Dry-runs do not execute guards;
+  recovery of an already started saga does not rerun them.
+- Process tests prove offline validation, atomic reload preservation,
+  signal-filtered and workspace lifecycle delivery, guard request placement,
+  and terminal delivery history. An isolated model-free test against the
+  selected Codex executable proves native `SessionStart` execution through App
+  Server so CoCo does not duplicate the native lifecycle-hook layer.
+
 ### Safety
 
 - Filesystem permission tests prove normal writes outside allowed roots are
@@ -1200,7 +1262,7 @@ The following are intentionally outside v0:
   read failure, restart, final-output selection, and binding mismatches before
   any table or existing record is removed. The initial direct read cutover is
   acceptable without a prolonged shadow-only checkpoint because the original
-  0.147.0 proof and current 0.153.4 real-process gate prove non-loading reads,
+  0.147.0 proof and current 0.154.0 real-process gate prove non-loading reads,
   restart persistence, exact ID/`cwd`, and optional history hydration. Eager recovery
   status/failure writes stop with that obsolete startup path. The later live-
   event reduction also stops user-message, native status/plan/diff/error,
@@ -1243,7 +1305,7 @@ approval model. CoCo neither supplies a separate Git database nor adds a
 custom commit proxy. A later app-side commit action may be useful UI
 convenience, but it is not part of the isolation contract.
 
-Codex 0.153.4 is now the selected and proven compatibility baseline;
+Codex 0.154.0 is now the selected and proven compatibility baseline;
 maintaining a broader range is optional rather than an alpha blocker. The
 remaining release gate is the two-repository, multi-client product proof.
 Windows support, profile configuration UX, and a future explicit

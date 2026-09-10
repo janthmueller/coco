@@ -13,6 +13,8 @@ async fn cli_closes_reopens_and_deletes_a_prepared_workspace_safely() -> Result<
     prepare_repository(&repository)?;
     prepare_codex_profile(&paths)?;
     write_fake_codex(&paths.fake_codex)?;
+    super::hooks::prepare(&paths)?;
+    super::hooks::verify_offline_validation(&paths, &repository).await?;
 
     let mut daemon = spawn_daemon(&paths, &daemon_log)?;
     wait_for_file(&paths.codex_args, &mut daemon, &daemon_log).await?;
@@ -84,6 +86,7 @@ async fn cli_closes_reopens_and_deletes_a_prepared_workspace_safely() -> Result<
     let after = cli_json(&run_cli(&paths, &repository, &["list", "--closed", "--json"]).await?)?;
     assert_eq!(after["workspaces"].as_array().map(Vec::len), Some(0));
     assert_branch_missing(&repository, &branch).await?;
+    verify_retirement_hooks(&paths, &repository).await?;
 
     interrupt(&daemon).await?;
     let daemon_status = timeout(PROCESS_TIMEOUT, daemon.wait()).await??;
@@ -95,6 +98,48 @@ async fn cli_closes_reopens_and_deletes_a_prepared_workspace_safely() -> Result<
             .expect("authorization mutex was poisoned")
             .is_empty(),
         "daemon did not authenticate to the App Server"
+    );
+    Ok(())
+}
+
+async fn verify_retirement_hooks(paths: &TestPaths, repository: &Path) -> Result<()> {
+    let hook_events = super::hooks::wait_for_kinds(
+        paths,
+        &[
+            ("workspace.created", 1),
+            ("workspace.closed", 2),
+            ("workspace.reopened", 1),
+            ("workspace.deleted", 1),
+        ],
+    )
+    .await?;
+    ensure!(
+        hook_events
+            .iter()
+            .any(|event| event["kind"] == "workspace.deleted"
+                && event["workspace"]["name"] == RETIREMENT_WORKSPACE),
+        "delete hook did not retain the deleted workspace identity"
+    );
+    super::hooks::verify_history(paths, repository, 5).await?;
+    let guards = super::hooks::captured_guards(paths)?;
+    let close_count = guards
+        .iter()
+        .filter(|request| request["action"] == "workspace.close")
+        .count();
+    let delete_count = guards
+        .iter()
+        .filter(|request| request["action"] == "workspace.delete")
+        .count();
+    ensure!(
+        close_count == 2 && delete_count == 1,
+        "guards did not run exactly once for applied operations: {guards:?}"
+    );
+    ensure!(
+        guards.iter().all(|request| request["schemaVersion"] == 1
+            && request["workspace"]["name"] == RETIREMENT_WORKSPACE
+            && request["repository"]["path"].is_string()
+            && request["data"]["plan"]["workspaceId"].is_string()),
+        "guard request envelope was incomplete: {guards:?}"
     );
     Ok(())
 }

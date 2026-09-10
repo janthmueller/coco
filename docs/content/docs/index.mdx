@@ -1,77 +1,84 @@
 ---
 title: CoCo
-description: Coordinate parallel Codex work without losing the thread—or mixing the files.
+description: Start Codex work, leave it running, and return to the exact workspace.
 ---
 
-CoCo stands for **Codex Coordinator**. It keeps parallel Codex conversations
-attached to the Git checkout and settings where each piece of work belongs.
+CoCo stands for **Codex Coordinator**. It is a local control plane that gives
+each piece of Codex work a durable name and keeps its conversation, Git
+worktree, repository, and settings together.
 
-Use it when you want to leave one piece of Codex work running, move to
-something else, and return later without guessing which conversation changed
-which files.
+The workspace remains addressable after the CLI command or Codex terminal UI
+that started it exits. You can inspect it from another terminal, answer a
+request, send more work when it is ready, or reopen the same conversation in
+the native Codex UI.
 
-## What CoCo does
+## When CoCo helps
 
-CoCo adds durable, named workspaces around Codex. It can:
+Use CoCo when you want to:
 
-- prepare several separate pieces of work before starting any model turns;
-- start Codex work, wait for its response, and follow its state from short
-  terminal commands;
-- surface approvals and questions that need your answer;
-- reopen the same conversation in the Codex terminal UI;
-- close and later restore a workspace without deleting its branch or thread;
-- retire a closed workspace with separate choices for its branch and thread;
-- and find workspaces across several registered repositories.
+- run several separate pieces of Codex work across one or more repositories;
+- start work from a short-lived command and supervise it separately;
+- move between CLI commands, an MCP client, and the native Codex terminal UI
+  without losing the exact conversation or checkout;
+- prepare code and conversation context independently; or
+- free a worktree and later restore it without losing the workspace;
+- let an agent publish a validated update and react with a trusted local
+  command.
 
-Codex still performs the actual reasoning, tool calls, and file changes, and
-raises approval requests for you to decide. CoCo keeps their surrounding
-context together.
+CoCo does not replace Codex. Codex still reasons, calls tools, requests
+approval, and edits files. CoCo coordinates the environment around that work
+and keeps it reachable.
 
-## What is a workspace?
-
-A workspace is one unit of Codex work. It contains:
-
-- a registered repository;
-- a separate Git worktree, normally on a `coco/<name>` branch;
-- one persistent Codex thread after work begins; and
-- its selected model and Codex profile.
-
-The code base, conversation context, and Git branch binding are separate
-choices. A workspace can start from another commit, inherit an existing Codex
-conversation, use an existing branch, or run detached without coupling those
-decisions.
-
-The worktree prevents changes from being mixed into your current checkout.
-The first `send` or interactive `jump` creates the thread. After that, `send`,
-`status`, and `jump` all continue the same conversation instead of starting
-unrelated sessions.
-
-## How the workflow fits together
+## The core workflow
 
 | You want to…                                 | Use…                          |
 | -------------------------------------------- | ----------------------------- |
-| Prepare work in a separate checkout          | `coco create`                 |
+| Prepare a separate workspace                 | `coco create`                 |
 | Start or continue a Codex turn               | `coco send`                   |
-| Check once or follow live activity           | `coco status`                 |
-| Answer an approval or question               | `coco decide`                 |
-| Enter the existing Codex terminal UI         | `coco jump`                   |
-| Review tracked changes and untracked paths   | `coco diff`                   |
-| Free a worktree without losing its workspace | `coco close`                  |
+| Check once or follow live state              | `coco status`                 |
+| Answer a supported approval or question      | `coco decide`                 |
+| Enter the same conversation in the Codex TUI | `coco jump`                   |
+| Review changes from the workspace base       | `coco diff`                   |
+| Free a worktree without losing the workspace | `coco close`                  |
 | Restore or permanently retire closed work    | `coco reopen` / `coco delete` |
 
-The `coco` command normally exits after each operation. Add `--wait` to `send`
-to print that turn's final response. Keep `cocod` running while you use CoCo so
-ongoing work remains available to later commands. `status` reports state only;
-leaving `status --follow` or the terminal UI does not by itself cancel an
-active turn.
+`coco` commands normally exit after returning their result. `cocod` stays
+running and owns the active Codex process, so leaving `send`, `status
+--follow`, or a TUI opened by `jump` does not by itself cancel a turn. Add
+`--wait` to `send` only when that command should remain attached and print the
+final response.
 
-For automation, `coco-mcp` can expose a repository-scoped view of the same
-workspaces to an MCP host. Its default tools are read-only.
+## What a workspace keeps together
+
+A workspace has:
+
+- one registered Git repository and a separate worktree;
+- one persistent Codex thread after work begins;
+- the model and Codex profile selected for that thread; and
+- a fixed Git base plus the chosen conversation context.
+
+The code base and conversation context are independent choices. You can start
+from clean code on `main` while inheriting an investigation from another CoCo
+workspace or an exact Codex thread ID. By default, CoCo starts fresh and
+creates a `coco/<workspace>` branch.
+
+A workspace is an execution environment, not a ticket. CoCo does not decide
+what should be worked on or treat a finished turn as completed project work.
+
+## More than one terminal
+
+The `coco` CLI is the main control surface. A local MCP server can expose the
+same repository-scoped workspaces to another application; inspection is
+read-only unless you explicitly enable sending. Agents can also publish
+explicitly enabled structured signals for humans or integrations to read
+later. CoCo hooks can run a local command after a matching saved signal or
+workspace lifecycle change, while guards can stop a checked close or deletion.
 
 <Callout type="warn" title="Alpha software">
-  CoCo is intended for supervised local use on Linux and macOS. Read the
-  [troubleshooting and limitations](/docs/reference/current-limitations) before
-  relying on it for important or unattended work.
+  CoCo is intended for supervised local use on Linux and macOS. Keep `cocod`
+  running while a turn is active and read the [troubleshooting and
+  limitations](/docs/reference/current-limitations) before relying on it for
+  important work.
 </Callout>
 
 ## Next steps
@@ -79,22 +86,27 @@ workspaces to an MCP host. Its default tools are read-only.
 <Cards>
   <Card
     title="Install CoCo"
-    description="Choose Cargo or Nix and verify the three commands."
+    description="Install with Cargo or Nix and start the coordinator."
     href="/docs/installation"
   />
   <Card
     title="Run the quickstart"
-    description="Create, start, follow, and enter your first workspace."
+    description="Start work, leave the command, follow state, and return through the Codex UI."
     href="/docs/getting-started"
   />
   <Card
     title="Work with workspaces"
-    description="Learn the full create, status, decide, jump, diff, and fork flow."
+    description="Choose code, context, branches, models, and a safe lifecycle."
     href="/docs/guides/workspaces"
   />
   <Card
-    title="Choose a model or profile"
-    description="Select a model or apply reusable Codex settings."
-    href="/docs/guides/execution-profiles"
+    title="Connect through MCP"
+    description="Let another local application inspect or continue the same workspaces."
+    href="/docs/guides/mcp"
+  />
+  <Card
+    title="React to agent signals"
+    description="Publish validated updates and run trusted local reactions after they are saved."
+    href="/docs/guides/hooks"
   />
 </Cards>

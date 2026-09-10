@@ -6,7 +6,9 @@ description: Let a Codex workspace report structured updates and follow them fro
 A **signal** is a short, structured update from an agent, such as “this change
 is ready for review.” CoCo saves the update so you or another application can
 read it later. It does not automatically start work, change a workspace's
-state, or mark anything complete.
+state, or mark anything complete. You can separately configure a
+[CoCo hook](../hooks/) to run a trusted local command after a matching signal
+is accepted.
 
 ## Define a signal
 
@@ -152,6 +154,14 @@ Continue reading while `hasMore` is true. JSON follow emits one page per line;
 unchanged pages are not repeated. After a disconnect, run the command again
 with the saved cursor. Consumers should recognize repeated records by their
 `id` before performing an external action.
+
+## React to a signal
+
+Reading and reacting are separate. A signal remains available to every reader
+whether or not a hook is configured. To run a local command after
+`review.requested@1` is accepted, add a `signal.emitted` hook with that exact
+signal filter. See [Run reactions with hooks](../hooks/) for the configuration,
+delivery guarantees, and security boundary.
 
 ## Retention and privacy
 

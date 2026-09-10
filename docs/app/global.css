@@ -246,7 +246,7 @@ html > body[data-scroll-locked] {
 
 .coco-feature-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0;
   margin-top: 2.6rem;
   border-block: 1px solid var(--color-fd-border);
@@ -402,6 +402,10 @@ html > body[data-scroll-locked] {
 
   .coco-feature-card:nth-child(2) {
     border-right: 0;
+  }
+
+  .coco-feature-card:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--color-fd-border);
   }
 
   .coco-flow-node:nth-child(2)::after {

@@ -4,6 +4,7 @@ mod coordinator;
 mod daemon;
 mod domain;
 mod git;
+mod hooks;
 mod mcp;
 mod paths;
 mod profile;
