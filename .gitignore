@@ -6,6 +6,7 @@
 /docs/node_modules/
 /docs/out/
 /docs/*.tsbuildinfo
+/schema/
 /.playwright-mcp/
 /nuqs-limits-reference.png
 

@@ -1044,9 +1044,9 @@ that authority.
 
 ### Protocol compatibility boundary
 
-Generated App Server schemas are an upgrade-review aid, not a production input
-or a byte-for-byte compatibility gate. To inspect a candidate Codex release,
-run:
+Generated App Server schemas are an untracked, disposable upgrade-review aid,
+not a production input or a byte-for-byte compatibility gate. To inspect a
+candidate Codex release, run:
 
 ```bash
 codex app-server generate-json-schema --experimental --out ./schema/codex-app-server
@@ -1065,9 +1065,10 @@ documentation page, an upstream merge, or byte-for-byte equality of an
 additive generated schema is not release evidence. A broader compatibility
 range remains optional; every claimed version needs the same behavioral gate.
 
-The committed bundle includes experimental fields so CoCo can audit the
-remote-attachment surface it depends on. The daemon client advertises
-`experimentalApi` because inherited-context preparation requires
+The generated bundle includes experimental fields so CoCo can audit the
+remote-attachment surface it depends on without retaining an upstream schema
+snapshot in this repository. The daemon client advertises `experimentalApi`
+because inherited-context preparation requires
 `thread/fork.deferGoalContinuation`; this preserves CoCo's create-without-start
 contract instead of letting Codex continue the inherited goal immediately.
 Experimental fields remain opt-in by necessity rather than convenience. In

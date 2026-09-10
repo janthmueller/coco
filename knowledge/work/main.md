@@ -3384,25 +3384,74 @@ Verification:
 - Root `README.md` separately passes Prettier and `git diff --check` reports no
   whitespace errors.
 
+## Public alpha activation and repository cleanup — 2026-09-10
+
+Status: GitHub publication switches activated at the user's explicit request;
+the local cleanup is complete and authorized for the public-alpha commit and
+push.
+
+Scope and findings:
+
+- A locked `cargo publish --dry-run` against crates.io packaged 117 files
+  (1.3 MiB, 247.8 KiB compressed), compiled the packaged crate successfully,
+  and stopped before upload. The public crates.io API reports that
+  `codex-coordinator` does not yet exist.
+- GitHub still reports `janthmueller/coco` as private. Pages now exists with
+  `build_type=workflow`, HTTPS enforcement, and the intended
+  `https://janthmueller.github.io/coco/` URL. The Documentation workflow was
+  re-enabled. No deployment was dispatched from the older remote revision.
+- The `crates.io` environment contains the named `CARGO_REGISTRY_TOKEN`, and
+  the repository variable `COCO_RELEASE_ENABLED` was changed from `false` to
+  `true`. No release or push was started in this slice.
+- Remote Actions history is empty and local `main` remains three commits ahead
+  of `origin/main`; therefore the current candidate has no hosted CI result or
+  Pages artifact until it is pushed.
+- `schema/` contained 361 generated experimental Codex App Server files
+  totaling 4.4 MiB. No Rust code, build, test, package, or workflow consumes
+  them; the narrow hand-owned adapter and real-process compatibility suite are
+  authoritative. The tracked snapshot was removed, `/schema/` is now ignored,
+  and the architecture record says to generate a disposable local snapshot
+  only for an upgrade review.
+- Root `handoff.md` was removed before publication because it still specified
+  TypeScript, task/new vocabulary, and the superseded original architecture.
+  Its durable decisions already live in current canonical knowledge.
+
+Verification:
+
+- `cargo package --locked --list` succeeds and contains only the declared
+  crate inputs.
+- `cargo publish --dry-run --locked` completes packaging and verification.
+- Both staged and unstaged `git diff --check` pass after schema removal.
+- A repository-wide reference scan finds no live consumer of the removed
+  schema snapshot; the remaining canonical reference is its on-demand
+  generation command, plus an accurate historical entry in this log.
+- Gitleaks 8.30.1 reports no leaks across all 48 commits and approximately
+  7.46 MB of Git history. A separate directory scan of the exact next-commit
+  file set, including the unstaged documentation changes and staged schema
+  removal, also reports no leaks across approximately 2.30 MB.
+- No current or historical path resembles a tracked environment file,
+  credential, private key, database, or local authentication file. Historical
+  filename matches for `Token` are generated App Server protocol type names,
+  not credential material. The ignored browser, build, and Nix artifacts are
+  absent from Git.
+
 ## Open questions and handoff
 
-- The `janthmueller/coco` repository and protected `crates.io` environment
-  exist, but the repository is private again, its Pages site is deleted, and
-  the Documentation workflow is disabled server-side at the user's direction.
-  The credential name is present without exposing its value, file permissions
-  were narrowed before transfer, and `COCO_RELEASE_ENABLED` remains false.
-  Repository, documentation, and crate publication each require a new explicit
-  user decision after the product-boundary review.
-- Before enabling automatic releases, make the successful Documentation run
-  for the exact candidate SHA an automated release prerequisite as well as the
-  existing Rust run. For the first manual alpha, inspect both hosted results
-  and complete a `publish=false` rehearsal before requesting publication.
-- Crates.io publication is paused. The upstream comparison shows that managed
-  worktree creation and TUI launch are no longer a defensible product boundary.
-  The user selected the narrower headless multi-repository control-plane
-  direction; finish the native-first reduction and its behavioral proof, then
-  test the first Codex release containing PRs 42652, 43069, and 43120 before
-  revising public positioning or publishing an alpha.
+- The `janthmueller/coco` repository remains private, but its Pages site and
+  Documentation workflow are enabled again. The credential name is present
+  without exposing its value, and `COCO_RELEASE_ENABLED` is now true at the
+  user's explicit direction. The next qualifying successful Rust run on a
+  current `main` push can therefore publish an alpha automatically.
+- The release workflow still requires the Rust result for the exact candidate
+  SHA but not the separate Documentation result. With automatic release now
+  enabled, a successful Rust run can publish while Documentation is still
+  running or has failed. Close this gate gap if documentation success must be
+  mechanically required rather than checked operationally.
+- The earlier crates.io pause is resolved: the narrower headless,
+  multi-repository control-plane direction, native-first reduction, dedicated
+  workspace runtime, and released-Codex behavioral proof are complete. The
+  user has reauthorized automatic alpha publication; repository visibility
+  remains private until a separate explicit visibility change.
 - The user withdrew the follow-up issue search and upstream-comment idea after
   the private checkpoint was completed. Do not pursue or post either unless
   explicitly requested again.
