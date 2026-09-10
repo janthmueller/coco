@@ -1,5 +1,5 @@
 ---
-title: Run reactions and guards
+title: Run hooks and guards
 description: Run trusted local commands after CoCo events or before destructive workspace actions.
 ---
 
@@ -21,7 +21,7 @@ Configure the second kind through
 [Codex's native hooks](https://learn.chatgpt.com/docs/hooks), not in CoCo's
 file below.
 
-Each reaction runs only its configured command. Start follow-up model work
+Each post-event hook runs only its configured command. Start follow-up model work
 separately with `coco send`.
 
 ## Create a hook command
@@ -47,9 +47,9 @@ Replace the output path, then make the script executable:
 chmod 700 ~/.config/coco/save-hook-event
 ```
 
-Reaction and guard commands run with a minimal environment containing only `PATH`. Use
+Hook and guard commands run with a minimal environment containing only `PATH`. Use
 absolute paths for files and do not rely on `HOME` or other inherited
-variables. CoCo ignores a reaction's standard output and error output, so the
+variables. CoCo ignores a hook command's standard output and error output, so the
 command must save or send anything you need.
 
 ## Configure the hook
@@ -197,7 +197,7 @@ workspace without a thread or branch uses `null` for the corresponding field.
 
 ## Check configuration and deliveries
 
-List the reactions and guards loaded by the running daemon:
+List the hooks and guards loaded by the running daemon:
 
 ```bash
 coco hook list
@@ -211,7 +211,7 @@ coco hook history --limit 100 --json
 ```
 
 History shows pending, running, successful, failed, and cancelled deliveries.
-It covers post-event reactions, not synchronous guards, and does not reveal
+It covers post-event hooks, not synchronous guards, and does not reveal
 command arguments or event payloads.
 
 CoCo retries a failed command after a short delay, up to `maxAttempts`. A
@@ -224,12 +224,12 @@ retry delays newer events for that hook. Separate hooks may run at the same
 time.
 
 Avoid a hook command that performs the same CoCo action it reacts to. This
-alpha does not detect reaction loops. Hook commands should also remain in the
+alpha does not detect hook loops. Hook commands should also remain in the
 foreground; CoCo does not manage background processes they start.
 
 <Callout type="warn" title="Hooks run as your user">
   Only configure commands you trust. The minimal environment avoids accidental
-  credential inheritance, but a reaction or guard still has the filesystem and
+  credential inheritance, but a hook or guard still has the filesystem and
   process access of your operating-system user. Keep secrets out of their
   inputs.
 </Callout>

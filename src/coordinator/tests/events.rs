@@ -35,6 +35,7 @@ async fn projected_workspace(fixture: &Fixture, workspace: &Workspace) -> Worksp
         .get_workspace(WorkspaceGetParams {
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
+            include_resources: false,
         })
         .await
         .unwrap()

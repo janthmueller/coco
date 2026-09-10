@@ -243,8 +243,11 @@ pub(super) struct StatusArgs {
     #[arg(long, short = 'g')]
     pub(super) global: bool,
     /// Follow state changes until interrupted.
-    #[arg(long, conflicts_with = "json")]
+    #[arg(long, short = 'f', conflicts_with = "json")]
     pub(super) follow: bool,
+    /// Include current memory, process, and CPU use.
+    #[arg(long, short = 'r')]
+    pub(super) resources: bool,
     /// Emit stable, machine-readable JSON.
     #[arg(long)]
     pub(super) json: bool,

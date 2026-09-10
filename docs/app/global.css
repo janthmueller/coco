@@ -61,9 +61,15 @@ html > body[data-scroll-locked] {
 .coco-brand {
   display: inline-flex;
   align-items: center;
-  font-size: 1.125rem;
+  font-size: 1rem;
   font-weight: 700;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.02em;
+  line-height: 1.25rem;
+}
+
+.coco-home-layout {
+  /* Match the nav's padded content edge to the 74rem landing-page grid. */
+  --fd-layout-width: 76rem;
 }
 
 .coco-home {
@@ -110,12 +116,12 @@ html > body[data-scroll-locked] {
 .coco-hero h1 {
   max-width: 12ch;
   margin-top: 1.6rem;
-  font-size: clamp(3rem, 6vw, 5.25rem);
-  font-weight: 680;
-  letter-spacing: -0.045em;
-  line-height: 1;
+  font-size: clamp(3rem, 5.4vw, 4.7rem);
+  font-weight: 620;
+  letter-spacing: -0.025em;
+  line-height: 1.08;
   text-wrap: balance;
-  word-spacing: 0.08em;
+  word-spacing: 0.06em;
 }
 
 .coco-hero-copy {
@@ -234,10 +240,10 @@ html > body[data-scroll-locked] {
 
 .coco-section h2 {
   margin-top: 0.85rem;
-  font-size: clamp(2rem, 4vw, 3.2rem);
-  font-weight: 660;
-  letter-spacing: -0.045em;
-  line-height: 1.08;
+  font-size: clamp(1.9rem, 3.2vw, 2.65rem);
+  font-weight: 620;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
 }
 
 .coco-section-lead {
@@ -275,23 +281,28 @@ html > body[data-scroll-locked] {
   color: var(--coco-accent);
 }
 
+.coco-docs-page {
+  gap: 0.7rem;
+}
+
 .coco-docs-title {
-  font-size: 1.875rem;
-  font-weight: 650;
-  letter-spacing: -0.035em;
+  font-size: 1.75rem;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
 }
 
 .coco-docs-description {
-  max-width: 50rem;
+  margin-bottom: 0;
   color: var(--color-fd-muted-foreground);
-  font-size: 1.125rem;
-  line-height: 1.55;
+  font-size: 1.05rem;
+  line-height: 1.5;
 }
 
 .coco-docs-body {
-  margin-top: 2.5rem;
+  margin-top: 0.7rem;
   border-top: 1px solid var(--color-fd-border);
-  padding-top: 1.5rem;
+  padding-top: 1.35rem;
   font-size: 1rem;
   line-height: 1.75;
 }
@@ -421,7 +432,7 @@ html > body[data-scroll-locked] {
   }
 
   .coco-hero h1 {
-    font-size: clamp(2.7rem, 14vw, 4rem);
+    font-size: clamp(2.6rem, 13vw, 3.7rem);
   }
 
   .coco-feature-grid,

@@ -149,9 +149,9 @@ In the forms below, `<WORKSPACE>` may be a repository-local name or full ID.
 | ------------------------------------------------------------------- | ----------------------------------------------- |
 | `coco list [--json]` (`ls`)                                         | List workspaces in the selected scope           |
 | `coco list --closed [--json]`                                       | List closed workspaces instead                  |
-| `coco status [-a] [--json]`                                         | Show workspace states in the selected scope     |
-| `coco status [-a] --follow`                                         | Follow state changes for that collection        |
-| `coco status WORKSPACE [-g] [--json] [--follow]`                    | Show or follow one workspace's state            |
+| `coco status [-a] [-r] [--json]`                                    | Show workspace states in the selected scope     |
+| `coco status [-a] [-r] --follow` (`-f`)                             | Follow state changes for that collection        |
+| `coco status WORKSPACE [-g] [-r] [--json] [--follow]`               | Show or follow one workspace's state            |
 | `coco send [WORKSPACE] [MESSAGE] [-g] [--operation-id ID] [--wait]` | Choose a workspace and start its next turn      |
 | `coco jump [WORKSPACE] [-g]`                                        | Choose and open the workspace in the Codex TUI  |
 | `coco diff [WORKSPACE] [-g]`                                        | Choose or print its bounded change summary      |
@@ -168,9 +168,10 @@ prints conversation messages.
 `list` and `status` inspect without creating or loading conversation context;
 `send` and `jump` activate it when needed.
 
-Detailed `status WORKSPACE` also reports the workspace exec-server state. On
-Linux this includes its current descendant count, aggregate RSS, and interval
-CPU use. Collection status intentionally omits resource sampling.
+Add `--resources` (`-r`) to scoped or collection status for current process
+count, aggregate RSS, and CPU use on Linux. `--json` includes available
+resource details without requiring `-r`. `--follow` also has the short form
+`-f`, so `-fr` follows state and resource use together.
 
 Add `--global`/`-g` to `status`, `send`, `jump`, `diff`, `close`, `reopen`, or
 `delete` to resolve one workspace name from all repositories. For commands
@@ -307,12 +308,12 @@ coco hook (history | deliveries) [--limit <NUMBER>] [--json]
 ```
 
 Hook commands are daemon-wide and do not accept a repository path,
-`--all-repos`, or `--global`. `list` shows loaded reactions and guards without
+`--all-repos`, or `--global`. `list` shows loaded hooks and guards without
 revealing their command arguments. `validate` checks the configured file
 without executing commands or contacting the daemon. `reload` validates and
 atomically replaces the running configuration; a failed reload keeps the old
 one. `history` shows the newest 20 post-event delivery outcomes by default;
 set `--limit` from 1 through 100. Its `deliveries` alias is equivalent.
 
-See [Run reactions and guards](../../guides/hooks/) to configure commands,
+See [Run hooks and guards](../../guides/hooks/) to configure commands,
 guard close or deletion, and understand retries.

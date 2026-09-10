@@ -9,7 +9,7 @@ use crossterm::terminal::{
 /// Own the temporary inline display, restoring it even on an input/output error.
 pub(super) struct PickerTerminal<W: Write> {
     output: W,
-    frame: PickerFrame,
+    frame: InlineFrame,
     rows: u16,
     active: bool,
 }
@@ -19,7 +19,7 @@ impl<W: Write> PickerTerminal<W> {
         enable_raw_mode()?;
         let mut terminal = Self {
             output,
-            frame: PickerFrame::default(),
+            frame: InlineFrame::default(),
             rows: 24,
             active: true,
         };
@@ -57,12 +57,17 @@ impl<W: Write> Drop for PickerTerminal<W> {
 }
 
 #[derive(Default)]
-struct PickerFrame {
+pub(in crate::cli) struct InlineFrame {
     rendered_lines: usize,
 }
 
-impl PickerFrame {
-    fn draw(&mut self, output: &mut impl Write, lines: &[String], rows: u16) -> io::Result<()> {
+impl InlineFrame {
+    pub(in crate::cli) fn draw(
+        &mut self,
+        output: &mut impl Write,
+        lines: &[String],
+        rows: u16,
+    ) -> io::Result<()> {
         let mut frame = Vec::new();
         self.rewind(&mut frame, rows)?;
         for line in lines {
@@ -103,7 +108,7 @@ mod tests {
 
     #[test]
     fn first_draw_allocates_real_lines_instead_of_bottom_clamped_cursor_moves() {
-        let mut frame = PickerFrame::default();
+        let mut frame = InlineFrame::default();
         let mut output = Vec::new();
         frame
             .draw(
@@ -120,7 +125,7 @@ mod tests {
 
     #[test]
     fn redraw_and_cleanup_erase_the_previous_frame_without_adding_lines() {
-        let mut frame = PickerFrame::default();
+        let mut frame = InlineFrame::default();
         let lines = ["first".into(), "second".into(), "third".into()];
         frame.draw(&mut Vec::new(), &lines, 8).unwrap();
         let mut output = Vec::new();
@@ -136,7 +141,7 @@ mod tests {
 
     #[test]
     fn shrinking_terminal_never_rewinds_beyond_the_visible_screen() {
-        let mut frame = PickerFrame { rendered_lines: 10 };
+        let mut frame = InlineFrame { rendered_lines: 10 };
         let mut output = Vec::new();
         frame
             .draw(&mut output, &["title".into(), "selected".into()], 4)

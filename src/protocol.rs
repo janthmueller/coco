@@ -304,6 +304,8 @@ pub struct WorkspaceListParams {
     pub scope: RepositoryScope,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phases: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_resources: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -348,6 +350,8 @@ pub struct WorkspaceDeleteParams {
 pub struct WorkspaceGetParams {
     pub scope: RepositoryScope,
     pub workspace: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_resources: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -577,6 +581,8 @@ pub struct WorkspaceListItem {
     #[serde(flatten)]
     pub workspace: Workspace,
     pub repository: RepositorySummary,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_resources: Option<WorkspaceRuntimeResources>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -789,6 +795,10 @@ fn default_profile() -> String {
     "default".to_owned()
 }
 
+const fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -949,9 +959,22 @@ mod tests {
             WorkspaceListParams {
                 scope: RepositoryScope::repository("/repo"),
                 phases: None,
+                include_resources: false,
             },
             DaemonMethod::WorkspaceList,
             json!({"scope": {"kind": "repository", "path": "/repo"}}),
+        );
+        assert_request(
+            WorkspaceListParams {
+                scope: RepositoryScope::repository("/repo"),
+                phases: None,
+                include_resources: true,
+            },
+            DaemonMethod::WorkspaceList,
+            json!({
+                "scope": {"kind": "repository", "path": "/repo"},
+                "includeResources": true,
+            }),
         );
         assert_request(
             WorkspaceCloseParams {
@@ -1004,9 +1027,23 @@ mod tests {
             WorkspaceGetParams {
                 scope: RepositoryScope::AllRepositories,
                 workspace: "workspace".to_owned(),
+                include_resources: false,
             },
             DaemonMethod::WorkspaceGet,
             json!({"scope": {"kind": "allRepositories"}, "workspace": "workspace"}),
+        );
+        assert_request(
+            WorkspaceGetParams {
+                scope: RepositoryScope::AllRepositories,
+                workspace: "workspace".to_owned(),
+                include_resources: true,
+            },
+            DaemonMethod::WorkspaceGet,
+            json!({
+                "scope": {"kind": "allRepositories"},
+                "workspace": "workspace",
+                "includeResources": true,
+            }),
         );
         assert_request(
             TurnResultParams {

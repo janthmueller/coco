@@ -424,6 +424,7 @@ struct WorkspaceSelection {
 struct ResolvedWorkspaceTarget {
     scope: RepositoryScope,
     workspace: String,
+    verified: bool,
 }
 
 fn workspace_selection(
@@ -525,6 +526,7 @@ async fn resolve_workspace_input_with_phases(
         return Ok(ResolvedWorkspaceTarget {
             scope: scope_for_reference(repository_scope, &workspace, global),
             workspace,
+            verified: false,
         });
     }
     require_interactive(interaction, "workspace")?;
@@ -540,7 +542,11 @@ async fn resolve_workspace_input_with_phases(
         )
     };
     let workspaces = client
-        .request(WorkspaceListParams { scope, phases })
+        .request(WorkspaceListParams {
+            scope,
+            phases,
+            include_resources: false,
+        })
         .await?;
     if workspaces.is_empty() {
         let scope_hint = if global {
@@ -558,6 +564,7 @@ async fn resolve_workspace_input_with_phases(
     Ok(ResolvedWorkspaceTarget {
         scope: RepositoryScope::AllRepositories,
         workspace: workspaces[selected].workspace.id.clone(),
+        verified: true,
     })
 }
 
@@ -788,12 +795,13 @@ async fn list_workspaces(
         .request(WorkspaceListParams {
             scope,
             phases: closed.then(|| vec!["closed".to_owned()]),
+            include_resources: false,
         })
         .await?;
     if json_output {
         print_json(versioned_array("workspaces", serde_json::to_value(result)?))
     } else {
-        print_workspace_list(&result, include_repository);
+        print_workspace_list(&result, include_repository, false);
         Ok(())
     }
 }
@@ -813,7 +821,15 @@ async fn run_status(
             );
         }
         let scope = scope_for_reference(repository_scope, &workspace, global);
-        return show_status(paths, scope, workspace, args.follow, args.json).await;
+        return show_status(
+            paths,
+            scope,
+            workspace,
+            args.follow,
+            args.resources,
+            args.json,
+        )
+        .await;
     }
     if global {
         bail!(
@@ -822,9 +838,36 @@ async fn run_status(
     }
     let scope = overview_scope(repository_scope, all_repos);
     if args.follow {
-        follow_status_collection(&RpcClient::new(paths.socket_path.clone()), scope).await
+        follow_status_collection(
+            &RpcClient::new(paths.socket_path.clone()),
+            scope,
+            args.resources,
+        )
+        .await
     } else {
-        list_workspaces(paths, scope, args.json, false).await
+        show_status_collection(paths, scope, args.resources, args.json).await
+    }
+}
+
+async fn show_status_collection(
+    paths: &CocoPaths,
+    scope: RepositoryScope,
+    resources: bool,
+    json_output: bool,
+) -> Result<()> {
+    let include_repository = matches!(scope, RepositoryScope::AllRepositories);
+    let result = RpcClient::new(paths.socket_path.clone())
+        .request(WorkspaceListParams {
+            scope,
+            phases: None,
+            include_resources: resources || json_output,
+        })
+        .await?;
+    if json_output {
+        print_json(versioned_array("workspaces", serde_json::to_value(result)?))
+    } else {
+        print_workspace_list(&result, include_repository, resources);
+        Ok(())
     }
 }
 
@@ -985,13 +1028,24 @@ async fn run_send(
     wait: bool,
     interaction: &mut dyn Interaction,
 ) -> Result<()> {
-    let target = resolve_workspace_input(
+    let mut target = resolve_workspace_input(
         paths,
         selection,
         "Choose a workspace to send to",
         interaction,
     )
     .await?;
+    if message.is_none() && !target.verified {
+        let result = RpcClient::new(paths.socket_path.clone())
+            .request(WorkspaceGetParams {
+                scope: target.scope.clone(),
+                workspace: target.workspace.clone(),
+                include_resources: false,
+            })
+            .await?;
+        target.workspace = result.workspace.id;
+        target.verified = true;
+    }
     let message = resolve_text_input(message, "message", "Message", interaction)?;
     send(
         paths,
@@ -1009,19 +1063,24 @@ async fn show_status(
     scope: RepositoryScope,
     workspace: String,
     follow: bool,
+    resources: bool,
     json_output: bool,
 ) -> Result<()> {
     let client = RpcClient::new(paths.socket_path.clone());
     if follow {
-        return follow_status(&client, scope, &workspace).await;
+        return follow_status(&client, scope, &workspace, resources).await;
     }
     let result = client
-        .request(WorkspaceGetParams { scope, workspace })
+        .request(WorkspaceGetParams {
+            scope,
+            workspace,
+            include_resources: resources || json_output,
+        })
         .await?;
     if json_output {
         print_json(versioned(serde_json::to_value(result)?))
     } else {
-        print_status(&result);
+        print_status(&result, resources);
         Ok(())
     }
 }

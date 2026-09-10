@@ -105,6 +105,7 @@ async fn list(args: SignalListArgs, client: &RpcClient, scope: RepositoryScope) 
                 .request(WorkspaceGetParams {
                     scope: scope.clone(),
                     workspace: reference,
+                    include_resources: false,
                 })
                 .await?
                 .workspace

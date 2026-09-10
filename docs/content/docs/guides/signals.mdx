@@ -155,12 +155,12 @@ unchanged pages are not repeated. After a disconnect, run the command again
 with the saved cursor. Consumers should recognize repeated records by their
 `id` before performing an external action.
 
-## React to a signal
+## Run a hook for a signal
 
-Reading and reacting are separate. A signal remains available to every reader
-whether or not a hook is configured. To run a local command after
+Reading a signal and running a hook are independent. A signal remains available
+to every reader whether or not a hook is configured. To run a local command after
 `review.requested@1` is accepted, add a `signal.emitted` hook with that exact
-signal filter. See [Run reactions with hooks](../hooks/) for the configuration,
+signal filter. See [Run hooks and guards](../hooks/) for the configuration,
 delivery guarantees, and security boundary.
 
 ## Retention and privacy

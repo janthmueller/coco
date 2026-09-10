@@ -8,7 +8,7 @@ use unicode_width::UnicodeWidthStr;
 use super::style::{Palette, Tone};
 use terminal::PickerTerminal;
 
-mod terminal;
+pub(in crate::cli) mod terminal;
 
 const MAX_VISIBLE_ROWS: usize = 9;
 

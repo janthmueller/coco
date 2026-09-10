@@ -216,13 +216,18 @@ coco status fix/login --follow
 `coco ls` is the equivalent short spelling of `coco list`.
 
 `list` and a targetless `status` are compact overviews of the current
-repository. `status <workspace>` shows that workspace's detailed current state,
-worktree path, exec-server state, any reported error, and pending decision. On
-Linux, a running exec server also shows the current process count, aggregate
-resident memory, and CPU use of its process tree. A first sample says
-`CPU sampling` because CPU needs two observations. Add `--follow` to keep
-watching until you press Ctrl+C, including after the workspace becomes ready,
-waits for you, is unloaded, or reports a problem.
+repository. `status <workspace>` adds its worktree path, any reported error,
+and pending decision. Add `--follow` (`-f`) to keep watching until you press
+Ctrl+C, including after the workspace becomes ready, waits for you, is
+unloaded, or reports a problem.
+
+Add `--resources` (`-r`) to either form when you also want current resident
+memory, process count, and CPU use on Linux:
+
+```bash
+coco status -r
+coco status fix/login -fr
+```
 
 A targetless `status --follow` watches every workspace in the selected
 repository under the same rule. In a terminal, the current view is updated in
@@ -238,8 +243,8 @@ Status output contains state and decision hints only. Conversation messages
 belong to the Codex thread; use `send --wait` for the response to a new turn or
 `jump` to read the conversation.
 
-Resource details are shown only for one explicitly selected workspace. They
-are live observations rather than saved history or enforced limits.
+Resource details are live observations rather than saved history or enforced
+limits.
 
 `list` and `status` only inspect workspaces. They do not create context for a
 prepared workspace or load a saved conversation after `cocod` restarts.

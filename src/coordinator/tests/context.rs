@@ -445,6 +445,7 @@ async fn passive_reads_project_not_loaded_without_resuming_or_persisting_it() {
         .get_workspace(WorkspaceGetParams {
             scope: scope.clone(),
             workspace: workspace.id.clone(),
+            include_resources: false,
         })
         .await
         .unwrap();
@@ -453,6 +454,7 @@ async fn passive_reads_project_not_loaded_without_resuming_or_persisting_it() {
         .list_workspaces(WorkspaceListParams {
             scope: scope.clone(),
             phases: None,
+            include_resources: false,
         })
         .await
         .unwrap();

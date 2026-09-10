@@ -199,6 +199,7 @@ where
             WorkspaceListParams {
                 scope: RepositoryScope::repository(self.repository.clone()),
                 phases: input.phases,
+                include_resources: false,
             },
             None,
             None,
@@ -213,6 +214,7 @@ where
             WorkspaceGetParams {
                 scope: RepositoryScope::repository(self.repository.clone()),
                 workspace: workspace.clone(),
+                include_resources: true,
             },
             Some(workspace),
             None,

@@ -17,7 +17,7 @@ pub(super) use collections::{
     print_model_list, print_repository_list, print_workspace_list, render_workspace_list_for_stdout,
 };
 
-const PUBLIC_SCHEMA_VERSION: u64 = 8;
+const PUBLIC_SCHEMA_VERSION: u64 = 9;
 
 pub(super) fn phase_label(phase: &str) -> &'static str {
     match phase {
@@ -204,16 +204,23 @@ pub(super) fn print_decision_sent(workspace: &Workspace) {
     );
 }
 
-pub(super) fn print_status(result: &WorkspaceStatusResult) {
-    print!("{}", render_status_for_stdout(result));
+pub(super) fn print_status(result: &WorkspaceStatusResult, include_resources: bool) {
+    print!("{}", render_status_for_stdout(result, include_resources));
 }
 
-pub(super) fn render_status_for_stdout(result: &WorkspaceStatusResult) -> String {
-    render_status(result, None, Palette::stdout())
+pub(super) fn render_status_for_stdout(
+    result: &WorkspaceStatusResult,
+    include_resources: bool,
+) -> String {
+    render_status(result, None, include_resources, Palette::stdout())
 }
 
-pub(super) fn render_follow_status(result: &WorkspaceStatusResult, spinner: &str) -> String {
-    render_status(result, Some(spinner), Palette::stdout())
+pub(super) fn render_follow_status(
+    result: &WorkspaceStatusResult,
+    spinner: &str,
+    include_resources: bool,
+) -> String {
+    render_status(result, Some(spinner), include_resources, Palette::stdout())
 }
 
 pub(super) fn render_workspace_update(
@@ -293,6 +300,7 @@ fn render_workspace_success(
 fn render_status(
     result: &WorkspaceStatusResult,
     marker_override: Option<&str>,
+    include_resources: bool,
     palette: Palette,
 ) -> String {
     let workspace = &result.workspace;
@@ -305,7 +313,7 @@ fn render_status(
         output.push_str(&palette.paint(Tone::Dim, detail));
         output.push('\n');
     }
-    if let Some(resources) = &result.runtime_resources {
+    if include_resources && let Some(resources) = &result.runtime_resources {
         output.push_str(&render_runtime_resources(resources, palette));
     }
     if let Some(message) = &workspace.last_error_message {
@@ -336,17 +344,11 @@ fn render_status(
 
 fn render_runtime_resources(resources: &WorkspaceRuntimeResources, palette: Palette) -> String {
     match resources.state {
-        WorkspaceRuntimeState::Inactive => format!(
-            "  {}\n",
-            palette.paint(Tone::Dim, "Workspace runtime inactive")
-        ),
-        WorkspaceRuntimeState::Exited => format!(
-            "  {} {}\n",
-            palette.paint(Tone::RedBold, "\u{2717}"),
-            palette.paint(Tone::Red, "Workspace runtime exited")
-        ),
+        WorkspaceRuntimeState::Inactive | WorkspaceRuntimeState::Exited => {
+            format!("  {}\n", palette.paint(Tone::Dim, "Resources —"))
+        }
         WorkspaceRuntimeState::Running => {
-            let mut parts = vec!["Exec server".to_owned()];
+            let mut parts = Vec::with_capacity(3);
             let sampling_supported = resources.process_count.is_some()
                 || resources.resident_memory_bytes.is_some()
                 || resources.cpu_percent.is_some();
@@ -365,7 +367,11 @@ fn render_runtime_resources(resources: &WorkspaceRuntimeResources, palette: Pale
                     |percent| format!("{percent:.1}% CPU"),
                 ));
             }
-            format!("  {}\n", palette.paint(Tone::Dim, parts.join(" \u{b7} ")))
+            if parts.is_empty() {
+                format!("  {}\n", palette.paint(Tone::Dim, "Resources —"))
+            } else {
+                format!("  {}\n", palette.paint(Tone::Dim, parts.join(" \u{b7} ")))
+            }
         }
     }
 }
@@ -452,16 +458,14 @@ fn decision_kind_label(kind: DecisionKind) -> &'static str {
 
 fn workspace_location(workspace: &Workspace) -> Option<String> {
     let mut parts = Vec::with_capacity(2);
-    if workspace.worktree_path.is_some() {
+    if let Some(path) = &workspace.worktree_path {
+        parts.push(path.display().to_string());
         parts.push(
             workspace
                 .branch_name
                 .clone()
                 .unwrap_or_else(|| "detached".to_owned()),
         );
-    }
-    if let Some(path) = &workspace.worktree_path {
-        parts.push(path.display().to_string());
     }
     (!parts.is_empty()).then(|| safe_line(&parts.join(" · ")))
 }
@@ -558,7 +562,7 @@ mod tests {
         };
         assert_eq!(
             render_runtime_resources(&resources, Palette::plain()),
-            "  Exec server \u{b7} 25.0 MiB RSS \u{b7} 3 processes \u{b7} 12.3% CPU\n"
+            "  25.0 MiB RSS \u{b7} 3 processes \u{b7} 12.3% CPU\n"
         );
     }
 
@@ -576,7 +580,7 @@ mod tests {
         };
         assert_eq!(
             render_runtime_resources(&resources, Palette::plain()),
-            "  Exec server\n"
+            "  Resources —\n"
         );
     }
 }

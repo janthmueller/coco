@@ -30,7 +30,7 @@ const features = [
   },
   {
     description:
-      "Publish validated agent signals, react with local commands, and guard destructive workspace actions.",
+      "Publish validated agent signals, run trusted local hooks, and guard destructive workspace actions.",
     icon: Radio,
     title: "Connect the work",
   },

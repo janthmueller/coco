@@ -87,14 +87,15 @@ the same workspaces.
 The first `send` or `jump` for a workspace starts one dedicated
 `codex exec-server`. CoCo reuses that process for later turns until you close
 the workspace or stop `cocod`. Creating, listing, and inspecting a prepared
-workspace leave it inactive. Detailed `status` shows whether its exec server is
-running and, on Linux, its current process count, memory, and CPU use.
+workspace leave it inactive. Add `--resources` (`-r`) to `status` for its
+current process count, memory, and CPU use on Linux.
 
 Stop the coordinator with <kbd>Ctrl</kbd>+<kbd>C</kbd>. Workspaces remain listed
 the next time it starts. `list` and `status` neither create prepared context nor
 load saved conversations; `send` or `jump` activates one when needed. A turn
-that was active when `cocod` stopped is interrupted. The alpha does not install
-or enable a background service automatically.
+that was active when `cocod` stopped is interrupted and must be started again;
+the workspace, worktree, and saved conversation remain available. The alpha
+does not install or enable a background service automatically.
 
 If Codex cannot provide the workspace runtime, you can temporarily use the
 older shared execution mode:

@@ -59,6 +59,9 @@ data.
   that control-plane promise but is not the product definition. Treat signals
   and their optional local hooks as an advanced integration rather than a
   competing onboarding story.
+- Call commands that run after saved events **hooks** and checks that run before
+  a destructive action **guards**. Do not expose `reaction` as a third public
+  category; it is an internal distinction within the hook implementation.
 
 These presentation rules apply only to `README.md` and `docs/`. Internal
 knowledge should continue to state ownership boundaries, exclusions, and
@@ -141,8 +144,13 @@ Preserve these qualities:
   a quiet right-side table of contents;
 - concise page introductions, clear “when to use” guidance, and obvious next
   steps;
-- generous whitespace, large muted page descriptions, simple dividers, an
-  active-navigation pill, and uncluttered prose and code blocks;
+- intentional whitespace, muted page descriptions, simple dividers, an
+  active-navigation pill, and uncluttered prose and code blocks. Page title,
+  description, and body share one content edge, and framework spacing must not
+  stack with custom spacing into an oversized introduction;
+- a landing-page navigation edge aligned with the landing content grid, plus
+  display headings whose tracking and line height keep every word distinct at
+  desktop and mobile widths;
 - responsive navigation, visible focus states, semantic markup, sufficient
   contrast, and reduced-motion support.
 

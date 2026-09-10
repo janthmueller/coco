@@ -17,6 +17,29 @@ architectural baseline for CoCo.
 
 ## Active work
 
+- [x] Refine the public documentation layout from the deployed-site review.
+  - [x] Put the header brand and `Docs` link on one intentional content axis.
+  - [x] Replace overly tight display typography with readable heading spacing
+    and sizing across the landing page.
+  - [x] Reduce the oversized document-page header region and align its title,
+    description, content, and right-hand outline.
+  - [x] Audit public hook terminology so users see hooks and guards rather than
+    an unexplained internal `reaction` category.
+  - [x] Verify responsive/static output and document the visual decisions.
+- [x] Repair the confirmed CLI interaction bugs and make resource observation
+  an explicit status view.
+  - [x] Replace save/restore-based follow rendering with a bottom-edge-safe
+    inline frame shared with the established picker mechanics; cover resize,
+    changing height, and real tmux behavior.
+  - [x] Resolve an explicit send target through the daemon before prompting
+    for a missing message, while retaining turn-start's final race-safe check.
+  - [x] Add `status --resources`/`-r` for human detail and collection views,
+    add `--follow`/`-f`, and keep JSON status output complete without either
+    presentation flag.
+  - [x] Keep human resource output minimal: RSS, process count, and CPU only;
+    retain backend, scope, PID, and timestamps in JSON.
+  - [x] Update the shipped CLI contract and public docs, then run focused,
+    full Rust, real-terminal, docs, and Nix verification sequentially.
 - [x] Prove and integrate Codex's native per-workspace execution boundary.
   - [x] Inventory every thread start/resume/fork/turn and interactive-attach
     path that must carry an App Server environment selection.
@@ -3473,6 +3496,100 @@ Verification:
   and both layouts retain their intended hierarchy without clipping.
 - The successful Pages deployment was fetched from its public URL and contains
   both `href="/coco/docs/">Docs` and `Codex work, coordinated.`.
+
+## Public documentation layout refinement — 2026-09-10
+
+Status: complete in the working tree.
+
+Outcome:
+
+- Fumadocs' home layout used a 1,400-pixel navigation width while the landing
+  content used a 74-rem container. The home layout now accounts for its own
+  horizontal padding so the brand, `Docs` link, hero, and lower sections sit on
+  one intentional grid.
+- Landing display headings use a smaller ceiling, lighter weight, gentler
+  tracking, and a readable line height. The mobile heading retains the same
+  word separation without overflowing its viewport.
+- The notebook description's built-in bottom margin had compounded with the
+  custom body margin and flex gap. The page introduction now uses one compact
+  rhythm; its title, description, divider, prose, and outline remain aligned.
+- Public terminology now presents post-event commands as hooks and pre-action
+  checks as guards. `Reaction` remains an internal delivery classification,
+  not a third user concept.
+- Restart wording now distinguishes an interrupted in-flight turn from the
+  workspace, worktree, thread, and saved conversation that remain recoverable.
+
+Verification:
+
+- `pnpm --dir docs run check` passes TypeScript generation/checking, Oxlint,
+  and Prettier.
+- The production `/coco` static export verifies 103 public-only files, ten
+  pages, static search, and project-subpath routing.
+- Headless Chrome renders the exported landing and overview pages at
+  `1690x900` and `390x844`. The desktop navigation shares the landing content
+  edge, headings retain visible word boundaries, and the compact overview
+  introduction remains responsive without clipping.
+
+## CLI interaction edge-case audit — 2026-09-10
+
+Status: implementation and verification complete in the working tree.
+
+Outcome:
+
+- The picker terminal primitive is now a reusable inline frame. Status follow
+  rewinds relative to the rows it allocated instead of restoring a coordinate
+  invalidated by terminal scrolling, and it restores wrapping and cursor state
+  on exit.
+- An explicitly named send target is resolved through the daemon before CoCo
+  asks for an omitted message. Turn start still performs the final lookup to
+  protect against a race.
+- `status --resources`/`-r` makes RSS, process count, and CPU explicit in human
+  output for either a workspace or collection; JSON status includes available
+  observations without that presentation flag. `--follow` now also accepts
+  `-f`, and short flags can be clustered.
+
+Original findings:
+
+- Interactive `status --follow` incorrectly relies on terminal save/restore
+  coordinates. When its first multi-line frame starts at the bottom margin,
+  writing the frame scrolls the viewport but does not relocate the saved
+  coordinate. Every later restore therefore starts at the bottom again and
+  appends another visible frame. A later invocation can appear healthy when it
+  happens to begin with enough rows below the cursor.
+- The existing `FollowOutput` unit test proves only that the expected escape
+  bytes were emitted into a `Vec<u8>`; it cannot model terminal scrolling and
+  therefore misses this bug. An isolated 70-by-8 tmux probe rendered one final
+  frame when started near the top but three copies when started at the bottom.
+- Rewinding by the number of allocated CRLF rows, as the picker already does,
+  left exactly one final frame in the same bottom-edge probe. That evidence led
+  to the shared inline-frame primitive now used by both selection and follow,
+  including changing frame height, resize, wrapping, cursor restoration, and
+  targeted or collection status.
+- `coco send WORKSPACE` also has an ordering bug when the message is omitted.
+  `resolve_workspace_input` validates picker-derived targets through
+  `workspace.list`, but for an explicit reference it merely constructs a scope
+  and returns the unverified string. `run_send` then opens `Message:` before
+  the first daemon request, so an invalid or ambiguous workspace is rejected
+  only after the user has typed a message.
+- The implemented send correction deliberately reuses non-loading
+  `workspace.get` before secondary input, returns the canonical workspace ID,
+  and retains the real `turn.start` resolution as the final race-safe check.
+  Repository/name resolution remains owned by the coordinator rather than
+  being duplicated in the CLI.
+
+Verification:
+
+- Focused library and process tests cover conditional resource sampling,
+  collection cells, JSON completeness, early send validation, and status CLI
+  forms.
+- The isolated real-tmux smoke test starts follow at the terminal bottom
+  margin, observes changing frame sizes, and confirms one live/final frame plus
+  restored terminal state. It does not touch the user's tmux server.
+- `cargo check --all-targets --locked`, all library/all-target tests, Clippy
+  with warnings denied, `cargo machete`, `cargo deny check`, package/publish
+  dry-runs, documentation checks/export, and the flake check complete without
+  a new product failure. The expected duplicate-version warning remains in the
+  crates.io dry run.
 
 ## Open questions and handoff
 

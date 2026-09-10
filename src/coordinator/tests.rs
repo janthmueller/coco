@@ -10,6 +10,7 @@ use tokio::sync::Notify;
 
 use super::*;
 use crate::codex::CodexEvent;
+use crate::domain::runtime::WorkspaceRuntimeResources;
 use crate::domain::{
     CodexModel, CodexReasoningEffort, CodexThreadStatus, ContextMode, DecisionKind, DecisionPrompt,
     DecisionState, Workspace, WorkspaceAvailability, WorkspaceLifecycle, WorkspacePhase,
@@ -78,6 +79,9 @@ enum WorkerCall {
     StopExecution {
         workspace_id: String,
     },
+    Resources {
+        workspace_id: String,
+    },
     Thread {
         name: String,
         cwd: PathBuf,
@@ -121,6 +125,7 @@ struct FakeWorker {
     archived_threads: StdMutex<HashSet<String>>,
     descendants: StdMutex<BTreeMap<String, Vec<String>>>,
     background_terminals: StdMutex<BTreeMap<String, usize>>,
+    runtime_resources: StdMutex<Option<WorkspaceRuntimeResources>>,
     failed_thread_reads: StdMutex<Vec<String>>,
     fail_thread_start: bool,
     fail_turn_start: bool,
@@ -263,6 +268,10 @@ impl FakeWorker {
             .lock()
             .unwrap()
             .insert(thread_id.to_owned(), count);
+    }
+
+    fn set_runtime_resources(&self, resources: WorkspaceRuntimeResources) {
+        *self.runtime_resources.lock().unwrap() = Some(resources);
     }
 }
 
@@ -475,6 +484,16 @@ impl WorkerRuntime for FakeWorker {
             workspace_id: workspace_id.to_owned(),
         });
         Ok(())
+    }
+
+    async fn workspace_resources(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Option<WorkspaceRuntimeResources>, WorkerError> {
+        self.calls.lock().unwrap().push(WorkerCall::Resources {
+            workspace_id: workspace_id.to_owned(),
+        });
+        Ok(self.runtime_resources.lock().unwrap().clone())
     }
 
     async fn start_thread(

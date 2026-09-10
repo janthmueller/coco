@@ -284,7 +284,8 @@ async fn maps_all_tools_to_repository_scoped_wire_calls() {
         calls[2].1,
         json!({
             "scope": {"kind": "repository", "path": "/fixed/repository"},
-            "workspace": "workspace-one"
+            "workspace": "workspace-one",
+            "includeResources": true
         })
     );
     assert_eq!(calls[4].0, "workspace.diff");

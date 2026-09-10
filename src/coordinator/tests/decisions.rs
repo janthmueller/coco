@@ -45,6 +45,7 @@ async fn normalizes_codex_events_and_allows_an_idempotent_follow_up_turn() {
             .get_workspace(WorkspaceGetParams {
                 scope: RepositoryScope::repository(fixture.source.clone()),
                 workspace: workspace.id.clone(),
+                include_resources: false,
             })
             .await
             .unwrap()
@@ -208,6 +209,7 @@ async fn record_and_approve_command(fixture: &Fixture, workspace: &Workspace) {
         .get_workspace(WorkspaceGetParams {
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
+            include_resources: false,
         })
         .await
         .unwrap();
@@ -322,6 +324,7 @@ async fn forwards_validated_user_input_without_exposing_answer_values() {
         .get_workspace(WorkspaceGetParams {
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
+            include_resources: false,
         })
         .await
         .unwrap();
@@ -436,6 +439,7 @@ async fn presents_bounded_file_changes_and_orphans_them_on_disconnect() {
         .get_workspace(WorkspaceGetParams {
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
+            include_resources: false,
         })
         .await
         .unwrap();

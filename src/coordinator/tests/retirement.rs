@@ -63,6 +63,7 @@ async fn close_hides_a_workspace_and_reopen_restores_its_exact_identity() {
         .list_workspaces(WorkspaceListParams {
             scope: scope(&fixture),
             phases: None,
+            include_resources: false,
         })
         .await
         .unwrap();
@@ -72,6 +73,7 @@ async fn close_hides_a_workspace_and_reopen_restores_its_exact_identity() {
         .list_workspaces(WorkspaceListParams {
             scope: scope(&fixture),
             phases: Some(vec!["closed".to_owned()]),
+            include_resources: false,
         })
         .await
         .unwrap();

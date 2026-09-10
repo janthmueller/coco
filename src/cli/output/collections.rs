@@ -13,20 +13,23 @@ const MAX_TABLE_WIDTH: usize = 160;
 pub(in crate::cli) fn print_workspace_list(
     workspaces: &[WorkspaceListItem],
     include_repository: bool,
+    include_resources: bool,
 ) {
     print!(
         "{}",
-        render_workspace_list_for_stdout(workspaces, include_repository)
+        render_workspace_list_for_stdout(workspaces, include_repository, include_resources)
     );
 }
 
 pub(in crate::cli) fn render_workspace_list_for_stdout(
     workspaces: &[WorkspaceListItem],
     include_repository: bool,
+    include_resources: bool,
 ) -> String {
     render_workspace_list(
         workspaces,
         include_repository,
+        include_resources,
         stdout_width(),
         Palette::stdout(),
     )
@@ -49,6 +52,7 @@ pub(in crate::cli) fn print_model_list(models: &[CodexModel]) {
 fn render_workspace_list(
     workspaces: &[WorkspaceListItem],
     include_repository: bool,
+    include_resources: bool,
     width: usize,
     palette: Palette,
 ) -> String {
@@ -58,7 +62,9 @@ fn render_workspace_list(
     let rows = workspaces
         .iter()
         .map(|item| {
-            let mut cells = Vec::with_capacity(if include_repository { 4 } else { 3 });
+            let mut cells = Vec::with_capacity(
+                3 + usize::from(include_repository) + 3 * usize::from(include_resources),
+            );
             if include_repository {
                 cells.push(Cell::new(
                     item.repository.root_path.display().to_string(),
@@ -71,6 +77,12 @@ fn render_workspace_list(
                 format!("{} {}", phase.marker, phase.label),
                 phase.tone,
             ));
+            if include_resources {
+                let (rss, processes, cpu) = resource_cells(item.runtime_resources.as_ref());
+                cells.push(Cell::new(rss, Tone::Dim));
+                cells.push(Cell::new(processes, Tone::Dim));
+                cells.push(Cell::new(cpu, Tone::Dim));
+            }
             cells.push(Cell::new(
                 item.workspace
                     .branch_name
@@ -81,11 +93,35 @@ fn render_workspace_list(
             cells
         })
         .collect::<Vec<_>>();
-    if include_repository {
+    if include_repository && include_resources {
+        render_table(
+            &[
+                "REPOSITORY",
+                "WORKSPACE",
+                "STATE",
+                "RSS",
+                "PROCS",
+                "CPU",
+                "BRANCH",
+            ],
+            &rows,
+            &[36, 32, 26, 14, 8, 10, 48],
+            width,
+            palette,
+        )
+    } else if include_repository {
         render_table(
             &["REPOSITORY", "WORKSPACE", "STATE", "BRANCH"],
             &rows,
             &[36, 32, 26, 48],
+            width,
+            palette,
+        )
+    } else if include_resources {
+        render_table(
+            &["WORKSPACE", "STATE", "RSS", "PROCS", "CPU", "BRANCH"],
+            &rows,
+            &[32, 26, 14, 8, 10, 48],
             width,
             palette,
         )
@@ -98,6 +134,28 @@ fn render_workspace_list(
             palette,
         )
     }
+}
+
+fn resource_cells(
+    resources: Option<&crate::domain::runtime::WorkspaceRuntimeResources>,
+) -> (String, String, String) {
+    let Some(resources) = resources else {
+        return ("—".to_owned(), "—".to_owned(), "—".to_owned());
+    };
+    if resources.state != crate::domain::runtime::WorkspaceRuntimeState::Running {
+        return ("—".to_owned(), "—".to_owned(), "—".to_owned());
+    }
+    (
+        resources
+            .resident_memory_bytes
+            .map_or_else(|| "—".to_owned(), super::format_bytes),
+        resources
+            .process_count
+            .map_or_else(|| "—".to_owned(), |count| count.to_string()),
+        resources
+            .cpu_percent
+            .map_or_else(|| "—".to_owned(), |cpu| format!("{cpu:.1}%")),
+    )
 }
 
 fn render_repository_list(
@@ -293,6 +351,10 @@ fn stdout_width() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::runtime::{
+        WorkspaceResourceScope, WorkspaceRuntimeBackend, WorkspaceRuntimeResources,
+        WorkspaceRuntimeState,
+    };
 
     #[test]
     fn table_alignment_is_plain_and_bounded_before_styling() {
@@ -326,5 +388,27 @@ mod tests {
         let colored = render_table(&["STATE"], &rows, &[20], 20, Palette::colored());
         assert!(colored.contains("\u{1b}["));
         assert!(colored.contains("● Ready"));
+    }
+
+    #[test]
+    fn resource_cells_show_only_scan_friendly_measurements() {
+        let resources = WorkspaceRuntimeResources {
+            backend: WorkspaceRuntimeBackend::ExecServer,
+            state: WorkspaceRuntimeState::Running,
+            scope: WorkspaceResourceScope::ProcessTree,
+            process_id: Some(42),
+            process_count: Some(3),
+            resident_memory_bytes: Some(25 * 1024 * 1024),
+            cpu_percent: Some(12.34),
+            sampled_at_ms: Some(1),
+        };
+        assert_eq!(
+            resource_cells(Some(&resources)),
+            ("25.0 MiB".to_owned(), "3".to_owned(), "12.3%".to_owned())
+        );
+        assert_eq!(
+            resource_cells(None),
+            ("—".to_owned(), "—".to_owned(), "—".to_owned())
+        );
     }
 }

@@ -13,6 +13,73 @@ async fn lists_the_app_server_model_catalog_without_repository_state() {
 }
 
 #[tokio::test]
+async fn workspace_resources_are_observed_only_when_requested() {
+    let fixture = Fixture::new(FakeWorker::default());
+    fixture.register().await;
+    let workspace = fixture
+        .coordinator
+        .create_workspace(fixture.create_params())
+        .await
+        .unwrap()
+        .workspace;
+    let resources = WorkspaceRuntimeResources {
+        backend: crate::domain::runtime::WorkspaceRuntimeBackend::ExecServer,
+        state: crate::domain::runtime::WorkspaceRuntimeState::Running,
+        scope: crate::domain::runtime::WorkspaceResourceScope::ProcessTree,
+        process_id: Some(42),
+        process_count: Some(3),
+        resident_memory_bytes: Some(25 * 1024 * 1024),
+        cpu_percent: Some(12.3),
+        sampled_at_ms: Some(1),
+    };
+    fixture.worker.set_runtime_resources(resources.clone());
+
+    let compact = fixture
+        .coordinator
+        .list_workspaces(WorkspaceListParams {
+            scope: RepositoryScope::repository(fixture.source.clone()),
+            phases: None,
+            include_resources: false,
+        })
+        .await
+        .unwrap();
+    assert_eq!(compact[0].runtime_resources, None);
+    assert!(fixture.worker.calls().is_empty());
+
+    let detailed = fixture
+        .coordinator
+        .list_workspaces(WorkspaceListParams {
+            scope: RepositoryScope::repository(fixture.source.clone()),
+            phases: None,
+            include_resources: true,
+        })
+        .await
+        .unwrap();
+    assert_eq!(detailed[0].runtime_resources, Some(resources.clone()));
+    assert_eq!(
+        fixture.worker.calls(),
+        [WorkerCall::Resources {
+            workspace_id: workspace.id.clone(),
+        }]
+    );
+
+    let shown = fixture
+        .coordinator
+        .get_workspace(WorkspaceGetParams {
+            scope: RepositoryScope::repository(fixture.source.clone()),
+            workspace: workspace.id.clone(),
+            include_resources: true,
+        })
+        .await
+        .unwrap();
+    assert_eq!(shown.runtime_resources, Some(resources));
+    assert!(matches!(
+        fixture.worker.calls().last(),
+        Some(WorkerCall::Resources { workspace_id }) if workspace_id == &workspace.id
+    ));
+}
+
+#[tokio::test]
 async fn prepares_a_workspace_without_starting_a_native_thread_and_replays_operation_ids() {
     let fixture = Fixture::new(FakeWorker::default());
     let repository = fixture.register().await;
@@ -223,6 +290,7 @@ async fn passive_native_idle_preserves_the_local_mutation_guard() {
         .get_workspace(WorkspaceGetParams {
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
+            include_resources: false,
         })
         .await
         .unwrap();
@@ -294,6 +362,7 @@ async fn native_thread_read_failure_projects_unavailable_without_serving_or_pers
         .get_workspace(WorkspaceGetParams {
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
+            include_resources: false,
         })
         .await
         .unwrap();
@@ -340,6 +409,7 @@ async fn failed_lifecycle_remains_failed_without_a_native_thread_read() {
         .get_workspace(WorkspaceGetParams {
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: failed.id,
+            include_resources: false,
         })
         .await
         .unwrap();
@@ -378,6 +448,7 @@ async fn workspace_list_filters_after_hydrating_every_native_phase() {
         .list_workspaces(WorkspaceListParams {
             scope: RepositoryScope::repository(fixture.source.clone()),
             phases: Some(vec!["waiting_for_input".to_owned()]),
+            include_resources: false,
         })
         .await
         .unwrap();
@@ -443,6 +514,7 @@ async fn serves_repository_views_events_and_bounded_diffs() {
         .list_workspaces(WorkspaceListParams {
             scope: RepositoryScope::repository(fixture.source.clone()),
             phases: Some(vec!["prepared".to_owned()]),
+            include_resources: false,
         })
         .await
         .unwrap();
@@ -453,6 +525,7 @@ async fn serves_repository_views_events_and_bounded_diffs() {
         .get_workspace(WorkspaceGetParams {
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
+            include_resources: false,
         })
         .await
         .unwrap();
@@ -592,6 +665,7 @@ async fn scopes_workspace_names_to_repositories_and_resolves_global_references()
         .list_workspaces(WorkspaceListParams {
             scope: RepositoryScope::AllRepositories,
             phases: None,
+            include_resources: false,
         })
         .await
         .unwrap();
@@ -604,40 +678,40 @@ async fn scopes_workspace_names_to_repositories_and_resolves_global_references()
 
     let local = fixture
         .coordinator
-        .get_workspace(WorkspaceGetParams {
-            scope: RepositoryScope::repository(fixture.source.clone()),
-            workspace: "feat/shared".to_owned(),
-        })
+        .get_workspace(compact_status_params(
+            RepositoryScope::repository(fixture.source.clone()),
+            "feat/shared",
+        ))
         .await
         .unwrap();
     assert_eq!(local.workspace.id, first.id);
 
     let global_id = fixture
         .coordinator
-        .get_workspace(WorkspaceGetParams {
-            scope: RepositoryScope::AllRepositories,
-            workspace: second.id.clone(),
-        })
+        .get_workspace(compact_status_params(
+            RepositoryScope::AllRepositories,
+            second.id.clone(),
+        ))
         .await
         .unwrap();
     assert_eq!(global_id.workspace.id, second.id);
 
     let global_unique = fixture
         .coordinator
-        .get_workspace(WorkspaceGetParams {
-            scope: RepositoryScope::AllRepositories,
-            workspace: unique.name.clone(),
-        })
+        .get_workspace(compact_status_params(
+            RepositoryScope::AllRepositories,
+            unique.name.clone(),
+        ))
         .await
         .unwrap();
     assert_eq!(global_unique.workspace.id, unique.id);
 
     let ambiguous = fixture
         .coordinator
-        .get_workspace(WorkspaceGetParams {
-            scope: RepositoryScope::AllRepositories,
-            workspace: "feat/shared".to_owned(),
-        })
+        .get_workspace(compact_status_params(
+            RepositoryScope::AllRepositories,
+            "feat/shared",
+        ))
         .await
         .unwrap_err();
     assert_error_match_count(&ambiguous, "WORKSPACE_REFERENCE_AMBIGUOUS", 2);
@@ -650,10 +724,10 @@ async fn scopes_workspace_names_to_repositories_and_resolves_global_references()
 
     let local_miss = fixture
         .coordinator
-        .get_workspace(WorkspaceGetParams {
-            scope: RepositoryScope::repository(fixture.source.clone()),
-            workspace: unique.name.clone(),
-        })
+        .get_workspace(compact_status_params(
+            RepositoryScope::repository(fixture.source.clone()),
+            unique.name.clone(),
+        ))
         .await
         .unwrap_err();
     assert_error_match_count(&local_miss, "WORKSPACE_NOT_FOUND", 1);
@@ -663,6 +737,17 @@ async fn scopes_workspace_names_to_repositories_and_resolves_global_references()
     assert_eq!(candidates.len(), 1);
     assert_eq!(candidates[0].workspace_id, unique.id);
     assert_eq!(candidates[0].repository_path, second_source);
+}
+
+fn compact_status_params(
+    scope: RepositoryScope,
+    workspace: impl Into<String>,
+) -> WorkspaceGetParams {
+    WorkspaceGetParams {
+        scope,
+        workspace: workspace.into(),
+        include_resources: false,
+    }
 }
 
 fn assert_error_match_count(error: &CoordinatorError, code: &str, expected: usize) {

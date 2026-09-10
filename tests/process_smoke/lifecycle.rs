@@ -67,7 +67,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     super::hooks::verify_loaded(&paths, &repository).await?;
 
     let models = cli_json(&run_cli(&paths, &repository, &["model", "list", "--json"]).await?)?;
-    assert_eq!(models["schemaVersion"], 8);
+    assert_eq!(models["schemaVersion"], 9);
     assert_eq!(models["models"].as_array().map(Vec::len), Some(2));
     assert_eq!(models["models"][0]["model"], DEFAULT_MODEL);
     assert_eq!(models["models"][0]["isDefault"], true);
@@ -86,7 +86,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
 
     run_cli(&paths, &repository, &["repo", "add", "."]).await?;
     let repositories = cli_json(&run_cli(&paths, &repository, &["repo", "ls", "--json"]).await?)?;
-    assert_eq!(repositories["schemaVersion"], 8);
+    assert_eq!(repositories["schemaVersion"], 9);
     assert_eq!(
         repositories["repositories"].as_array().map(Vec::len),
         Some(1)
@@ -164,7 +164,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     );
 
     let listed = cli_json(&run_cli(&paths, &repository, &["list", "--json"]).await?)?;
-    assert_eq!(listed["schemaVersion"], 8);
+    assert_eq!(listed["schemaVersion"], 9);
     let workspaces = listed["workspaces"]
         .as_array()
         .context("coco list did not return a workspaces array")?;
@@ -173,6 +173,10 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         "coco list returned an unexpected workspace count"
     );
     let workspace = &workspaces[0];
+    ensure!(
+        workspace.get("runtimeResources").is_none(),
+        "coco list unexpectedly sampled runtime resources"
+    );
     let human_workspaces = run_cli(&paths, &repository, &["list"]).await?;
     let human_workspaces = String::from_utf8_lossy(&human_workspaces.stdout);
     ensure!(
@@ -189,10 +193,25 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         "human workspace output was noisy or terminal-dependent: {human_workspaces}"
     );
     let status_overview = cli_json(&run_cli(&paths, &repository, &["status", "--json"]).await?)?;
-    assert_eq!(status_overview["schemaVersion"], 8);
+    assert_eq!(status_overview["schemaVersion"], 9);
     assert_eq!(
         status_overview["workspaces"].as_array().map(Vec::len),
         Some(1)
+    );
+    ensure!(
+        status_overview["workspaces"][0]
+            .get("runtimeResources")
+            .is_none(),
+        "shared execution unexpectedly reported a per-workspace resource boundary"
+    );
+    let resource_overview = run_cli(&paths, &repository, &["status", "-r"]).await?;
+    let resource_overview = String::from_utf8_lossy(&resource_overview.stdout);
+    ensure!(
+        resource_overview.contains("RSS")
+            && resource_overview.contains("PROCS")
+            && resource_overview.contains("CPU")
+            && !resource_overview.contains("Exec server"),
+        "resource status was incomplete or exposed backend details: {resource_overview}"
     );
     let followed_collection =
         run_cli_until_interrupt(&paths, &repository, &["status", "-a", "--follow"]).await?;
@@ -247,6 +266,16 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
                 .contains("message is required without interactive input"),
         "non-terminal send unexpectedly prompted or returned an unclear error: {}",
         String::from_utf8_lossy(&missing_message.stderr)
+    );
+
+    let missing_workspace =
+        capture_cli(&paths, &repository, &["send", "missing/workspace"], None).await?;
+    let missing_workspace_error = String::from_utf8_lossy(&missing_workspace.stderr);
+    ensure!(
+        !missing_workspace.status.success()
+            && missing_workspace_error.contains("WORKSPACE_NOT_FOUND")
+            && !missing_workspace_error.contains("message is required"),
+        "send requested a message before validating its explicit workspace: {missing_workspace_error}"
     );
 
     let waiting = wait_for_pending_decision(&paths, &repository).await?;

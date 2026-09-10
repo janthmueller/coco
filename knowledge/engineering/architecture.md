@@ -330,6 +330,9 @@ Failure response:
 The current protocol has unary requests only. State following polls
 `workspace.get` for one workspace or `workspace.list` for a collection; each
 call derives current workspace state from a non-loading native `thread/read`.
+Both requests accept an additive `includeResources` observation flag. Human
+status sets it only for `--resources`; JSON status and `workspaces.status` set
+it unconditionally, while ordinary `list` and selectors leave it absent.
 Current thread state never falls back to the database, and status never reads
 conversation history. `send --wait` polls `turn.result` for its exact client
 operation ID. The coordinator correlates agent-message and completion
@@ -402,11 +405,17 @@ columns, and keep line wrapping off during the frame. Each update is buffered
 before writing. A guard clears the frame and restores wrapping, cursor
 visibility, and input mode on selection, cancellation, and errors. This remains
 inline, without an alternate-screen takeover or any daemon protocol change.
+The live status renderer reuses the same relative-frame primitive without raw
+input mode and retains its final frame. It hides the hardware cursor and
+disables wrapping only while following, then restores both on Ctrl-C or error;
+this avoids saved-cursor corruption when the first frame scrolls at the bottom
+margin.
 
 The `tests/terminal_smoke.py` opt-in probe runs the real shared interaction
 adapter inside its own disposable tmux server and shell. It covers a full
-terminal, navigation, resizing, cancellation, cursor restoration, and line
-confirmation. The ordinary Rust suite separately covers state, layout,
+terminal, navigation, resizing, cancellation, cursor restoration, line
+confirmation, and status replacement at the bottom margin. The ordinary Rust
+suite separately covers state, layout,
 Unicode width, output sequences, and confirmation authorization. The probe
 uses no real workspace, daemon, Codex process, or model.
 

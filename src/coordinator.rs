@@ -195,11 +195,13 @@ impl Coordinator {
     fn workspace_list_item(
         &self,
         workspace: Workspace,
+        runtime_resources: Option<crate::domain::runtime::WorkspaceRuntimeResources>,
     ) -> Result<WorkspaceListItem, CoordinatorError> {
         let repository = self.repository_by_id(&workspace.repository_id)?;
         Ok(WorkspaceListItem {
             workspace,
             repository: RepositorySummary::from(&repository),
+            runtime_resources,
         })
     }
 

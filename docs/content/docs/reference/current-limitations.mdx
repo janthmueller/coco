@@ -152,7 +152,7 @@ can retry; command arguments and event payloads are not shown by the hook
 history command. Use `coco hook reload` after editing the configuration; CoCo
 does not watch it automatically. Guards can deny closing or deletion, but they
 are trusted commands rather than a sandbox or multi-user authorization
-boundary. This alpha does not detect a reaction that recursively produces the
+boundary. This alpha does not detect a hook that recursively produces the
 same event.
 
 ## Current alpha limitations
@@ -175,7 +175,8 @@ same event.
 - Prepared workspaces create their conversation only when `send` or `jump`
   needs it; saved conversations are likewise loaded on demand. A turn active
   during a `cocod` restart is interrupted and does not continue automatically.
-  A pending decision from the old process can no longer be answered.
+  The workspace, worktree, and saved conversation remain available, but a
+  pending decision from the old process can no longer be answered.
 - If Codex disconnects while accepting a `send`, CoCo reports that operation
   as uncertain instead of retrying it automatically. Inspect the workspace
   with `status` or `jump` before choosing to start another turn.
@@ -194,7 +195,7 @@ same event.
   have no branch, and this alpha cannot yet promote one through CoCo; keep
   durable work on a branch-backed workspace.
 - CoCo's MCP server can inspect or continue existing workspaces and read or
-  explicitly publish agent signals. A configured hook can react with a trusted
+  explicitly publish agent signals. A configured hook can run a trusted
   local command, and `send` starts a follow-up model turn. Configure MCP tools
   available inside a workspace through its selected Codex profile.
 - Normal `cocod` shutdown and workspace close stop tracked exec servers. A hard
@@ -202,5 +203,6 @@ same event.
   has no parent-lifetime option; CoCo does not yet provide OS-enforced
   process-tree containment.
 
-Review workspace changes before relying on them, and do not depend on active
-work surviving a coordinator restart or on automatic cleanup.
+Review workspace changes before relying on them, and do not depend on an
+in-flight turn continuing through a coordinator restart or on automatic
+cleanup.

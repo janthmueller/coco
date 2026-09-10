@@ -41,7 +41,7 @@ client that started them:
   review changes, close and reopen a worktree, or explicitly choose what to
   delete.
 - **Connect the work.** Agents can publish schema-validated signals, and
-  trusted local commands can react afterward or guard workspace retirement.
+  trusted local hooks can run afterward or guard workspace retirement.
 
 ## Install
 
@@ -104,12 +104,13 @@ same conversation in the native Codex UI and the workspace's worktree.
 Leaving the status view or the TUI does not cancel an active turn. Add `--wait`
 to `send` when you want that command to remain attached and print the final
 response. Stopping `cocod` while a turn is active interrupts that turn.
+It does not delete the workspace or its saved conversation.
 
 By default, the first `send` or `jump` starts one dedicated
 `codex exec-server` for that workspace. CoCo reuses it for later turns and
 stops it when the workspace is closed or `cocod` exits normally.
-Detailed `status` shows the process and, on Linux, its current process count,
-memory, and CPU use. These are observations, not resource limits.
+Add `--resources` (`-r`) to `status` when you want current process count,
+memory, and CPU use on Linux. These are observations, not resource limits.
 
 ## Work with a workspace
 
@@ -119,7 +120,7 @@ The common commands follow one lifecycle:
 | ------------------------------------- | -------------------------------------- |
 | Prepare a separate workspace          | `coco create <name>`                   |
 | Start or continue a Codex turn        | `coco send <workspace> <message>`      |
-| Inspect or follow current state       | `coco status [<workspace>] [--follow]` |
+| Inspect or follow current state       | `coco status [<workspace>] [-f]`       |
 | Answer a supported request            | `coco decide <decision-id>`            |
 | Enter the existing Codex conversation | `coco jump <workspace>`                |
 | Review changes from the fixed base    | `coco diff <workspace>`                |

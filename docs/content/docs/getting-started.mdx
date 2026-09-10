@@ -67,9 +67,15 @@ coco status feat/first --follow
 
 The follow command keeps the current state visible as it changes, including
 when the workspace becomes ready, needs your input, or reports a problem. It
-also shows the activated workspace's execution process and, on Linux, its
-current resource use. It never prints conversation messages. Press `Ctrl+C` to
-stop following; a Codex turn does not stop with the display.
+never prints conversation messages. Press `Ctrl+C` to stop following; a Codex
+turn does not stop with the display.
+
+Add `--resources` (`-r`) when you also want current memory, process count, and
+CPU use on Linux. Short flags can be combined:
+
+```bash
+coco status feat/first -fr
+```
 
 When CoCo supports the request Codex is waiting on, `status` prints a decision
 ID and the next command:

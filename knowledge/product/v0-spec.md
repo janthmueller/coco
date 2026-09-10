@@ -237,8 +237,8 @@ peer-response routing remain separate, unimplemented capabilities.
   schema-v11 retained legacy decision table, and raw answers are never retained.
 - v0 has no publicly reachable network listener. Its App Server endpoint is
   capability-token protected and bound only to `127.0.0.1`.
-- Detailed status may expose a generation-local observation of the selected
-  workspace executor. Linux observations include its current descendant count,
+- Status JSON and human `--resources` may expose a generation-local observation
+  of each selected workspace executor. Linux observations include its current descendant count,
   aggregate RSS, and interval CPU percentage. They are best-effort telemetry,
   exclude shared App Server cost, are never persisted, and do not imply a hard
   resource limit.
@@ -468,10 +468,10 @@ coco [<repository-path>] create [<name>]
   [--profile <name>] [--model <model>] [--send <message>] [--jump]
 coco [<repository-path>] (list | ls) [--json]
 coco (list | ls) --all-repos [--json]       # `-a` is the short form
-coco [<repository-path>] status [--follow] [--json]
-coco status --all-repos [--follow] [--json] # `-a` is the short form
-coco [<repository-path>] status <workspace> [--follow] [--json]
-coco status <workspace> --global [--follow] [--json] # `-g` is the short form
+coco [<repository-path>] status [--resources] [--follow] [--json]
+coco status --all-repos [--resources] [--follow] [--json] # `-a`, `-r`, and `-f` are short forms
+coco [<repository-path>] status <workspace> [--resources] [--follow] [--json]
+coco status <workspace> --global [--resources] [--follow] [--json] # `-g` is the short form
 coco [<repository-path>] send [<workspace>] [<message>] [--wait]
 coco send [<workspace>] [<message>] --global [--wait]
 coco [<repository-path>] jump [<workspace>]
@@ -702,7 +702,7 @@ ID must not create duplicate artifacts.
   `thread/read`; do not resume a thread merely to list it. An unbound ready
   workspace projects `prepared`; a missing or invalid existing binding projects
   unavailable instead of falling back to stored status.
-- `--json` emits one schema-version-8 JSON document and no decorative stdout
+- `--json` emits one schema-version-9 JSON document and no decorative stdout
   text. Every row includes a compact repository identity.
 
 ### `coco status`
@@ -724,6 +724,7 @@ ID must not create duplicate artifacts.
   native App Server request IDs are never exposed. When per-workspace execution
   is enabled, it additionally includes the executor backend/state/scope, root
   PID, and only the resource measurements actually available on that host.
+  Collection status JSON attaches the same resource observation to each row.
   These samples are current, optional, and non-persistent.
 - `--json` uses the same field meanings as the relevant daemon projection and
   includes a top-level schema version.
@@ -734,10 +735,12 @@ ID must not create duplicate artifacts.
   piped stdout they append only initial state and later changes without terminal
   control sequences. Neither form reads, persists, or prints conversation
   messages. Ctrl-C detaches only the display and does not cancel a turn.
-- Detailed human status shows the workspace executor on a separate compact
-  line. Linux adds aggregate RSS, process count, and CPU after two samples;
-  the first sample says that CPU is being sampled. Collection status does not
-  scan or render per-workspace resources.
+- Human status omits executor implementation details and resource sampling by
+  default. `--resources`/`-r` adds only aggregate RSS, process count, and CPU
+  when available; a collection uses dedicated `RSS`, `PROCS`, and `CPU`
+  columns. `--follow`/`-f` composes with it, including clustered `-fr`/`-afr`.
+  JSON status always requests the complete optional observation without
+  requiring `--resources`.
 - `--follow` and `--json` are intentionally mutually exclusive in the current
   CLI; machine clients can poll `status --json`.
 
@@ -745,7 +748,9 @@ ID must not create duplicate artifacts.
 
 - Accept a non-empty text message and return after `turn/start` is accepted by
   default. In a human terminal, an omitted workspace uses the scoped picker and
-  an omitted message uses a subsequent text prompt. Non-terminal and
+  an omitted message uses a subsequent text prompt. An explicit workspace is
+  resolved through the daemon before opening that prompt, so an unknown or
+  ambiguous reference fails without collecting unused text. Non-terminal and
   `--no-input` callers must supply both.
 - `--wait` remains attached to the exact client operation until its native turn
   finishes and prints only the last completed agent message for that turn.
@@ -1183,10 +1188,11 @@ The following are intentionally outside v0:
   server PIDs and that close plus normal daemon shutdown stop their tracked
   executor roots. Generated-schema drift is reviewed diagnostically rather
   than rejected byte-for-byte.
-- Detailed status returns no invented measurements for an inactive runtime.
+- Status returns no invented measurements for an inactive runtime.
   Linux tests require a live root PID, at least one attributed process, and
   nonzero RSS; interval CPU remains optional on the first sample. Collection
-  status stays free of process-tree scanning, and no sample is persisted.
+  scanning occurs only for `--resources`, JSON status, or the read-only MCP
+  status projection, and no sample is persisted.
 - Two sequential `send` operations use the same thread and different turn IDs;
   concurrent sends yield one accepted turn and one deterministic conflict.
 - A crash/error before dispatch leaves a replayable prepared operation. A

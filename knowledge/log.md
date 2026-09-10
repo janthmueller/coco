@@ -10,6 +10,23 @@ status: stable
 
 ## 2026-09-10
 
+- **Public layout rhythm and terminology**: Aligned the landing navigation to
+  the page grid, relaxed oversized display type, and removed compounded
+  Fumadocs/custom spacing from documentation introductions. Public integration
+  language now uses only hooks and guards rather than presenting reactions as
+  a third concept. Restart guidance now states explicitly that an in-flight
+  turn is interrupted while its workspace, worktree, and saved conversation
+  remain available.
+
+- **Minimal resource status and robust live frames**: Made human resource
+  telemetry explicit through `status --resources`/`-r` for either one
+  workspace or a collection, with `-f` for follow and clusterable short flags.
+  JSON status always includes the available generation-local observation while
+  ordinary lists avoid sampling. Human output omits executor backend details.
+  Follow now uses relative CRLF-backed frame replacement that remains correct
+  after a first draw at the terminal bottom margin, and explicit `send`
+  targets are validated before an omitted-message prompt opens.
+
 - **Public alpha publication**: At the user's explicit direction, made the
   repository public, activated its static GitHub Pages deployment, and enabled
   crates.io releases. Published `v0.1.0-alpha.1` with Linux and macOS binaries

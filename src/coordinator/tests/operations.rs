@@ -172,6 +172,7 @@ async fn read_workspace(fixture: &Fixture, workspace_id: &str) -> Workspace {
         .get_workspace(WorkspaceGetParams {
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace_id.to_owned(),
+            include_resources: false,
         })
         .await
         .unwrap()
@@ -256,6 +257,7 @@ async fn native_events_cannot_prove_an_ambiguous_dispatch_was_accepted() {
         .get_workspace(WorkspaceGetParams {
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id,
+            include_resources: false,
         })
         .await
         .unwrap();
@@ -352,6 +354,7 @@ async fn a_completion_notification_may_overtake_the_confirming_response() {
         .get_workspace(WorkspaceGetParams {
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id,
+            include_resources: false,
         })
         .await
         .unwrap();

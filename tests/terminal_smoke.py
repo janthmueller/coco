@@ -48,6 +48,9 @@ class Terminal:
         raise AssertionError(f"terminal did not show {description}:\n{screen}")
 
     def start(self, name: str, plain: bool = False) -> None:
+        self.start_test(f"cli::prompt::tests::{name}", plain)
+
+    def start_test(self, test: str, plain: bool = False) -> None:
         self.wait_until(
             lambda screen: screen.rstrip().endswith("probe-ready>"),
             "an idle shell prompt",
@@ -62,7 +65,7 @@ class Terminal:
             command.append("NO_COLOR=1")
         command.extend([
             self.binary, "--ignored", "--exact",
-            f"cli::prompt::tests::{name}", "--nocapture",
+            test, "--nocapture",
         ])
         self.keys(shlex.join(command), "Enter")
 
@@ -153,6 +156,18 @@ def check_confirmations(terminal: Terminal) -> None:
     print("confirmation: Enter defaults to No; y/n, retries, and EOF pass")
 
 
+def check_follow(terminal: Terminal) -> None:
+    terminal.start_test("cli::status::tests::interactive_follow_terminal_probe")
+    terminal.wait("follow-result=ok")
+    terminal.wait("test result: ok.")
+    screen = terminal.screen()
+    assert screen.count("probe/test Waiting") == 1, screen
+    assert "probe/test Working" not in screen, screen
+    assert "probe/test Ready" not in screen, screen
+    assert terminal.flags() == "1:1", "follow did not restore cursor or wrapping"
+    print("follow: bottom-margin frames replace in place and restore terminal state")
+
+
 def main() -> None:
     if len(sys.argv) != 2:
         raise SystemExit("usage: python3 tests/terminal_smoke.py <library-test-executable>")
@@ -167,6 +182,7 @@ def main() -> None:
         try:
             check_picker(terminal)
             check_confirmations(terminal)
+            check_follow(terminal)
         finally:
             terminal.tmux("kill-server")
 

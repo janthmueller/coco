@@ -906,6 +906,7 @@ impl Coordinator {
         &self,
         params: WorkspaceListParams,
     ) -> Result<Vec<WorkspaceListItem>, CoordinatorError> {
+        let include_resources = params.include_resources;
         let repository_id = match &params.scope {
             RepositoryScope::Repository { path } => {
                 Some(self.registered_repository_for_path(path)?.0.id)
@@ -938,10 +939,16 @@ impl Coordinator {
         if let Some(phases) = phases {
             hydrated.retain(|workspace| phases.contains(&workspace.phase));
         }
-        hydrated
-            .into_iter()
-            .map(|workspace| self.workspace_list_item(workspace))
-            .collect()
+        let mut listed = Vec::with_capacity(hydrated.len());
+        for workspace in hydrated {
+            let runtime_resources = if include_resources {
+                self.observe_workspace_resources(&workspace.id).await
+            } else {
+                None
+            };
+            listed.push(self.workspace_list_item(workspace, runtime_resources)?);
+        }
+        Ok(listed)
     }
 
     pub(crate) async fn get_workspace(
@@ -985,12 +992,10 @@ impl Coordinator {
         let events = self.store.events_after(Some(&workspace.id), 0)?;
         let next_sequence = events.last().map_or(0, |event| event.sequence);
         let open_decisions = self.open_decisions_for_workspace(&workspace.id);
-        let runtime_resources = match self.worker.workspace_resources(&workspace.id).await {
-            Ok(resources) => resources,
-            Err(source) => {
-                warn!(workspace_id = %workspace.id, %source, "workspace resources are unavailable");
-                None
-            }
+        let runtime_resources = if params.include_resources {
+            self.observe_workspace_resources(&workspace.id).await
+        } else {
+            None
         };
         Ok(WorkspaceStatusResult {
             workspace,
@@ -999,6 +1004,19 @@ impl Coordinator {
             open_decisions,
             next_sequence,
         })
+    }
+
+    async fn observe_workspace_resources(
+        &self,
+        workspace_id: &str,
+    ) -> Option<crate::domain::runtime::WorkspaceRuntimeResources> {
+        match self.worker.workspace_resources(workspace_id).await {
+            Ok(resources) => resources,
+            Err(source) => {
+                warn!(%workspace_id, %source, "workspace resources are unavailable");
+                None
+            }
+        }
     }
 
     pub(crate) async fn list_events(

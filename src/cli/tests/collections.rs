@@ -182,13 +182,19 @@ fn status_supports_collection_overviews_and_explicit_workspace_details() {
         vec!["coco", "status"],
         vec!["coco", "status", "--json"],
         vec!["coco", "status", "--follow"],
+        vec!["coco", "status", "-f"],
+        vec!["coco", "status", "--resources"],
+        vec!["coco", "status", "-r"],
+        vec!["coco", "status", "-fr"],
         vec!["coco", "status", "-a"],
         vec!["coco", "status", "-a", "--json"],
         vec!["coco", "status", "-a", "--follow"],
+        vec!["coco", "status", "-afr"],
         vec!["coco", "status", "-g"],
         vec!["coco", "status", "auth"],
         vec!["coco", "status", "auth", "--json"],
         vec!["coco", "status", "auth", "--follow"],
+        vec!["coco", "status", "auth", "-fr"],
         vec!["coco", "status", "auth", "-g"],
     ] {
         assert!(
@@ -196,6 +202,12 @@ fn status_supports_collection_overviews_and_explicit_workspace_details() {
             "valid status form failed: {arguments:?}"
         );
     }
+
+    let parsed = Cli::try_parse_from(["coco", "status", "auth", "-fr"]).unwrap();
+    assert!(matches!(
+        parsed.command,
+        Command::Status(args) if args.follow && args.resources
+    ));
 
     for arguments in [
         vec!["coco", "status", "auth", "-a"],
