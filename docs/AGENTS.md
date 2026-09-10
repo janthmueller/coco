@@ -7,6 +7,9 @@ strictly user-facing.
 - Every page must answer a concrete user question or enable a concrete action.
 - Prefer a short explanation and one working example over comprehensive
   internals.
+- Describe CoCo positively through the outcomes and actions it enables. Do not
+  define the product or a workspace by what it is not; reserve negative wording
+  for an actionable limitation or safety fact that prevents user surprise.
 - Define unavoidable terms in plain language when they first appear.
 - Document only verified, shipped behavior. Mention unavailable behavior only
   when a user needs the limitation to avoid surprise; do not publish a

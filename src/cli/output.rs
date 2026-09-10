@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde_json::{Value, json};
 
+use crate::domain::runtime::{WorkspaceRuntimeResources, WorkspaceRuntimeState};
 use crate::domain::{Decision, DecisionKind, DecisionState, Repository, Workspace, WorkspacePhase};
 use crate::protocol::{
     RepositorySummary, WorkspaceCloseResult, WorkspaceDeleteResult, WorkspaceDiffResult,
@@ -16,7 +17,7 @@ pub(super) use collections::{
     print_model_list, print_repository_list, print_workspace_list, render_workspace_list_for_stdout,
 };
 
-const PUBLIC_SCHEMA_VERSION: u64 = 7;
+const PUBLIC_SCHEMA_VERSION: u64 = 8;
 
 pub(super) fn phase_label(phase: &str) -> &'static str {
     match phase {
@@ -304,6 +305,9 @@ fn render_status(
         output.push_str(&palette.paint(Tone::Dim, detail));
         output.push('\n');
     }
+    if let Some(resources) = &result.runtime_resources {
+        output.push_str(&render_runtime_resources(resources, palette));
+    }
     if let Some(message) = &workspace.last_error_message {
         output.push_str(&format!(
             "  {} {}\n",
@@ -328,6 +332,58 @@ fn render_status(
         ));
     }
     output
+}
+
+fn render_runtime_resources(resources: &WorkspaceRuntimeResources, palette: Palette) -> String {
+    match resources.state {
+        WorkspaceRuntimeState::Inactive => format!(
+            "  {}\n",
+            palette.paint(Tone::Dim, "Workspace runtime inactive")
+        ),
+        WorkspaceRuntimeState::Exited => format!(
+            "  {} {}\n",
+            palette.paint(Tone::RedBold, "\u{2717}"),
+            palette.paint(Tone::Red, "Workspace runtime exited")
+        ),
+        WorkspaceRuntimeState::Running => {
+            let mut parts = vec!["Exec server".to_owned()];
+            let sampling_supported = resources.process_count.is_some()
+                || resources.resident_memory_bytes.is_some()
+                || resources.cpu_percent.is_some();
+            if let Some(bytes) = resources.resident_memory_bytes {
+                parts.push(format!("{} RSS", format_bytes(bytes)));
+            }
+            if let Some(count) = resources.process_count {
+                parts.push(format!(
+                    "{count} {}",
+                    if count == 1 { "process" } else { "processes" }
+                ));
+            }
+            if sampling_supported {
+                parts.push(resources.cpu_percent.map_or_else(
+                    || "CPU sampling".to_owned(),
+                    |percent| format!("{percent:.1}% CPU"),
+                ));
+            }
+            format!("  {}\n", palette.paint(Tone::Dim, parts.join(" \u{b7} ")))
+        }
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = KIB * 1024.0;
+    const GIB: f64 = MIB * 1024.0;
+    let bytes = bytes as f64;
+    if bytes >= GIB {
+        format!("{:.1} GiB", bytes / GIB)
+    } else if bytes >= MIB {
+        format!("{:.1} MiB", bytes / MIB)
+    } else if bytes >= KIB {
+        format!("{:.1} KiB", bytes / KIB)
+    } else {
+        format!("{bytes:.0} B")
+    }
 }
 
 fn render_decision_hints(decisions: &[Decision], palette: Palette) -> String {
@@ -486,5 +542,41 @@ mod tests {
     #[test]
     fn terminal_fields_cannot_inject_control_sequences() {
         assert_eq!(safe_line("repo\n\u{1b}[31m"), "repo  [31m");
+    }
+
+    #[test]
+    fn running_workspace_resources_are_compact_and_truthful() {
+        let resources = WorkspaceRuntimeResources {
+            backend: crate::domain::runtime::WorkspaceRuntimeBackend::ExecServer,
+            state: WorkspaceRuntimeState::Running,
+            scope: crate::domain::runtime::WorkspaceResourceScope::ProcessTree,
+            process_id: Some(42),
+            process_count: Some(3),
+            resident_memory_bytes: Some(25 * 1024 * 1024),
+            cpu_percent: Some(12.34),
+            sampled_at_ms: Some(1),
+        };
+        assert_eq!(
+            render_runtime_resources(&resources, Palette::plain()),
+            "  Exec server \u{b7} 25.0 MiB RSS \u{b7} 3 processes \u{b7} 12.3% CPU\n"
+        );
+    }
+
+    #[test]
+    fn unsupported_resource_measurements_do_not_claim_to_be_sampling() {
+        let resources = WorkspaceRuntimeResources {
+            backend: crate::domain::runtime::WorkspaceRuntimeBackend::ExecServer,
+            state: WorkspaceRuntimeState::Running,
+            scope: crate::domain::runtime::WorkspaceResourceScope::RootProcess,
+            process_id: Some(42),
+            process_count: None,
+            resident_memory_bytes: None,
+            cpu_percent: None,
+            sampled_at_ms: Some(1),
+        };
+        assert_eq!(
+            render_runtime_resources(&resources, Palette::plain()),
+            "  Exec server\n"
+        );
     }
 }

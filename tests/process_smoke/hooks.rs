@@ -75,7 +75,7 @@ printf '%s' '{"decision":"allow"}'
 
 pub(super) async fn verify_loaded(paths: &TestPaths, repository: &Path) -> Result<()> {
     let listed = cli_json(&run_cli(paths, repository, &["hook", "ls", "--json"]).await?)?;
-    assert_eq!(listed["schemaVersion"], 7);
+    assert_eq!(listed["schemaVersion"], 8);
     assert_eq!(listed["hooks"].as_array().map(Vec::len), Some(5));
     assert_eq!(listed["guards"].as_array().map(Vec::len), Some(2));
     let human = run_cli(paths, repository, &["hook", "list"]).await?;

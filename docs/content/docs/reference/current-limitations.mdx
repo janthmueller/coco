@@ -40,6 +40,16 @@ to your shell configuration so both commands inherit it.
 A different Codex version may expose incompatible commands or App Server
 behavior.
 
+If startup succeeds but an activating command says that Codex cannot register
+or start a workspace runtime, restart the coordinator in compatibility mode:
+
+```bash
+COCO_WORKSPACE_EXECUTION=shared cocod
+```
+
+This runs without separate workspace execution processes or their resource
+observations.
+
 ## Cargo cannot build CoCo
 
 Cargo installation compiles native code locally. In addition to Rust 1.98.1
@@ -150,6 +160,15 @@ same event.
 - Keep `cocod` running while workspaces are active. Installation does not
   create or enable a background service.
 - The shared Codex connection uses experimental App Server functionality.
+- Each activated workspace also uses an experimental Codex exec server.
+  Detailed status measures its process tree on Linux, but CoCo does not yet
+  enforce CPU, memory, or process limits. Other supported systems report the
+  runtime without those measurements.
+- Codex 0.154.0 routes the TUI's `!command` shortcut through a host-local path
+  that is unavailable for a workspace exec server. Normal prompts and agent
+  shell tools still use the workspace; run ad-hoc commands in a separate shell.
+  Immediately after loading or forking a conversation, start a normal prompt
+  before relying on `/review` or `/compact` to use that workspace runtime.
 - `coco decide` handles known command approvals, file-change approvals, and
   Codex questions. An unknown request type remains blocked instead of being
   answered unsafely.
@@ -176,9 +195,13 @@ same event.
   durable work on a branch-backed workspace.
 - CoCo's MCP server can inspect or continue existing workspaces and read or
   explicitly publish agent signals. A configured hook can react with a trusted
-  local command, but CoCo does not automatically start follow-up model work or
-  update tickets. CoCo does not currently provide its own MCP registry or
-  per-workspace tool selector.
+  local command. Start a follow-up model turn explicitly with `send`. The
+  current MCP integration has no user-managed server registry or per-workspace
+  tool selector.
+- Normal `cocod` shutdown and workspace close stop tracked exec servers. A hard
+  process kill can leave one behind because the current Codex local listener
+  has no parent-lifetime option; CoCo does not yet provide OS-enforced
+  process-tree containment.
 
 Review workspace changes before relying on them, and do not depend on active
 work surviving a coordinator restart or on automatic cleanup.

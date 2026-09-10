@@ -17,6 +17,22 @@ architectural baseline for CoCo.
 
 ## Active work
 
+- [x] Prove and integrate Codex's native per-workspace execution boundary.
+  - [x] Inventory every thread start/resume/fork/turn and interactive-attach
+    path that must carry an App Server environment selection.
+  - [x] Add a lazily managed `codex exec-server` process per active workspace,
+    register it through `environment/add`, and keep the shared App Server as
+    CoCo's control plane.
+  - [x] Preserve a clean fallback or actionable compatibility error when the
+    selected Codex build does not support the experimental environment API.
+  - [x] Cover environment registration, sticky selection, process cleanup,
+    restart behavior, and workspace isolation with focused fake and real-Codex
+    tests before treating this as shipped behavior.
+  - [x] Once the execution root is proven, add truthful per-workspace resource
+    observation against that process tree; keep hard limits and containers as
+    separate follow-up contracts unless their prerequisites are demonstrable.
+  - [x] Update canonical engineering knowledge, and update public docs only for
+    behavior that is actually available and verified.
 - [x] Assess per-workspace resource observation and containment without
   implementing a runtime change.
   - [x] Compare current Orca accounting and concurrency behavior against its
@@ -3198,10 +3214,10 @@ made.
   workspace/runtime it launches. Do not move ticket or workflow state into this
   layer.
 
-Open decision before implementation: whether the first deliverable is only a
-resource view, or the resource view plus a global `max active turns` and
-low-memory admission policy. Per-workspace hard limits must wait for an explicit
-containment-topology decision rather than being inferred from sampled metrics.
+The implementation decision made after this assessment was to prove the native
+per-workspace exec-server boundary and add on-demand observation in the same
+slice. Global admission, hard limits, and an alternative execution backend
+remain separate contracts rather than being inferred from sampled metrics.
 
 Primary comparison source was fresh Orca commit
 `f2d5711b2d32e9f11277cd63805c76b0b5f9ddf7`: [process statistics
@@ -3214,6 +3230,94 @@ v2](https://docs.kernel.org/admin-guide/cgroup-v2.html), [Windows Job
 Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects),
 and [Windows CPU rate
 control](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_cpu_rate_control_information).
+
+## Native workspace execution and resource observation — 2026-09-10
+
+Status: implementation and documentation complete in the working tree. The
+checkpoint commit `ce8bc02` predates this slice; no commit or push was requested
+for the runtime work yet.
+
+- Default daemon execution now keeps one shared Codex App Server as the control
+  plane and lazily launches one host `codex exec-server` for each workspace that
+  first needs execution. Merely creating, listing, or observing an inactive
+  workspace does not launch its executor. `COCO_WORKSPACE_EXECUTION=shared`
+  remains an explicit compatibility fallback.
+- The daemon assigns an opaque stable environment ID, accepts only a nonzero
+  loopback WebSocket endpoint from the child, registers it with
+  `environment/add`, and proves connectivity with `environment/info`. Startup
+  output is bounded, child ownership uses kill-on-drop, and normal workspace
+  close or daemon shutdown stops the owned executor. Reopening and reattaching
+  re-registers the stable ID against the replacement endpoint.
+- Fresh `thread/start` and every ordinary `turn/start` select the exact
+  workspace environment. Context fork and thread resume first ensure the
+  destination executor exists, then the following turn reselects it because
+  Codex 0.154.0 exposes no `environments` field on `thread/fork` or
+  `thread/resume`. `jump` places a loopback relay between the native TUI and the
+  App Server so fresh and resumed interactive `thread/start`/`turn/start`
+  requests receive the same selection without reimplementing the TUI.
+- The exact upstream boundary remains visible: `thread/compact/start`,
+  `review/start`, and `thread/shellCommand` have no environment selector in
+  0.154.0. Consequently pre-turn compact/review immediately after resume or
+  fork may use Codex's local default, and the TUI `!command` shortcut remains
+  host-local. Normal agent shell tool calls after `turn/start` use the selected
+  workspace executor.
+- Detailed workspace status now carries an ephemeral `runtimeResources`
+  projection and the public JSON envelope advances from schema version 7 to 8.
+  It reports inactive, running, or exited state without starting an inactive
+  process. Linux walks the current `/proc` descendant tree to aggregate process
+  count and RSS and calculates CPU across consecutive samples; the first sample
+  truthfully has no CPU percentage. Other hosts expose only evidence available
+  from the root process. Collection status/list avoids process scans.
+- The measured idle cost of one real Codex 0.154.0 exec server in this Linux
+  environment was approximately 48 MiB RSS, 23 MiB PSS, 10 MiB private memory,
+  and 0% CPU. These are observations, not quotas or capacity promises.
+- No container backend, cgroup/Job Object policy, hard resource limit, admission
+  controller, or resource-history persistence was added. A hard-killed daemon
+  can leave an exec server behind because Codex 0.154.0 rejects
+  `--exit-on-stdin-close` with a local listener; normal close and shutdown are
+  covered. The ephemeral loopback executor endpoint also has no independent
+  CoCo token and remains suitable only for the existing same-user local trust
+  model.
+- Unit and coordinator tests cover mode parsing, endpoint validation, opaque
+  IDs, environment injection, status rendering, error sanitization, and stop
+  delegation. The normal process suite continues to exercise the explicit
+  shared fallback instead of maintaining a fake implementation of the
+  experimental Codex environment protocol. The opt-in real-Codex suite proves
+  registration and readiness, fresh and resumed attachment, normal turn
+  selection, two simultaneous workspaces with distinct executor PIDs,
+  same-daemon close/reopen/re-registration, workspace-close cleanup, and daemon
+  shutdown cleanup against exactly `codex-cli 0.154.0`.
+- Final verification after the close/reopen strengthening passed on
+  2026-09-10: formatting, Clippy with warnings denied, all `285` ordinary Rust
+  tests plus all `5` process scenarios, all `3` opt-in real-Codex tests against
+  installed `codex-cli 0.154.0`, the static `/coco` export (`103` files and ten
+  pages), and `nix flake check .`. The compatibility timeout is deliberately
+  60 seconds because a cold native resume after archive/unarchive takes roughly
+  25 seconds in both CoCo's direct path and a fresh standalone App Server
+  connection; production RPC has no corresponding timeout.
+- Public entry points now describe CoCo positively through what users can do.
+  Product and ownership exclusions remain internal knowledge; negative wording
+  in public material is reserved for concrete operational or safety limits that
+  prevent surprise.
+- Clarification: this is strictly a public-presentation rule for `README.md`
+  and `docs/`. Internal product and engineering documents should retain clear
+  statements about what CoCo does not own when those boundaries guide design.
+- A strengthened real-Codex retirement test initially exposed a 20-second test
+  timeout during cold resume after archive/unarchive. A fresh secondary App
+  Server connection behaved identically and returned after roughly 25 seconds,
+  ruling out the CoCo connection and workspace executor as the cause. The
+  direct CoCo reopen/attach path passes with a 60-second compatibility-test
+  budget; production RPC does not impose the discarded 20-second deadline.
+- The final diff audit removed a diagnostic-only lifecycle deviation: close
+  continues to unsubscribe explicitly before optional native archive, then
+  proves quiescence and stops the workspace executor before Git removes the
+  worktree. This preserves the established subscription semantics even when a
+  thread was already archived elsewhere.
+- The original Codex repository was fast-forwarded through commit `196964ef10`
+  on 2026-09-10 and rechecked. Its current protocol still offers environment
+  selection on `thread/start` and `turn/start`, not on `thread/resume` or
+  `thread/fork`; the documented routing boundary remains accurate for the
+  pinned `codex-cli 0.154.0` behavior suite.
 
 ## Open questions and handoff
 

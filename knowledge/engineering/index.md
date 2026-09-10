@@ -16,6 +16,9 @@ agents.
 - [Rust source architecture and code health](rust-architecture.md) - Records
   the measured module/coupling baseline, target source layout, crate-split
   criteria, refactor phases, and enforceable hygiene tooling.
+- [Per-workspace Codex execution runtime](workspace-runtime.md) - Defines the
+  shared control plane, lazy workspace executors, environment routing,
+  resource observations, lifecycle, and current containment limits.
 - [Release process](release.md) - Defines semantic versioning, the tested-main
   release guard, Cargo version synchronization, alpha tags, and native binary
   archives.

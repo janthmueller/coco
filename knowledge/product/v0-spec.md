@@ -72,6 +72,13 @@ peer-response routing remain separate, unimplemented capabilities.
   baseline. Its model-free real-process test passes preparation, exact native
   materialization/adoption, inherited-context fork, history reads, daemon
   restart, and exact resume.
+- That baseline also passes the experimental environment contract CoCo now
+  consumes: lazy per-workspace exec-server registration, fresh-thread and
+  ordinary-turn selection, distinct process roots for concurrent workspaces,
+  on-demand Linux resource observation, close-time cleanup, and daemon-shutdown
+  cleanup. The same evidence shows that resume/fork do not accept environment
+  selection and that host-local `thread/shellCommand` is not routed to a
+  remote-only workspace executor.
 - Schemas and real behavior from selected releases expose the `initialize`,
   `model/list`, `thread/start`, `thread/resume`, and `turn/start` client requests;
   thread/turn, plan, diff, item, token, error, and status notifications; and
@@ -137,8 +144,10 @@ peer-response routing remain separate, unimplemented capabilities.
   `cocod`.
 - It is implemented in Rust with Tokio.
 - `cocod` owns one Codex App Server child and connects through an authenticated
-  IPv4-loopback WebSocket. This same endpoint lets `coco jump` attach the
-  official Codex TUI without creating a second App Server process.
+  IPv4-loopback WebSocket. This same control plane lets `coco jump` attach the
+  official Codex TUI without creating a second App Server process. One lighter
+  `codex exec-server` is started lazily per activated workspace and selected on
+  fresh-thread plus ordinary-turn requests; it is not a second App Server.
 - Starting `cocod` does not eagerly resume every persisted workspace thread.
   Passive reads remain non-loading; `send`, native-fork source preparation, and
   `jump` activate and subscribe only the selected thread after validating its
@@ -228,6 +237,11 @@ peer-response routing remain separate, unimplemented capabilities.
   schema-v11 retained legacy decision table, and raw answers are never retained.
 - v0 has no publicly reachable network listener. Its App Server endpoint is
   capability-token protected and bound only to `127.0.0.1`.
+- Detailed status may expose a generation-local observation of the selected
+  workspace executor. Linux observations include its current descendant count,
+  aggregate RSS, and interval CPU percentage. They are best-effort telemetry,
+  exclude shared App Server cost, are never persisted, and do not imply a hard
+  resource limit.
 - Worktrees may use a new branch, an existing local branch, or detached HEAD.
   Detached worktrees remain registered Git worktrees. CoCo can close one only
   while its `HEAD` still equals its base; detached-to-branch promotion remains
@@ -688,7 +702,7 @@ ID must not create duplicate artifacts.
   `thread/read`; do not resume a thread merely to list it. An unbound ready
   workspace projects `prepared`; a missing or invalid existing binding projects
   unavailable instead of falling back to stored status.
-- `--json` emits one schema-version-7 JSON document and no decorative stdout
+- `--json` emits one schema-version-8 JSON document and no decorative stdout
   text. Every row includes a compact repository identity.
 
 ### `coco status`
@@ -707,7 +721,10 @@ ID must not create duplicate artifacts.
   runtime phase and wait reasons, Git facets, timestamps, last error, and a
   recent compatibility-event cursor. It also includes current `pending` or
   `submitted` decisions using opaque CoCo IDs and bounded presentation data;
-  native App Server request IDs are never exposed.
+  native App Server request IDs are never exposed. When per-workspace execution
+  is enabled, it additionally includes the executor backend/state/scope, root
+  PID, and only the resource measurements actually available on that host.
+  These samples are current, optional, and non-persistent.
 - `--json` uses the same field meanings as the relevant daemon projection and
   includes a top-level schema version.
 - One-shot status and every `--follow` poll perform non-loading native reads;
@@ -717,6 +734,10 @@ ID must not create duplicate artifacts.
   piped stdout they append only initial state and later changes without terminal
   control sequences. Neither form reads, persists, or prints conversation
   messages. Ctrl-C detaches only the display and does not cancel a turn.
+- Detailed human status shows the workspace executor on a separate compact
+  line. Linux adds aggregate RSS, process count, and CPU after two samples;
+  the first sample says that CPU is being sampled. Collection status does not
+  scan or render per-workspace resources.
 - `--follow` and `--json` are intentionally mutually exclusive in the current
   CLI; machine clients can poll `status --json`.
 
@@ -763,7 +784,8 @@ ID must not create duplicate artifacts.
   provide one.
 - For a bound workspace, validate and when needed resume the exact native
   thread so the daemon connection is subscribed, then run `codex resume` in
-  that worktree against the authenticated App Server.
+  that worktree through the authenticated relay. Every ordinary TUI turn is
+  assigned to the workspace executor.
 - For an unbound fresh workspace, acquire one temporary activation lease and
   launch the TUI in native remote-start mode through a one-use local relay.
   Correlate the exact `thread/start` response, but bind it only after its first
@@ -782,6 +804,11 @@ ID must not create duplicate artifacts.
   workspace.
 - A normal `/quit` or `/exit` detaches the remote TUI without interrupting an
   active turn. Explicit interruption remains the separate cancel action.
+- Codex's `!command` shortcut is host-local and is not a supported workspace
+  shell path with the default remote executor. Review or compaction immediately
+  after a newly loaded resume may also use Codex's local default until the next
+  ordinary turn selects the workspace executor; CoCo must not hide this native
+  0.154.0 limitation.
 
 ### `coco decide`
 
@@ -1069,6 +1096,8 @@ The following are intentionally outside v0:
 - autonomous coordinator policy, workspace-to-workspace A2A messaging, or privileged MCP
   tools such as approval, cleanup, integration, and arbitrary command access;
 - multiple simultaneous Codex App Server processes or process pools;
+- hard per-workspace CPU, memory, or process quotas, automatic host-pressure
+  scheduling, and a container execution backend;
 - a user-managed worker MCP catalog, arbitrary per-thread MCP selection, or an
   Agentgateway integration; the future boundary is documented, but
   Agentgateway is not currently planned;
@@ -1146,11 +1175,18 @@ The following are intentionally outside v0:
 - Fake App Server process tests exercise Git-only preparation, atomic first
   send, native fork/compaction, event correlation, one-use fresh-TUI relay,
   exact adoption, detach, and completion/failure. A separate opt-in real Codex
-  compatibility test consumes no model turn: it checks 0.154.0, proves an empty
-  remote candidate remains unbound, materializes one exact candidate with a
-  native shell action, then verifies history and exact resume through fresh
-  daemon and App Server processes. Generated-schema drift is reviewed
-  diagnostically rather than rejected byte-for-byte.
+  compatibility test consumes no model turn: it checks 0.154.0, registers and
+  probes workspace environments, proves an empty remote candidate remains
+  unbound, materializes one exact local-shell candidate solely for the history
+  contract, then verifies history and exact resume through fresh daemon and
+  App Server processes. It also proves two active workspaces have distinct exec
+  server PIDs and that close plus normal daemon shutdown stop their tracked
+  executor roots. Generated-schema drift is reviewed diagnostically rather
+  than rejected byte-for-byte.
+- Detailed status returns no invented measurements for an inactive runtime.
+  Linux tests require a live root PID, at least one attributed process, and
+  nonzero RSS; interval CPU remains optional on the first sample. Collection
+  status stays free of process-tree scanning, and no sample is persisted.
 - Two sequential `send` operations use the same thread and different turn IDs;
   concurrent sends yield one accepted turn and one deterministic conflict.
 - A crash/error before dispatch leaves a replayable prepared operation. A
@@ -1248,8 +1284,11 @@ The following are intentionally outside v0:
   uses an exact command allowlist and does not broaden the common Git directory
   into an unconditional writable root.
 - The daemon socket, SQLite file, App Server endpoint descriptor, and
-  capability token are user-only. The sole network port is authenticated and
-  bound to IPv4 loopback.
+  capability token are user-only. The shared App Server port is authenticated
+  and bound to IPv4 loopback. Workspace exec servers also bind ephemeral
+  loopback ports whose URLs are not published, but upstream local mode has no
+  equivalent CoCo token; v0 therefore remains a single-local-user tool rather
+  than a multi-user security boundary.
 
 ### Native-first migration and release proof
 

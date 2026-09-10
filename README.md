@@ -30,8 +30,9 @@ client that started them:
   accepts a turn while `cocod` keeps the work available.
 - **Return to the exact place.** A named workspace keeps the Codex thread,
   worktree, repository, and selected settings together.
-- **Supervise work from another client.** Check state, answer supported
-  approvals and questions, send another instruction, or enter the native TUI.
+- **Supervise work from another client.** Check state and workspace resource
+  use, answer supported approvals and questions, send another instruction, or
+  enter the native TUI.
 - **Work across repositories.** List everything together or address one
   workspace without first changing directories.
 - **Control the lifecycle safely.** Prepare without starting a model turn,
@@ -39,10 +40,6 @@ client that started them:
   delete.
 - **Connect the work.** Agents can publish schema-validated signals, and
   trusted local commands can react afterward or guard workspace retirement.
-
-A workspace is an execution environment, not a ticket or task record. CoCo
-coordinates Codex work; it does not decide what work should be done or whether
-it is complete.
 
 ## Install
 
@@ -105,6 +102,11 @@ same conversation in the native Codex UI and the workspace's worktree.
 Leaving the status view or the TUI does not cancel an active turn. Add `--wait`
 to `send` when you want that command to remain attached and print the final
 response. Stopping `cocod` while a turn is active interrupts that turn.
+
+CoCo starts a lightweight Codex execution process only when a workspace first
+needs it. Detailed `status` shows that process and, on Linux, its current
+process count, memory, and CPU use. These are observations, not resource
+limits.
 
 ## Work with a workspace
 

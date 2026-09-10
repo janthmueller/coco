@@ -207,6 +207,9 @@ src/
   daemon/
     handler.rs                   # RPC-to-coordinator translation
     worker.rs                    # WorkerRuntime adapter around CodexClient
+    execution.rs                 # lazy workspace executor lifecycle
+    execution/
+      resources.rs               # platform-specific ephemeral observation
 
   bin/                           # thin executable entry points only
 ```

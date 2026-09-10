@@ -96,6 +96,7 @@ impl Coordinator {
         let resumed = self
             .worker
             .resume_thread(
+                &workspace.id,
                 thread_id,
                 worktree,
                 profile.thread_config,

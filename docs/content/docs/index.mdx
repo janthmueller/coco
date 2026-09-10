@@ -17,7 +17,8 @@ the native Codex UI.
 Use CoCo when you want to:
 
 - run several separate pieces of Codex work across one or more repositories;
-- start work from a short-lived command and supervise it separately;
+- start work from a short-lived command and supervise its state and resource
+  use separately;
 - move between CLI commands, an MCP client, and the native Codex terminal UI
   without losing the exact conversation or checkout;
 - prepare code and conversation context independently; or
@@ -25,9 +26,8 @@ Use CoCo when you want to:
 - let an agent publish a validated update and react with a trusted local
   command.
 
-CoCo does not replace Codex. Codex still reasons, calls tools, requests
-approval, and edits files. CoCo coordinates the environment around that work
-and keeps it reachable.
+Codex reasons, calls tools, requests approval, and edits files. CoCo
+coordinates the environment around that work and keeps it reachable.
 
 ## The core workflow
 
@@ -61,9 +61,6 @@ The code base and conversation context are independent choices. You can start
 from clean code on `main` while inheriting an investigation from another CoCo
 workspace or an exact Codex thread ID. By default, CoCo starts fresh and
 creates a `coco/<workspace>` branch.
-
-A workspace is an execution environment, not a ticket. CoCo does not decide
-what should be worked on or treat a finished turn as completed project work.
 
 ## More than one terminal
 

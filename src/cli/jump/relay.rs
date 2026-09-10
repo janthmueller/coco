@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 use crate::protocol::{
     WorkspaceAttachAdoptParams, WorkspaceAttachAdoptResult, WorkspaceAttachRenewParams,
+    WorkspaceExecutionEnvironment,
 };
 use crate::rpc::RpcClient;
 
@@ -39,6 +40,7 @@ impl PreparedRelay {
         lease_id: String,
         upstream_endpoint: &str,
         upstream_token: &str,
+        execution_environment: Option<WorkspaceExecutionEnvironment>,
     ) -> Result<Self> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .await
@@ -56,6 +58,7 @@ impl PreparedRelay {
             client,
             workspace_id,
             lease_id,
+            execution_environment,
         ));
         Ok(Self {
             endpoint_url: format!("ws://{address}"),
@@ -130,6 +133,7 @@ async fn run_relay(
     client: RpcClient,
     workspace_id: String,
     lease_id: String,
+    execution_environment: Option<WorkspaceExecutionEnvironment>,
 ) -> Result<()> {
     let (stream, peer) = accept_downstream(&listener, &client, &workspace_id, &lease_id).await?;
     ensure!(
@@ -145,6 +149,7 @@ async fn run_relay(
         &client,
         &workspace_id,
         &lease_id,
+        execution_environment.as_ref(),
     )
     .await;
     complete_adoption(&client, &workspace_id, &lease_id, &mut state).await?;
@@ -180,6 +185,7 @@ async fn proxy_session(
     client: &RpcClient,
     workspace_id: &str,
     lease_id: &str,
+    execution_environment: Option<&WorkspaceExecutionEnvironment>,
 ) -> (AdoptionState, Option<String>) {
     let mut state = AdoptionState::default();
     let mut poll = interval(ADOPTION_POLL_INTERVAL);
@@ -189,7 +195,7 @@ async fn proxy_session(
     loop {
         let outcome = tokio::select! {
             message = downstream.next() => {
-                forward_downstream(message, upstream, &mut state).await
+                forward_downstream(message, upstream, &mut state, execution_environment).await
             }
             message = upstream.next() => {
                 forward_upstream(message, downstream, &mut state).await
@@ -237,11 +243,13 @@ async fn forward_downstream(
     message: Option<Result<Message, tokio_tungstenite::tungstenite::Error>>,
     upstream: &mut WebSocketStream<TcpStream>,
     state: &mut AdoptionState,
+    execution_environment: Option<&WorkspaceExecutionEnvironment>,
 ) -> Result<ForwardOutcome, String> {
     let Some(message) = message else {
         return Ok(ForwardOutcome::Closed);
     };
-    let message = message.map_err(|error| error.to_string())?;
+    let mut message = message.map_err(|error| error.to_string())?;
+    inject_execution_environment(&mut message, execution_environment)?;
     state.observe_downstream(&message);
     let closed = matches!(message, Message::Close(_));
     upstream
@@ -253,6 +261,45 @@ async fn forward_downstream(
     } else {
         ForwardOutcome::Continue
     })
+}
+
+fn inject_execution_environment(
+    message: &mut Message,
+    execution_environment: Option<&WorkspaceExecutionEnvironment>,
+) -> Result<(), String> {
+    let Some(execution_environment) = execution_environment else {
+        return Ok(());
+    };
+    let Some(mut frame) = message_json(message) else {
+        return Ok(());
+    };
+    if !matches!(
+        frame.get("method").and_then(Value::as_str),
+        Some("thread/start" | "turn/start")
+    ) {
+        return Ok(());
+    }
+    let params = frame
+        .get_mut("params")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| "Codex sent an execution request without object params".to_owned())?;
+    params.insert(
+        "environments".to_owned(),
+        serde_json::json!([{
+            "environmentId": execution_environment.environment_id,
+            "cwd": execution_environment.cwd,
+            "runtimeWorkspaceRoots": execution_environment.runtime_workspace_roots,
+        }]),
+    );
+    let encoded = serde_json::to_string(&frame).map_err(|error| error.to_string())?;
+    *message = match message {
+        Message::Text(_) => Message::Text(encoded.into()),
+        Message::Binary(_) => Message::Binary(encoded.into_bytes().into()),
+        Message::Ping(_) | Message::Pong(_) | Message::Close(_) | Message::Frame(_) => {
+            return Ok(());
+        }
+    };
+    Ok(())
 }
 
 async fn forward_upstream(
@@ -503,5 +550,63 @@ mod tests {
         ));
         assert!(state.activation_requested);
         assert!(state.should_poll());
+    }
+
+    #[test]
+    fn injects_the_workspace_environment_into_thread_and_turn_start() {
+        let environment = test_environment();
+        for method in ["thread/start", "turn/start"] {
+            let mut message = Message::Text(
+                json!({
+                    "id": 7,
+                    "method": method,
+                    "params": {
+                        "cwd": "/wrong",
+                        "environments": [{"environmentId": "wrong", "cwd": "/wrong"}],
+                    },
+                })
+                .to_string()
+                .into(),
+            );
+            inject_execution_environment(&mut message, Some(&environment)).unwrap();
+            let frame = message_json(&message).unwrap();
+            assert_eq!(
+                frame.pointer("/params/environments"),
+                Some(&json!([{
+                    "environmentId": "coco-environment",
+                    "cwd": "/worktree",
+                    "runtimeWorkspaceRoots": ["/worktree"],
+                }]))
+            );
+        }
+    }
+
+    #[test]
+    fn leaves_unrelated_frames_and_shared_execution_untouched() {
+        let original = Message::Text(
+            json!({"id": 7, "method": "thread/resume", "params": {"threadId": "t"}})
+                .to_string()
+                .into(),
+        );
+        let mut unrelated = original.clone();
+        inject_execution_environment(&mut unrelated, Some(&test_environment())).unwrap();
+        assert_eq!(unrelated, original);
+
+        let mut shared = Message::Text(
+            json!({"id": 8, "method": "turn/start", "params": {"threadId": "t"}})
+                .to_string()
+                .into(),
+        );
+        let shared_original = shared.clone();
+        inject_execution_environment(&mut shared, None).unwrap();
+        assert_eq!(shared, shared_original);
+    }
+
+    fn test_environment() -> WorkspaceExecutionEnvironment {
+        WorkspaceExecutionEnvironment {
+            environment_id: "coco-environment".to_owned(),
+            cwd: "/worktree".into(),
+            runtime_workspace_roots: vec!["/worktree".into()],
+        }
     }
 }

@@ -5,6 +5,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::domain::runtime::WorkspaceRuntimeResources;
 use crate::domain::{
     Audit, AuditOutcome, CodexModel, ContextMode, Decision, GitObservation, NormalizedEvent,
     Repository, Workspace,
@@ -508,6 +509,16 @@ pub enum TurnResult {
 pub struct WorkspaceAttachResult {
     pub workspace: Workspace,
     pub launch: WorkspaceAttachLaunch,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_environment: Option<WorkspaceExecutionEnvironment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceExecutionEnvironment {
+    pub environment_id: String,
+    pub cwd: PathBuf,
+    pub runtime_workspace_roots: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -682,6 +693,8 @@ pub struct GitIncomplete {
 pub struct WorkspaceStatusResult {
     pub workspace: Workspace,
     pub git: WorkspaceGitStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_resources: Option<WorkspaceRuntimeResources>,
     pub open_decisions: Vec<Decision>,
     pub next_sequence: i64,
 }
@@ -1220,24 +1233,7 @@ mod tests {
             json!({"id": "repo-1", "displayName": "repo", "rootPath": "/repo"}),
         );
         assert_response::<WorkspaceListParams>(json!([listed]));
-        assert_response::<WorkspaceGetParams>(json!({
-            "workspace": workspace(),
-            "git": {
-                "observed": true,
-                "canonicalPath": "/worktree",
-                "branchName": "coco/workspace",
-                "headSha": "head",
-                "baseSha": "base",
-                "dirty": true,
-                "aheadBy": 1,
-                "behindBy": 0,
-                "baseRelation": "descendant",
-                "bindingValid": true,
-                "untrackedPaths": ["new.txt"],
-            },
-            "openDecisions": [],
-            "nextSequence": 3,
-        }));
+        assert_workspace_status_response();
         assert_attach_responses();
         assert_response::<TurnStartParams>(json!({
             "workspace": workspace(),
@@ -1336,6 +1332,11 @@ mod tests {
                 "threadId": "thread-1",
                 "leaseId": "lease-1"
             },
+            "executionEnvironment": {
+                "environmentId": "coco-workspace",
+                "cwd": "/worktrees/workspace",
+                "runtimeWorkspaceRoots": ["/worktrees/workspace"]
+            },
         }));
         assert_response::<WorkspaceAttachRenewParams>(json!({}));
         assert_response::<WorkspaceAttachAdoptParams>(json!({"state": "pending"}));
@@ -1344,6 +1345,37 @@ mod tests {
             "workspace": workspace(),
         }));
         assert_response::<WorkspaceAttachReleaseParams>(json!({}));
+    }
+
+    fn assert_workspace_status_response() {
+        assert_response::<WorkspaceGetParams>(json!({
+            "workspace": workspace(),
+            "git": {
+                "observed": true,
+                "canonicalPath": "/worktree",
+                "branchName": "coco/workspace",
+                "headSha": "head",
+                "baseSha": "base",
+                "dirty": true,
+                "aheadBy": 1,
+                "behindBy": 0,
+                "baseRelation": "descendant",
+                "bindingValid": true,
+                "untrackedPaths": ["new.txt"],
+            },
+            "runtimeResources": {
+                "backend": "exec_server",
+                "state": "running",
+                "scope": "process_tree",
+                "processId": 42,
+                "processCount": 3,
+                "residentMemoryBytes": 25165824,
+                "cpuPercent": 12.5,
+                "sampledAtMs": 4
+            },
+            "openDecisions": [],
+            "nextSequence": 3,
+        }));
     }
 
     fn assert_request<R>(request: R, expected_method: DaemonMethod, expected_params: Value)

@@ -47,6 +47,16 @@ async fn close_hides_a_workspace_and_reopen_restores_its_exact_identity() {
         git_output(&fixture.source, &["rev-parse", &branch]),
         closed.workspace.closed_head_sha.unwrap()
     );
+    assert!(
+        fixture
+            .worker
+            .calls
+            .lock()
+            .unwrap()
+            .contains(&WorkerCall::StopExecution {
+                workspace_id: workspace.id.clone(),
+            })
+    );
 
     let active = fixture
         .coordinator

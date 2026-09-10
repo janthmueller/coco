@@ -55,6 +55,7 @@ impl TestPaths {
             .env("COCO_WORKTREES_DIR", &self.worktrees)
             .env("CODEX_HOME", &self.codex_home)
             .env("COCO_CODEX_BINARY", &self.fake_codex)
+            .env("COCO_WORKSPACE_EXECUTION", "shared")
             .env("COCO_TEST_CODEX_ARGS", &self.codex_args)
             .env("COCO_TEST_JUMP_ARGS", &self.jump_args)
             .env("COCO_HOOKS_PATH", &self.hooks)

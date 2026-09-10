@@ -167,6 +167,10 @@ prints conversation messages.
 `list` and `status` inspect without creating or loading conversation context;
 `send` and `jump` activate it when needed.
 
+Detailed `status WORKSPACE` also reports the workspace execution process. On
+Linux this includes its current descendant count, aggregate RSS, and interval
+CPU use. Collection status intentionally omits resource sampling.
+
 Add `--global`/`-g` to `status`, `send`, `jump`, `diff`, `close`, `reopen`, or
 `delete` to resolve one workspace name from all repositories. For commands
 with a selector, it also populates an omitted-target selector from all
@@ -251,7 +255,9 @@ coco status feat/first --json
 ```
 
 These commands emit one JSON value to standard output. Human-oriented follow
-mode is intentionally excluded.
+mode is intentionally excluded. The current top-level schema version is `8`.
+Only a detailed workspace status may include `runtimeResources`; its optional
+measurements are a current sample and are not persisted.
 
 Human output uses color only when its output stream is a terminal and honors
 the standard `NO_COLOR` environment variable. Redirected output and JSON never

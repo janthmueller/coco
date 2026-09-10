@@ -33,6 +33,10 @@ data.
 
 - Lead with what a reader can accomplish and provide a concrete next step.
 - Prefer focused examples and task-oriented pages over implementation tours.
+- Explain CoCo positively through the outcomes and actions it enables. Do not
+  position the product or define a workspace by listing what it is not;
+  negative wording belongs only in an actionable limitation or safety note
+  that prevents user surprise.
 - State limitations when they affect correctness, safety, privacy, cost, or a
   successful workflow.
 - Keep public claims aligned with implemented and verified behavior. Describe
@@ -55,6 +59,10 @@ data.
   that control-plane promise but is not the product definition. Treat signals
   and their optional local hooks as an advanced integration rather than a
   competing onboarding story.
+
+These presentation rules apply only to `README.md` and `docs/`. Internal
+knowledge should continue to state ownership boundaries, exclusions, and
+non-goals explicitly whenever they are needed for sound design decisions.
 
 ## Strict public/internal boundary
 

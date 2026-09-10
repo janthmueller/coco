@@ -241,6 +241,7 @@ impl Coordinator {
         loaded_profile.snapshot.model_override = workspace.profile.model_override.clone();
         let started_thread = self
             .start_context_thread(
+                &workspace.id,
                 &workspace.name,
                 &context,
                 worktree,
@@ -300,6 +301,7 @@ impl Coordinator {
         let started = self
             .worker
             .start_thread(
+                &workspace.id,
                 &workspace.name,
                 worktree,
                 loaded_profile.thread_config,
@@ -660,6 +662,7 @@ impl Coordinator {
 
     async fn start_context_thread(
         &self,
+        workspace_id: &str,
         name: &str,
         context: &CreationContext,
         cwd: &Path,
@@ -669,10 +672,14 @@ impl Coordinator {
         match &context.fork {
             Some(fork) => {
                 self.worker
-                    .fork_thread(name, &fork.thread_id, cwd, config, model)
+                    .fork_thread(workspace_id, name, &fork.thread_id, cwd, config, model)
                     .await
             }
-            None => self.worker.start_thread(name, cwd, config, model).await,
+            None => {
+                self.worker
+                    .start_thread(workspace_id, name, cwd, config, model)
+                    .await
+            }
         }
     }
 
@@ -978,9 +985,17 @@ impl Coordinator {
         let events = self.store.events_after(Some(&workspace.id), 0)?;
         let next_sequence = events.last().map_or(0, |event| event.sequence);
         let open_decisions = self.open_decisions_for_workspace(&workspace.id);
+        let runtime_resources = match self.worker.workspace_resources(&workspace.id).await {
+            Ok(resources) => resources,
+            Err(source) => {
+                warn!(workspace_id = %workspace.id, %source, "workspace resources are unavailable");
+                None
+            }
+        };
         Ok(WorkspaceStatusResult {
             workspace,
             git,
+            runtime_resources,
             open_decisions,
             next_sequence,
         })

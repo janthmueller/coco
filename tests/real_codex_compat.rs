@@ -20,7 +20,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
 use tokio_tungstenite::{WebSocketStream, client_async};
 
-const COMPATIBILITY_TIMEOUT: Duration = Duration::from_secs(20);
+const COMPATIBILITY_TIMEOUT: Duration = Duration::from_secs(60);
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
 const SUPPORTED_CODEX_VERSION: &str = "codex-cli 0.154.0";
 const OPT_IN_ENV: &str = "COCO_RUN_REAL_CODEX_COMPAT";
@@ -87,6 +87,7 @@ struct AttachLease {
     workspace_id: String,
     lease_id: String,
     cwd: PathBuf,
+    execution_environment: Value,
 }
 
 struct RealAppServer {
@@ -472,12 +473,34 @@ async fn installed_codex_matches_the_pinned_preparation_adoption_and_resume_cont
     prepare_repository(&repository)?;
     let (first, _) =
         run_daemon_lifecycle(&paths, &codex_binary, &repository, "first", false).await?;
+    assert_workspace_executor_stopped(&first)?;
     verify_native_read_contracts(&paths, &codex_binary, &repository, &first).await?;
     let (second, loaded) =
         run_daemon_lifecycle(&paths, &codex_binary, &repository, "second", true).await?;
     let loaded = loaded.context("restart lifecycle did not exercise on-demand loading")?;
+    assert_workspace_executor_stopped(&loaded)?;
 
     assert_same_persisted_thread(&first, &second, &loaded)?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn assert_workspace_executor_stopped(status: &Value) -> Result<()> {
+    let Some(pid) = status
+        .pointer("/runtimeResources/processId")
+        .and_then(Value::as_u64)
+    else {
+        return Ok(());
+    };
+    ensure!(
+        !Path::new("/proc").join(pid.to_string()).exists(),
+        "workspace exec-server process {pid} survived cocod shutdown"
+    );
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn assert_workspace_executor_stopped(_status: &Value) -> Result<()> {
     Ok(())
 }
 
@@ -832,7 +855,31 @@ async fn verify_context_fork_activation(
         attached.pointer("/workspace/phase") == Some(&json!("idle")),
         "context fork was not idle before the terminal UI opened: {attached}"
     );
+    assert_distinct_workspace_executors(
+        source,
+        &workspace_status_for(paths, codex_binary, repository, FORK_WORKSPACE_NAME).await?,
+    )?;
     release_returned_attach(paths, &attached).await?;
+    Ok(())
+}
+
+fn assert_distinct_workspace_executors(source: &Value, child: &Value) -> Result<()> {
+    let source_pid = source
+        .pointer("/runtimeResources/processId")
+        .and_then(Value::as_u64)
+        .context("source workspace had no executor process")?;
+    let child_pid = child
+        .pointer("/runtimeResources/processId")
+        .and_then(Value::as_u64)
+        .context("context child had no executor process")?;
+    ensure!(
+        source_pid != child_pid,
+        "source and context child unexpectedly shared executor process {source_pid}"
+    );
+    ensure!(
+        child.pointer("/runtimeResources/state") == Some(&json!("running")),
+        "context child executor was not running: {child}"
+    );
     Ok(())
 }
 
@@ -867,8 +914,10 @@ async fn materialize_workspace_through_remote_action(
     model: &str,
 ) -> Result<()> {
     let empty_lease = begin_fresh_attach(paths, repository).await?;
-    let mut empty_remote = RemoteAppServer::connect(paths).await?;
-    let empty_thread = start_remote_thread(&mut empty_remote, &empty_lease.cwd, model).await?;
+    verify_workspace_resources(paths, codex_binary, repository).await?;
+    let mut empty_remote = RemoteAppServer::connect_with_capabilities(paths, true).await?;
+    verify_workspace_environment(&mut empty_remote, &empty_lease).await?;
+    let empty_thread = start_remote_thread(&mut empty_remote, &empty_lease, model, true).await?;
     let pending = adopt_remote_thread(paths, &empty_lease, &empty_thread).await?;
     ensure!(
         pending["state"] == "pending",
@@ -879,8 +928,13 @@ async fn materialize_workspace_through_remote_action(
     assert_prepared_workspace(&workspace_status(paths, codex_binary, repository).await?)?;
 
     let active_lease = begin_fresh_attach(paths, repository).await?;
-    let mut active_remote = RemoteAppServer::connect(paths).await?;
-    let active_thread = start_remote_thread(&mut active_remote, &active_lease.cwd, model).await?;
+    let mut active_remote = RemoteAppServer::connect_with_capabilities(paths, true).await?;
+    verify_workspace_environment(&mut active_remote, &active_lease).await?;
+    // Keep the model-free shell materialization on Codex's local environment.
+    // `thread/shellCommand` is intentionally host-local upstream; ordinary
+    // model tool calls use the workspace environment selected on turn/start.
+    let active_thread =
+        start_remote_thread(&mut active_remote, &active_lease, model, false).await?;
     active_remote
         .request(
             "thread/shellCommand",
@@ -943,25 +997,30 @@ async fn begin_fresh_attach(paths: &TestPaths, repository: &Path) -> Result<Atta
                 .as_str()
                 .context("fresh attach result had no worktree")?,
         ),
+        execution_environment: result
+            .get("executionEnvironment")
+            .cloned()
+            .context("fresh attach result had no workspace execution environment")?,
     })
 }
 
 async fn start_remote_thread(
     remote: &mut RemoteAppServer,
-    cwd: &Path,
+    lease: &AttachLease,
     model: &str,
+    select_workspace_environment: bool,
 ) -> Result<String> {
-    let result = remote
-        .request(
-            "thread/start",
-            json!({
-                "cwd": cwd,
-                "config": {},
-                "ephemeral": false,
-                "model": model,
-            }),
-        )
-        .await?;
+    let cwd = &lease.cwd;
+    let mut params = json!({
+        "cwd": cwd,
+        "config": {},
+        "ephemeral": false,
+        "model": model,
+    });
+    if select_workspace_environment {
+        params["environments"] = json!([lease.execution_environment.clone()]);
+    }
+    let result = remote.request("thread/start", params).await?;
     ensure!(
         result["cwd"].as_str() == cwd.to_str(),
         "remote thread/start changed cwd: {result}"
@@ -970,12 +1029,91 @@ async fn start_remote_thread(
         result["model"].as_str() == Some(model),
         "remote thread/start did not make the requested model effective: {result}"
     );
+    if select_workspace_environment {
+        ensure!(
+            result.pointer("/thread/environments/0/environmentId")
+                == lease.execution_environment.get("environmentId"),
+            "remote thread/start did not bind the workspace executor: {result}"
+        );
+    }
     result
         .pointer("/thread/id")
         .and_then(Value::as_str)
         .filter(|id| !id.is_empty())
         .map(ToOwned::to_owned)
         .context("remote thread/start returned no thread id")
+}
+
+async fn verify_workspace_environment(
+    remote: &mut RemoteAppServer,
+    lease: &AttachLease,
+) -> Result<()> {
+    ensure!(
+        lease
+            .execution_environment
+            .get("cwd")
+            .and_then(Value::as_str)
+            == lease.cwd.to_str(),
+        "attach returned an execution cwd that differs from the managed worktree"
+    );
+    let environment_id = lease
+        .execution_environment
+        .get("environmentId")
+        .and_then(Value::as_str)
+        .context("attach execution environment had no id")?;
+    let info = remote
+        .request("environment/info", json!({"environmentId": environment_id}))
+        .await?;
+    ensure!(
+        info.pointer("/shell/name")
+            .and_then(Value::as_str)
+            .is_some(),
+        "workspace exec-server returned no shell information: {info}"
+    );
+    let status = remote
+        .request(
+            "environment/status",
+            json!({"environmentId": environment_id}),
+        )
+        .await?;
+    ensure!(
+        status.get("status") == Some(&json!("ready")),
+        "workspace exec-server was not ready after registration: {status}"
+    );
+    Ok(())
+}
+
+async fn verify_workspace_resources(
+    paths: &TestPaths,
+    codex_binary: &Path,
+    repository: &Path,
+) -> Result<()> {
+    let status = workspace_status(paths, codex_binary, repository).await?;
+    let resources = status
+        .get("runtimeResources")
+        .context("workspace status did not include runtime resources")?;
+    ensure!(
+        resources.get("backend") == Some(&json!("exec_server"))
+            && resources.get("state") == Some(&json!("running"))
+            && resources
+                .get("processId")
+                .and_then(Value::as_u64)
+                .is_some_and(|pid| pid > 0),
+        "workspace status did not identify its running exec-server: {resources}"
+    );
+    #[cfg(target_os = "linux")]
+    ensure!(
+        resources
+            .get("processCount")
+            .and_then(Value::as_u64)
+            .is_some_and(|count| count >= 1)
+            && resources
+                .get("residentMemoryBytes")
+                .and_then(Value::as_u64)
+                .is_some_and(|bytes| bytes > 0),
+        "workspace status did not measure its Linux process tree: {resources}"
+    );
+    Ok(())
 }
 
 async fn wait_for_remote_adoption(
@@ -1105,7 +1243,7 @@ async fn daemon_request(paths: &TestPaths, method: &str, params: Value) -> Resul
 
 fn select_default_model(response: &Value) -> Result<String> {
     ensure!(
-        response["schemaVersion"] == 7,
+        response["schemaVersion"] == 8,
         "coco model list returned an unexpected schema version: {response}"
     );
     let models = response["models"]

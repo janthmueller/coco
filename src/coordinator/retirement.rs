@@ -143,6 +143,10 @@ impl Coordinator {
             self.rollback_close(&closing).await;
             return Err(source);
         }
+        if let Err(source) = self.worker.stop_workspace_execution(&closing.id).await {
+            self.rollback_close(&closing).await;
+            return Err(source.into());
+        }
         if let Err(source) =
             self.git
                 .remove_worktree(&prepared.repository, &prepared.binding, discard_changes)

@@ -13,6 +13,7 @@ use crate::protocol::{
     WorkspaceAttachAdoptParams, WorkspaceAttachAdoptResult, WorkspaceAttachLaunch,
     WorkspaceAttachParams, WorkspaceAttachReleaseParams, WorkspaceAttachReleaseResult,
     WorkspaceAttachRenewParams, WorkspaceAttachRenewResult, WorkspaceAttachResult,
+    WorkspaceExecutionEnvironment,
 };
 use crate::store::{EventDraft, NewThreadBinding};
 
@@ -193,6 +194,7 @@ impl Coordinator {
         }
 
         self.validate_workspace_profile(&workspace)?;
+        let execution_environment = self.prepare_attach_environment(&workspace).await?;
         let lease_id = self
             .jump_leases
             .lock()
@@ -201,6 +203,7 @@ impl Coordinator {
         Ok(WorkspaceAttachResult {
             workspace,
             launch: WorkspaceAttachLaunch::Start { lease_id },
+            execution_environment,
         })
     }
 
@@ -375,18 +378,39 @@ impl Coordinator {
             .codex_thread_id
             .clone()
             .ok_or(CoordinatorError::IncompleteWorkspace("Codex thread"))?;
+        let execution_environment = self.prepare_attach_environment(&workspace).await?;
         let lease_id = self
             .jump_leases
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .acquire(&workspace.id, false)?;
         Ok(WorkspaceAttachResult {
+            execution_environment,
             workspace,
             launch: WorkspaceAttachLaunch::Resume {
                 thread_id,
                 lease_id,
             },
         })
+    }
+
+    async fn prepare_attach_environment(
+        &self,
+        workspace: &Workspace,
+    ) -> Result<Option<WorkspaceExecutionEnvironment>, CoordinatorError> {
+        let worktree = workspace
+            .worktree_path
+            .as_deref()
+            .ok_or(CoordinatorError::IncompleteWorkspace("worktree"))?;
+        Ok(self
+            .worker
+            .prepare_workspace_execution(&workspace.id, worktree)
+            .await?
+            .map(|environment| WorkspaceExecutionEnvironment {
+                environment_id: environment.environment_id,
+                cwd: environment.cwd,
+                runtime_workspace_roots: environment.runtime_workspace_roots,
+            }))
     }
 
     fn validate_workspace_profile(&self, workspace: &Workspace) -> Result<(), CoordinatorError> {

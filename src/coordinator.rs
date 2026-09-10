@@ -31,7 +31,8 @@ mod workspace;
 
 pub(crate) use error::{CoordinatorError, WorkspaceReferenceCandidate};
 pub(crate) use worker::{
-    LocatedNativeThread, NativeThread, StartedThread, StartedTurn, WorkerError, WorkerRuntime,
+    LocatedNativeThread, NativeThread, StartedThread, StartedTurn, WorkerError,
+    WorkerExecutionEnvironment, WorkerRuntime,
 };
 
 pub(crate) struct Coordinator {

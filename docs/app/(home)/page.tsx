@@ -24,7 +24,7 @@ const features = [
   },
   {
     description:
-      "Inspect state, answer a request, continue from another terminal, or enter the same work through the native Codex UI.",
+      "Inspect state and resource use, answer a request, continue from another terminal, or enter the same work through the native Codex UI.",
     icon: ShieldCheck,
     title: "Stay in control",
   },

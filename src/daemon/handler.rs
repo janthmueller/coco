@@ -8,6 +8,7 @@ use tracing::error;
 
 use crate::codex::CodexError;
 use crate::coordinator::{Coordinator, CoordinatorError, WorkerError};
+use crate::daemon::execution::WorkspaceExecutionError;
 use crate::protocol::{
     AuditRecordParams, DaemonMethod, DecisionGetParams, DecisionRespondParams, EventListParams,
     HealthParams, HealthResult, HookDeliveryListParams, HookListParams, HookReloadParams,
@@ -247,6 +248,9 @@ fn public_worker_error(error: &WorkerError) -> String {
     let WorkerError::Runtime(source) = error else {
         return "Codex returned a response CoCo could not use".to_owned();
     };
+    if let Some(error) = source.downcast_ref::<WorkspaceExecutionError>() {
+        return public_workspace_execution_error(error);
+    }
     let Some(CodexError::Rpc { code, message, .. }) = source.downcast_ref::<CodexError>() else {
         return "Codex could not accept the operation".to_owned();
     };
@@ -254,6 +258,28 @@ fn public_worker_error(error: &WorkerError) -> String {
         "Codex rejected the operation ({code}): {}",
         bounded_single_line(message, 512)
     )
+}
+
+fn public_workspace_execution_error(error: &WorkspaceExecutionError) -> String {
+    match error {
+        WorkspaceExecutionError::Spawn(source)
+            if source.kind() == std::io::ErrorKind::NotFound =>
+        {
+            "The installed Codex does not provide `codex exec-server`; use codex-cli 0.154.0 or set COCO_WORKSPACE_EXECUTION=shared before starting cocod"
+                .to_owned()
+        }
+        WorkspaceExecutionError::Registration { .. } => {
+            "The installed Codex cannot register workspace runtimes; use codex-cli 0.154.0 or set COCO_WORKSPACE_EXECUTION=shared before starting cocod"
+                .to_owned()
+        }
+        WorkspaceExecutionError::Connection { .. }
+        | WorkspaceExecutionError::EarlyExit { .. }
+        | WorkspaceExecutionError::StartupTimeout => {
+            "The Codex workspace runtime could not start; check the cocod log or set COCO_WORKSPACE_EXECUTION=shared before restarting cocod"
+                .to_owned()
+        }
+        _ => "The Codex workspace runtime failed; check the cocod log".to_owned(),
+    }
 }
 
 fn bounded_single_line(value: &str, limit: usize) -> String {
@@ -307,5 +333,24 @@ mod tests {
         )));
 
         assert_eq!(payload.message, "Codex could not accept the operation");
+    }
+
+    #[test]
+    fn workspace_runtime_compatibility_errors_offer_a_safe_fallback() {
+        let payload = map_coordinator_error(CoordinatorError::Worker(WorkerError::runtime(
+            WorkspaceExecutionError::Registration {
+                source: CodexError::Rpc {
+                    code: -32601,
+                    message: "private upstream detail".to_owned(),
+                    data: Some(json!({"secret": true})),
+                },
+            },
+        )));
+
+        assert_eq!(
+            payload.message,
+            "The installed Codex cannot register workspace runtimes; use codex-cli 0.154.0 or set COCO_WORKSPACE_EXECUTION=shared before starting cocod"
+        );
+        assert!(!payload.message.contains("private upstream detail"));
     }
 }

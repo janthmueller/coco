@@ -67,7 +67,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     super::hooks::verify_loaded(&paths, &repository).await?;
 
     let models = cli_json(&run_cli(&paths, &repository, &["model", "list", "--json"]).await?)?;
-    assert_eq!(models["schemaVersion"], 7);
+    assert_eq!(models["schemaVersion"], 8);
     assert_eq!(models["models"].as_array().map(Vec::len), Some(2));
     assert_eq!(models["models"][0]["model"], DEFAULT_MODEL);
     assert_eq!(models["models"][0]["isDefault"], true);
@@ -86,7 +86,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
 
     run_cli(&paths, &repository, &["repo", "add", "."]).await?;
     let repositories = cli_json(&run_cli(&paths, &repository, &["repo", "ls", "--json"]).await?)?;
-    assert_eq!(repositories["schemaVersion"], 7);
+    assert_eq!(repositories["schemaVersion"], 8);
     assert_eq!(
         repositories["repositories"].as_array().map(Vec::len),
         Some(1)
@@ -164,7 +164,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     );
 
     let listed = cli_json(&run_cli(&paths, &repository, &["list", "--json"]).await?)?;
-    assert_eq!(listed["schemaVersion"], 7);
+    assert_eq!(listed["schemaVersion"], 8);
     let workspaces = listed["workspaces"]
         .as_array()
         .context("coco list did not return a workspaces array")?;
@@ -189,7 +189,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         "human workspace output was noisy or terminal-dependent: {human_workspaces}"
     );
     let status_overview = cli_json(&run_cli(&paths, &repository, &["status", "--json"]).await?)?;
-    assert_eq!(status_overview["schemaVersion"], 7);
+    assert_eq!(status_overview["schemaVersion"], 8);
     assert_eq!(
         status_overview["workspaces"].as_array().map(Vec::len),
         Some(1)

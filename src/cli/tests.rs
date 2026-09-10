@@ -317,6 +317,7 @@ fn builds_authenticated_resume_and_fresh_jump_commands() {
         endpoint_url: "ws://127.0.0.1:45123".to_owned(),
         capability_token: "test-capability".to_owned(),
         codex_home: directory.path().join("codex-home"),
+        execution_environment: None,
     };
 
     let command = resume_command(&target, "thread-123", PathBuf::from("/opt/codex"));

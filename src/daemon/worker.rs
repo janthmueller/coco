@@ -7,9 +7,13 @@ use serde_json::{Value, json};
 
 use crate::codex::{CodexClient, CodexError};
 use crate::coordinator::{
-    LocatedNativeThread, NativeThread, StartedThread, StartedTurn, WorkerError, WorkerRuntime,
+    LocatedNativeThread, NativeThread, StartedThread, StartedTurn, WorkerError,
+    WorkerExecutionEnvironment, WorkerRuntime,
 };
+use crate::domain::runtime::WorkspaceRuntimeResources;
 use crate::domain::{CodexModel, CodexThreadStatus};
+
+use super::execution::WorkspaceExecutors;
 
 const MODEL_PAGE_LIMIT: u32 = 100;
 const MAX_MODEL_PAGES: usize = 100;
@@ -66,11 +70,33 @@ struct ThreadReadWire {
 #[derive(Debug, Clone)]
 pub(super) struct CodexWorker {
     client: CodexClient,
+    workspace_executors: Option<WorkspaceExecutors>,
 }
 
 impl CodexWorker {
-    pub(super) fn new(client: CodexClient) -> Self {
-        Self { client }
+    pub(super) fn new(
+        client: CodexClient,
+        workspace_executors: Option<WorkspaceExecutors>,
+    ) -> Self {
+        Self {
+            client,
+            workspace_executors,
+        }
+    }
+
+    async fn workspace_environment(
+        &self,
+        workspace_id: &str,
+        cwd: &Path,
+    ) -> Result<Option<WorkerExecutionEnvironment>, WorkerError> {
+        let Some(executors) = self.workspace_executors.as_ref() else {
+            return Ok(None);
+        };
+        executors
+            .ensure(workspace_id, cwd)
+            .await
+            .map(Some)
+            .map_err(WorkerError::runtime)
     }
 }
 
@@ -294,20 +320,57 @@ impl WorkerRuntime for CodexWorker {
         Ok(())
     }
 
+    async fn prepare_workspace_execution(
+        &self,
+        workspace_id: &str,
+        cwd: &Path,
+    ) -> Result<Option<WorkerExecutionEnvironment>, WorkerError> {
+        self.workspace_environment(workspace_id, cwd).await
+    }
+
+    async fn stop_workspace_execution(&self, workspace_id: &str) -> Result<(), WorkerError> {
+        let Some(executors) = self.workspace_executors.as_ref() else {
+            return Ok(());
+        };
+        executors
+            .stop(workspace_id)
+            .await
+            .map_err(WorkerError::runtime)
+    }
+
+    async fn workspace_resources(
+        &self,
+        workspace_id: &str,
+    ) -> Result<Option<WorkspaceRuntimeResources>, WorkerError> {
+        let Some(executors) = self.workspace_executors.as_ref() else {
+            return Ok(None);
+        };
+        executors
+            .resources(workspace_id)
+            .await
+            .map(Some)
+            .map_err(WorkerError::runtime)
+    }
+
     async fn start_thread(
         &self,
+        workspace_id: &str,
         name: &str,
         cwd: &Path,
         config: Value,
         model: Option<&str>,
     ) -> Result<StartedThread, WorkerError> {
-        let params = with_model(
-            json!({
-                "cwd": cwd,
-                "config": config,
-                "ephemeral": false,
-            }),
-            model,
+        let environment = self.workspace_environment(workspace_id, cwd).await?;
+        let params = with_environment(
+            with_model(
+                json!({
+                    "cwd": cwd,
+                    "config": config,
+                    "ephemeral": false,
+                }),
+                model,
+            ),
+            environment.as_ref(),
         );
         let response = self
             .client
@@ -321,12 +384,14 @@ impl WorkerRuntime for CodexWorker {
 
     async fn fork_thread(
         &self,
+        workspace_id: &str,
         name: &str,
         source_thread_id: &str,
         cwd: &Path,
         config: Value,
         model: Option<&str>,
     ) -> Result<StartedThread, WorkerError> {
+        let _environment = self.workspace_environment(workspace_id, cwd).await?;
         let params = with_model(
             json!({
                 "threadId": source_thread_id,
@@ -358,11 +423,13 @@ impl WorkerRuntime for CodexWorker {
 
     async fn resume_thread(
         &self,
+        workspace_id: &str,
         thread_id: &str,
         cwd: &Path,
         config: Value,
         model: Option<&str>,
     ) -> Result<StartedThread, WorkerError> {
+        let _environment = self.workspace_environment(workspace_id, cwd).await?;
         let params = with_model(
             json!({
                 "threadId": thread_id,
@@ -389,18 +456,23 @@ impl WorkerRuntime for CodexWorker {
 
     async fn start_turn(
         &self,
+        workspace_id: &str,
         thread_id: &str,
         cwd: &Path,
         client_message_id: &str,
         message: &str,
         additional_context: Option<Value>,
     ) -> Result<StartedTurn, WorkerError> {
-        let mut params = json!({
-            "threadId": thread_id,
-            "cwd": cwd,
-            "clientUserMessageId": client_message_id,
-            "input": [{"type": "text", "text": message}],
-        });
+        let environment = self.workspace_environment(workspace_id, cwd).await?;
+        let mut params = with_environment(
+            json!({
+                "threadId": thread_id,
+                "cwd": cwd,
+                "clientUserMessageId": client_message_id,
+                "input": [{"type": "text", "text": message}],
+            }),
+            environment.as_ref(),
+        );
         if let Some(additional_context) = additional_context {
             params["additionalContext"] = additional_context;
         }
@@ -428,6 +500,17 @@ impl WorkerRuntime for CodexWorker {
 fn with_model(mut params: Value, model: Option<&str>) -> Value {
     if let Some(model) = model {
         params["model"] = Value::String(model.to_owned());
+    }
+    params
+}
+
+fn with_environment(mut params: Value, environment: Option<&WorkerExecutionEnvironment>) -> Value {
+    if let Some(environment) = environment {
+        params["environments"] = json!([{
+            "environmentId": environment.environment_id,
+            "cwd": environment.cwd,
+            "runtimeWorkspaceRoots": environment.runtime_workspace_roots,
+        }]);
     }
     params
 }
@@ -544,8 +627,32 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{decode_located_thread_response, decode_thread_read_response};
+    use super::{decode_located_thread_response, decode_thread_read_response, with_environment};
+    use crate::coordinator::WorkerExecutionEnvironment;
     use crate::domain::CodexThreadStatus;
+
+    #[test]
+    fn selects_one_workspace_environment_without_replacing_other_params() {
+        let environment = WorkerExecutionEnvironment {
+            environment_id: "coco-runtime".to_owned(),
+            cwd: PathBuf::from("/worktree"),
+            runtime_workspace_roots: vec![PathBuf::from("/worktree")],
+        };
+        let params = with_environment(
+            json!({"threadId": "thread-1", "input": []}),
+            Some(&environment),
+        );
+
+        assert_eq!(params["threadId"], "thread-1");
+        assert_eq!(
+            params["environments"],
+            json!([{
+                "environmentId": "coco-runtime",
+                "cwd": "/worktree",
+                "runtimeWorkspaceRoots": ["/worktree"]
+            }])
+        );
+    }
 
     #[test]
     fn decodes_only_the_stable_thread_metadata_projection() {

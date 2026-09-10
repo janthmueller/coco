@@ -213,9 +213,12 @@ coco status fix/login --follow
 
 `list` and a targetless `status` are compact overviews of the current
 repository. `status <workspace>` shows that workspace's detailed current state,
-worktree path, any reported error, and pending decision. Add `--follow` to keep
-watching until you press Ctrl+C, including after the workspace becomes ready,
-waits for you, is unloaded, or reports a problem.
+worktree path, execution process, any reported error, and pending decision. On
+Linux, an activated workspace also shows the current process count, aggregate
+resident memory, and CPU use of its Codex execution process tree. A first
+sample says `CPU sampling` because CPU needs two observations. Add `--follow`
+to keep watching until you press Ctrl+C, including after the workspace becomes
+ready, waits for you, is unloaded, or reports a problem.
 
 A targetless `status --follow` watches every workspace in the selected
 repository under the same rule. In a terminal, the current view is updated in
@@ -230,6 +233,9 @@ coco status -a --follow
 Status output contains state and decision hints only. Conversation messages
 belong to the Codex thread; use `send --wait` for the response to a new turn or
 `jump` to read the conversation.
+
+Resource details are shown only for one explicitly selected workspace. They
+are live observations rather than saved history or enforced limits.
 
 `list` and `status` only inspect workspaces. They do not create context for a
 prepared workspace or load a saved conversation after `cocod` restarts.
@@ -283,6 +289,11 @@ the first action creates and binds the thread. Leaving before any action keeps
 the workspace prepared. Use `/quit` or `/exit` to leave the terminal UI. Work
 already running continues; explicitly interrupting the turn in Codex still
 cancels it.
+
+Normal prompts and the shell tools used by the agent run in the workspace.
+Codex 0.154.0 does not route its interactive `!command` shortcut through this
+workspace runtime, so run an ad-hoc command from a separate shell in the
+worktree instead.
 
 ## Review workspace changes
 

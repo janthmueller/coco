@@ -10,6 +10,14 @@ status: stable
 
 ## 2026-09-10
 
+- **Per-workspace Codex execution and observation**: Kept one shared App Server
+  as CoCo's control plane and added one lazy `codex exec-server` per activated
+  workspace. Fresh threads, normal turns, and TUI turns select the matching
+  environment; detailed status reports generation-local process state and
+  Linux process-tree RSS/CPU observations. Normal close and daemon shutdown
+  stop owned executors. Hard limits, containers, history, and unsupported
+  resume/fork/review/compact routing remain explicit separate contracts.
+
 - **Hook lifecycle controls and retirement guards**: Added offline
   configuration validation, atomic daemon reload with last-known-good
   preservation, and a shared visible registry for post-event reactions and

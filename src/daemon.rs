@@ -18,9 +18,11 @@ use crate::paths::CocoPaths;
 use crate::rpc::{RpcHandler, RpcServer};
 use crate::store::Store;
 
+mod execution;
 mod handler;
 mod worker;
 
+use execution::{WorkspaceExecutionMode, WorkspaceExecutors};
 use handler::DaemonHandler;
 use worker::CodexWorker;
 
@@ -70,14 +72,21 @@ pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<
             "reconciled unfinished local state after daemon restart"
         );
     }
+    let workspace_execution_mode = WorkspaceExecutionMode::from_env()?;
+    let workspace_executor = (
+        codex_options.codex_binary.clone(),
+        codex_options.codex_home.clone(),
+    );
     let (codex, events) = CodexClient::spawn(codex_options)
         .await
         .context("could not start the Codex App Server")?;
+    let workspace_executors =
+        build_workspace_executors(workspace_execution_mode, codex.clone(), workspace_executor);
     let runtime_generation = Uuid::new_v4().to_string();
     let coordinator = Arc::new(Coordinator::new(
         Arc::clone(&store),
         Git::default(),
-        Arc::new(CodexWorker::new(codex.clone())),
+        Arc::new(CodexWorker::new(codex.clone(), workspace_executors.clone())),
         paths.worktrees_dir,
         paths.codex_home,
         Arc::clone(&hooks),
@@ -125,6 +134,9 @@ pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<
         error!(%source, "hook dispatcher panicked");
     }
 
+    if let Some(workspace_executors) = workspace_executors {
+        workspace_executors.close().await;
+    }
     if let Err(source) = codex.close().await {
         error!(%source, "could not close the Codex App Server cleanly");
     }
@@ -132,6 +144,19 @@ pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<
         error!(%source, "Codex event workspace panicked");
     }
     server_result.context("daemon RPC server stopped with an error")
+}
+
+fn build_workspace_executors(
+    mode: WorkspaceExecutionMode,
+    codex: CodexClient,
+    options: (PathBuf, Option<PathBuf>),
+) -> Option<WorkspaceExecutors> {
+    match mode {
+        WorkspaceExecutionMode::ExecServer => {
+            Some(WorkspaceExecutors::new(codex, options.0, options.1))
+        }
+        WorkspaceExecutionMode::Shared => None,
+    }
 }
 
 fn acquire_daemon_lock(data_dir: &Path) -> Result<File> {

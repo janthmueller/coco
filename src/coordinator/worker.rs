@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::domain::runtime::WorkspaceRuntimeResources;
 use crate::domain::{CodexModel, CodexThreadStatus};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -18,6 +19,17 @@ pub(crate) struct StartedThread {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StartedTurn {
     pub(crate) id: String,
+}
+
+/// Opaque execution placement selected by the worker adapter for one CoCo
+/// workspace. The coordinator only carries this to trusted interactive
+/// clients; Codex-specific registration and process ownership stay in the
+/// daemon adapter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WorkerExecutionEnvironment {
+    pub(crate) environment_id: String,
+    pub(crate) cwd: PathBuf,
+    pub(crate) runtime_workspace_roots: Vec<PathBuf>,
 }
 
 /// Stable subset of a native Codex thread used to hydrate CoCo projections.
@@ -109,8 +121,34 @@ pub(crate) trait WorkerRuntime: Send + Sync + 'static {
 
     async fn delete_thread(&self, thread_id: &str) -> Result<(), WorkerError>;
 
+    /// Lazily prepares an execution environment for a workspace. Workers that
+    /// execute in their control-plane process retain the legacy `None`
+    /// behavior.
+    async fn prepare_workspace_execution(
+        &self,
+        _workspace_id: &str,
+        _cwd: &Path,
+    ) -> Result<Option<WorkerExecutionEnvironment>, WorkerError> {
+        Ok(None)
+    }
+
+    /// Stops an execution boundary owned by one workspace. Implementations
+    /// without per-workspace runtimes have nothing to stop.
+    async fn stop_workspace_execution(&self, _workspace_id: &str) -> Result<(), WorkerError> {
+        Ok(())
+    }
+
+    /// Returns an ephemeral observation without starting an inactive runtime.
+    async fn workspace_resources(
+        &self,
+        _workspace_id: &str,
+    ) -> Result<Option<WorkspaceRuntimeResources>, WorkerError> {
+        Ok(None)
+    }
+
     async fn start_thread(
         &self,
+        workspace_id: &str,
         name: &str,
         cwd: &Path,
         config: Value,
@@ -119,6 +157,7 @@ pub(crate) trait WorkerRuntime: Send + Sync + 'static {
 
     async fn fork_thread(
         &self,
+        workspace_id: &str,
         name: &str,
         source_thread_id: &str,
         cwd: &Path,
@@ -132,6 +171,7 @@ pub(crate) trait WorkerRuntime: Send + Sync + 'static {
 
     async fn resume_thread(
         &self,
+        workspace_id: &str,
         thread_id: &str,
         cwd: &Path,
         config: Value,
@@ -140,6 +180,7 @@ pub(crate) trait WorkerRuntime: Send + Sync + 'static {
 
     async fn start_turn(
         &self,
+        workspace_id: &str,
         thread_id: &str,
         cwd: &Path,
         client_message_id: &str,

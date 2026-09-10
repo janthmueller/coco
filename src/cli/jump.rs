@@ -6,7 +6,7 @@ use anyhow::{Context, Result, bail};
 use crate::paths::CocoPaths;
 use crate::protocol::{
     AppServerEndpoint, WorkspaceAttachLaunch, WorkspaceAttachReleaseParams,
-    WorkspaceAttachRenewParams, WorkspaceAttachResult,
+    WorkspaceAttachRenewParams, WorkspaceAttachResult, WorkspaceExecutionEnvironment,
 };
 use crate::rpc::RpcClient;
 
@@ -57,13 +57,17 @@ async fn jump_inner(
             thread_id,
             lease_id,
         } => {
-            run_resume_command(
-                resume_command(&target, &thread_id, codex_binary),
-                client,
-                &target.workspace_id,
-                &lease_id,
-            )
-            .await
+            if target.execution_environment.is_some() {
+                run_relayed_resume(target, thread_id, lease_id, codex_binary, client.clone()).await
+            } else {
+                run_resume_command(
+                    resume_command(&target, &thread_id, codex_binary),
+                    client,
+                    &target.workspace_id,
+                    &lease_id,
+                )
+                .await
+            }
         }
         WorkspaceAttachLaunch::Start { lease_id } => {
             run_fresh_jump(target, lease_id, codex_binary, client.clone()).await
@@ -83,10 +87,48 @@ async fn run_fresh_jump(
         lease_id,
         &target.endpoint_url,
         &target.capability_token,
+        target.execution_environment.clone(),
     )
     .await?;
     let mut command = fresh_command(
         &target,
+        codex_binary,
+        relay.endpoint_url(),
+        relay.capability_token(),
+    );
+    let status = match command.status().await {
+        Ok(status) => status,
+        Err(error) => {
+            relay.abort().await;
+            return Err(error).context("could not start the Codex terminal UI");
+        }
+    };
+    let relay_outcome = relay.finish().await;
+    if !status.success() {
+        bail!("Codex terminal UI exited with {status}");
+    }
+    relay_outcome
+}
+
+async fn run_relayed_resume(
+    target: JumpTarget,
+    thread_id: String,
+    lease_id: String,
+    codex_binary: PathBuf,
+    client: RpcClient,
+) -> Result<()> {
+    let relay = relay::PreparedRelay::start(
+        client,
+        target.workspace_id.clone(),
+        lease_id,
+        &target.endpoint_url,
+        &target.capability_token,
+        target.execution_environment.clone(),
+    )
+    .await?;
+    let mut command = resume_command_to(
+        &target,
+        &thread_id,
         codex_binary,
         relay.endpoint_url(),
         relay.capability_token(),
@@ -146,6 +188,7 @@ pub(super) struct JumpTarget {
     pub(super) endpoint_url: String,
     pub(super) capability_token: String,
     pub(super) codex_home: PathBuf,
+    pub(super) execution_environment: Option<WorkspaceExecutionEnvironment>,
 }
 
 pub(super) async fn load_jump_target(
@@ -168,6 +211,7 @@ pub(super) async fn load_jump_target(
         endpoint_url,
         capability_token,
         codex_home: paths.codex_home.clone(),
+        execution_environment: result.execution_environment,
     })
 }
 
@@ -223,15 +267,31 @@ pub(super) fn resume_command(
     thread_id: &str,
     codex_binary: PathBuf,
 ) -> tokio::process::Command {
+    resume_command_to(
+        target,
+        thread_id,
+        codex_binary,
+        &target.endpoint_url,
+        &target.capability_token,
+    )
+}
+
+fn resume_command_to(
+    target: &JumpTarget,
+    thread_id: &str,
+    codex_binary: PathBuf,
+    endpoint: &str,
+    capability_token: &str,
+) -> tokio::process::Command {
     let mut command = base_command(target, codex_binary);
     command
         .arg("resume")
         .arg(thread_id)
-        .args(["--remote", &target.endpoint_url])
+        .args(["--remote", endpoint])
         .args(["--remote-auth-token-env", REMOTE_TOKEN_ENV])
         .arg("-C")
         .arg(&target.worktree)
-        .env(REMOTE_TOKEN_ENV, &target.capability_token);
+        .env(REMOTE_TOKEN_ENV, capability_token);
     command
 }
 

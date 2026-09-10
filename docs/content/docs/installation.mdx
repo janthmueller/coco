@@ -84,10 +84,25 @@ can continue and remain reachable from a later `status`, `decide`, or `jump`.
 With the default paths, a second `cocod` process exits instead of competing for
 the same workspaces.
 
+When a workspace first needs Codex execution, `cocod` starts one additional
+`codex exec-server` for it. The process remains available until you close the
+workspace or stop `cocod`; merely creating or listing a workspace does not
+start it. In the current Linux test environment an idle exec server used about
+48 MiB of resident memory, though actual use varies by system and workload.
+
 Stop the coordinator with <kbd>Ctrl</kbd>+<kbd>C</kbd>. Workspaces remain listed
 the next time it starts. `list` and `status` neither create prepared context nor
 load saved conversations; `send` or `jump` activates one when needed. A turn
 that was active when `cocod` stopped is interrupted. The alpha does not install
 or enable a background service automatically.
+
+If Codex cannot provide the workspace runtime, you can temporarily use the
+older shared execution mode:
+
+```bash
+COCO_WORKSPACE_EXECUTION=shared cocod
+```
+
+This compatibility mode does not provide per-workspace resource observations.
 
 Next, [run your first workspace](../getting-started/).

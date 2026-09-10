@@ -18,6 +18,12 @@ status: draft
 - `codex-cli 0.154.0` is installed in the development environment and is the
   selected compatibility baseline. A model-free real-process test exercises
   the exact stable App Server methods and fields CoCo consumes.
+- The same compatibility suite now exercises the experimental environment
+  boundary used by CoCo: one shared App Server registers a lazy
+  `codex exec-server` for each activated workspace, normal turns select that
+  environment, and detailed status observes its process root. See
+  [Per-workspace Codex execution runtime](workspace-runtime.md) for exact
+  routing and containment limits.
 - Schema v10 adds dedicated signal types, a cursor stream, and bounded signal
   records. Schema v11 adds only the CoCo hook events and delivery rows needed
   for a transactional outbox; neither revives native-history mirroring. See
@@ -56,7 +62,9 @@ status: draft
 
 - Rust, Tokio, SQLite, native Git worktrees, and one daemon-owned Codex App
   Server are fixed v0 choices. The daemon and interactive Codex TUI share its
-  capability-token-protected IPv4-loopback WebSocket.
+  capability-token-protected IPv4-loopback WebSocket. The App Server remains
+  the single control plane while one lighter Codex exec server is started
+  lazily per activated workspace for normal tool execution and attribution.
 - `cocod` owns workspace/runtime coordination and safety policy. CLI, CoCo's
   local MCP server, and later TUI/web clients are equal presentation/control
   adapters only. Ticket scheduling and business workflow are not daemon policy.
@@ -154,7 +162,13 @@ status: draft
                                               |                          |
                                               v                          v
                                       codex app-server          official Codex TUI
-                                                                  (`coco jump`)
+                                              |                   (`coco jump`)
+                                              |
+                           experimental environments / loopback WebSockets
+                                              |
+                              +---------------+---------------+
+                              v                               v
+                    workspace A exec-server         workspace B exec-server
 ```
 
 Only `cocod` may mutate managed state, create worktrees, or own the App Server
@@ -214,7 +228,8 @@ WorkerRuntime / Codex adapter
   start, resume, read, locate, and list native threads
   start turns, project live native status, answer exact server requests
   model discovery, subscription, archive/unarchive/delete, descendant and
-  background-terminal inspection, and process lifecycle
+  background-terminal inspection, lazy workspace-executor lifecycle, and
+  ephemeral resource observation
 
 Clock / IdGenerator
   injectable sources for deterministic tests and idempotency
@@ -1056,9 +1071,19 @@ remote-attachment surface it depends on. The daemon client advertises
 `thread/fork.deferGoalContinuation`; this preserves CoCo's create-without-start
 contract instead of letting Codex continue the inherited goal immediately.
 Experimental fields remain opt-in by necessity rather than convenience. In
-particular, omit `thread/start.runtimeWorkspaceRoots` when it would merely
-repeat `cwd`; Codex already defaults the runtime root to that directory, and do
-not adopt experimental pagination merely to mirror native history.
+particular, CoCo does not send the separate
+`thread/start.runtimeWorkspaceRoots` compatibility field merely to repeat
+`cwd`; the selected environment instead carries its own exact
+`runtimeWorkspaceRoots`. Do not adopt experimental pagination merely to mirror
+native history.
+
+The environment topology and its incomplete 0.154.0 request coverage are
+normative in [Per-workspace Codex execution runtime](workspace-runtime.md).
+`thread/start` and `turn/start` accept environment selections; `thread/resume`,
+`thread/fork`, `thread/compact/start`, `review/start`, and host-local
+`thread/shellCommand` do not provide an equivalent selection field. The
+adapter must preserve those distinctions rather than claiming every action is
+already isolated.
 
 The verified 0.154.0 runtime uses this minimal sequence:
 
@@ -1074,41 +1099,52 @@ The verified 0.154.0 runtime uses this minimal sequence:
 5. `workspace.create` persists the selected profile/model provenance and
    verified Git binding, but deliberately creates no empty native thread.
    A `ready` workspace without a thread projects publicly as `prepared`.
-6. On the first fresh `send`, resolve `default` to an empty `config` object or
+6. Before an operation first needs workspace execution, lazily spawn
+   `codex exec-server --listen ws://127.0.0.1:0` in the canonical worktree,
+   register its opaque stable ID and ephemeral endpoint through
+   `environment/add`, and verify `environment/info`. Do not persist its URL,
+   PID, or resource samples.
+7. On the first fresh `send`, resolve `default` to an empty `config` object or
    parse the complete `$CODEX_HOME/<name>.config.toml` overlay, call persistent
-   `thread/start`, and immediately dispatch the real `turn/start`. Persist the
-   turn intent before that durable action and install a generation-local guard.
-   Only the direct native turn response allows one SQLite transaction to bind
-   the exact thread and accept the operation. A rejected or unconfirmed
-   dispatch never triggers an automatic retry; if Codex already materialized
-   the rollout, preserve the exact validated binding for diagnosis and later
-   resume.
-7. On the first activation of inherited context, revalidate the recorded source
+   `thread/start` with the workspace environment, and immediately dispatch the
+   real `turn/start` with the same selection. Persist the turn intent before
+   that durable action and install a generation-local guard. Only the direct
+   native turn response allows one SQLite transaction to bind the exact thread
+   and accept the operation. A rejected or unconfirmed dispatch never triggers
+   an automatic retry; if Codex already materialized the rollout, preserve the
+   exact validated binding for diagnosis and later resume.
+8. On the first activation of inherited context, revalidate the recorded source
    thread and call native `thread/fork` with the independently selected
    destination `cwd`; optional compaction completes before the first message.
-8. On later `send`, read and validate the bound thread, resume it only when the
+   Because 0.154.0 cannot select an environment on fork or compact, the first
+   ordinary child turn performs the exact destination selection.
+9. On later `send`, read and validate the bound thread, resume it only when the
    current daemon connection lacks a subscription, and issue `turn/start` with
-   the same canonical `cwd` and a client message ID.
-9. Never synthesize a model from profile contents. Supply the explicit model
+   the same canonical `cwd`, workspace environment, and client message ID.
+10. Never synthesize a model from profile contents. Supply the explicit model
    in the native `model` field, retain the profile overlay in `config`, and let
    Codex report the effective model. Use paginated `model/list` for discovery.
-10. Correlate responses, notifications, and server-initiated requests by the
-    consumed protocol fields; map only understood semantics into CoCo state.
+11. Correlate responses, notifications, and server-initiated requests by the
+   consumed protocol fields; map only understood semantics into CoCo state.
 
 For an already bound workspace, `coco jump` reads the user-only endpoint and
-token, then launches `codex resume <thread-id> --remote <url>
---remote-auth-token-env <name> -C <worktree>`. The token is supplied only in
-the child environment. A renewable per-client presence lease prevents
-retirement while this TUI remains open, without excluding another bound TUI
-or `send` on an idle thread.
+token, prepares the workspace executor, and normally launches `codex resume`
+through a one-use authenticated relay. The relay injects the exact workspace
+environment into each downstream `turn/start`; the upstream App Server token
+and relay token are supplied only in child-process memory/environment. In
+explicit shared-execution fallback mode, the CLI retains the direct remote
+resume path. A renewable per-client presence lease prevents retirement while
+the TUI remains open, without excluding another bound TUI or `send` on an idle
+thread.
 
 For an unbound fresh workspace, `workspace.attach` acquires one expiring
 generation-local lease and returns no invented thread ID. The CLI starts a
 one-use authenticated loopback WebSocket relay to the daemon's App Server and
 launches the official TUI with `codex --remote <relay> -C <worktree>`, plus the
-stored profile and model options. The relay correlates the exact
-`thread/start` request/response pair. It does not bind an empty candidate. Once
-that candidate receives `turn/start`, `thread/shellCommand`, or `review/start`,
+stored profile and model options. The relay replaces environment selection on
+the exact `thread/start` and later `turn/start` requests, and correlates the
+start request/response pair. It does not bind an empty candidate. Once that
+candidate receives `turn/start`, `thread/shellCommand`, or `review/start`,
 the daemon verifies through exact `thread/read` that Codex reports a non-empty
 regular rollout file, the expected `cwd`, no fork parent, and the same thread
 ID. It then names and binds that thread and resumes it on the daemon connection
@@ -1119,6 +1155,14 @@ is alive it renews the lease every ten seconds; if the CLI or relay dies, the
 missing heartbeat lets the daemon expire it after thirty seconds.
 Binding converts the exclusive adoption lease into ordinary TUI presence;
 the relay continues its heartbeat until exit.
+
+Codex 0.154.0 implements interactive `!command` through host-local
+`thread/shellCommand`, which rejects a remote-only selected environment. It is
+therefore not a valid materialization or shell path for the default workspace
+runtime even though the relay still observes the method defensively. Normal
+TUI prompts use `turn/start` and are routed to the executor. Review/compact
+immediately after a resume remains subject to the upstream environment gap
+documented in the runtime decision.
 
 The normal remote-TUI exit path sends `thread/unsubscribe` and closes only its
 client WebSocket; it does not send `turn/interrupt`. Because the daemon has
@@ -1368,7 +1412,8 @@ Current daemon startup order after the native read cutover:
    repository-serialized and leaves an ambiguous transition visible for a
    later retry rather than guessing.
 5. Bind the local CLI socket and report ready. Startup does not enumerate or
-   resume all ordinary `ready`/`open` workspaces.
+   resume all ordinary `ready`/`open` workspaces, and it does not recreate
+   their workspace executors until an activating operation needs one.
 
 `workspace.list`, `workspace.get`, and `event.list` read and validate each
 selected binding without loading its thread; after restart an unloaded thread
@@ -1384,9 +1429,14 @@ only live callbacks and an in-flight turn owned by the terminated App Server
 generation are lost.
 
 On shutdown, stop accepting mutations, close watcher streams with their last
-applicable cursor, interrupt or reconcile in-flight App Server requests according to its
-supported protocol, checkpoint/close SQLite, and terminate only the child
-process owned by this daemon. It does not delete worktrees or branches.
+applicable cursor, interrupt or reconcile in-flight App Server requests
+according to its supported protocol, stop every tracked workspace exec server,
+checkpoint/close SQLite, and terminate only the App Server and executor
+processes owned by this daemon. It does not delete worktrees or branches.
+Normal cleanup is covered, but a hard daemon death can orphan a local-mode
+executor because upstream does not allow its stdin-lifetime flag with
+`--listen`; see the runtime decision rather than treating parent PID ownership
+as hard containment.
 
 The alpha exposes only this foreground lifecycle and currently treats terminal
 interrupt as its orderly stop trigger. Packaging must not install or enable a

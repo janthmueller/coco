@@ -51,8 +51,7 @@ impl Coordinator {
         &self,
         params: TurnStartParams,
     ) -> Result<WorkspaceResult, CoordinatorError> {
-        validate_non_empty("message", &params.message)?;
-        validate_operation_id(&params.operation_id)?;
+        validate_turn_start(&params)?;
         let resolved = self.resolve_workspace(&params.scope, &params.workspace)?;
         let repository = self.repository_by_id(&resolved.repository_id)?;
         let repository_lock = self.repository_lock(&repository.id).await;
@@ -108,6 +107,7 @@ impl Coordinator {
         let started = self
             .worker
             .start_turn(
+                &workspace.id,
                 &thread_id,
                 &worktree,
                 &request_fingerprint,
@@ -204,6 +204,9 @@ impl Coordinator {
             let (thread_id, worktree) = self.validated_turn_target(&workspace)?;
             (thread_id.to_owned(), worktree.to_owned())
         };
+        self.worker
+            .prepare_workspace_execution(&workspace.id, &worktree)
+            .await?;
         Ok(PreparedTurnTarget {
             workspace,
             thread_id,
@@ -416,6 +419,11 @@ impl Coordinator {
             runtime.uncertain = true;
         }
     }
+}
+
+fn validate_turn_start(params: &TurnStartParams) -> Result<(), CoordinatorError> {
+    validate_non_empty("message", &params.message)?;
+    validate_operation_id(&params.operation_id)
 }
 
 fn require_open_workspace(workspace: &Workspace) -> Result<(), CoordinatorError> {

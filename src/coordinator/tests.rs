@@ -75,6 +75,9 @@ enum WorkerCall {
     DeleteThread {
         thread_id: String,
     },
+    StopExecution {
+        workspace_id: String,
+    },
     Thread {
         name: String,
         cwd: PathBuf,
@@ -467,8 +470,16 @@ impl WorkerRuntime for FakeWorker {
         Ok(())
     }
 
+    async fn stop_workspace_execution(&self, workspace_id: &str) -> Result<(), WorkerError> {
+        self.calls.lock().unwrap().push(WorkerCall::StopExecution {
+            workspace_id: workspace_id.to_owned(),
+        });
+        Ok(())
+    }
+
     async fn start_thread(
         &self,
+        _workspace_id: &str,
         name: &str,
         cwd: &Path,
         config: Value,
@@ -518,6 +529,7 @@ impl WorkerRuntime for FakeWorker {
 
     async fn resume_thread(
         &self,
+        _workspace_id: &str,
         thread_id: &str,
         cwd: &Path,
         config: Value,
@@ -568,6 +580,7 @@ impl WorkerRuntime for FakeWorker {
 
     async fn fork_thread(
         &self,
+        _workspace_id: &str,
         name: &str,
         source_thread_id: &str,
         cwd: &Path,
@@ -627,6 +640,7 @@ impl WorkerRuntime for FakeWorker {
 
     async fn start_turn(
         &self,
+        _workspace_id: &str,
         thread_id: &str,
         cwd: &Path,
         client_message_id: &str,
