@@ -3437,8 +3437,8 @@ Verification:
 
 ## Public alpha release and landing-page refinement — 2026-09-10
 
-Status: complete locally; the public repository and release are live, and the
-landing-page correction is ready for its documentation-only push.
+Status: complete. Commit `e4c3f07` is pushed, Documentation run `34525149861`
+deployed it successfully, and the corrected landing page is live.
 
 Outcome:
 
@@ -3471,6 +3471,8 @@ Verification:
 - Headless Chrome renders the production export at `1678x873` and `390x844`.
   The desktop header exposes `Docs`, the headline has clear word boundaries,
   and both layouts retain their intended hierarchy without clipping.
+- The successful Pages deployment was fetched from its public URL and contains
+  both `href="/coco/docs/">Docs` and `Codex work, coordinated.`.
 
 ## Open questions and handoff
 
