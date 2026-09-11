@@ -29,7 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DOCS_BASE_PATH: ${{ vars.DOCS_BASE_PATH || format('/{0}', github.event.repository.name) }}
-      NEXT_PUBLIC_REPOSITORY_URL: ${{ format('{0}/{1}', github.server_url, github.repository) }}
+      DOCS_REPOSITORY_URL: ${{ format('{0}/{1}', github.server_url, github.repository) }}
+      DOCS_SITE_URL: ${{ vars.DOCS_SITE_URL || format('https://{0}.github.io', github.repository_owner) }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

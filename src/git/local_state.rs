@@ -9,7 +9,10 @@ use sha2::{Digest, Sha256};
 
 use super::command::{command_failed, ensure_success};
 use super::repository::{canonicalize, validate_object_id};
-use super::{Git, GitError, GitRepository, IncludedFile, LocalStateManifest, LocalStateSnapshot};
+use super::{
+    Git, GitError, GitRepository, IncludedFile, LocalStateManifest, LocalStatePolicy,
+    LocalStateSnapshot,
+};
 
 const WORKTREE_INCLUDE_FILE: &str = ".worktreeinclude";
 const AUTOMATIC_INCLUDE: &str = "AGENTS.override.md";
@@ -23,11 +26,12 @@ impl Git {
         &self,
         repository: &GitRepository,
         base_sha: &str,
-        carry_tracked: bool,
-        carry_untracked: bool,
+        policy: LocalStatePolicy,
     ) -> Result<LocalStateSnapshot, GitError> {
         validate_object_id(base_sha)?;
         let source_head = self.resolve_commit(repository, "HEAD")?;
+        let carry_tracked = policy.carries_tracked();
+        let carry_untracked = policy.carries_untracked();
         let (staged_patch, unstaged_patch) = if carry_tracked {
             if source_head != base_sha {
                 return Err(GitError::LocalChangesBaseMismatch {
@@ -39,8 +43,10 @@ impl Git {
                 self.tracked_patch(&repository.root_path, true)?,
                 self.tracked_patch(&repository.root_path, false)?,
             )
-        } else {
+        } else if policy == LocalStatePolicy::RequireClean {
             self.assert_clean(repository)?;
+            (Vec::new(), Vec::new())
+        } else {
             (Vec::new(), Vec::new())
         };
         let untracked_paths = if carry_untracked {

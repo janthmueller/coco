@@ -119,7 +119,7 @@ fn retirement_reports_locks_and_branch_movement_before_side_effects() {
         ],
     );
     assert!(matches!(
-        git.delete_created_branch(&repository, "coco/locked", &base),
+        git.delete_created_branch(&repository, "coco/locked", &base, false),
         Err(GitError::BranchAlreadyCheckedOut { .. })
     ));
     run(
@@ -133,7 +133,7 @@ fn retirement_reports_locks_and_branch_movement_before_side_effects() {
     assert_eq!(moved, base);
     // A different expected snapshot is rejected even when the branch itself is valid.
     assert!(matches!(
-        git.delete_created_branch(&repository, "coco/locked", &"0".repeat(40)),
+        git.delete_created_branch(&repository, "coco/locked", &"0".repeat(40), false),
         Err(GitError::BranchMoved { .. })
     ));
 }

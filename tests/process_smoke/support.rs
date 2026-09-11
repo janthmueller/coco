@@ -527,6 +527,15 @@ pub(super) fn verify_codex_requests(requests: &[Value], worktree: &Path) -> Resu
             .is_some_and(|value| value.starts_with("coco-")),
         "turn/start had no CoCo message id"
     );
+    let usage_reads = requests
+        .iter()
+        .filter(|request| request.get("method") == Some(&json!("account/usage/read")))
+        .collect::<Vec<_>>();
+    assert_eq!(usage_reads.len(), 1, "native cost reads were not cached");
+    assert_eq!(
+        usage_reads[0].pointer("/params/threadId"),
+        Some(&json!(THREAD_ID))
+    );
     verify_bound_thread_reads(requests)
 }
 
@@ -662,7 +671,15 @@ pub(super) fn verify_recovery_requests(requests: &[Value], worktree: &Path) -> R
         .filter_map(|request| request.get("method").and_then(Value::as_str))
         .filter(|method| *method != "thread/read")
         .collect::<Vec<_>>();
-    assert_eq!(methods, ["initialize", "initialized", "thread/resume"]);
+    assert_eq!(
+        methods,
+        [
+            "initialize",
+            "initialized",
+            "account/usage/read",
+            "thread/resume"
+        ]
+    );
     let resume = request(requests, "thread/resume")?;
     assert_eq!(resume.pointer("/params/threadId"), Some(&json!(THREAD_ID)));
     assert_eq!(

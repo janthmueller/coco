@@ -2,40 +2,25 @@
   "name": "coco-docs",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "packageManager": "pnpm@11.21.0",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
-    "build": "next build --webpack && node ./scripts/verify-export.mjs",
-    "check": "pnpm typecheck && pnpm lint && pnpm format:check",
-    "dev": "next dev",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "lint": "oxlint .",
+    "build": "astro build && node ./scripts/verify-export.mjs",
+    "check": "astro check",
+    "dev": "astro dev",
     "preview": "node ./scripts/serve-export.mjs",
-    "typecheck": "next typegen && tsc --noEmit",
+    "start": "astro dev",
     "verify": "node ./scripts/verify-export.mjs"
   },
   "dependencies": {
-    "fumadocs-core": "16.15.7",
-    "fumadocs-mdx": "15.4.0",
-    "fumadocs-ui": "npm:@fumadocs/base-ui@16.15.7",
-    "lucide-react": "1.41.0",
-    "next": "16.3.4",
-    "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "@astrojs/starlight": "0.41.10",
+    "astro": "7.2.10"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "4.3.3",
-    "@types/mdx": "2.0.14",
-    "@types/node": "26.4.1",
-    "@types/react": "19.2.18",
-    "@types/react-dom": "19.2.7",
-    "oxlint": "1.81.0",
-    "postcss": "8.5.26",
-    "prettier": "3.9.6",
-    "tailwindcss": "4.3.3",
-    "typescript": "7.0.2"
+    "@astrojs/check": "0.9.10",
+    "typescript": "6.0.3"
   }
 }

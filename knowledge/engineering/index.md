@@ -19,6 +19,9 @@ agents.
 - [Per-workspace Codex execution runtime](workspace-runtime.md) - Defines the
   shared control plane, lazy workspace executors, environment routing,
   resource observations, lifecycle, and current containment limits.
+- [Workspace token usage and billing estimates](workspace-usage.md) - Defines
+  native token evidence, optional billing estimates, attribution/recovery
+  requirements, and the implemented passive usage surface.
 - [Release process](release.md) - Defines semantic versioning, the tested-main
   release guard, Cargo version synchronization, alpha tags, and native binary
   archives.

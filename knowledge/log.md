@@ -8,6 +8,53 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-09-11
+
+- **Passive native workspace usage**: Added `coco usage [workspace]` with
+  current/all-repository scope, global exact-name lookup, one-shot JSON, and
+  terminal-stable `--follow`/`-f`. CoCo now retains one exact-binding,
+  monotonic `thread/tokenUsage/updated` checkpoint per workspace in schema v14
+  and marks a prior-generation value as last seen after restart. Optional
+  native per-thread credits/USD estimates are queried on demand, cached only
+  briefly in memory, and remain explicitly unavailable rather than zero when
+  Codex does not report them. Usage reads never load a conversation or start a
+  workspace executor; operational state remains in `status`.
+
+- **Idle-runtime priority**: Recorded one real idle 0.154.0 executor at roughly
+  14 MiB cgroup-charged memory, one process, and no interval CPU. Automatic
+  idle stop is now explicitly lower priority until aggregate or host-pressure
+  evidence justifies it; native `Ready` alone is not a safe retirement
+  condition.
+
+- **Unified Starlight documentation site**: Replaced the separate Fumadocs
+  landing and documentation application with one Astro Starlight site rooted
+  at the overview. Retained the public-only content boundary, static Pagefind
+  search, repository-subpath support, verified `out/` artifact, and existing
+  GitHub Pages deployment flow while removing the Next.js runtime toolchain.
+
+- **Hierarchical Linux workspace containment**: Added an automatically selected
+  cgroup-v2 backend using rootless transient systemd user scopes beneath an
+  opaque per-instance workspace slice. Workspace activation now starts inside
+  the boundary; close, delete, normal daemon shutdown, and next-generation
+  stale cleanup stop complete scopes. Status distinguishes cgroup-charged
+  memory from process-tree RSS and exposes task count, cumulative CPU, and
+  controller events in schema-v10 JSON. No CPU, memory, or task limits are
+  enabled yet, and unsupported hosts retain the process-tree fallback.
+
+- **Whole-workspace deletion with explicit retention**: `delete` now handles
+  open/closed and verified failed preparation, removes owned resources by
+  default, and offers `--keep-thread`/`--keep-branch`. Adopted refs and signal
+  history stay outside its deletion authority. Separate file/commit discard
+  approvals, combined guard planning, actual Git reachability, compare-and-delete
+  refs, schema-v12 recovery, and explicit partial-failure errors protect data.
+  Close remains reversible and allows detached commits retained by other refs.
+
+- **Non-blocking dirty-source creation**: Made the normal CLI create path warn
+  and continue from the selected committed base when its source checkout is
+  dirty. The typed daemon protocol retains separate strict-reject and ignore
+  policies, explicit carry remains opt-in, and `.worktreeinclude` continues to
+  apply independently without mutating the source.
+
 ## 2026-09-10
 
 - **Public layout rhythm and terminology**: Aligned the landing navigation to

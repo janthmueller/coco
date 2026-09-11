@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
+use std::time::Instant;
 
 use serde_json::json;
 use tokio::sync::Mutex as AsyncMutex;
@@ -11,7 +12,9 @@ use crate::domain::{
 };
 use crate::git::{Git, GitRepository};
 use crate::hooks::HookRegistry;
-use crate::protocol::{RepositoryScope, RepositorySummary, WorkspaceListItem, WorkspaceResult};
+use crate::protocol::{
+    RepositoryScope, RepositorySummary, WorkspaceCostEstimate, WorkspaceListItem, WorkspaceResult,
+};
 use crate::store::{EventDraft, Store, StoreError};
 
 const MAX_OPERATION_ID_BYTES: usize = 256;
@@ -23,9 +26,11 @@ mod error;
 mod hooks;
 mod jump;
 mod recovery;
+mod resources;
 mod retirement;
 mod signals;
 mod turn;
+mod usage;
 mod worker;
 mod workspace;
 
@@ -52,6 +57,7 @@ pub(crate) struct Coordinator {
     pending_compactions: StdMutex<HashMap<String, context::PendingCompaction>>,
     file_change_previews: StdMutex<HashMap<(String, String), Vec<DecisionFileChange>>>,
     jump_leases: StdMutex<jump::JumpLeaseRegistry>,
+    usage_costs: StdMutex<HashMap<String, (Instant, WorkspaceCostEstimate)>>,
 }
 
 impl Coordinator {
@@ -81,6 +87,7 @@ impl Coordinator {
             pending_compactions: StdMutex::new(HashMap::new()),
             file_change_previews: StdMutex::new(HashMap::new()),
             jump_leases: StdMutex::new(jump::JumpLeaseRegistry::default()),
+            usage_costs: StdMutex::new(HashMap::new()),
         }
     }
 

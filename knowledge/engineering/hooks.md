@@ -142,7 +142,7 @@ object members. Version 1 emits only:
 | `workspace.created` | the Git worktree and ready workspace record commit | `worktreeMode`, `baseSha` |
 | `workspace.closed` | the open-to-closed transition commits | normal disposition fields, or `recovered: true` after saga recovery |
 | `workspace.reopened` | the closed-to-open transition commits | empty object |
-| `workspace.deleted` | the closed workspace record is removed | selected thread/branch deletion plus optional recovery marker |
+| `workspace.deleted` | an open/closed workspace deletion commits | selected thread/branch deletion plus optional recovery marker |
 
 No event is created when no loaded hook matches it. An idempotent retry of an
 already accepted signal does not create a second event or delivery.
@@ -155,6 +155,13 @@ its current retirement plan, rejects built-in blockers, and verifies any
 client-supplied expected plan. Immediately before beginning the stored saga or
 calling Git/Codex, it evaluates matching guards in stable ID order while still
 holding the repository operation lock. A dry-run returns before this point.
+
+Direct deletion of a present open worktree runs both close and delete guards
+before any effect and recomputes its complete plan afterward. The close guard
+gets `deleting: true`; both see the same selected plan. Successful deletion
+emits only `workspace.deleted`; ordinary explicit close owns `workspace.closed`.
+Schema v12 recovery never replays worktree discard on a surviving checkout;
+it cancels that intent for a new user-reviewed request instead.
 
 Each command receives one compact JSON request on stdin with `schemaVersion`,
 an opaque request `id`, `action`, `requestedAtMs`, repository and workspace

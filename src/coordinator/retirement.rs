@@ -18,6 +18,7 @@ use crate::protocol::{
 };
 use crate::store::WorkspaceDeletionIntent;
 
+mod deletion;
 mod safety;
 
 struct PreparedClose {
@@ -25,13 +26,6 @@ struct PreparedClose {
     registered_repository: Repository,
     repository: GitRepository,
     binding: WorktreeBinding,
-    plan: WorkspaceRetirementPlan,
-}
-
-struct PreparedDelete {
-    workspace: Workspace,
-    registered_repository: Repository,
-    repository: GitRepository,
     plan: WorkspaceRetirementPlan,
 }
 
@@ -80,7 +74,16 @@ impl Coordinator {
             workspace.worktree_mode,
             workspace.branch_name.as_deref(),
         )?;
-        let mut blockers = close_git_blockers(&workspace, &observation, params.discard_changes);
+        let unretained = if workspace.worktree_mode == WorktreeMode::Detached {
+            self.git
+                .unretained_commit_count(&repository, &observation.binding.head_sha, None)?
+        } else {
+            0
+        };
+        let mut blockers = close_git_blockers(&observation, params.discard_changes);
+        if unretained > 0 {
+            blockers.push("detached commits are not retained by another branch or tag; create a branch before closing".into());
+        }
         let thread_disposition = close_thread_disposition(&workspace, params.archive_thread);
         self.collect_runtime_blockers(&workspace, thread_disposition, &mut blockers)
             .await;
@@ -92,6 +95,7 @@ impl Coordinator {
             &observation,
             thread_disposition,
             descendant_thread_count,
+            unretained,
             blockers,
         );
         Ok(PreparedClose {
@@ -147,12 +151,9 @@ impl Coordinator {
             self.rollback_close(&closing).await;
             return Err(source.into());
         }
-        if let Err(source) =
-            self.git
-                .remove_worktree(&prepared.repository, &prepared.binding, discard_changes)
-        {
+        if let Err(source) = self.remove_close_worktree(&prepared, discard_changes) {
             self.rollback_close(&closing).await;
-            return Err(source.into());
+            return Err(source);
         }
         let hook = self.plan_workspace_hook(
             HookEventKind::WorkspaceClosed,
@@ -178,6 +179,27 @@ impl Coordinator {
             plan: prepared.plan,
             applied: true,
         })
+    }
+
+    fn remove_close_worktree(
+        &self,
+        prepared: &PreparedClose,
+        discard_changes: bool,
+    ) -> Result<(), CoordinatorError> {
+        if prepared.binding.mode == WorktreeMode::Detached
+            && self.git.unretained_commit_count(
+                &prepared.repository,
+                &prepared.binding.head_sha,
+                None,
+            )? > 0
+        {
+            return Err(CoordinatorError::WorkspaceRetirementBlocked(vec![
+                "detached commits no longer have a retaining branch or tag".into(),
+            ]));
+        }
+        Ok(self
+            .git
+            .remove_worktree(&prepared.repository, &prepared.binding, discard_changes)?)
     }
 
     async fn unsubscribe_for_close(&self, workspace: &Workspace) -> Result<(), CoordinatorError> {
@@ -283,200 +305,6 @@ impl Coordinator {
         Ok(reopened)
     }
 
-    pub(crate) async fn delete_workspace(
-        &self,
-        params: WorkspaceDeleteParams,
-    ) -> Result<WorkspaceDeleteResult, CoordinatorError> {
-        let resolved = self.resolve_workspace(&params.scope, &params.workspace)?;
-        let repository_lock = self.repository_lock(&resolved.repository_id).await;
-        let _guard = repository_lock.lock().await;
-        let _dependencies = self.context_dependencies.lock().await;
-        let prepared = self.prepare_delete(&params).await?;
-        if params.dry_run {
-            return Ok(WorkspaceDeleteResult {
-                plan: prepared.plan,
-                applied: false,
-            });
-        }
-        reject_blocked_plan(&prepared.plan)?;
-        validate_expected_plan(params.expected_plan.as_ref(), &prepared.plan)?;
-        self.apply_delete(prepared, &params).await
-    }
-
-    async fn prepare_delete(
-        &self,
-        params: &WorkspaceDeleteParams,
-    ) -> Result<PreparedDelete, CoordinatorError> {
-        let workspace = self.resolve_workspace(&params.scope, &params.workspace)?;
-        require_availability(&workspace, WorkspaceAvailability::Closed)?;
-        let (registered_repository, repository) = self.git_repository_for_workspace(&workspace)?;
-        let path = workspace
-            .worktree_path
-            .clone()
-            .ok_or(CoordinatorError::IncompleteWorkspace("worktree"))?;
-        self.validate_retirement_path(&workspace, &repository)?;
-        let mut blockers = self.closed_workspace_blockers(&workspace, &repository, &path)?;
-        if params.delete_branch {
-            self.append_branch_delete_blockers(&workspace, &repository, &mut blockers)?;
-        }
-        let thread_disposition = delete_thread_disposition(&workspace, params.delete_thread);
-        self.append_context_reference_blockers(&workspace, params.delete_thread, &mut blockers)?;
-        if thread_disposition == WorkspaceThreadDisposition::Delete {
-            self.collect_closed_thread_blockers(&workspace, &mut blockers)
-                .await;
-        }
-        let descendant_thread_count = if thread_disposition == WorkspaceThreadDisposition::Delete {
-            self.descendant_count_or_block(&workspace, &mut blockers)
-                .await
-        } else {
-            0
-        };
-        let plan = delete_plan(
-            &workspace,
-            path,
-            thread_disposition,
-            params.delete_branch,
-            descendant_thread_count,
-            blockers,
-        );
-        Ok(PreparedDelete {
-            workspace,
-            registered_repository,
-            repository,
-            plan,
-        })
-    }
-
-    async fn apply_delete(
-        &self,
-        prepared: PreparedDelete,
-        params: &WorkspaceDeleteParams,
-    ) -> Result<WorkspaceDeleteResult, CoordinatorError> {
-        self.hooks
-            .check_guards(
-                GuardAction::WorkspaceDelete,
-                &prepared.registered_repository,
-                &prepared.workspace,
-                json!({
-                    "plan": &prepared.plan,
-                    "deleteThread": params.delete_thread,
-                    "deleteBranch": params.delete_branch,
-                }),
-            )
-            .await?;
-        let intent = WorkspaceDeletionIntent {
-            delete_thread: params.delete_thread,
-            delete_branch: params.delete_branch,
-        };
-        let hook = self.plan_workspace_hook(
-            HookEventKind::WorkspaceDeleted,
-            &prepared.workspace,
-            json!({
-                "threadDeleted": intent.delete_thread,
-                "branchDeleted": intent.delete_branch,
-            }),
-        )?;
-        let notify_hook = hook.is_some();
-        let deleting = self
-            .store
-            .begin_workspace_deletion(&prepared.workspace.id, intent)?;
-        let deleting = self
-            .delete_native_thread_if_requested(deleting, intent)
-            .await?;
-        if let Err(source) =
-            self.delete_branch_if_requested(&deleting, &prepared.repository, intent)
-        {
-            let _ = self.store.cancel_workspace_deletion(&deleting.id);
-            return Err(source);
-        }
-        self.store
-            .delete_workspace_record_with_hook(&deleting.id, hook)?;
-        if notify_hook {
-            self.hooks.notify();
-        }
-        Ok(WorkspaceDeleteResult {
-            plan: prepared.plan,
-            applied: true,
-        })
-    }
-
-    async fn delete_native_thread_if_requested(
-        &self,
-        workspace: Workspace,
-        intent: WorkspaceDeletionIntent,
-    ) -> Result<Workspace, CoordinatorError> {
-        if !intent.delete_thread || workspace.codex_thread_id.is_none() {
-            return Ok(workspace);
-        }
-        let thread_id = required_thread_id(&workspace)?;
-        let Some(located) = self.worker.locate_thread(thread_id).await? else {
-            self.mark_thread_unsubscribed(thread_id);
-            return self
-                .store
-                .clear_workspace_thread_binding(&workspace.id)
-                .map_err(CoordinatorError::from);
-        };
-        let mut blockers = Vec::new();
-        append_native_identity_blockers(&workspace, &located.thread, &mut blockers);
-        append_status_blocker(&located.thread.status, &mut blockers);
-        self.collect_background_terminal_blocker(thread_id, &located.thread.status, &mut blockers)
-            .await;
-        self.descendant_count_or_block(&workspace, &mut blockers)
-            .await;
-        if let Err(source) = reject_blockers(blockers) {
-            let _ = self.store.cancel_workspace_deletion(&workspace.id);
-            return Err(source);
-        }
-        if let Err(source) = self.worker.delete_thread(thread_id).await {
-            match self.worker.locate_thread(thread_id).await {
-                Ok(None) => {
-                    self.mark_thread_unsubscribed(thread_id);
-                    return self
-                        .store
-                        .clear_workspace_thread_binding(&workspace.id)
-                        .map_err(CoordinatorError::from);
-                }
-                Ok(Some(_)) => {
-                    let _ = self.store.cancel_workspace_deletion(&workspace.id);
-                }
-                Err(verification) => {
-                    warn!(
-                        workspace_id = %workspace.id,
-                        %verification,
-                        "native thread deletion result is ambiguous; recovery remains pending"
-                    );
-                }
-            }
-            return Err(source.into());
-        }
-        self.mark_thread_unsubscribed(thread_id);
-        self.store
-            .clear_workspace_thread_binding(&workspace.id)
-            .map_err(CoordinatorError::from)
-    }
-
-    fn delete_branch_if_requested(
-        &self,
-        workspace: &Workspace,
-        repository: &GitRepository,
-        intent: WorkspaceDeletionIntent,
-    ) -> Result<(), CoordinatorError> {
-        if !intent.delete_branch {
-            return Ok(());
-        }
-        let branch = workspace
-            .branch_name
-            .as_deref()
-            .ok_or(CoordinatorError::IncompleteWorkspace("branch"))?;
-        let head = workspace
-            .closed_head_sha
-            .as_deref()
-            .ok_or(CoordinatorError::IncompleteWorkspace("closed branch HEAD"))?;
-        self.git
-            .delete_created_branch_if_present(repository, branch, head)?;
-        Ok(())
-    }
-
     pub(crate) async fn recover_workspace_retirements(&self) -> usize {
         let workspaces = match self.store.transitional_workspaces() {
             Ok(workspaces) => workspaces,
@@ -551,30 +379,6 @@ impl Coordinator {
                 .await;
             }
             Ok(None) => blockers.push("Codex thread is unavailable".to_owned()),
-            Err(_) => blockers.push("Codex thread status is unavailable".to_owned()),
-        }
-    }
-
-    async fn collect_closed_thread_blockers(
-        &self,
-        workspace: &Workspace,
-        blockers: &mut Vec<String>,
-    ) {
-        let Some(thread_id) = workspace.codex_thread_id.as_deref() else {
-            return;
-        };
-        match self.worker.locate_thread(thread_id).await {
-            Ok(Some(located)) => {
-                append_native_identity_blockers(workspace, &located.thread, blockers);
-                append_status_blocker(&located.thread.status, blockers);
-                self.collect_background_terminal_blocker(
-                    thread_id,
-                    &located.thread.status,
-                    blockers,
-                )
-                .await;
-            }
-            Ok(None) => {}
             Err(_) => blockers.push("Codex thread status is unavailable".to_owned()),
         }
     }
@@ -771,49 +575,6 @@ impl Coordinator {
         Ok(())
     }
 
-    async fn recover_deleting_workspace(
-        &self,
-        workspace: &Workspace,
-    ) -> Result<(), CoordinatorError> {
-        let _dependencies = self.context_dependencies.lock().await;
-        let intent = self.store.workspace_deletion_intent(&workspace.id)?;
-        let hook = self.plan_workspace_hook(
-            HookEventKind::WorkspaceDeleted,
-            workspace,
-            json!({
-                "threadDeleted": intent.delete_thread,
-                "branchDeleted": intent.delete_branch,
-                "recovered": true,
-            }),
-        )?;
-        let notify_hook = hook.is_some();
-        let (_, repository) = self.git_repository_for_workspace(workspace)?;
-        self.validate_retirement_path(workspace, &repository)?;
-        let mut blockers = self.closed_workspace_blockers(
-            workspace,
-            &repository,
-            required_worktree_path(workspace)?,
-        )?;
-        self.append_context_reference_blockers(workspace, intent.delete_thread, &mut blockers)?;
-        if let Err(source) = reject_blockers(blockers) {
-            self.store.cancel_workspace_deletion(&workspace.id)?;
-            return Err(source);
-        }
-        let deleting = self
-            .delete_native_thread_if_requested(workspace.clone(), intent)
-            .await?;
-        if let Err(source) = self.delete_branch_if_requested(&deleting, &repository, intent) {
-            let _ = self.store.cancel_workspace_deletion(&deleting.id);
-            return Err(source);
-        }
-        self.store
-            .delete_workspace_record_with_hook(&deleting.id, hook)?;
-        if notify_hook {
-            self.hooks.notify();
-        }
-        Ok(())
-    }
-
     fn plan_workspace_hook(
         &self,
         kind: HookEventKind,
@@ -851,76 +612,15 @@ impl Coordinator {
         }
         Ok(())
     }
-
-    fn closed_workspace_blockers(
-        &self,
-        workspace: &Workspace,
-        repository: &GitRepository,
-        path: &Path,
-    ) -> Result<Vec<String>, CoordinatorError> {
-        let mut blockers = Vec::new();
-        if path_exists(path)? || self.git.worktree_is_registered(repository, path)? {
-            blockers.push("managed worktree still exists; reopen and close it first".to_owned());
-        }
-        if self.reject_workspace_attachment(&workspace.id).is_err() {
-            blockers.push("workspace is attached to a Codex terminal UI".to_owned());
-        }
-        if !self.open_decisions_for_workspace(&workspace.id).is_empty() {
-            blockers.push("workspace has a pending approval or user question".to_owned());
-        }
-        Ok(blockers)
-    }
-
-    fn append_branch_delete_blockers(
-        &self,
-        workspace: &Workspace,
-        repository: &GitRepository,
-        blockers: &mut Vec<String>,
-    ) -> Result<(), CoordinatorError> {
-        match (workspace.worktree_mode, workspace.branch_name.as_deref()) {
-            (WorktreeMode::NewBranch, Some(branch)) => {
-                let expected = workspace
-                    .closed_head_sha
-                    .as_deref()
-                    .ok_or(CoordinatorError::IncompleteWorkspace("closed branch HEAD"))?;
-                match self
-                    .git
-                    .validate_created_branch_deletion(repository, branch, expected)
-                {
-                    Ok(()) => {}
-                    Err(GitError::BranchMoved { actual, .. }) => blockers.push(format!(
-                        "branch {branch} moved from {expected} to {actual} after close"
-                    )),
-                    Err(GitError::BranchAlreadyCheckedOut { path, .. }) => blockers.push(format!(
-                        "branch {branch} is checked out at {}",
-                        path.display()
-                    )),
-                    Err(GitError::BranchNotFound(_)) => {
-                        blockers.push(format!("branch {branch} is unavailable"));
-                    }
-                    Err(_) => blockers.push(format!("branch {branch} could not be verified")),
-                }
-            }
-            (WorktreeMode::ExistingBranch, _) => blockers
-                .push("--delete-branch cannot delete a branch CoCo did not create".to_owned()),
-            _ => blockers.push("detached workspaces have no branch to delete".to_owned()),
-        }
-        Ok(())
-    }
 }
 
 fn close_git_blockers(
-    workspace: &Workspace,
     observation: &crate::git::WorktreeRetirementObservation,
     discard_changes: bool,
 ) -> Vec<String> {
     let mut blockers = Vec::new();
     if let Some(reason) = &observation.lock_reason {
         blockers.push(format!("Git worktree is locked: {reason}"));
-    }
-    if detached_commits(workspace, &observation.binding) {
-        blockers
-            .push("detached worktree contains commits that are not retained by a branch".into());
     }
     if observation.has_local_changes() && !discard_changes {
         blockers.push(
@@ -936,12 +636,14 @@ fn close_plan(
     observation: &crate::git::WorktreeRetirementObservation,
     thread_disposition: WorkspaceThreadDisposition,
     descendant_thread_count: usize,
+    unretained_commit_count: usize,
     blockers: Vec<String>,
 ) -> WorkspaceRetirementPlan {
     WorkspaceRetirementPlan {
         workspace_id: workspace.id.clone(),
         workspace_name: workspace.name.clone(),
         worktree_path: observation.binding.path.clone(),
+        remove_worktree: true,
         head_sha: Some(observation.binding.head_sha.clone()),
         branch_name: workspace.branch_name.clone(),
         thread_id: workspace.codex_thread_id.clone(),
@@ -950,33 +652,9 @@ fn close_plan(
         tracked_changes: observation.tracked_changes,
         untracked_file_count: observation.untracked_file_count,
         ignored_file_count: observation.ignored_file_count,
-        detached_commits: detached_commits(workspace, &observation.binding),
-        descendant_thread_count,
-        blockers,
-    }
-}
-
-fn delete_plan(
-    workspace: &Workspace,
-    worktree_path: std::path::PathBuf,
-    thread_disposition: WorkspaceThreadDisposition,
-    delete_branch: bool,
-    descendant_thread_count: usize,
-    blockers: Vec<String>,
-) -> WorkspaceRetirementPlan {
-    WorkspaceRetirementPlan {
-        workspace_id: workspace.id.clone(),
-        workspace_name: workspace.name.clone(),
-        worktree_path,
-        head_sha: workspace.closed_head_sha.clone(),
-        branch_name: workspace.branch_name.clone(),
-        thread_id: workspace.codex_thread_id.clone(),
-        thread_disposition,
-        delete_branch,
-        tracked_changes: false,
-        untracked_file_count: 0,
-        ignored_file_count: 0,
-        detached_commits: false,
+        detached_commits: workspace.worktree_mode == WorktreeMode::Detached
+            && unretained_commit_count > 0,
+        unretained_commit_count,
         descendant_thread_count,
         blockers,
     }
@@ -1002,11 +680,6 @@ fn delete_thread_disposition(
     } else {
         WorkspaceThreadDisposition::Retain
     }
-}
-
-fn detached_commits(workspace: &Workspace, binding: &WorktreeBinding) -> bool {
-    workspace.worktree_mode == WorktreeMode::Detached
-        && workspace.base_sha.as_deref() != Some(&binding.head_sha)
 }
 
 fn require_availability(

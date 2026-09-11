@@ -11,15 +11,17 @@ use crate::domain::{
     Workspace, WorkspaceAvailability, WorkspaceLifecycle, WorkspacePhase, WorktreeMode,
     derive_workspace_runtime,
 };
-use crate::git::{GitRepository, LocalStateSnapshot, WorktreePlan, WorktreeTarget};
+use crate::git::{
+    GitRepository, LocalStatePolicy, LocalStateSnapshot, WorktreePlan, WorktreeTarget,
+};
 use crate::profile::{load_profile, with_effective_thread_settings};
 use crate::protocol::{
     AuditRecordParams, EventListParams, EventListResult, GitIncomplete, GitObservationError,
     GitUnavailable, RepositoryListParams, RepositoryRegisterParams, RepositoryResolveParams,
-    RepositoryScope, RepositorySummary, WorkspaceBaseRequest, WorkspaceContextRequest,
-    WorkspaceContextSource, WorkspaceCreateParams, WorkspaceDiffParams, WorkspaceDiffResult,
-    WorkspaceGetParams, WorkspaceGitStatus, WorkspaceListItem, WorkspaceListParams,
-    WorkspaceResult, WorkspaceStatusResult, WorkspaceWorktreeRequest,
+    RepositoryScope, RepositorySummary, WorkspaceBaseRequest, WorkspaceChangesRequest,
+    WorkspaceContextRequest, WorkspaceContextSource, WorkspaceCreateParams, WorkspaceDiffParams,
+    WorkspaceDiffResult, WorkspaceGetParams, WorkspaceGitStatus, WorkspaceListItem,
+    WorkspaceListParams, WorkspaceResult, WorkspaceStatusResult, WorkspaceWorktreeRequest,
 };
 use crate::store::{
     AuditDraft, EventDraft, NewThreadBinding, NewWorkspace, Operation, ThreadOperationAcceptance,
@@ -148,12 +150,17 @@ impl Coordinator {
         loaded_profile.snapshot.model_override = params.model.clone();
         let (base, target) =
             self.resolve_creation_worktree(&params, &repository, &git_repository)?;
-        let local_state = self.git.snapshot_local_state(
-            &git_repository,
-            &base.base_sha,
-            params.changes.carries_tracked(),
-            params.changes.carries_untracked(),
-        )?;
+        let local_state_policy = match params.changes {
+            WorkspaceChangesRequest::Reject => LocalStatePolicy::RequireClean,
+            WorkspaceChangesRequest::Ignore => LocalStatePolicy::IgnoreChanges,
+            WorkspaceChangesRequest::CarryTracked => LocalStatePolicy::CarryTracked,
+            WorkspaceChangesRequest::CarryTrackedAndUntracked => {
+                LocalStatePolicy::CarryTrackedAndUntracked
+            }
+        };
+        let local_state =
+            self.git
+                .snapshot_local_state(&git_repository, &base.base_sha, local_state_policy)?;
         // Cross-repository thread context can race source deletion. Hold the
         // dependency guard until the resolved source is durably recorded.
         let dependencies = self.context_dependencies.lock().await;
@@ -285,6 +292,7 @@ impl Coordinator {
             .worktree_path
             .as_deref()
             .ok_or(CoordinatorError::IncompleteWorkspace("worktree"))?;
+        self.require_workspace_resource_policy_support(&workspace.id)?;
         let context = stored_creation_context(workspace)?;
         if context.mode != ContextMode::Fresh || context.fork.is_some() {
             return Err(CoordinatorError::InvalidParams(
@@ -668,18 +676,17 @@ impl Coordinator {
         cwd: &Path,
         config: Value,
         model: Option<&str>,
-    ) -> Result<super::StartedThread, super::WorkerError> {
+    ) -> Result<super::StartedThread, CoordinatorError> {
+        self.require_workspace_resource_policy_support(workspace_id)?;
         match &context.fork {
-            Some(fork) => {
-                self.worker
-                    .fork_thread(workspace_id, name, &fork.thread_id, cwd, config, model)
-                    .await
-            }
-            None => {
-                self.worker
-                    .start_thread(workspace_id, name, cwd, config, model)
-                    .await
-            }
+            Some(fork) => Ok(self
+                .worker
+                .fork_thread(workspace_id, name, &fork.thread_id, cwd, config, model)
+                .await?),
+            None => Ok(self
+                .worker
+                .start_thread(workspace_id, name, cwd, config, model)
+                .await?),
         }
     }
 

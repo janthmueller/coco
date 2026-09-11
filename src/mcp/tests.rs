@@ -100,6 +100,11 @@ fn fake_response(method: DaemonMethod) -> Value {
             "openDecisions": [],
             "nextSequence": 0,
         }),
+        DaemonMethod::WorkspaceUsageList => json!([]),
+        DaemonMethod::WorkspaceUsageGet => fake_usage_response(),
+        DaemonMethod::WorkspaceLimitsGet
+        | DaemonMethod::WorkspaceLimitsSet
+        | DaemonMethod::WorkspaceLimitsReset => fake_limits_response(),
         DaemonMethod::TurnStart => json!({
             "workspace": fake_workspace(),
             "turnId": "turn-test",
@@ -133,6 +138,40 @@ fn fake_response(method: DaemonMethod) -> Value {
             "occurredAtMs": 1,
         }),
     }
+}
+
+fn fake_usage_response() -> Value {
+    json!({
+        "workspace": fake_workspace(),
+        "repository": {
+            "id": "repo-test",
+            "rootPath": "/repo",
+            "displayName": "repo"
+        },
+        "cost": {"status": "unavailable", "reason": "noThread"}
+    })
+}
+
+fn fake_limits_response() -> Value {
+    json!({
+        "workspace": fake_workspace(),
+        "policy": {
+            "revision": 0,
+            "policy": {"schemaVersion": 1}
+        },
+        "controller": {
+            "capabilities": {
+                "backend": "none",
+                "dynamicUpdates": false,
+                "memoryHigh": false,
+                "memoryMax": false,
+                "cpuMax": false,
+                "cpuWeight": false,
+                "tasksMax": false
+            },
+            "runtimeState": "inactive"
+        }
+    })
 }
 
 fn fake_workspace() -> Value {

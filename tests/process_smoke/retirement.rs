@@ -80,13 +80,14 @@ async fn cli_closes_reopens_and_deletes_a_prepared_workspace_safely() -> Result<
     run_cli(
         &paths,
         &repository,
-        &["delete", RETIREMENT_WORKSPACE, "--delete-branch", "--yes"],
+        &["delete", RETIREMENT_WORKSPACE, "--yes"],
     )
     .await?;
     let after = cli_json(&run_cli(&paths, &repository, &["list", "--closed", "--json"]).await?)?;
     assert_eq!(after["workspaces"].as_array().map(Vec::len), Some(0));
     assert_branch_missing(&repository, &branch).await?;
     verify_retirement_hooks(&paths, &repository).await?;
+    verify_direct_delete(&paths, &repository).await?;
 
     interrupt(&daemon).await?;
     let daemon_status = timeout(PROCESS_TIMEOUT, daemon.wait()).await??;
@@ -99,6 +100,45 @@ async fn cli_closes_reopens_and_deletes_a_prepared_workspace_safely() -> Result<
             .is_empty(),
         "daemon did not authenticate to the App Server"
     );
+    Ok(())
+}
+
+async fn verify_direct_delete(paths: &TestPaths, repository: &Path) -> Result<()> {
+    let name = "cleanup/direct";
+    run_cli(paths, repository, &["create", name]).await?;
+    let status = named_workspace_status(paths, repository, name).await?;
+    let path = PathBuf::from(
+        status["workspace"]["worktreePath"]
+            .as_str()
+            .context("missing worktree")?,
+    );
+    let branch = status["workspace"]["branchName"]
+        .as_str()
+        .context("missing branch")?;
+    fs::write(path.join("local.txt"), "keep unless confirmed\n")?;
+    let refused = capture_cli(paths, repository, &["delete", name, "-y"], None).await?;
+    ensure!(
+        !refused.status.success(),
+        "-y unexpectedly discarded local changes"
+    );
+    ensure!(path.join("local.txt").is_file());
+    run_cli(
+        paths,
+        repository,
+        &["delete", name, "--discard-changes", "-y"],
+    )
+    .await?;
+    ensure!(!path.exists(), "direct delete kept the worktree");
+    assert_branch_missing(repository, branch).await?;
+    let name = "cleanup/keep";
+    run_cli(paths, repository, &["create", name]).await?;
+    let result = run_cli(
+        paths,
+        repository,
+        &["delete", name, "--keep-branch", "--keep-thread", "-y"],
+    )
+    .await?;
+    ensure!(String::from_utf8_lossy(&result.stdout).contains("Kept branch  coco/cleanup/keep"));
     Ok(())
 }
 
@@ -146,7 +186,7 @@ async fn verify_retirement_hooks(paths: &TestPaths, repository: &Path) -> Result
 
 async fn assert_closed_workspace_listing(paths: &TestPaths, repository: &Path) -> Result<()> {
     let open = cli_json(&run_cli(paths, repository, &["list", "--json"]).await?)?;
-    assert_eq!(open["schemaVersion"], 9);
+    assert_eq!(open["schemaVersion"], 10);
     assert_eq!(open["workspaces"].as_array().map(Vec::len), Some(0));
     let closed = cli_json(&run_cli(paths, repository, &["list", "--closed", "--json"]).await?)?;
     assert_eq!(closed["workspaces"].as_array().map(Vec::len), Some(1));

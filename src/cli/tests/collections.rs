@@ -102,6 +102,15 @@ fn help_assigns_all_repos_to_overviews_and_global_to_single_targets() {
     assert!(status_help.contains("--all-repos"));
     assert!(status_help.contains("--global"));
 
+    let mut command = Cli::command();
+    let usage_help = command
+        .find_subcommand_mut("usage")
+        .expect("usage subcommand must exist")
+        .render_long_help()
+        .to_string();
+    assert!(usage_help.contains("--all-repos"));
+    assert!(usage_help.contains("--global"));
+
     for name in ["send", "jump", "diff", "close", "reopen", "delete"] {
         let mut command = Cli::command();
         let help = command
@@ -149,11 +158,19 @@ fn parses_repository_overviews_and_global_workspace_searches_separately() {
         assert!(!parsed.requests_global_search());
     }
 
+    for arguments in [["coco", "-a", "usage"], ["coco", "usage", "-a"]] {
+        let parsed = Cli::try_parse_from(arguments).unwrap();
+        assert!(parsed.requests_all_repositories());
+        assert!(!parsed.requests_global_search());
+    }
+
     for arguments in [
         vec!["coco", "-g", "status"],
         vec!["coco", "status", "-g"],
         vec!["coco", "-g", "status", "feat/login"],
         vec!["coco", "status", "feat/login", "-g"],
+        vec!["coco", "-g", "usage", "feat/login"],
+        vec!["coco", "usage", "feat/login", "-g"],
         vec!["coco", "-g", "jump"],
         vec!["coco", "jump", "-g"],
         vec!["coco", "-g", "jump", "feat/login"],
@@ -173,6 +190,35 @@ fn parses_repository_overviews_and_global_workspace_searches_separately() {
         let parsed = Cli::try_parse_from(arguments).unwrap();
         assert!(!parsed.requests_all_repositories());
         assert!(parsed.requests_global_search());
+    }
+}
+
+#[test]
+fn usage_supports_passive_collection_and_target_follow_forms() {
+    for arguments in [
+        vec!["coco", "usage"],
+        vec!["coco", "usage", "--json"],
+        vec!["coco", "usage", "--follow"],
+        vec!["coco", "usage", "-f"],
+        vec!["coco", "usage", "-af"],
+        vec!["coco", "usage", "auth"],
+        vec!["coco", "usage", "auth", "--json"],
+        vec!["coco", "usage", "auth", "-f"],
+        vec!["coco", "usage", "auth", "-g"],
+    ] {
+        assert!(
+            Cli::try_parse_from(&arguments).is_ok(),
+            "valid usage form failed: {arguments:?}"
+        );
+    }
+    for arguments in [
+        vec!["coco", "usage", "auth", "-a"],
+        vec!["coco", "usage", "auth", "--follow", "--json"],
+    ] {
+        assert!(
+            Cli::try_parse_from(&arguments).is_err(),
+            "invalid usage form parsed: {arguments:?}"
+        );
     }
 }
 
@@ -227,6 +273,7 @@ fn incompatible_repository_scopes_are_rejected_before_rpc() {
         vec!["coco", "../other", "list", "-a"],
         vec!["coco", "--global", "../other", "status", "auth"],
         vec!["coco", "../other", "status", "auth", "-g"],
+        vec!["coco", "../other", "usage", "auth", "-g"],
         vec!["coco", "-a", "-g", "status", "auth"],
         vec!["coco", "../other", "signal", "list", "-a"],
         vec!["coco", "../other", "signal", "list", "auth", "-g"],
@@ -280,7 +327,9 @@ async fn leading_scope_flags_are_rejected_by_incompatible_commands() {
         vec!["coco", "-a", "create", "auth"],
         vec!["coco", "-a", "send", "auth", "continue"],
         vec!["coco", "-a", "status", "auth"],
+        vec!["coco", "-a", "usage", "auth"],
         vec!["coco", "-g", "status"],
+        vec!["coco", "-g", "usage"],
         vec!["coco", "-g", "list"],
         vec!["coco", "-g", "repo", "list"],
         vec!["coco", "-g", "model", "list"],

@@ -276,7 +276,7 @@
                 .name == "coco-docs"
                 and .private == true
                 and .packageManager == "pnpm@11.21.0"
-                and .scripts.build == "next build --webpack && node ./scripts/verify-export.mjs"
+                and .scripts.build == "astro build && node ./scripts/verify-export.mjs"
               ' "$docsManifest" >/dev/null
 
               grep -F 'channel = "1.98.1"' "$toolchainManifest" >/dev/null

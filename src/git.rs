@@ -180,6 +180,24 @@ pub struct LocalStateSnapshot {
     manifest: LocalStateManifest,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LocalStatePolicy {
+    RequireClean,
+    IgnoreChanges,
+    CarryTracked,
+    CarryTrackedAndUntracked,
+}
+
+impl LocalStatePolicy {
+    const fn carries_tracked(self) -> bool {
+        matches!(self, Self::CarryTracked | Self::CarryTrackedAndUntracked)
+    }
+
+    const fn carries_untracked(self) -> bool {
+        matches!(self, Self::CarryTrackedAndUntracked)
+    }
+}
+
 #[derive(Debug, Clone)]
 struct IncludedFile {
     path: PathBuf,

@@ -5,7 +5,7 @@ description: Tracks repository bootstrap, the Rust baseline, and early CoCo arch
 tags: [work, branch, bootstrap, rust, mcp, architecture]
 status: active
 branch: main
-updated: 2026-09-10
+updated: 2026-09-11
 ---
 
 # main — repository foundation
@@ -17,6 +17,81 @@ architectural baseline for CoCo.
 
 ## Active work
 
+- [ ] Revisit the read-only CLI vocabulary after `usage` has practical use:
+  compare the separate `list`, `status`, and `usage` commands with a possible
+  shared `show` namespace without changing the current surface prematurely.
+- [ ] Before exposing workspace-owned deltas, budgets, or alerts, run the
+  model-consuming fork/compact/TUI/offline attribution cases recorded in the
+  workspace-usage decision; current output deliberately reports native thread
+  totals only.
+- [x] Implement the approved native workspace-usage slice.
+  - [x] Persist focused Codex token snapshots with thread-binding identity,
+    provenance, and freshness rather than conversation history.
+  - [x] Add typed `workspace.usage.get`/collection protocol paths and the
+    optional native per-thread cost provider without a local price catalog.
+  - [x] Add `coco usage [workspace]`, current-repository/all-repository scope,
+    `--follow`/`-f`, concise human output, and complete one-shot JSON.
+  - [x] Keep usage following passive, terminal-stable, and separate from
+    status/list while recording their possible later CLI consolidation.
+  - [x] Cover exact binding, notification regression, restart/freshness,
+    nullable cost, scoping, rendering, full fake-process behavior, and the
+    selected Codex compatibility contract; keep model-consuming attribution
+    claims in the explicit follow-up above. Update public and canonical docs.
+- [x] Record the idle-runtime priority decision and assess native workspace
+  token/cost accounting without implementing a product surface.
+  - [x] Verify token notifications, per-thread billing estimates, replay
+    limitations, and OpenTelemetry against Codex 0.154.0.
+  - [x] Probe the current authenticated per-thread billing route without
+    issuing a model turn.
+  - [x] Separate raw usage, current context, and optional cost; record staged
+    persistence, attribution, compatibility, and CLI recommendations.
+- [x] Finish portable workspace resource policies and Linux enforcement.
+  - [x] Reassess whether Linux cgroup v2 creates avoidable platform lock-in.
+  - [x] Define the portable capability model and separate genuinely portable
+    limits from Linux-, Windows-, and optional container-specific controls.
+  - [x] Agree persistence, CLI/config, live-update, failure, and recovery
+    semantics before implementing enforcement.
+  - [x] Implement revisioned workspace policy, CLI/local RPC, fail-closed
+    activation, verified cgroup launch/live updates, rollback, and restart
+    staging without adding a second platform backend.
+  - [x] Finish public documentation and the complete verification gates.
+- [x] Implement the first Linux cgroup-v2 workspace containment slice.
+  - [x] Add the instance/workspace-pool hierarchy and rootless systemd scope
+    capability selection without enabling limits.
+  - [x] Launch and stop each workspace executor as one complete scope, with
+    instance-safe stale-runtime cleanup after daemon loss.
+  - [x] Replace ancestry estimates with truthful cgroup-v2 memory, CPU,
+    process/task, and controller-event observations when contained.
+  - [x] Preserve the process-tree fallback and validate unit, process, real
+    systemd, real Codex, public documentation, and static-export behavior.
+- [x] Design the first Linux cgroup-v2 workspace containment slice.
+  - [x] Audit the current executor launch, ownership, resource sampling, and
+    shutdown boundaries.
+  - [x] Select a rootless cgroup delegation/launch strategy and define
+    capability detection plus non-Linux fallback.
+  - [x] Define cgroup identity, lifecycle/recovery, accounting, configurable
+    CPU/memory/PID limits, errors, and public CLI/config behavior.
+  - [x] Record the implementation slices, tests, risks, and next concrete
+    action in canonical runtime knowledge before changing product behavior.
+- [x] Track workspace token usage and estimated cost as a deferred,
+  separately designed observability capability.
+- [x] Clarify destructive-command help without changing behavior.
+  - [x] Describe `close` and its dry-run in user language rather than internal
+    retirement terminology.
+  - [x] Give both `--yes` options the same contract: skip confirmation without
+    authorizing either class of data loss.
+  - [x] Rebuild the CLI help and run the focused parsing tests.
+- [x] Clarify the two deletion-safety axes after user review.
+  - [x] Rename the overly broad `--discard-commits` policy to
+    `--discard-unretained-commits` throughout CLI, wire contract, persistence,
+    tests, and documentation.
+  - [x] State plainly that close removes the worktree, so uncommitted files
+    require explicit discard even though the branch and thread are retained.
+  - [x] Re-run focused behavior and documentation gates, then update handoff.
+- [x] Make dirty-source creation non-blocking with a clear omitted-changes warning.
+- [x] Implement the approved close/delete redesign: direct deletion, owned-resource
+  defaults, explicit retention, separate loss approvals, combined guards,
+  recoverable partial effects, and public/internal documentation.
 - [x] Refine the public documentation layout from the deployed-site review.
   - [x] Put the header brand and `Docs` link on one intentional content axis.
   - [x] Replace overly tight display typography with readable heading spacing
@@ -980,7 +1055,7 @@ ordinary untracked or ignored local files), and its native thread is proven
   explicit confirmation, or `--discard-changes --yes` in non-interactive use;
 - a detached worktree whose `HEAD` differs from its immutable base is refused
   until it is promoted to a branch, unless a future explicit
-  `--discard-commits` policy is accepted; and
+  `--discard-unretained-commits` policy is accepted; and
 - CoCo invokes `git worktree remove` against the revalidated canonical managed
   path and never recursively deletes the directory itself. Removing a worktree
   never implicitly deletes its branch.
@@ -993,7 +1068,7 @@ this lifecycle action" selector: `close -t` archives the thread and
 `--archive-thread` and `--delete-thread`. Use `-b` only for
 `delete --delete-branch`; `-tb` therefore requests both optional permanent
 deletions and composes naturally with `-y`. Keep `--discard-changes` and any
-future `--discard-commits` long-only because they authorize data loss. Do not
+future `--discard-unretained-commits` long-only because they authorize data loss. Do not
 reuse `-a`: it already means `--all-repos`, and destructive bulk scope remains
 unsupported. Omitted targets use the existing picker; `--global`/`-g` retains
 its existing single-workspace meaning.
@@ -3652,3 +3727,563 @@ Verification:
   the common transport API, then add Windows named pipes with native CI before
   claiming Windows support. Otherwise prefer a user-visible capability over
   more structural movement.
+- Track per-workspace token usage and estimated cost as a later observability
+  task. First audit the released App Server's authoritative per-turn/thread
+  counters, then define fork/compaction/retry attribution, persistence, JSON
+  output, and versioned model pricing. Raw token evidence and derived monetary
+  estimates must remain distinguishable. This does not expand the first cgroup
+  containment slice.
+
+## Non-blocking dirty-source creation
+
+Status: complete in the working tree.
+
+Scope:
+
+- Allow ordinary `coco create` from a dirty source checkout without adding a
+  redundant ignore flag.
+- Warn before creation, preserve the source checkout unchanged, and create the
+  destination from its independently selected committed base without copying
+  tracked or ordinary untracked changes.
+- Keep strict rejection and ignore as distinct typed daemon policies so the
+  CLI can preflight safely and non-CLI clients remain explicit.
+- Continue honoring explicitly declared `.worktreeinclude` files independently
+  from tracked and ordinary-untracked state.
+- Cover wire representation, Git behavior, coordinator behavior, the real CLI
+  retry path, and user-facing documentation.
+
+Decision:
+
+- The CLI sends the strict request first. Because dirty rejection occurs before
+  persistence, hooks, worktree creation, or thread activation, it can print a
+  warning and safely retry the same operation with `changes: ignore`.
+- Default omission must not imply `HEAD` or otherwise alter base resolution.
+  Explicit carry modes remain unchanged, and no interactive confirmation is
+  introduced for this non-destructive operation.
+
+Verification:
+
+- `cargo fmt --all -- --check` passes.
+- `cargo clippy --all-targets --locked -- -D warnings` passes.
+- `cargo test --locked --all-targets` passes outside the filesystem sandbox:
+  292 library tests and all 5 process tests pass; only the 7 explicitly manual
+  or live-Codex tests remain ignored.
+- The focused real daemon/CLI lifecycle test proves a dirty source produces the
+  warning, retries without duplicate creation effects, and completes the
+  existing send/jump flow.
+- `pnpm --dir docs run check` passes.
+- The production static export with `DOCS_BASE_PATH=/coco` and the public
+  repository URL passes, verifying 103 files and all 10 public pages.
+- `git diff --check` passes, and a repository-wide wording scan found no stale
+  claim that ordinary CLI creation requires a clean checkout.
+
+Follow-up kept out of this slice:
+
+- Direct deletion of an open workspace remains a separate lifecycle change.
+- Fine-grained omission such as carrying tracked changes while explicitly
+  leaving ordinary untracked files behind remains unchanged and can be
+  reconsidered independently.
+
+## Close/delete behavior and CLI review
+
+Status: complete. The user approved the breaking alpha CLI change; the
+implementation and final verification are recorded below. Review findings
+describe the original behavior, before this change.
+
+Completed implementation checklist:
+
+- [x] Make deletion accept open/closed and safely inspect failed provisioning;
+  delete owned resources by default, with `--keep-thread`/`--keep-branch`.
+- [x] Preview all effects together and run both applicable guards before effects.
+  Persist one deletion intent and recover without replaying a destructive
+  worktree discard after a crash.
+- [x] Protect unretained commits independently from uncommitted files; preserve
+  adopted branches and expose retained branch/thread identities.
+- [x] Keep close reversible, correcting detached commit checks to actual Git
+  reachability rather than a comparison to the original base.
+- [x] Update focused lifecycle/recovery/CLI tests and affected documentation;
+  preserve and verify the preceding dirty-source fix in the same worktree.
+
+Scope:
+
+- Compare the current close/delete defaults with the workspace resource model
+  and the expected meaning of permanently deleting a workspace.
+- Evaluate deleting an open workspace directly, retention flags, and handling
+  dirty files, existing branches, detached commits, dependent context, hooks,
+  and interrupted operations.
+- Report concrete recommendations before changing lifecycle behavior. Preserve
+  the completed, uncommitted dirty-source creation fix.
+
+Findings:
+
+- Ordinary close stops the managed executor, removes the exact verified
+  worktree, and retains the workspace record, branch, and conversation.
+  Archive is a separate opt-in. Interactive close already offers an explicit
+  discard confirmation for local changes without requiring the flag first;
+  scripts need `--discard-changes`, and `--yes` alone never authorizes loss.
+- Delete currently requires closed availability in both coordinator and store.
+  Its default removes the workspace record and associated operational rows;
+  thread and branch deletion require separate flags. The selector likewise
+  shows only closed workspaces. This resembles deregistration more than the
+  whole-workspace deletion a user expects.
+- Branch deletion checks CoCo ownership, current ref identity, and absence of
+  another checkout, then uses `git branch -D`. It does not check whether
+  commits remain reachable from other branches/tags. A destructive default
+  must expose/protect that additional loss boundary.
+- The detached close blocker compares HEAD to the creation base. It also
+  blocks commits retained elsewhere; it is not a reachability check. A
+  retained SHA in SQLite alone is not a durable Git retention reference.
+- Close requires ready provisioning state; delete requires closed state. A
+  failed provisioning record therefore has no normal cleanup route through
+  these commands. A generalized deletion planner should inspect and report
+  the resources actually present in failed/prepared/open/closed workspaces.
+- Signals deliberately survive record deletion under their existing retention
+  policy, as the signal-store test confirms. Resource deletion must not claim
+  to erase emitted history or external effects.
+
+Recommended product contract:
+
+- Close means park for reopening: stop execution, remove the clean worktree,
+  preserve branch, thread, and binding. Keep native archive optional; current
+  archive checks are stricter for descendants than ordinary close.
+- Delete accepts open or closed workspaces and removes the managed worktree,
+  executor, record, bound thread, and a CoCo-created branch by default.
+  `--keep-thread` and `--keep-branch` select retention. An existing branch
+  supplied with `--checkout` remains external and is explicitly shown as kept;
+  detached workspaces have no branch selection.
+- Plan all selected effects and blockers before any mutation. For open
+  workspaces, include both close and delete guards before removal; use one
+  confirmation and one durable operation intent, with effect-time rechecks
+  and recoverable partial progress. Merely calling today's CLI close and then
+  delete would discover delete blockers/guards too late.
+- Dirty tracked/untracked/ignored files remain a distinct discard choice.
+  Show commits at risk separately; keep a retaining branch/ref or explicitly
+  approve discarding those commits. Ordinary `--yes` must not expand either
+  loss policy. Preserve active-turn, attachment, descendant, dependency,
+  worktree-lock, path, and branch-identity checks.
+- Make kept resources discoverable by reporting branch names and thread IDs.
+  Do not silently reverse the meaning of existing `-t`/`-b` options. Changing
+  deletion defaults is a breaking CLI change, especially for old `delete -y`
+  scripts; retain explicit wire policies and plan migration before shipping.
+
+Verification:
+
+- Reviewed the current CLI argument/confirmation flows, coordinator/store
+  transitions, Git removal/ref checks, hooks/guards, context dependencies,
+  and existing retirement and signal-history tests.
+- No lifecycle code changes, runtime operations, Git deletions, or new test
+  runs were needed for this source-based review. The prior completed
+  dirty-source changes remain untouched.
+
+### Approved implementation and verification
+
+Implemented on 2026-09-11, following the user's explicit approval of the
+breaking alpha change:
+
+- `delete` selects open and closed workspaces, including safe cleanup of
+  failed preparation. It removes the managed worktree/runtime, record, bound
+  native thread, and owned branch by default. `--keep-thread`/`--keep-branch`
+  retain resources and print exact IDs/names. Adopted branches always remain;
+  a planned branch name alone cannot establish ownership after a collision.
+- The CLI uses one combined plan and one yes/no confirmation. Discarding files
+  and unretained commits are separate choices; scripts must explicitly select
+  `--discard-changes`/`--discard-unretained-commits`. `--yes` alone grants neither. The old
+  delete `-t`/`-b` and long removal flags are rejected, not silently reversed.
+  The RPC keeps required explicit deletion booleans, avoiding implicit loss
+  when a client omits a policy.
+- Close keeps its reversible contract and optional `-t` archive. Detached
+  commits are allowed when another branch/tag/remote ref retains them, rather
+  than comparing HEAD to the initial base. Git loss checks run again before
+  effects; owned-branch removal uses expected-object compare-and-delete.
+- Open deletion checks both close/delete guards before any lifecycle effects,
+  then revalidates the complete plan. Success emits only `workspace.deleted`.
+  Active work, attachments, decisions, terminals, descendants, dependencies,
+  path/binding drift, and locks remain protected.
+- Schema v12 persists deletion origin and explicit commit-discard policy.
+  Recovery never replays a destructive file discard on a surviving worktree:
+  it restores open availability for a fresh confirmation. Once the worktree
+  is gone, verified remaining thread/branch effects can finish. Partial failure
+  explicitly reports `WORKSPACE_DELETION_INCOMPLETE` without leaking private
+  native error data. Signal history retains its existing policy.
+- The expanded deletion saga and planner have focused modules under
+  `coordinator/retirement/`; new policy, recovery, and migration tests have
+  separate files. This is the boundary needed by the combined lifecycle,
+  not a package-wide layout refactor. Public docs describe user choices;
+  canonical product, architecture, hook, and Rust-layout knowledge hold the
+  internal contract. The preceding dirty-source fix remains included.
+
+Verification:
+
+- `cargo fmt --all -- --check` and
+  `cargo clippy --all-targets --locked -- -D warnings` pass.
+- `cargo test --locked --all-targets -- --test-threads=2` passes: 309 library
+  tests and all 5 process tests; the 4 manual/live library tests and 3 real
+  Codex integration tests remain deliberately ignored. Local IPC tests ran
+  outside the filesystem sandbox. No live user workspace was deleted.
+- Coverage includes open/closed/detached deletion, adopted and retained refs,
+  loss cancellation, `--yes` safety, native rejection/ambiguity, dependency
+  races, both guards before open deletion, failed provisioning, safe restart,
+  schema-v11 migration, and the actual CLI/daemon workflow.
+- `cargo machete` finds no unused dependencies. `cargo deny --offline check`
+  passes against the existing advisory cache, with existing duplicate-version
+  warnings. The latter needed permission to acquire its cache lock; no
+  dependency version changed.
+- `pnpm --dir docs run check` passes. The `/coco` production export verifies
+  103 static files, all 10 pages, search/routing, and the public-only boundary.
+- Built `coco close --help` / `coco delete --help` match the new documentation.
+  `git diff --check` passes.
+
+Handoff:
+
+- Implementation complete locally. No commit, push, release, live workspace
+  retirement, or remote configuration change was requested or performed in
+  this slice.
+- A future commit should include the new untracked deletion/planner/test and
+  migration files together with the tracked changes. Both this slice and the
+  preceding dirty-source fix are still uncommitted.
+
+### Destructive-option naming follow-up
+
+After reviewing the safety model, the user selected the more precise
+`--discard-unretained-commits` name. The rename is complete in the Clap field,
+typed RPC (`discardUnretainedCommits`), guard input, stored schema-v12 intent,
+planner/execution code, tests, and public/internal documentation. The former
+`--discard-commits` and `discardCommits` spellings are deliberately rejected;
+there is no compatibility alias in this unreleased alpha change.
+
+Public guidance now states the close-time loss boundary explicitly: close
+removes the worktree, so tracked edits and untracked/ignored files do not live
+in the retained branch and require `--discard-changes` if not first committed,
+stashed, or moved. `--discard-unretained-commits` remains delete-only and
+applies only when another branch, tag, or remote-tracking branch will not retain
+the commits after the selected ref/worktree is removed.
+
+Follow-up verification:
+
+- `cargo fmt --all -- --check` and Clippy with warnings denied pass.
+- The full library suite passes with 309 tests and 4 explicit manual/live
+  ignores. The focused retirement suite also passes all 51 selected tests.
+- Protocol and CLI tests assert the new names and reject the old spellings.
+- Public documentation check and the production `/coco` static export pass;
+  the export again verifies 103 files and all 10 pages.
+- A clean-target build presents the final long option and its
+  branch/tag/remote-retention description. The repository's existing default
+  dev fingerprint initially (and incorrectly) reused the pre-change binary;
+  rebuilding the package with incremental compilation disabled refreshed the
+  local executable, whose `close --help` and `delete --help` now match source.
+  This was a local build-cache inconsistency rather than a second CLI path.
+- The five process-level CLI/daemon tests pass after the final rename. Their
+  first sandboxed run could not bind the fake App Server's loopback port; the
+  required out-of-sandbox rerun passed all five tests.
+- `git diff --check` passes.
+
+### Destructive-command help audit
+
+The generated help now describes `close` as keeping the workspace available
+to reopen and calls `--dry-run` output a close plan rather than exposing the
+internal retirement term. Both `--yes` descriptions state the same contract:
+confirmation is skipped, but no discard policy is granted. The delete text
+names both protected classes, local changes and unretained commits.
+
+The focused CLI parsing/help tests pass (3 selected), library Clippy passes
+with warnings denied, the rebuilt `close --help` and `delete --help` output was
+inspected, and `git diff --check` remains clean. No command behavior changed.
+
+### Cgroup-v2 containment design checkpoint
+
+The pre-design product checkpoint is local commit `699ebaa` and has not been
+pushed. Workspace token usage and estimated cost are now a distinct deferred
+observability item in the canonical runtime knowledge; native usage evidence,
+attribution, pricing-version, retention, and unknown-model behavior must be
+designed before it becomes output.
+
+The current executor boundary, lifecycle, storage, process-tree sampler, and
+single-daemon lock were audited. The selected Linux direction is a transient
+rootless systemd user scope per lazy workspace exec server, under an opaque
+data-directory-specific slice. This respects systemd's single-writer cgroup
+contract and places the executor plus descendants inside the boundary from
+process creation. Direct cgroupfs ownership and containers are not part of the
+first resource-only slice.
+
+Scope and slice names derive only from hashes of the canonical CoCo data path
+and stable workspace ID. A clean daemon shutdown or workspace close stops the
+whole scope. A hard daemon death leaves no reusable endpoint, so the next
+daemon generation must stop only its own stale namespace after acquiring the
+data-directory lock; it must never sweep a broad `coco-*` pattern. Any partial
+launch must also stop its exact deterministic unit before returning an error.
+
+The first implementation slice contains containment lifecycle and exact
+cgroup accounting, but no user limit flags. `memory.current` remains distinct
+from fallback summed RSS; `cpu.stat` provides interval CPU, `cgroup.procs` and
+`pids.current` distinguish processes from tasks, and controller event counters
+show limit pressure. Auto-detection can choose today's process-tree fallback
+before spawn, but once a systemd launch begins CoCo will not silently weaken a
+failed activation. Configured limits later make containment mandatory.
+
+Local disposable probes on this host confirmed a unified cgroup-v2 hierarchy,
+rootless transient user scopes, readable CPU/memory/PID counters, immediate
+runtime changes to memory/CPU/task properties, and whole-scope stop. Official
+kernel and systemd contracts back the accepted design. `git diff --check`
+passes; no product code, public documentation, live CoCo workspace, remote
+state, or release was changed during the design.
+
+Next implementation order:
+
+1. add the focused execution-containment module, capability selection,
+   instance-scoped stale cleanup, scope launch, and whole-scope shutdown;
+2. add truthful cgroup-v2 measurements and controller events while retaining
+   the process-tree fallback;
+3. observe real behavior, then jointly design durable global/workspace limits
+   and dynamic updates; and
+4. only afterward consider a shared pool, admission, and idle runtime stop.
+
+### Cgroup-v2 containment implementation
+
+Implemented the approved first slice without adding limits or changing thread
+routing. On a compatible Linux user session, every lazy workspace exec server
+now starts in an opaque transient systemd scope beneath a stable per-data-dir
+workspace slice. The instance and workspace components use 128-bit SHA-256
+prefixes. Runtime activation verifies both the supervisor's unified cgroup
+membership and the exact workspace-slice/unit ancestry before registration.
+Startup cleanup accepts only the exact lower-hex unit shape for the current
+instance, so it cannot broaden into another CoCo data directory's scopes.
+
+Normal close, delete, daemon shutdown, registration failure, and partial
+startup stop the complete scope. The final audit also made shutdown retain its
+direct-process fallback and retry exact scope cleanup if the first systemd
+stop fails. `auto` selects this backend only after cgroup-v2/controller and
+user-manager probes; `systemd` makes it mandatory and `process-tree` preserves
+the explicit compatibility path. A systemd activation failure never silently
+falls back after launch has begun.
+
+Status now reads `memory.current`, `cpu.stat`, `cgroup.procs`, `pids.current`,
+and memory/PID/CPU event counters from the verified boundary. Human output
+uses the neutral `MEMORY` heading and says `memory` for cgroup-charged bytes,
+while fallback detail retains the truthful `RSS` label. Schema-v10 JSON keeps
+charged memory and RSS in distinct fields and additionally exposes task count,
+cumulative CPU, event counters, and the opaque unit. Inactive and unsupported
+measurements remain absent. Public documentation explains only the user-facing
+behavior and fallback; topology, safety rationale, and future limit policy
+remain canonical internal knowledge.
+
+Final verification on 2026-09-11:
+
+- `cargo fmt --all -- --check` and Clippy with all targets and warnings denied
+  pass after the final safety audit.
+- The full Rust suite passes with 319 library tests and all 5 process tests;
+  5 deliberate manual/live library tests and the opt-in real-Codex tests remain
+  ignored in that ordinary run.
+- The focused live systemd test passes and proves descendant accounting plus
+  exact next-generation scope cleanup.
+- The model-free real Codex compatibility suite passes all 3 tests against the
+  pinned 0.154.0 executable, including real workspace-pool placement,
+  measurements, and shutdown cleanup. No model turn or token usage occurred.
+- The explicit process-tree fallback had already passed its real compatibility
+  path before the final systemd-only argument hardening.
+- Public docs typecheck, lint, and format checks pass. The `/coco` production
+  build verifies 103 static files, all 10 pages, search, routing, and the
+  public-only boundary.
+- `git diff --check` passes after the implementation. The cgroup slice is ready
+  for its own local checkpoint after `699ebaa`. Nothing was pushed, released,
+  or changed remotely.
+
+The next product decision is deliberately not hidden inside this slice:
+observe real workspace costs first, then design persisted global defaults and
+workspace overrides for `MemoryLow`/`MemoryHigh`/`MemoryMax`, `CPUWeight`/
+`CPUQuota`, and `TasksMax`. A whole-CoCo cap would additionally require the
+daemon and shared App Server to run in a sibling control-plane scope beneath
+the already reserved instance parent. Token/cost accounting remains a separate
+observability task.
+
+### Cross-platform containment checkpoint
+
+The pre-policy review found no single host-native cross-platform equivalent to
+cgroup v2. Linux cgroup v2 provides hierarchical aggregate control and
+accounting. Windows Job Objects provide a strong native peer: process-tree
+membership, nested jobs, aggregate accounting, whole-job termination, memory
+and process limits, and CPU weights or hard rate caps. macOS process groups can
+provide whole-group signalling, while inherited `setrlimit` and launchd job
+limits are per-process/job facilities rather than a directly equivalent,
+dynamic nested resource hierarchy. They must not be presented as equivalent
+aggregate enforcement without a separate proof.
+
+An OCI/container runtime is the closest common operational abstraction, but on
+macOS and ordinary Windows development it adds a Linux VM or different
+container mode plus worktree mounts, credentials, toolchains, networking, and
+filesystem-performance semantics. It is therefore a useful future opt-in
+strict-isolation backend, not the transparent default for host-native CoCo
+workspaces.
+
+The recommended direction is a platform-neutral CoCo containment/policy port
+with capability-reporting backends: current Linux systemd/cgroup v2, future
+Windows Job Objects, a macOS lifecycle/observation backend that claims only
+what it can prove, and an optional container backend. Common policy fields may
+be accepted only where their semantics genuinely map; Linux-specific controls
+such as `MemoryLow` must remain explicit rather than being given misleading
+portable names. Any requested hard guarantee must fail closed when the chosen
+backend cannot enforce it. The user accepted this direction, and it is now the
+canonical runtime extension boundary.
+
+### Portable policy and Linux enforcement implementation
+
+Implemented a versioned portable policy with exact byte-valued memory high and
+maximum controls, a CPU maximum expressed in millicores, relative CPU weight,
+and a task/thread maximum. The policy and monotonic desired revision live in a
+schema-v13 workspace child table. No row remains the revision-zero empty
+default, and workspace deletion cascades the row. Backend capability reporting
+uses portable semantic fields rather than systemd names; the current Linux
+systemd/cgroup-v2 backend advertises all five while process-tree/shared
+execution advertises none. A non-empty desired policy therefore fails closed
+both when changed and again before any later workspace activation.
+
+Added `coco limits show`, `set`, and `reset` with ordinary local/global
+workspace resolution. The CLI parses exact decimal and IEC byte units, CPU
+capacity to three fractional core digits, typed per-field clears, and stable
+JSON. Human output separates desired policy from its applied runtime snapshot.
+No limit is configured implicitly.
+
+The Linux backend supplies configured systemd properties at scope creation and
+uses runtime property updates for live scopes, then reads the kernel cgroup
+files back before claiming the revision was applied. `MemoryMax` below current
+charged use is rejected before mutation. Live testing exposed an upstream
+systemd behavior where clearing `CPUQuota` reports success without resetting
+`cpu.max`; CoCo does not kill a workspace to hide that mismatch. It persists
+the desired reset, retains the stricter applied cap, and reports that it will
+apply after the next runtime start. Other enforcement failures roll durable
+intent back with a new monotonic revision; incomplete rollback stops execution
+on a best-effort basis and fails explicitly.
+
+Final verification on 2026-09-11:
+
+- all-target Clippy with warnings denied passes;
+- the ordinary all-target Rust suite passes with 334 library tests, all 5
+  process tests, and 6 deliberate ignored library/live probes;
+- both the existing live containment test and the new live policy mutation
+  test pass against the real systemd user manager;
+- canonical runtime, product, and persistence knowledge has been brought to
+  schema v13 and the implemented policy contract;
+- the complete model-free compatibility suite passes all 3 tests against the
+  installed Codex 0.154.0, including policy application before launch, a live
+  update, daemon recovery, and a staged CPU-cap reset without killing the
+  active runtime;
+- public docs checks pass, and the static `/coco` production export verifies
+  103 files, all 10 pages, search, routing, and the public-only boundary;
+- `nix flake check .` passes after the new module files were added to Git's
+  index so the flake source could include them; its first run correctly failed
+  because Git-backed flakes exclude untracked source files;
+- the rebuilt executable exposes the documented `limits show`, `set`, and
+  `reset` surface. An initially stale `target/debug/coco` was traced to the
+  local incremental compiler cache; a non-incremental rebuild produced the
+  current source behavior and did not require a product change.
+
+No Windows Job Object, macOS aggregate-enforcement, container, shared-pool,
+admission-control, or automatic runtime-stop backend was added. Those remain
+separate capability-backed extensions behind the portable runtime interface;
+the current implementation makes no unsupported cross-platform guarantee.
+
+### Idle-runtime and workspace-usage assessment
+
+The first real idle cgroup observation showed approximately 14 MiB of charged
+memory, one process, and no measurable interval CPU for a Codex 0.154.0
+workspace executor. This is one local observation rather than a benchmark, but
+it does not justify automatic idle shutdown as the next feature. The canonical
+runtime decision now keeps auto-stop lower priority until aggregate scale or
+host-pressure evidence warrants its lifecycle complexity. `Ready` alone is
+not a safe stop condition because pending decisions, TUI relays, and surviving
+workspace children must also be ruled out.
+
+The token/cost investigation found two distinct stable-schema surfaces in the
+installed release. `thread/tokenUsage/updated` supplies exact thread/turn
+identity, cumulative and latest token breakdowns, and model-context size. An
+optional `threadId` on `account/usage/read` can return backend-estimated
+credits, optional USD, and model/reasoning/speed/token groups. The latter is
+route-dependent and eventually consistent; a read-only probe of an existing
+workspace returned `threadUsage: null` through the current authentication, so
+cost must be optional rather than synthesized as zero.
+
+OpenTelemetry was also audited. Codex exports turn token metrics and related
+response fields, but that path requires operator exporter/collector setup and
+is designed for external observability. It would duplicate the already owned
+App Server stream and is not CoCo's local source of truth. Local tokenization,
+rollout/SQLite parsing, goal counters, account-wide totals, internal-only raw
+response events, and model-traffic proxying were rejected as primary sources.
+
+The proposed implementation order is native raw usage first, with a compact
+per-binding checkpoint and explicit freshness/provenance, followed by a
+separate optional native cost query. Fresh, tool-using, compacted, restarted,
+forked/imported, TUI-driven, and externally driven thread cases need
+real-process attribution tests before CoCo labels a delta as workspace-owned.
+The likely CLI is a dedicated `coco usage [workspace]` surface rather than
+adding cumulative billing noise to default status, but its scoping and history
+semantics remain a user decision. No product code, public docs, model turn, or
+remote state changed during this assessment.
+
+Verification on 2026-09-11:
+
+- generated schemas from the installed `codex-cli 0.154.0` were inspected for
+  both usage contracts;
+- exact released Codex source was checked for resume/fork replay and telemetry
+  behavior;
+- the current per-thread account route was probed read-only and returned an
+  unavailable estimate;
+- canonical runtime and new usage knowledge were updated; and
+- `git diff --check` passes for the documentation-only change.
+
+## Native workspace usage implementation — 2026-09-11
+
+Implemented the approved dedicated read surface without changing default
+status output. `coco usage` lists open workspaces in the current repository,
+`-a` selects all repositories, and an explicit workspace supports ordinary
+local lookup or `-g`. Both a single workspace and a collection support
+terminal-aware `--follow`/`-f`; redirected output appends only changed frames,
+and `--json` remains a complete one-shot projection. No targetless picker was
+introduced. A later comparison of `list`/`status`/`usage` with a possible
+shared `show` namespace is recorded as follow-up rather than folded into this
+slice.
+
+The App Server event adapter now consumes focused
+`thread/tokenUsage/updated` fields. The coordinator resolves the exact bound
+thread and schema-v14 storage keeps one schema-v1 checkpoint containing native
+cumulative and latest breakdowns, context-window size, turn/thread identity,
+observation time, and daemon generation. A lower cumulative total cannot
+replace a higher one, a different thread binding is rejected, and workspace
+deletion cascades the checkpoint. After daemon restart the retained value is
+exposed as last seen until a notification in the new generation arrives. This
+is native thread evidence only; no conversation content, event history,
+workspace-attributable delta, or budget was added.
+
+The typed worker boundary also exposes optional per-thread native cost. The
+Codex adapter decodes credits, optional USD, and model/reasoning/speed groups
+from `account/usage/read`; null, unsupported, and failed reads produce an
+explicit unavailable value without hiding token usage. Results are cached in
+memory for 15 seconds and invalidated by new token evidence. They are never
+persisted, and CoCo does not maintain a price table. Usage reads do not invoke
+`thread/read`, `thread/resume`, resource sampling, or workspace-executor
+activation.
+
+Verification on 2026-09-11:
+
+- Rustfmt and `git diff --check` pass.
+- All-target Clippy passes with warnings denied; `cargo machete` reports no
+  unused dependencies.
+- The complete non-incremental all-target Rust suite passes: 346 library tests and all 5
+  process tests, with 6 deliberate manual/live library probes ignored. The
+  process scenario covers notification ingestion, exact JSON and concise human
+  output, local/all/global scope, both follow forms, native cost, persistence,
+  and passive stale reads after daemon restart.
+- The focused lifecycle process smoke test passes again after adding an exact
+  assertion that repeated usage projections share one cached native
+  `account/usage/read` request for the bound thread.
+- All 3 model-free real-Codex compatibility tests pass against the installed
+  0.154.0 executable. No model turn was issued; fork/compact/TUI/offline usage
+  attribution remains explicitly gated before any future delta claim.
+- Public docs typecheck, lint, and format checks pass. The production build
+  verifies 103 static files, all 10 pages, search, `/coco` routing, and the
+  public-only boundary.
+- A stale incremental local `target/debug/coco` initially exposed the previous
+  help despite current tests. A non-incremental binary rebuild produced the
+  expected `usage`, `limits`, and current lifecycle help; this was a local
+  build-artifact issue, not a source change.
+
+This slice is included in the requested local checkpoint commit. No push,
+release, model-consuming request, or remote mutation was made.

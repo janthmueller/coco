@@ -287,7 +287,7 @@ impl Git {
         Ok(None)
     }
 
-    fn validate_branch_name(
+    pub(super) fn validate_branch_name(
         &self,
         repository: &GitRepository,
         branch_name: &str,

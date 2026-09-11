@@ -1,23 +1,31 @@
 use anyhow::Result;
 use serde_json::{Value, json};
 
-use crate::domain::runtime::{WorkspaceRuntimeResources, WorkspaceRuntimeState};
+use crate::domain::runtime::{
+    WorkspaceResourceControllerStatus, WorkspaceResourcePolicy, WorkspaceResourcePolicySnapshot,
+    WorkspaceRuntimeResources, WorkspaceRuntimeState,
+};
 use crate::domain::{Decision, DecisionKind, DecisionState, Repository, Workspace, WorkspacePhase};
 use crate::protocol::{
     RepositorySummary, WorkspaceCloseResult, WorkspaceDeleteResult, WorkspaceDiffResult,
-    WorkspaceListItem, WorkspaceReopenResult, WorkspaceResult, WorkspaceRetirementPlan,
-    WorkspaceStatusResult, WorkspaceThreadDisposition,
+    WorkspaceLimitsResult, WorkspaceListItem, WorkspaceReopenResult, WorkspaceResult,
+    WorkspaceRetirementPlan, WorkspaceStatusResult, WorkspaceThreadDisposition,
 };
 
 use super::style::{Palette, Tone};
 
 mod collections;
+mod usage;
 
 pub(super) use collections::{
     print_model_list, print_repository_list, print_workspace_list, render_workspace_list_for_stdout,
 };
+pub(super) use usage::{
+    print_workspace_usage, print_workspace_usage_list, render_workspace_usage_for_stdout,
+    render_workspace_usage_list_for_stdout,
+};
 
-const PUBLIC_SCHEMA_VERSION: u64 = 9;
+const PUBLIC_SCHEMA_VERSION: u64 = 10;
 
 pub(super) fn phase_label(phase: &str) -> &'static str {
     match phase {
@@ -80,6 +88,152 @@ pub(super) fn print_workspace_created(result: &WorkspaceResult) {
     );
 }
 
+pub(super) fn print_workspace_limits(result: &WorkspaceLimitsResult) {
+    print!("{}", render_workspace_limits(result, Palette::stdout()));
+}
+
+fn render_workspace_limits(result: &WorkspaceLimitsResult, palette: Palette) -> String {
+    let policy = &result.policy.policy;
+    let name = palette.paint(Tone::Bold, safe_line(&result.workspace.name));
+    let state = limit_state(&result.policy, &result.controller);
+    if state == LimitState::Unconfigured {
+        return format!(
+            "{name} {}\n",
+            palette.paint(Tone::Dim, "· No limits configured")
+        );
+    }
+    let label = if state == LimitState::Unsupported {
+        format!(
+            "Unsupported here: {}",
+            result
+                .controller
+                .capabilities
+                .unsupported_fields(policy)
+                .join(", ")
+        )
+    } else {
+        state.label().to_owned()
+    };
+    let mut output = format!(
+        "{name} {}\n",
+        palette.paint(Tone::Dim, format!("· {label}"))
+    );
+    if state == LimitState::PendingRestart
+        && let Some(applied) = &result.controller.applied_policy
+    {
+        output.push_str("  Desired\n");
+        output.push_str(&render_resource_policy(policy, "    "));
+        output.push_str("  Current\n");
+        output.push_str(&render_resource_policy(&applied.policy, "    "));
+        return output;
+    }
+    output.push_str(&render_resource_policy(policy, "  "));
+    output
+}
+
+fn render_resource_policy(policy: &WorkspaceResourcePolicy, indent: &str) -> String {
+    if policy.is_empty() {
+        return format!("{indent}None\n");
+    }
+    let mut output = String::new();
+    let mut memory = Vec::with_capacity(2);
+    if let Some(value) = policy.memory_high_bytes {
+        memory.push(format!("high {}", format_bytes(value)));
+    }
+    if let Some(value) = policy.memory_max_bytes {
+        memory.push(format!("max {}", format_bytes(value)));
+    }
+    if !memory.is_empty() {
+        output.push_str(&format!("{indent}Memory  {}\n", memory.join(" · ")));
+    }
+    let mut cpu = Vec::with_capacity(2);
+    if let Some(value) = policy.cpu_max_millicores {
+        cpu.push(format!("max {}", format_cpu_cores(value)));
+    }
+    if let Some(value) = policy.cpu_weight {
+        cpu.push(format!("weight {value}"));
+    }
+    if !cpu.is_empty() {
+        output.push_str(&format!("{indent}CPU     {}\n", cpu.join(" · ")));
+    }
+    if let Some(value) = policy.tasks_max {
+        output.push_str(&format!("{indent}Tasks   max {value}\n"));
+    }
+    output
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LimitState {
+    Unconfigured,
+    Unsupported,
+    Applied,
+    PendingRestart,
+    Unknown,
+    NextStart,
+}
+
+impl LimitState {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Unconfigured => "No limits configured",
+            Self::Unsupported => "Unsupported here",
+            Self::Applied => "Applied now",
+            Self::PendingRestart => "Applies after runtime restart",
+            Self::Unknown => "Application state unknown",
+            Self::NextStart => "Applies on next start",
+        }
+    }
+}
+
+fn limit_state(
+    desired: &WorkspaceResourcePolicySnapshot,
+    controller: &WorkspaceResourceControllerStatus,
+) -> LimitState {
+    if !controller
+        .capabilities
+        .unsupported_fields(&desired.policy)
+        .is_empty()
+    {
+        return LimitState::Unsupported;
+    }
+    if controller.runtime_state != WorkspaceRuntimeState::Running {
+        return if desired.policy.is_empty() {
+            LimitState::Unconfigured
+        } else {
+            LimitState::NextStart
+        };
+    }
+    match controller.applied_policy.as_ref() {
+        Some(applied) if applied == desired => {
+            if desired.policy.is_empty() {
+                LimitState::Unconfigured
+            } else {
+                LimitState::Applied
+            }
+        }
+        Some(_) => LimitState::PendingRestart,
+        None => LimitState::Unknown,
+    }
+}
+
+fn format_cpu_cores(millicores: u32) -> String {
+    if millicores.is_multiple_of(1_000) {
+        let cores = millicores / 1_000;
+        format!("{cores} {}", if cores == 1 { "core" } else { "cores" })
+    } else {
+        let cores = f64::from(millicores) / 1_000.0;
+        let formatted = format!("{cores:.3}");
+        format!("{} cores", formatted.trim_end_matches('0'))
+    }
+}
+
+pub(super) fn print_source_changes_omitted_warning(path: &str) {
+    eprint!(
+        "{}",
+        render_source_changes_omitted_warning(path, Palette::stderr())
+    );
+}
+
 pub(super) fn print_turn_started(result: &WorkspaceResult) {
     print!(
         "{}",
@@ -132,6 +286,16 @@ pub(super) fn print_workspace_deleted(result: &WorkspaceDeleteResult) {
         palette.paint(Tone::GreenBold, "✓"),
         palette.paint(Tone::Bold, safe_line(&result.plan.workspace_name)),
     );
+    if result.plan.thread_disposition == WorkspaceThreadDisposition::Retain
+        && let Some(thread) = &result.plan.thread_id
+    {
+        println!("  Kept thread  {}", safe_line(thread));
+    }
+    if !result.plan.delete_branch
+        && let Some(branch) = &result.plan.branch_name
+    {
+        println!("  Kept branch  {}", safe_line(branch));
+    }
 }
 
 pub(super) fn print_retirement_plan(action: &str, plan: &WorkspaceRetirementPlan) {
@@ -143,8 +307,13 @@ pub(super) fn print_retirement_plan(action: &str, plan: &WorkspaceRetirementPlan
         palette.paint(Tone::Dim, "plan"),
     );
     println!(
-        "  Worktree  {}",
-        palette.paint(Tone::Dim, plan.worktree_path.display())
+        "  Worktree  {} {}",
+        if plan.remove_worktree {
+            "remove"
+        } else {
+            "absent"
+        },
+        palette.paint(Tone::Dim, safe_line(&plan.worktree_path.to_string_lossy()))
     );
     if plan.has_local_changes() {
         let tracked = if plan.tracked_changes {
@@ -159,8 +328,14 @@ pub(super) fn print_retirement_plan(action: &str, plan: &WorkspaceRetirementPlan
     } else {
         println!("  Changes   none");
     }
+    if plan.unretained_commit_count > 0 {
+        println!(
+            "  Commits   {} not retained by another branch or tag",
+            plan.unretained_commit_count
+        );
+    }
     println!(
-        "  Thread    {}",
+        "  Thread    {} {}",
         if plan.thread_id.is_none() {
             "none"
         } else {
@@ -169,17 +344,19 @@ pub(super) fn print_retirement_plan(action: &str, plan: &WorkspaceRetirementPlan
                 WorkspaceThreadDisposition::Archive => "archive",
                 WorkspaceThreadDisposition::Delete => "delete",
             }
-        }
+        },
+        safe_line(plan.thread_id.as_deref().unwrap_or("")),
     );
     println!(
-        "  Branch    {}",
+        "  Branch    {} {}",
         if plan.branch_name.is_none() {
             "none"
         } else if plan.delete_branch {
             "delete"
         } else {
             "retain"
-        }
+        },
+        safe_line(plan.branch_name.as_deref().unwrap_or("")),
     );
     if !plan.blockers.is_empty() {
         println!("  {}", palette.paint(Tone::RedBold, "Blocked"));
@@ -297,6 +474,14 @@ fn render_workspace_success(
     output
 }
 
+fn render_source_changes_omitted_warning(path: &str, palette: Palette) -> String {
+    format!(
+        "{} Local changes remain in {} and were not copied.\n",
+        palette.paint(Tone::YellowBold, "!"),
+        palette.paint(Tone::Bold, safe_line(path)),
+    )
+}
+
 fn render_status(
     result: &WorkspaceStatusResult,
     marker_override: Option<&str>,
@@ -350,9 +535,12 @@ fn render_runtime_resources(resources: &WorkspaceRuntimeResources, palette: Pale
         WorkspaceRuntimeState::Running => {
             let mut parts = Vec::with_capacity(3);
             let sampling_supported = resources.process_count.is_some()
+                || resources.memory_current_bytes.is_some()
                 || resources.resident_memory_bytes.is_some()
                 || resources.cpu_percent.is_some();
-            if let Some(bytes) = resources.resident_memory_bytes {
+            if let Some(bytes) = resources.memory_current_bytes {
+                parts.push(format!("{} memory", format_bytes(bytes)));
+            } else if let Some(bytes) = resources.resident_memory_bytes {
                 parts.push(format!("{} RSS", format_bytes(bytes)));
             }
             if let Some(count) = resources.process_count {
@@ -549,6 +737,14 @@ mod tests {
     }
 
     #[test]
+    fn omitted_source_changes_warning_is_concise_and_safe() {
+        assert_eq!(
+            render_source_changes_omitted_warning("/repo\n\u{1b}[31m", Palette::plain()),
+            "! Local changes remain in /repo  [31m and were not copied.\n"
+        );
+    }
+
+    #[test]
     fn running_workspace_resources_are_compact_and_truthful() {
         let resources = WorkspaceRuntimeResources {
             backend: crate::domain::runtime::WorkspaceRuntimeBackend::ExecServer,
@@ -556,8 +752,13 @@ mod tests {
             scope: crate::domain::runtime::WorkspaceResourceScope::ProcessTree,
             process_id: Some(42),
             process_count: Some(3),
+            task_count: None,
             resident_memory_bytes: Some(25 * 1024 * 1024),
+            memory_current_bytes: None,
             cpu_percent: Some(12.34),
+            cpu_usage_usec: None,
+            cgroup_unit: None,
+            events: None,
             sampled_at_ms: Some(1),
         };
         assert_eq!(
@@ -574,13 +775,76 @@ mod tests {
             scope: crate::domain::runtime::WorkspaceResourceScope::RootProcess,
             process_id: Some(42),
             process_count: None,
+            task_count: None,
             resident_memory_bytes: None,
+            memory_current_bytes: None,
             cpu_percent: None,
+            cpu_usage_usec: None,
+            cgroup_unit: None,
+            events: None,
             sampled_at_ms: Some(1),
         };
         assert_eq!(
             render_runtime_resources(&resources, Palette::plain()),
             "  Resources —\n"
         );
+    }
+
+    #[test]
+    fn cgroup_memory_is_not_presented_as_rss() {
+        let resources = WorkspaceRuntimeResources {
+            backend: crate::domain::runtime::WorkspaceRuntimeBackend::ExecServer,
+            state: WorkspaceRuntimeState::Running,
+            scope: crate::domain::runtime::WorkspaceResourceScope::CgroupV2,
+            process_id: Some(42),
+            process_count: Some(3),
+            task_count: Some(7),
+            resident_memory_bytes: None,
+            memory_current_bytes: Some(25 * 1024 * 1024),
+            cpu_percent: Some(12.34),
+            cpu_usage_usec: Some(500_000),
+            cgroup_unit: Some("opaque.scope".to_owned()),
+            events: None,
+            sampled_at_ms: Some(1),
+        };
+        assert_eq!(
+            render_runtime_resources(&resources, Palette::plain()),
+            "  25.0 MiB memory \u{b7} 3 processes \u{b7} 12.3% CPU\n"
+        );
+    }
+
+    #[test]
+    fn limit_state_keeps_desired_and_applied_policy_distinct() {
+        let capabilities = crate::domain::runtime::WorkspaceResourceCapabilities {
+            backend: crate::domain::runtime::WorkspaceResourceControllerBackend::SystemdCgroupV2,
+            dynamic_updates: true,
+            memory_high: true,
+            memory_max: true,
+            cpu_max: true,
+            cpu_weight: true,
+            tasks_max: true,
+        };
+        let applied = WorkspaceResourcePolicySnapshot {
+            revision: 1,
+            policy: WorkspaceResourcePolicy {
+                cpu_max_millicores: Some(750),
+                ..WorkspaceResourcePolicy::default()
+            },
+        };
+        let desired = WorkspaceResourcePolicySnapshot {
+            revision: 2,
+            policy: WorkspaceResourcePolicy::default(),
+        };
+        let controller = WorkspaceResourceControllerStatus {
+            capabilities,
+            runtime_state: WorkspaceRuntimeState::Running,
+            applied_policy: Some(applied),
+        };
+
+        assert_eq!(
+            limit_state(&desired, &controller),
+            LimitState::PendingRestart
+        );
+        assert_eq!(format_cpu_cores(750), "0.75 cores");
     }
 }

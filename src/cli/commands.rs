@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -6,29 +7,33 @@ use uuid::Uuid;
 use crate::paths::CocoPaths;
 use crate::protocol::{
     ModelListParams, RepositoryListParams, RepositoryRegisterParams, RepositoryResolveParams,
-    RepositoryScope, RepositorySummary, TurnStartParams, WorkspaceAttachParams,
-    WorkspaceBaseRequest, WorkspaceChangesRequest, WorkspaceCloseParams, WorkspaceContextRequest,
-    WorkspaceContextSource, WorkspaceCreateParams, WorkspaceDeleteParams, WorkspaceDiffParams,
-    WorkspaceGetParams, WorkspaceListItem, WorkspaceListParams, WorkspaceReopenParams,
-    WorkspaceResult, WorkspaceWorktreeRequest,
+    RepositoryScope, RepositorySummary, ResourcePolicyUpdate, TurnStartParams,
+    WorkspaceAttachParams, WorkspaceBaseRequest, WorkspaceChangesRequest, WorkspaceCloseParams,
+    WorkspaceContextRequest, WorkspaceContextSource, WorkspaceCreateParams, WorkspaceDeleteParams,
+    WorkspaceDiffParams, WorkspaceGetParams, WorkspaceLimitsGetParams, WorkspaceLimitsResetParams,
+    WorkspaceLimitsResult, WorkspaceLimitsSetParams, WorkspaceListItem, WorkspaceListParams,
+    WorkspaceReopenParams, WorkspaceResourcePolicyPatch, WorkspaceResult, WorkspaceWorktreeRequest,
 };
 use crate::rpc::{RpcClient, RpcClientError};
 
 use super::args::{
-    Cli, CloseArgs, Command, CreateArgs, DeleteArgs, McpCommand, ModelCommand, RepoCommand,
-    StatusArgs,
+    Cli, CloseArgs, Command, CreateArgs, DeleteArgs, LimitField, LimitsCommand, LimitsSetArgs,
+    LimitsTargetArgs, McpCommand, ModelCommand, RepoCommand, StatusArgs,
 };
 use super::decision::decide;
 use super::jump::jump;
 use super::output::{
     print_diff, print_json, print_model_list, print_repository_list, print_repository_registered,
-    print_retirement_plan, print_status, print_turn_started, print_workspace_closed,
-    print_workspace_created, print_workspace_deleted, print_workspace_list,
-    print_workspace_reopened, versioned, versioned_array,
+    print_retirement_plan, print_source_changes_omitted_warning, print_status, print_turn_started,
+    print_workspace_closed, print_workspace_created, print_workspace_deleted,
+    print_workspace_limits, print_workspace_list, print_workspace_reopened, versioned,
+    versioned_array,
 };
 use super::prompt::{Choice, Interaction, TerminalInteraction};
 use super::status::{follow_status, follow_status_collection};
 
+#[cfg(test)]
+mod resources_tests;
 #[cfg(test)]
 mod retirement_tests;
 use super::turn::wait_for_turn;
@@ -113,10 +118,194 @@ async fn run_with_interaction(cli: Cli, interaction: &mut dyn Interaction) -> Re
             list_workspaces(&paths, scope, json, closed).await
         }
         Command::Status(args) => run_status(&paths, repository_path, args, all_repos, global).await,
+        Command::Usage(args) => {
+            super::usage::run(&paths, repository_path, args, all_repos, global).await
+        }
+        Command::Limits { command } => {
+            run_limits_scoped(
+                command,
+                &paths,
+                &repository_path,
+                has_scope_path,
+                all_repos,
+                global,
+                interaction,
+            )
+            .await
+        }
         Command::Decide { decision, choice } => {
             reject_top_level_scope(has_explicit_scope, "decide")?;
             decide(&paths, decision, choice, interaction).await
         }
+    }
+}
+
+async fn run_limits_scoped(
+    command: LimitsCommand,
+    paths: &CocoPaths,
+    repository_path: &Path,
+    has_scope_path: bool,
+    all_repos: bool,
+    global: bool,
+    interaction: &mut dyn Interaction,
+) -> Result<()> {
+    reject_all_repos_for_reference(all_repos, "limits")?;
+    match command {
+        LimitsCommand::Show(args) => {
+            let target = resolve_limits_target(
+                paths,
+                repository_path,
+                has_scope_path,
+                global,
+                &args,
+                "inspect",
+                interaction,
+            )
+            .await?;
+            let result = RpcClient::new(paths.socket_path.clone())
+                .request(WorkspaceLimitsGetParams {
+                    scope: target.scope,
+                    workspace: target.workspace,
+                })
+                .await?;
+            print_limits_result(&result, args.json)
+        }
+        LimitsCommand::Set(args) => {
+            let target_args = LimitsTargetArgs {
+                workspace: args.workspace.clone(),
+                global: args.global,
+                json: args.json,
+            };
+            let target = resolve_limits_target(
+                paths,
+                repository_path,
+                has_scope_path,
+                global,
+                &target_args,
+                "configure",
+                interaction,
+            )
+            .await?;
+            let patch = limits_patch(&args)?;
+            let result = RpcClient::new(paths.socket_path.clone())
+                .request(WorkspaceLimitsSetParams {
+                    scope: target.scope,
+                    workspace: target.workspace,
+                    patch,
+                })
+                .await?;
+            print_limits_result(&result, args.json)
+        }
+        LimitsCommand::Reset(args) => {
+            let target = resolve_limits_target(
+                paths,
+                repository_path,
+                has_scope_path,
+                global,
+                &args,
+                "reset",
+                interaction,
+            )
+            .await?;
+            let result = RpcClient::new(paths.socket_path.clone())
+                .request(WorkspaceLimitsResetParams {
+                    scope: target.scope,
+                    workspace: target.workspace,
+                })
+                .await?;
+            print_limits_result(&result, args.json)
+        }
+    }
+}
+
+async fn resolve_limits_target(
+    paths: &CocoPaths,
+    repository_path: &Path,
+    has_scope_path: bool,
+    global: bool,
+    args: &LimitsTargetArgs,
+    action: &str,
+    interaction: &mut dyn Interaction,
+) -> Result<ResolvedWorkspaceTarget> {
+    resolve_workspace_input_with_phases(
+        paths,
+        workspace_selection(
+            repository_path,
+            has_scope_path,
+            args.workspace.clone(),
+            global,
+        ),
+        &format!("Choose a workspace to {action} limits"),
+        Some(
+            [
+                "prepared",
+                "active",
+                "waiting_for_approval",
+                "waiting_for_input",
+                "idle",
+                "not_loaded",
+                "system_error",
+                "unavailable",
+                "completed",
+                "failed",
+                "closed",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        ),
+        interaction,
+    )
+    .await
+}
+
+fn limits_patch(args: &LimitsSetArgs) -> Result<WorkspaceResourcePolicyPatch> {
+    let clear = args.clear.iter().copied().collect::<HashSet<_>>();
+    let patch = WorkspaceResourcePolicyPatch {
+        memory_high_bytes: limit_update(
+            args.memory_high,
+            LimitField::MemoryHigh,
+            &clear,
+            "memory-high",
+        )?,
+        memory_max_bytes: limit_update(
+            args.memory_max,
+            LimitField::MemoryMax,
+            &clear,
+            "memory-max",
+        )?,
+        cpu_max_millicores: limit_update(args.cpu_max, LimitField::CpuMax, &clear, "cpu-max")?,
+        cpu_weight: limit_update(args.cpu_weight, LimitField::CpuWeight, &clear, "cpu-weight")?,
+        tasks_max: limit_update(args.tasks_max, LimitField::TasksMax, &clear, "tasks-max")?,
+    };
+    if patch.is_empty() {
+        bail!("set at least one limit or use --clear <FIELD>");
+    }
+    Ok(patch)
+}
+
+fn limit_update<T>(
+    value: Option<T>,
+    field: LimitField,
+    clear: &HashSet<LimitField>,
+    name: &str,
+) -> Result<Option<ResourcePolicyUpdate<T>>> {
+    if value.is_some() && clear.contains(&field) {
+        bail!("--{name} conflicts with --clear {name}");
+    }
+    Ok(match value {
+        Some(value) => Some(ResourcePolicyUpdate::Set(value)),
+        None if clear.contains(&field) => Some(ResourcePolicyUpdate::Clear),
+        None => None,
+    })
+}
+
+fn print_limits_result(result: &WorkspaceLimitsResult, json_output: bool) -> Result<()> {
+    if json_output {
+        print_json(versioned(serde_json::to_value(result)?))
+    } else {
+        print_workspace_limits(result);
+        Ok(())
     }
 }
 
@@ -477,6 +666,20 @@ fn is_unresolved_repository(error: &RpcClientError) -> bool {
     )
 }
 
+fn is_dirty_source(error: &RpcClientError) -> bool {
+    matches!(
+        error,
+        RpcClientError::Remote(payload) if payload.code == "DIRTY_SOURCE"
+    )
+}
+
+fn dirty_source_path(error: &RpcClientError) -> Option<&str> {
+    let RpcClientError::Remote(payload) = error else {
+        return None;
+    };
+    payload.data.as_ref()?.get("repositoryPath")?.as_str()
+}
+
 async fn choose_repository(
     client: &RpcClient,
     interaction: &mut dyn Interaction,
@@ -655,12 +858,25 @@ async fn create_workspace(
         "Workspace name",
         interaction,
     )?);
-    let (params, initial_message, should_jump) =
+    let (mut params, initial_message, should_jump) =
         normalize_create_args(cwd, args, Uuid::new_v4().to_string())?;
     let name = params.name.clone();
     let repository_path = params.repository_path.clone();
     let client = RpcClient::new(paths.socket_path.clone());
-    let mut result: WorkspaceResult = client.request(params).await?;
+    let mut result: WorkspaceResult = match client.request(params.clone()).await {
+        Ok(result) => result,
+        Err(error)
+            if params.changes == WorkspaceChangesRequest::Reject && is_dirty_source(&error) =>
+        {
+            let path = dirty_source_path(&error)
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| repository_path.display().to_string());
+            print_source_changes_omitted_warning(&path);
+            params.changes = WorkspaceChangesRequest::Ignore;
+            client.request(params).await?
+        }
+        Err(error) => return Err(error.into()),
+    };
     let workspace_id = result.workspace.id.clone();
     let sent = initial_message.is_some();
     if let Some(message) = initial_message {
@@ -976,48 +1192,88 @@ async fn run_delete(
     let target = resolve_workspace_input_with_phases(
         paths,
         selection,
-        "Choose a closed workspace to delete",
-        Some(vec!["closed".to_owned()]),
+        "Choose a workspace to delete",
+        Some(
+            [
+                "prepared",
+                "active",
+                "waiting_for_approval",
+                "waiting_for_input",
+                "idle",
+                "not_loaded",
+                "system_error",
+                "unavailable",
+                "provisioning",
+                "starting",
+                "completed",
+                "failed",
+                "closed",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        ),
         interaction,
     )
     .await?;
     let client = RpcClient::new(paths.socket_path.clone());
-    let preview = client
-        .request(WorkspaceDeleteParams {
-            scope: target.scope.clone(),
-            workspace: target.workspace.clone(),
-            delete_thread: args.delete_thread,
-            delete_branch: args.delete_branch,
-            dry_run: true,
-            expected_plan: None,
-        })
-        .await?;
+    let mut params = WorkspaceDeleteParams {
+        scope: target.scope,
+        workspace: target.workspace,
+        delete_thread: !args.keep_thread,
+        delete_branch: !args.keep_branch,
+        discard_changes: args.discard_changes,
+        discard_unretained_commits: args.discard_unretained_commits,
+        dry_run: true,
+        expected_plan: None,
+    };
+    let mut preview = client.request(params.clone()).await?;
     if args.dry_run {
         print_retirement_plan("Delete", &preview.plan);
         return Ok(());
     }
+    params.workspace = preview.plan.workspace_id.clone();
+    // Only the explicit final discard question may expand loss policy in an
+    // interactive run. --yes merely skips that question for supplied policies.
+    let needs_discard = (preview.plan.has_local_changes() && !params.discard_changes)
+        || (preview.plan.unretained_commit_count > 0 && !params.discard_unretained_commits);
+    if needs_discard && !args.yes && interaction.is_interactive() {
+        params.discard_changes |= preview.plan.has_local_changes();
+        params.discard_unretained_commits |= preview.plan.unretained_commit_count > 0;
+        preview = client.request(params.clone()).await?;
+    }
     print_retirement_plan("Delete", &preview.plan);
     if !preview.plan.blockers.is_empty() {
-        bail!("workspace cannot be deleted while the listed blockers remain");
+        bail!(
+            "workspace cannot be deleted while the listed blockers remain; --yes does not authorize discarding changes or commits"
+        );
     }
     if !args.yes {
         require_interactive(interaction, "confirmation")?;
-        if !interaction.confirm("Permanently apply this deletion plan?")? {
+        let question = deletion_confirmation(&preview.plan);
+        if !interaction.confirm(question)? {
             bail!("workspace deletion cancelled");
         }
     }
-    let result = client
-        .request(WorkspaceDeleteParams {
-            scope: target.scope,
-            workspace: preview.plan.workspace_id.clone(),
-            delete_thread: args.delete_thread,
-            delete_branch: args.delete_branch,
-            dry_run: false,
-            expected_plan: Some(preview.plan),
-        })
-        .await?;
+    params.workspace = preview.plan.workspace_id.clone();
+    params.dry_run = false;
+    params.expected_plan = Some(preview.plan);
+    let result = client.request(params).await?;
     print_workspace_deleted(&result);
     Ok(())
+}
+
+fn deletion_confirmation(plan: &crate::protocol::WorkspaceRetirementPlan) -> &'static str {
+    match (plan.has_local_changes(), plan.unretained_commit_count > 0) {
+        (true, true) => {
+            "Discard the listed local changes and unretained commits, and permanently delete this workspace?"
+        }
+        (true, false) => "Discard the listed local changes and permanently delete this workspace?",
+        (false, true) => {
+            "Discard the listed unretained commits and permanently delete this workspace?"
+        }
+        (false, false) => "Permanently apply this deletion plan?",
+    }
 }
 
 async fn run_send(

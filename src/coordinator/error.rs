@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use super::WorkerError;
 use crate::domain::WorkspacePhase;
+use crate::domain::runtime::WorkspaceResourcePolicyError;
 use crate::domain::signals::SignalError;
 use crate::git::GitError;
 use crate::hooks::{GuardRejection, HookConfigError};
@@ -69,6 +70,12 @@ pub(crate) enum CoordinatorError {
     WorkspaceAttachInProgress,
     #[error("workspace cannot be retired safely: {blockers}", blockers = .0.join("; "))]
     WorkspaceRetirementBlocked(Vec<String>),
+    #[error("workspace deletion is incomplete; the worktree is gone, but resource cleanup remains")]
+    WorkspaceDeletionIncomplete {
+        workspace_id: String,
+        #[source]
+        source: Box<CoordinatorError>,
+    },
     #[error("the temporary workspace attach lease is missing, expired, or does not match")]
     InvalidWorkspaceAttachLease,
     #[error("profile {0:?} changed since this workspace was created")]
@@ -77,6 +84,18 @@ pub(crate) enum CoordinatorError {
     CompactionFailed(String),
     #[error("Codex thread compaction did not finish within 15 minutes")]
     CompactionTimedOut,
+    #[error(transparent)]
+    ResourcePolicy(#[from] WorkspaceResourcePolicyError),
+    #[error("workspace resource limits are unavailable for: {fields}", fields = .fields.join(", "))]
+    ResourcePolicyUnsupported { fields: Vec<&'static str> },
+    #[error("workspace resource limits could not be applied: {0}")]
+    ResourcePolicyApplication(#[source] WorkerError),
+    #[error("workspace resource limit recovery is incomplete for {workspace_id}")]
+    ResourcePolicyRecoveryIncomplete {
+        workspace_id: String,
+        #[source]
+        source: StoreError,
+    },
     #[error(transparent)]
     Git(#[from] GitError),
     #[error(transparent)]
@@ -105,10 +124,15 @@ impl CoordinatorError {
             Self::IncompleteWorkspace(_) => "INCOMPLETE_WORKSPACE",
             Self::WorkspaceAttachInProgress => "WORKSPACE_BUSY",
             Self::WorkspaceRetirementBlocked(_) => "WORKSPACE_RETIREMENT_BLOCKED",
+            Self::WorkspaceDeletionIncomplete { .. } => "WORKSPACE_DELETION_INCOMPLETE",
             Self::InvalidWorkspaceAttachLease => "ATTACH_LEASE_INVALID",
             Self::ProfileChanged(_) => "PROFILE_CHANGED",
             Self::CompactionFailed(_) => "CODEX_COMPACTION_FAILED",
             Self::CompactionTimedOut => "CODEX_COMPACTION_TIMEOUT",
+            Self::ResourcePolicy(_) => "INVALID_RESOURCE_POLICY",
+            Self::ResourcePolicyUnsupported { .. } => "RESOURCE_LIMITS_UNAVAILABLE",
+            Self::ResourcePolicyApplication(_) => "RESOURCE_LIMIT_APPLICATION_FAILED",
+            Self::ResourcePolicyRecoveryIncomplete { .. } => "RESOURCE_LIMIT_UPDATE_INCOMPLETE",
             Self::Git(GitError::DirtyRepository(_)) => "DIRTY_SOURCE",
             Self::Git(GitError::InvalidWorkspaceName(_)) => "INVALID_WORKSPACE_NAME",
             Self::Git(GitError::BranchCollision { .. } | GitError::DestinationExists(_)) => {
@@ -137,6 +161,16 @@ impl CoordinatorError {
             }
             Self::OperationUncertain { operation_id } => Some(json!({"operationId": operation_id})),
             Self::WorkspaceRetirementBlocked(blockers) => Some(json!({"blockers": blockers})),
+            Self::WorkspaceDeletionIncomplete {
+                workspace_id,
+                source,
+            } => Some(json!({
+                "workspaceId": workspace_id, "worktreeRemoved": true, "causeCode": source.code(),
+            })),
+            Self::ResourcePolicyRecoveryIncomplete { workspace_id, .. } => {
+                Some(json!({"workspaceId": workspace_id}))
+            }
+            Self::Git(GitError::DirtyRepository(path)) => Some(json!({"repositoryPath": path})),
             Self::Guard(error) => {
                 let (guard_id, action, reason) = error.details();
                 Some(json!({

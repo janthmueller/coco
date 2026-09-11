@@ -1,8 +1,7 @@
 .direnv/
 /target/
 
-/docs/.next/
-/docs/.source/
+/docs/.astro/
 /docs/node_modules/
 /docs/out/
 /docs/*.tsbuildinfo

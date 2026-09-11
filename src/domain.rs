@@ -6,6 +6,7 @@ use serde_json::Value;
 pub(crate) mod hooks;
 pub(crate) mod runtime;
 pub(crate) mod signals;
+pub(crate) mod usage;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

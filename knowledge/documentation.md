@@ -122,42 +122,33 @@ gate:
 
 ## User-facing site direction
 
-The public site will use **Next.js + Fumadocs + MDX**, with theme-level styling
-through Tailwind CSS. Astro Starlight is intentionally excluded. Choose and pin
-exact package versions when the site is first scaffolded.
+The public site uses **Astro Starlight + MDX**. The user explicitly replaced
+the earlier Next.js and Fumadocs decision because its separate landing page and
+custom application shell added more interface than this documentation needs.
+Pin exact package versions and keep framework customization deliberately small.
 
-The primary visual reference is the public
-[nuqs documentation](https://nuqs.dev/docs/limits) and its
-[open-source documentation package](https://github.com/47ng/nuqs/tree/next/packages/docs).
-It also uses Next.js, Fumadocs, MDX, and Tailwind, so its layout decisions map
-cleanly onto this site. The earlier Orca reference established the same broad
-stack but is superseded for visual direction. Treat nuqs as an inspiration,
-not as permission to copy its branding, logo, prose, sponsors, or product-
-specific components.
+The primary structural references are the Starlight documentation sites in the
+Workfold and Azurator repositories. CoCo should feel like the same family of
+focused product manuals: the overview is the site root, every other route is a
+documentation page, and one sidebar provides the complete navigation. Preserve
+CoCo's own wording and content rather than copying either product's prose.
 
 Preserve these qualities:
 
-- a monochrome, light-first neutral palette with an equally complete dark
-  theme, restrained borders, and almost no decorative accent color;
-- the Fumadocs notebook layout: a 64-pixel top navigation, prominent centered
-  search, flat grouped left navigation, a narrow readable content column, and
-  a quiet right-side table of contents;
-- concise page introductions, clear “when to use” guidance, and obvious next
-  steps;
-- intentional whitespace, muted page descriptions, simple dividers, an
-  active-navigation pill, and uncluttered prose and code blocks. Page title,
-  description, and body share one content edge, and framework spacing must not
-  stack with custom spacing into an oversized introduction;
-- a landing-page navigation edge aligned with the landing content grid, plus
-  display headings whose tracking and line height keep every word distinct at
-  desktop and mobile widths;
+- Starlight's restrained responsive documentation shell, built-in light and
+  dark themes, accessible navigation, and static search;
+- one narrow readable content column, grouped left navigation, and a quiet
+  right-side table of contents;
+- concise page introductions, clear “when to use” guidance, obvious next
+  steps, and uncluttered prose and code blocks;
+- no separate marketing landing page, oversized display heading, duplicate
+  top-level navigation, or decorative component that does not help a user act;
 - responsive navigation, visible focus states, semantic markup, sufficient
   contrast, and reduced-motion support.
 
-Use Fumadocs as a composable base rather than accepting an untouched starter
-theme. Keep CoCo's own mark and product language, and omit nuqs-specific AI
-actions, sponsor placements, registry links, and other controls that do not
-serve a CoCo user.
+Use Starlight's standard components before writing a custom component. Keep
+site-level CSS limited to intentional product tokens or readability fixes and
+do not recreate an application-style landing shell around the documentation.
 
 ## Static GitHub Pages deployment contract
 
@@ -173,23 +164,17 @@ optional deployment optimization.
 
 The site scaffold must therefore:
 
-- configure Next.js with `output: "export"`; `next build` produces the complete
-  deployable `out/` directory;
-- use Fumadocs' static search setup so the search index is generated at build
-  time and queried in the browser;
-- pre-render every documentation route and provide static parameters for all
-  dynamic paths;
-- avoid request-time API routes, Server Actions, request-time authentication,
-  middleware, rewrites, response-header logic, ISR, and any other feature that
-  requires a Next.js runtime server; a route whose output is completely
-  generated during static export, such as the Fumadocs search index, is valid;
-- use static assets and either unoptimized images or a build-time/custom image
-  loader rather than the default runtime image optimizer;
-- set `trailingSlash: true` unless a verified Pages deployment demonstrates a
-  better host-independent routing choice;
+- keep Astro's static output mode and emit the complete deployable site to
+  `out/`;
+- use Starlight's build-time Pagefind index so search requires no server;
+- pre-render every documentation route and avoid on-demand routes, server
+  adapters, middleware, request-time authentication, or other runtime-only
+  features;
 - support both a repository project path such as `/coco/` and a later custom
-  domain. The build-time `basePath` must come from deployment context rather
-  than being scattered through content or components;
+  domain. Astro's build-time `base` and `site` values must come from deployment
+  context rather than being scattered through content or components;
+- include `.nojekyll` in the generated artifact and keep internal links safe
+  under the configured repository base path;
 - treat every emitted file as public. Internal `knowledge/`, working documents,
   credentials, local paths, and private operational metadata must never be
   copied into the Pages artifact.
@@ -213,9 +198,8 @@ following:
 
 Primary implementation references:
 
-- [Fumadocs static build](https://www.fumadocs.dev/docs/deploying/static)
-- [Next.js static exports](https://nextjs.org/docs/pages/guides/static-exports)
-- [Next.js `basePath`](https://nextjs.org/docs/pages/api-reference/config/next-config-js/basePath)
+- [Starlight configuration](https://starlight.astro.build/reference/configuration/)
+- [Starlight sidebar navigation](https://starlight.astro.build/guides/sidebar/)
+- [Astro deployment to GitHub Pages](https://docs.astro.build/en/guides/deploy/github/)
 - [GitHub Pages publishing sources](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)
 - [GitHub Pages custom workflows](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)
-- [GitHub's Next.js Pages workflow template](https://github.com/actions/starter-workflows/blob/main/pages/nextjs.yml)

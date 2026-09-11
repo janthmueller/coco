@@ -1,0 +1,419 @@
+---
+title: Command reference
+description: Commands and options available in the current CoCo alpha.
+---
+
+Run `coco --help` or `coco COMMAND --help` for the options in your installed
+version.
+
+## Installed commands
+
+| Command    | Purpose                                                 |
+| ---------- | ------------------------------------------------------- |
+| `coco`     | Create, inspect, and control workspaces                 |
+| `cocod`    | Keep threads and active Codex work reachable            |
+| `coco-mcp` | Expose repository-scoped workspace tools to an MCP host |
+
+Start `cocod` before using either of the other commands.
+
+## Command shape
+
+```text
+coco [OPTIONS] [REPOSITORY_PATH] <COMMAND>
+```
+
+Workspace commands use the repository containing the current directory by
+default. Put a registered path before the command to select another
+repository:
+
+```bash
+coco ../api list
+coco ../api status fix/login
+```
+
+Use `--all-repos` or `-a` with `list`, targetless `status`, targetless `usage`,
+or targetless `signal list` to include every registered repository:
+
+```bash
+coco list --all-repos
+coco status --all-repos
+coco usage --all-repos
+```
+
+Use `--global` or `-g` with a command that targets one workspace. Supply a
+globally unique name; commands that offer a workspace selector can also omit
+it to choose from every repository:
+
+```bash
+coco status fix/login --global
+coco jump -g
+```
+
+`create` always needs one repository. `repo`, `model`, `decide`, and `mcp` do
+not accept a leading path or either scope flag. A full workspace ID resolves
+globally without `-g`.
+
+## Repository commands
+
+```text
+coco repo add [PATH]
+coco repo <list|ls> [--json]
+```
+
+`repo add` registers the Git repository containing `PATH`; it defaults to `.`
+and is safe to repeat. `repo list` shows every registered repository.
+
+`list` is the documented spelling throughout CoCo; `ls` is its equivalent
+short alias.
+
+## Interactive input
+
+When standard input and the terminal display are connected to a terminal, you
+may omit some values:
+
+- `create` asks for a missing workspace name and lets you choose a registered
+  repository when the current directory does not select one;
+- `send`, `jump`, `diff`, `close`, and `limits` let you choose a missing
+  workspace;
+- `reopen` offers closed workspaces; `delete` offers open and closed workspaces;
+- `send` asks for a missing message after the workspace is known; and
+- `decide` uses the same selector for the choices supplied by Codex.
+
+Use `↑`/`↓` or `j`/`k` to move and Enter to confirm. Keys `1` through `9`
+select the corresponding option immediately. Press Escape, `q`, or Ctrl+C to
+cancel.
+
+CoCo never opens a selector when its input or prompt stream is not attached to
+a terminal, or when `--no-input` is present. In those cases, pass every required
+value explicitly. Collection commands, including targetless `status`, remain
+non-interactive.
+
+## Model commands
+
+```text
+coco model <list|ls> [--json]
+```
+
+Lists the models reported by the running Codex installation. This command is
+not repository-scoped.
+
+## Create a workspace
+
+```text
+coco [REPOSITORY_PATH] create [NAME]
+  [--base <GIT_REF> | --base-workspace <WORKSPACE>]
+  [-c, --context <WORKSPACE_OR_THREAD>]
+  [-C, --compact-context]
+  [--branch <BRANCH> | --checkout <BRANCH> | --detached/-D]
+  [--carry-changes [--carry-untracked] | --dirty/-d]
+  [--profile <NAME>]
+  [-m, --model <MODEL>]
+  [-s, --send <MESSAGE>]
+  [-j, --jump]
+```
+
+Omit `NAME` in a terminal to enter it interactively. `--base` defaults to
+`HEAD`. Names are 1–63 bytes and contain lowercase ASCII
+letters, numbers, and hyphens, with optional single slashes between
+components, such as `fix/login`. Each component begins and ends with a letter
+or number. A dirty source checkout is allowed: CoCo warns and leaves its local
+tracked and ordinary untracked changes behind unless you explicitly carry
+them.
+
+`--base-workspace` selects another workspace's committed `HEAD` as code.
+`--context`/`-c` independently forks conversation history from a workspace in
+the selected repository or an exact native Codex thread ID. Workspace matches
+take precedence; `workspace:` and `thread:` prefixes explicitly choose a kind.
+Without this option, the context is fresh. `--compact-context`/`-C` requires a
+context source and affects only the new fork. `-Cc <reference>` is the compact
+form of both options together.
+
+The default creates `coco/<NAME>`. `--branch` chooses another new branch,
+`--checkout` selects an existing local branch, and `--detached` creates no
+branch. `--checkout` cannot be combined with a base option, and Git rejects a
+branch already checked out elsewhere.
+
+`--carry-changes` copies tracked staged and unstaged changes.
+`--carry-untracked` additionally copies non-ignored `??` files and requires
+`--carry-changes`. `--dirty` is shorthand for both carry options; it remains
+independent of `--detached`. Carrying requires the selected base to match the
+source checkout's `HEAD`. Ignored files require `.worktreeinclude`.
+
+`--send` starts the workspace exec server, prepares the selected conversation
+context, and starts the first turn after Git preparation. `--jump` then opens
+that thread in the Codex terminal UI. Used alone on a fresh prepared workspace,
+`--jump` starts the exec server and lets the TUI bind the thread with your first
+action. Their short forms are independent and may be combined.
+
+## Workspace commands
+
+In the forms below, `<WORKSPACE>` may be a repository-local name or full ID.
+
+| Command                                                             | Purpose                                         |
+| ------------------------------------------------------------------- | ----------------------------------------------- |
+| `coco list [--json]` (`ls`)                                         | List workspaces in the selected scope           |
+| `coco list --closed [--json]`                                       | List closed workspaces instead                  |
+| `coco status [-a] [-r] [--json]`                                    | Show workspace states in the selected scope     |
+| `coco status [-a] [-r] --follow` (`-f`)                             | Follow state changes for that collection        |
+| `coco status WORKSPACE [-g] [-r] [--json] [--follow]`               | Show or follow one workspace's state            |
+| `coco usage [-a] [--json] [--follow]`                               | Show or follow token use for a collection       |
+| `coco usage WORKSPACE [-g] [--json] [--follow]`                     | Show or follow one workspace's token use        |
+| `coco limits show [WORKSPACE] [-g] [--json]`                        | Show desired and currently applied limits       |
+| `coco limits set [WORKSPACE] [-g] [OPTIONS]`                        | Change selected workspace limits                |
+| `coco limits reset [WORKSPACE] [-g] [--json]`                       | Remove all configured workspace limits          |
+| `coco send [WORKSPACE] [MESSAGE] [-g] [--operation-id ID] [--wait]` | Choose a workspace and start its next turn      |
+| `coco jump [WORKSPACE] [-g]`                                        | Choose and open the workspace in the Codex TUI  |
+| `coco diff [WORKSPACE] [-g]`                                        | Choose or print its bounded change summary      |
+| `coco close [WORKSPACE] [-g] [-t] [-n] [-y]`                        | Remove a safe worktree and retain its workspace |
+| `coco reopen [WORKSPACE] [-g]`                                      | Restore a closed workspace                      |
+| `coco delete [WORKSPACE] [-g] [-n] [-y]`                            | Delete the workspace and its owned resources    |
+
+Omitted values use interactive input only as described above. A targetless
+`status` is an overview rather than a selector. `status --follow` cannot be
+combined with `--json`. Quote messages containing spaces. `send` returns after
+Codex accepts the turn; `send --wait` instead prints that exact turn's final
+response. `status --follow` watches until Ctrl+C, follows state only, and never
+prints conversation messages.
+`list` and `status` inspect without creating or loading conversation context;
+`send` and `jump` activate it when needed.
+
+Add `--resources` (`-r`) to scoped or collection status for current process
+count, memory, and CPU use on Linux. cgroup-v2 hosts report memory charged to
+the complete workspace execution group; the compatibility fallback reports
+aggregate RSS. `--json` identifies the measurement source and includes task
+count, cumulative CPU use, and controller events when available without
+requiring `-r`. `--follow` also has the short form `-f`, so `-fr` follows state
+and resource use together.
+
+Add `--global`/`-g` to `status`, `limits`, `send`, `jump`, `diff`, `close`,
+`reopen`, `delete`, or a targeted `usage` to resolve one workspace name from
+all repositories. For commands with a selector, it also populates an
+omitted-target selector from all repositories. Add `--all-repos`/`-a` to
+`list`, targetless `status`, or targetless `usage`; it is a read-only
+collection scope and never broadcasts an action.
+
+Every `send` has an operation ID. If CoCo reports that ID after an interrupted
+wait or an unconfirmed request, retry the same workspace and exact message with
+`--operation-id <ID>`; add `--wait` to keep waiting for its result. Do not reuse
+the ID for a different message.
+
+## Token usage and cost
+
+```text
+coco [REPOSITORY_PATH] usage [WORKSPACE] [-g] [--json] [--follow]
+coco usage --all-repos [--json] [--follow]
+```
+
+Without a workspace, `usage` shows open workspaces in the current repository.
+Add `-a` for every registered repository, or target one workspace and add `-g`
+to resolve its name globally.
+
+The token total is the cumulative count reported by Codex for that workspace's
+conversation. Context shows the latest reported count against the model's
+context window. A saved value is marked `last seen` after a CoCo restart until
+Codex reports a newer value. A dash means CoCo has not observed that value; it
+does not mean zero.
+
+Cost appears only when Codex supplies a per-conversation estimate. CoCo shows
+USD when available and otherwise credits. This is an estimate rather than an
+invoice, and an unavailable cost never prevents token reporting.
+
+`usage` only inspects saved and currently available Codex data; it does not
+start a prepared workspace or load an unloaded conversation. Add
+`--follow`/`-f` to keep the view open until Ctrl+C. Terminal output updates in
+place; redirected output appends only changes. Follow mode cannot be combined
+with `--json`.
+
+## Resource limits
+
+```text
+coco [REPOSITORY_PATH] limits show [WORKSPACE] [-g] [--json]
+coco [REPOSITORY_PATH] limits set [WORKSPACE] [-g]
+  [--memory-high SIZE]
+  [--memory-max SIZE]
+  [--cpu-max CORES]
+  [--cpu-weight WEIGHT]
+  [--tasks-max COUNT]
+  [--clear FIELD]...
+  [--json]
+coco [REPOSITORY_PATH] limits reset [WORKSPACE] [-g] [--json]
+```
+
+No limit is enabled by default. On Linux with a compatible cgroup-v2 user
+session, CoCo can apply these limits to the workspace runtime and everything it
+starts:
+
+| Option          | Effect                                                         |
+| --------------- | -------------------------------------------------------------- |
+| `--memory-high` | Begins reclaiming and slowing allocation above this size       |
+| `--memory-max`  | Sets a last-resort hard memory ceiling                         |
+| `--cpu-max`     | Caps total CPU use in logical-core units, such as `0.5` or `2` |
+| `--cpu-weight`  | Sets relative CPU share under contention from 1 through 10,000 |
+| `--tasks-max`   | Caps the combined number of processes and threads              |
+
+Memory sizes accept bytes or suffixes such as `MB`, `GiB`, and `TiB`.
+`--clear memory-max`, for example, removes only that field; repeat `--clear`
+to remove several fields. `limits reset` removes the complete policy.
+
+Most changes apply to a running workspace immediately. CoCo rejects a new hard
+memory ceiling below current use. Removing an active CPU cap takes effect the
+next time that workspace runtime starts; `limits show` reports this instead of
+stopping the runtime. A hard memory ceiling can cause the operating system to
+terminate processes if the workspace cannot stay below it, so prefer
+`--memory-high` as the first pressure control.
+
+When the current host or compatibility backend cannot enforce a requested
+field, CoCo rejects it. `limits show --json` includes the exact desired and
+currently applied policy snapshots plus backend capabilities.
+
+## Close, reopen, and delete
+
+```text
+coco [REPOSITORY_PATH] close [WORKSPACE]
+  [-g, --global]
+  [-t, --archive-thread]
+  [--discard-changes]
+  [-n, --dry-run]
+  [-y, --yes]
+
+coco [REPOSITORY_PATH] reopen [WORKSPACE]
+  [-g, --global]
+
+coco [REPOSITORY_PATH] delete [WORKSPACE]
+  [-g, --global]
+  [--keep-thread]
+  [--keep-branch]
+  [--discard-changes]
+  [--discard-unretained-commits]
+  [-n, --dry-run]
+  [-y, --yes]
+```
+
+`close` stops the workspace exec server and removes the managed worktree while
+retaining the workspace record, branch, and thread. `-t` also archives the
+thread until `reopen`. Uncommitted state belongs to the removed worktree, not
+the retained branch. Local tracked, untracked, or ignored files therefore require
+`--discard-changes`; without `-y`, CoCo asks before discarding them. `--yes`
+never implies `--discard-changes`.
+
+`reopen` restores the exact retained Git binding and thread; its exec server
+starts on the next `send` or `jump`.
+
+`delete` accepts open or closed workspaces. By default it removes the worktree,
+workspace, Codex conversation, and branch created by CoCo. `--keep-thread` and
+`--keep-branch` retain the selected resources and print their IDs or names.
+Branches adopted with `--checkout` are always retained.
+
+Local files require explicit discard approval; commits that would lose their
+last retaining branch or tag require a separate approval. In scripts, use
+`--discard-changes` and/or `--discard-unretained-commits` for the loss you intend. `--yes`
+skips confirmation but grants neither discard policy. The earlier delete
+options `-t`/`--delete-thread` and `-b`/`--delete-branch` have been removed;
+review existing scripts before using the new defaults.
+
+Interactive confirmation uses `[y/N]`: type `y` and press Enter to proceed.
+Pressing Enter without an answer chooses No.
+
+Both destructive commands support a checked `--dry-run`. No close or delete
+command accepts `--all-repos`.
+
+Closing also checks agents and background terminals using the worktree.
+Deletion stops if a prepared workspace still needs the selected workspace as
+its context source. Changes to the previewed plan require a new review.
+
+## Answer a request
+
+```text
+coco decide <DECISION_ID> [--choice <NUMBER>]
+```
+
+When CoCo can present a pending approval or question, `status` prints its
+decision ID. `decide` uses the interactive selector and may accept text for an
+ordinary question. For scripts, `--choice` submits one displayed approval
+option by its one-based number; structured questions still require interactive
+input. Secret answers are hidden while you type and are not retained by CoCo.
+
+Decision IDs work from any directory and do not accept a repository path or
+either repository-scope flag.
+
+## Machine-readable output
+
+```bash
+coco repo list --json
+coco model list --json
+coco list --json
+coco list --closed --json
+coco list --all-repos --json
+coco status --json
+coco status --all-repos --json
+coco status feat/first --json
+coco usage --json
+coco usage --all-repos --json
+coco usage feat/first --json
+coco limits show feat/first --json
+```
+
+These commands emit one JSON value to standard output. Human-oriented follow
+mode is intentionally excluded. The current top-level schema version is `10`.
+Only a detailed workspace status may include `runtimeResources`; its optional
+measurements are a current sample and are not persisted.
+
+Usage JSON preserves the complete native token breakdown, its observation and
+freshness fields, and either the cost estimate reported by Codex or an explicit
+unavailable reason.
+
+Human output uses color only when its output stream is a terminal and honors
+the standard `NO_COLOR` environment variable. Redirected output and JSON never
+contain color codes. `diff` patches and responses from `send --wait` are
+printed unchanged so they remain safe to redirect.
+
+## MCP commands
+
+```text
+coco mcp serve --repository <PATH> [--allow-send] [--signal-catalog <DIR>] [--allow-emit <SIGNAL>]...
+coco-mcp --repository <PATH> [--allow-send] [--signal-catalog <DIR>] [--allow-emit <SIGNAL>]...
+```
+
+Both forms expose the same repository-scoped standard input/output server.
+See [Use CoCo through MCP](../../guides/mcp/) before enabling `--allow-send`.
+`--allow-emit NAME@VERSION` grants only that signal version; a bare name grants
+version `1`. It requires `--signal-catalog DIR` and a matching
+`NAME@VERSION.json` schema file. The directory is read at MCP startup; files
+alone do not grant emission permission.
+
+## Signal commands
+
+```text
+coco signal list [<WORKSPACE>] [-g] [--name <SIGNAL>] [--after <CURSOR>] [--limit <NUMBER>] [-f] [--json]
+coco signal list -a [--name <SIGNAL>] [--after <CURSOR>] [--limit <NUMBER>] [-f] [--json]
+```
+
+`list` also accepts the alias `ls`.
+`signal list` reads the current repository unless a leading repository path
+is given. An optional workspace name narrows the history; `--global` (`-g`)
+resolves that name across repositories. A full UUID works globally, including
+the UUID of a deleted workspace. `--all-repos` (`-a`) reads every repository
+without a workspace target. `--follow` (`-f`) runs until interrupted. With
+`--json`, it emits one page per line, including the cursor needed to resume.
+See [Agent signals](../../guides/signals/) for a complete example and retention
+limits.
+
+## Hook commands
+
+```text
+coco hook (list | ls) [--json]
+coco hook validate [--json]
+coco hook reload [--json]
+coco hook (history | deliveries) [--limit <NUMBER>] [--json]
+```
+
+Hook commands are daemon-wide and do not accept a repository path,
+`--all-repos`, or `--global`. `list` shows loaded hooks and guards without
+revealing their command arguments. `validate` checks the configured file
+without executing commands or contacting the daemon. `reload` validates and
+atomically replaces the running configuration; a failed reload keeps the old
+one. `history` shows the newest 20 post-event delivery outcomes by default;
+set `--limit` from 1 through 100. Its `deliveries` alias is equivalent.
+
+See [Run hooks and guards](../../guides/hooks/) to configure commands,
+guard close or deletion, and understand retries.

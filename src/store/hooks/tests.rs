@@ -190,7 +190,7 @@ fn migrates_a_v10_signal_store_without_losing_its_records() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, 11);
+    assert_eq!(version, 14);
     assert_eq!(signals, 1);
     assert_eq!(hook_tables, 2);
 }

@@ -10,7 +10,11 @@ use crate::coordinator::{
     LocatedNativeThread, NativeThread, StartedThread, StartedTurn, WorkerError,
     WorkerExecutionEnvironment, WorkerRuntime,
 };
-use crate::domain::runtime::WorkspaceRuntimeResources;
+use crate::domain::runtime::{
+    WorkspaceResourceCapabilities, WorkspaceResourceControllerStatus,
+    WorkspaceResourcePolicySnapshot, WorkspaceRuntimeResources, WorkspaceRuntimeState,
+};
+use crate::domain::usage::{NativeThreadCostEstimate, NativeThreadCostGroup};
 use crate::domain::{CodexModel, CodexThreadStatus};
 
 use super::execution::WorkspaceExecutors;
@@ -51,6 +55,45 @@ struct CollectionPage {
 #[derive(Debug, Deserialize)]
 struct ThreadReadResponse {
     thread: ThreadReadWire,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AccountUsageResponse {
+    #[serde(default)]
+    thread_usage: Option<ThreadUsageWire>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadUsageWire {
+    thread_id: String,
+    estimated_usage_credits_micros: u64,
+    #[serde(default)]
+    estimated_usage_usd_micros: Option<u64>,
+    groups: Vec<ThreadUsageGroupWire>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadUsageGroupWire {
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    reasoning_effort: Option<String>,
+    #[serde(default)]
+    speed: Option<String>,
+    estimated_usage_credits_micros: u64,
+    #[serde(default)]
+    net_new_input_tokens: Option<u64>,
+    #[serde(default)]
+    cached_input_tokens: Option<u64>,
+    #[serde(default)]
+    input_tokens: Option<u64>,
+    #[serde(default)]
+    output_tokens: Option<u64>,
+    #[serde(default)]
+    total_tokens: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -150,6 +193,18 @@ impl WorkerRuntime for CodexWorker {
             .await
             .map_err(WorkerError::runtime)?;
         decode_thread_read_response(response)
+    }
+
+    async fn read_thread_cost(
+        &self,
+        thread_id: &str,
+    ) -> Result<Option<NativeThreadCostEstimate>, WorkerError> {
+        let response = self
+            .client
+            .request("account/usage/read", json!({"threadId": thread_id}))
+            .await
+            .map_err(WorkerError::runtime)?;
+        decode_thread_cost_response(response, thread_id)
     }
 
     async fn find_materialized_thread(
@@ -349,6 +404,51 @@ impl WorkerRuntime for CodexWorker {
             .resources(workspace_id)
             .await
             .map(Some)
+            .map_err(WorkerError::runtime)
+    }
+
+    fn workspace_resource_capabilities(&self) -> WorkspaceResourceCapabilities {
+        self.workspace_executors.as_ref().map_or_else(
+            WorkspaceResourceCapabilities::unavailable,
+            WorkspaceExecutors::resource_capabilities,
+        )
+    }
+
+    async fn workspace_resource_policy_status(
+        &self,
+        workspace_id: &str,
+    ) -> Result<WorkspaceResourceControllerStatus, WorkerError> {
+        let Some(executors) = self.workspace_executors.as_ref() else {
+            return Ok(WorkspaceResourceControllerStatus {
+                capabilities: WorkspaceResourceCapabilities::unavailable(),
+                runtime_state: WorkspaceRuntimeState::Inactive,
+                applied_policy: None,
+            });
+        };
+        executors
+            .resource_policy_status(workspace_id)
+            .await
+            .map_err(WorkerError::runtime)
+    }
+
+    async fn configure_workspace_resource_policy(
+        &self,
+        workspace_id: &str,
+        snapshot: WorkspaceResourcePolicySnapshot,
+    ) -> Result<WorkspaceResourceControllerStatus, WorkerError> {
+        let Some(executors) = self.workspace_executors.as_ref() else {
+            let unsupported =
+                WorkspaceResourceCapabilities::unavailable().unsupported_fields(&snapshot.policy);
+            if unsupported.is_empty() {
+                return self.workspace_resource_policy_status(workspace_id).await;
+            }
+            return Err(WorkerError::ResourcePolicyUnsupported {
+                fields: unsupported,
+            });
+        };
+        executors
+            .configure_resource_policy(workspace_id, snapshot)
+            .await
             .map_err(WorkerError::runtime)
     }
 
@@ -578,6 +678,43 @@ fn decode_thread_read_response(response: Value) -> Result<NativeThread, WorkerEr
     decode_thread_wire(response.thread)
 }
 
+fn decode_thread_cost_response(
+    response: Value,
+    expected_thread_id: &str,
+) -> Result<Option<NativeThreadCostEstimate>, WorkerError> {
+    let response = serde_json::from_value::<AccountUsageResponse>(response)
+        .map_err(|error| WorkerError::InvalidThreadUsage(error.to_string()))?;
+    let Some(usage) = response.thread_usage else {
+        return Ok(None);
+    };
+    if usage.thread_id != expected_thread_id {
+        return Err(WorkerError::ThreadIdMismatch {
+            expected: expected_thread_id.to_owned(),
+            actual: usage.thread_id,
+        });
+    }
+    Ok(Some(NativeThreadCostEstimate {
+        thread_id: expected_thread_id.to_owned(),
+        estimated_usage_credits_micros: usage.estimated_usage_credits_micros,
+        estimated_usage_usd_micros: usage.estimated_usage_usd_micros,
+        groups: usage
+            .groups
+            .into_iter()
+            .map(|group| NativeThreadCostGroup {
+                model: group.model,
+                reasoning_effort: group.reasoning_effort,
+                speed: group.speed,
+                estimated_usage_credits_micros: group.estimated_usage_credits_micros,
+                net_new_input_tokens: group.net_new_input_tokens,
+                cached_input_tokens: group.cached_input_tokens,
+                input_tokens: group.input_tokens,
+                output_tokens: group.output_tokens,
+                total_tokens: group.total_tokens,
+            })
+            .collect(),
+    }))
+}
+
 fn decode_located_thread_response(response: Value) -> Result<LocatedNativeThread, WorkerError> {
     let response = serde_json::from_value::<ThreadReadResponse>(response)
         .map_err(|error| WorkerError::InvalidThreadRead(error.to_string()))?;
@@ -627,7 +764,10 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{decode_located_thread_response, decode_thread_read_response, with_environment};
+    use super::{
+        decode_located_thread_response, decode_thread_cost_response, decode_thread_read_response,
+        with_environment,
+    };
     use crate::coordinator::WorkerExecutionEnvironment;
     use crate::domain::CodexThreadStatus;
 
@@ -759,5 +899,60 @@ mod tests {
         }))
         .unwrap_err();
         assert!(error.to_string().contains("rollout path"));
+    }
+
+    #[test]
+    fn decodes_optional_native_thread_cost_without_account_wide_fields() {
+        let estimate = decode_thread_cost_response(
+            json!({
+                "summary": {"lifetimeTokens": 99},
+                "dailyUsageBuckets": [],
+                "threadUsage": {
+                    "threadId": "thread-1",
+                    "estimatedUsageCreditsMicros": 1_250_000,
+                    "estimatedUsageUsdMicros": 420_000,
+                    "groups": [{
+                        "model": "gpt-test",
+                        "reasoningEffort": "high",
+                        "speed": "fast",
+                        "estimatedUsageCreditsMicros": 1_250_000,
+                        "netNewInputTokens": 100,
+                        "cachedInputTokens": 50,
+                        "inputTokens": 150,
+                        "outputTokens": 25,
+                        "totalTokens": 175
+                    }]
+                }
+            }),
+            "thread-1",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(estimate.estimated_usage_credits_micros, 1_250_000);
+        assert_eq!(estimate.estimated_usage_usd_micros, Some(420_000));
+        assert_eq!(estimate.groups[0].total_tokens, Some(175));
+
+        assert_eq!(
+            decode_thread_cost_response(json!({"summary": {}, "threadUsage": null}), "thread-1")
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn rejects_a_cost_result_for_another_thread() {
+        let error = decode_thread_cost_response(
+            json!({
+                "summary": {},
+                "threadUsage": {
+                    "threadId": "thread-other",
+                    "estimatedUsageCreditsMicros": 0,
+                    "groups": []
+                }
+            }),
+            "thread-1",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("thread ID mismatch"));
     }
 }

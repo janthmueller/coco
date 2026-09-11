@@ -1,9 +1,14 @@
+use chrono::Utc;
+use serde::Deserialize;
 use serde_json::Value;
 use tracing::{debug, warn};
 
 use super::Coordinator;
 use crate::codex::CodexEvent;
 use crate::domain::Workspace;
+use crate::domain::usage::{
+    TokenUsageBreakdown, WORKSPACE_TOKEN_USAGE_SCHEMA_VERSION, WorkspaceTokenUsageCheckpoint,
+};
 use crate::protocol::TurnTerminalStatus;
 use crate::store::StoreError;
 
@@ -51,6 +56,9 @@ impl Coordinator {
             // thread/read. Do not recreate that native truth in SQLite.
             return Ok(());
         }
+        if method == "thread/tokenUsage/updated" {
+            return self.record_thread_token_usage(params);
+        }
         let Some(workspace) = self.workspace_for_codex_params(&params)? else {
             debug!(method, "ignoring uncorrelated Codex notification");
             return Ok(());
@@ -95,6 +103,50 @@ impl Coordinator {
                 self.observe_native_agent_message(thread_id, native_turn_id, text);
             }
             _ => {}
+        }
+        Ok(())
+    }
+
+    fn record_thread_token_usage(&self, params: Value) -> Result<(), StoreError> {
+        let notification = match serde_json::from_value::<TokenUsageUpdatedWire>(params) {
+            Ok(notification) => notification,
+            Err(source) => {
+                warn!(%source, "ignoring an invalid thread token-usage notification");
+                return Ok(());
+            }
+        };
+        let Some(workspace) = self.store.workspace_by_thread_id(&notification.thread_id)? else {
+            debug!(
+                thread_id = notification.thread_id,
+                "ignoring token usage for an unbound Codex thread"
+            );
+            return Ok(());
+        };
+        let checkpoint = WorkspaceTokenUsageCheckpoint {
+            schema_version: WORKSPACE_TOKEN_USAGE_SCHEMA_VERSION,
+            thread_id: notification.thread_id,
+            turn_id: notification.turn_id,
+            total: notification.token_usage.total,
+            last: notification.token_usage.last,
+            model_context_window: notification.token_usage.model_context_window,
+            runtime_generation: self.runtime_generation.clone(),
+            observed_at_ms: Utc::now().timestamp_millis(),
+        };
+        if let Err(source) = checkpoint.validate() {
+            warn!(workspace_id = %workspace.id, %source, "ignoring an invalid token-usage checkpoint");
+            return Ok(());
+        }
+        if self
+            .store
+            .observe_workspace_token_usage(&workspace.id, &checkpoint)?
+        {
+            self.invalidate_thread_cost(&checkpoint.thread_id);
+        } else {
+            debug!(
+                workspace_id = %workspace.id,
+                thread_id = checkpoint.thread_id,
+                "ignored a regressing cumulative token-usage notification"
+            );
         }
         Ok(())
     }
@@ -190,4 +242,21 @@ impl Coordinator {
             .operation_by_native_result_id(native_turn_id)?
             .and_then(|operation| (operation.workspace_id == workspace.id).then_some(operation.id)))
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TokenUsageUpdatedWire {
+    thread_id: String,
+    turn_id: String,
+    token_usage: ThreadTokenUsageWire,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadTokenUsageWire {
+    total: TokenUsageBreakdown,
+    last: TokenUsageBreakdown,
+    #[serde(default)]
+    model_context_window: Option<u64>,
 }

@@ -1,5 +1,7 @@
 use serde_json::json;
 
+mod retirement;
+
 use super::*;
 use crate::domain::{
     CodexThreadStatus, DecisionApprovalPrompt, DecisionKind, DecisionOption, DecisionPrompt,
@@ -88,7 +90,9 @@ fn workspace_availability_transitions_and_record_deletion_are_atomic() {
             WorkspaceDeletionIntent {
                 delete_thread: true,
                 delete_branch: true,
+                ..Default::default()
             },
+            None,
         )
         .unwrap();
     assert_eq!(
@@ -96,6 +100,7 @@ fn workspace_availability_transitions_and_record_deletion_are_atomic() {
         WorkspaceDeletionIntent {
             delete_thread: true,
             delete_branch: true,
+            ..Default::default()
         }
     );
     store.delete_workspace_record(&workspace.id).unwrap();
@@ -287,7 +292,7 @@ fn migrates_v1_tasks_to_workspaces_without_losing_data() {
     let version: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 11);
+    assert_eq!(version, 14);
     assert_eq!(workspace.lifecycle, WorkspaceLifecycle::Ready);
     assert_eq!(workspace.phase, WorkspacePhase::Unavailable);
     assert_eq!(
@@ -376,6 +381,7 @@ fn assert_default_retirement_columns(store: &Store, workspace: &Workspace) {
         WorkspaceDeletionIntent {
             delete_thread: false,
             delete_branch: false,
+            ..Default::default()
         }
     );
 }
@@ -834,7 +840,7 @@ fn migrates_v5_turn_idempotency_into_the_operation_ledger() {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 11);
+        assert_eq!(version, 14);
     }
 
     let operation = store

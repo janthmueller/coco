@@ -402,6 +402,7 @@ impl Coordinator {
             .worktree_path
             .as_deref()
             .ok_or(CoordinatorError::IncompleteWorkspace("worktree"))?;
+        self.require_workspace_resource_policy_support(&workspace.id)?;
         Ok(self
             .worker
             .prepare_workspace_execution(&workspace.id, worktree)

@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
+
+use crate::domain::runtime::MAX_CPU_MILLICORES;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -47,11 +49,11 @@ pub(super) enum Command {
     },
     /// Create a Codex workspace in a separate worktree.
     Create(CreateArgs),
-    /// Close a workspace and remove its worktree while retaining its record.
+    /// Close a workspace and remove its worktree while keeping it available to reopen.
     Close(CloseArgs),
     /// Recreate a closed workspace's worktree and continue using it.
     Reopen(ReopenArgs),
-    /// Permanently delete a closed workspace record.
+    /// Delete a workspace, its worktree, Codex thread, and CoCo-created branch.
     Delete(DeleteArgs),
     /// List workspaces in the selected repository, or across all repositories.
     #[command(visible_alias = "ls")]
@@ -68,6 +70,13 @@ pub(super) enum Command {
     },
     /// Show workspace state once or follow it live.
     Status(StatusArgs),
+    /// Show cumulative Codex token usage and available cost estimates.
+    Usage(UsageArgs),
+    /// Inspect or change resource limits for a workspace runtime.
+    Limits {
+        #[command(subcommand)]
+        command: LimitsCommand,
+    },
     /// Start the first or next turn for a ready workspace.
     Send {
         /// Workspace name or ID. Omit it to choose interactively.
@@ -120,7 +129,7 @@ pub(super) enum Command {
         #[command(subcommand)]
         command: super::signals::SignalCommand,
     },
-    /// Manage configured reactions, guards, and delivery history.
+    /// Manage hooks, guards, and delivery history.
     Hook {
         #[command(subcommand)]
         command: super::hooks::HookCommand,
@@ -142,11 +151,13 @@ impl Command {
         match self {
             Self::List { all_repos, .. } => *all_repos,
             Self::Status(args) => args.all_repos,
+            Self::Usage(args) => args.all_repos,
             Self::Signal { command } => command.all_repos(),
             Self::Repo { .. }
             | Self::Model { .. }
             | Self::Models { .. }
             | Self::Create(_)
+            | Self::Limits { .. }
             | Self::Close(_)
             | Self::Reopen(_)
             | Self::Delete(_)
@@ -162,6 +173,8 @@ impl Command {
     fn requests_global_search(&self) -> bool {
         match self {
             Self::Status(args) => args.global,
+            Self::Usage(args) => args.global,
+            Self::Limits { command } => command.global(),
             Self::Signal { command } => command.global(),
             Self::Send { global, .. } | Self::Jump { global, .. } | Self::Diff { global, .. } => {
                 *global
@@ -181,6 +194,149 @@ impl Command {
     }
 }
 
+#[derive(Debug, Subcommand)]
+pub(super) enum LimitsCommand {
+    /// Show the desired limits and whether they are active now.
+    Show(LimitsTargetArgs),
+    /// Change one or more desired limits.
+    Set(LimitsSetArgs),
+    /// Remove every CoCo-configured limit from a workspace.
+    Reset(LimitsTargetArgs),
+}
+
+impl LimitsCommand {
+    const fn global(&self) -> bool {
+        match self {
+            Self::Show(args) | Self::Reset(args) => args.global,
+            Self::Set(args) => args.global,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+pub(super) struct LimitsTargetArgs {
+    /// Workspace name or ID. Omit it to choose interactively.
+    pub(super) workspace: Option<String>,
+    /// Resolve or choose the workspace across every registered repository.
+    #[arg(long, short = 'g')]
+    pub(super) global: bool,
+    /// Emit stable, machine-readable JSON.
+    #[arg(long)]
+    pub(super) json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct LimitsSetArgs {
+    /// Workspace name or ID. Omit it to choose interactively.
+    pub(super) workspace: Option<String>,
+    /// Resolve or choose the workspace across every registered repository.
+    #[arg(long, short = 'g')]
+    pub(super) global: bool,
+    /// Start reclaim and throttle allocation above SIZE, such as 2GiB.
+    #[arg(long, value_name = "SIZE", value_parser = parse_byte_size)]
+    pub(super) memory_high: Option<u64>,
+    /// Set the last-resort hard memory ceiling to SIZE, such as 4GiB.
+    #[arg(long, value_name = "SIZE", value_parser = parse_byte_size)]
+    pub(super) memory_max: Option<u64>,
+    /// Limit total CPU bandwidth in logical cores, such as 0.5 or 2.
+    #[arg(long, value_name = "CORES", value_parser = parse_cpu_max)]
+    pub(super) cpu_max: Option<u32>,
+    /// Set relative CPU share under contention (1-10000, default weight 100).
+    #[arg(long, value_name = "WEIGHT", value_parser = clap::value_parser!(u16).range(1..=10_000))]
+    pub(super) cpu_weight: Option<u16>,
+    /// Limit the total number of processes and threads in the runtime.
+    #[arg(long, value_name = "COUNT", value_parser = clap::value_parser!(u64).range(1..))]
+    pub(super) tasks_max: Option<u64>,
+    /// Remove one configured field while retaining the others.
+    #[arg(long, value_name = "FIELD", value_enum, action = ArgAction::Append)]
+    pub(super) clear: Vec<LimitField>,
+    /// Emit stable, machine-readable JSON.
+    #[arg(long)]
+    pub(super) json: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, ValueEnum)]
+pub(super) enum LimitField {
+    MemoryHigh,
+    MemoryMax,
+    CpuMax,
+    CpuWeight,
+    TasksMax,
+}
+
+fn parse_byte_size(value: &str) -> Result<u64, String> {
+    let trimmed = value.trim();
+    let split = trimmed
+        .find(|character: char| !character.is_ascii_digit() && character != '.')
+        .unwrap_or(trimmed.len());
+    let (number, suffix) = trimmed.split_at(split);
+    let multiplier = match suffix.to_ascii_lowercase().as_str() {
+        "" | "b" => 1_u64,
+        "k" | "kb" => 1_000,
+        "kib" => 1024,
+        "m" | "mb" => 1_000_000,
+        "mib" => 1024 * 1024,
+        "g" | "gb" => 1_000_000_000,
+        "gib" => 1024 * 1024 * 1024,
+        "t" | "tb" => 1_000_000_000_000,
+        "tib" => 1024_u64.pow(4),
+        _ => {
+            return Err("size suffix must be B, KB, MB, GB, TB, KiB, MiB, GiB, or TiB".to_owned());
+        }
+    };
+    parse_scaled_decimal(number, multiplier, 3).and_then(|value| {
+        u64::try_from(value)
+            .ok()
+            .filter(|value| *value > 0)
+            .ok_or_else(|| "size must be greater than zero and fit in 64 bits".to_owned())
+    })
+}
+
+fn parse_cpu_max(value: &str) -> Result<u32, String> {
+    let millicores = parse_scaled_decimal(value.trim(), 1_000, 3).and_then(|value| {
+        u32::try_from(value).map_err(|_| "CPU maximum is too large".to_owned())
+    })?;
+    if (1..=MAX_CPU_MILLICORES).contains(&millicores) {
+        Ok(millicores)
+    } else {
+        Err(format!(
+            "CPU maximum must be between 0.001 and {} cores",
+            MAX_CPU_MILLICORES / 1_000
+        ))
+    }
+}
+
+fn parse_scaled_decimal(value: &str, scale: u64, decimals: usize) -> Result<u128, String> {
+    let (whole, fractional) = value.split_once('.').unwrap_or((value, ""));
+    if whole.is_empty()
+        || !whole.bytes().all(|byte| byte.is_ascii_digit())
+        || !fractional.bytes().all(|byte| byte.is_ascii_digit())
+        || fractional.len() > decimals
+        || (value.contains('.') && fractional.is_empty())
+    {
+        return Err(format!(
+            "expected a positive decimal with at most {decimals} fractional digits"
+        ));
+    }
+    let denominator = 10_u128.pow(u32::try_from(fractional.len()).unwrap_or(u32::MAX));
+    let whole = whole
+        .parse::<u128>()
+        .map_err(|_| "numeric value is too large".to_owned())?;
+    let fractional = if fractional.is_empty() {
+        0
+    } else {
+        fractional
+            .parse::<u128>()
+            .map_err(|_| "numeric value is too large".to_owned())?
+    };
+    let numerator = whole
+        .checked_mul(denominator)
+        .and_then(|whole| whole.checked_add(fractional))
+        .and_then(|value| value.checked_mul(u128::from(scale)))
+        .ok_or_else(|| "numeric value is too large".to_owned())?;
+    Ok(numerator / denominator)
+}
+
 #[derive(Debug, Args)]
 pub(super) struct CloseArgs {
     /// Workspace name or ID. Omit it to choose interactively.
@@ -194,10 +350,10 @@ pub(super) struct CloseArgs {
     /// Permanently discard tracked, untracked, and ignored worktree changes.
     #[arg(long)]
     pub(super) discard_changes: bool,
-    /// Show the checked retirement plan without changing anything.
+    /// Show the close plan without changing anything.
     #[arg(long, short = 'n')]
     pub(super) dry_run: bool,
-    /// Skip confirmation for an explicitly requested discard.
+    /// Skip confirmation; does not authorize discarding local changes.
     #[arg(long, short = 'y')]
     pub(super) yes: bool,
 }
@@ -213,21 +369,27 @@ pub(super) struct ReopenArgs {
 
 #[derive(Debug, Args)]
 pub(super) struct DeleteArgs {
-    /// Closed workspace name or ID. Omit it to choose interactively.
+    /// Open or closed workspace name or ID. Omit it to choose interactively.
     pub(super) workspace: Option<String>,
     /// Resolve or choose the workspace across every registered repository.
     #[arg(long, short = 'g')]
     pub(super) global: bool,
-    /// Permanently delete the native Codex thread too.
-    #[arg(long, short = 't')]
-    pub(super) delete_thread: bool,
-    /// Delete the local branch too, only when CoCo created it.
-    #[arg(long, short = 'b')]
-    pub(super) delete_branch: bool,
+    /// Keep the Codex conversation after deleting the workspace.
+    #[arg(long)]
+    pub(super) keep_thread: bool,
+    /// Keep the CoCo-created branch. Adopted branches are always kept.
+    #[arg(long)]
+    pub(super) keep_branch: bool,
+    /// Permanently discard tracked, untracked, and ignored worktree changes.
+    #[arg(long)]
+    pub(super) discard_changes: bool,
+    /// Allow commits to lose their last branch, tag, or remote-tracking reference.
+    #[arg(long)]
+    pub(super) discard_unretained_commits: bool,
     /// Show the checked deletion plan without changing anything.
     #[arg(long, short = 'n')]
     pub(super) dry_run: bool,
-    /// Apply the checked deletion plan without confirmation.
+    /// Skip confirmation; does not authorize discarding local changes or unretained commits.
     #[arg(long, short = 'y')]
     pub(super) yes: bool,
 }
@@ -248,6 +410,24 @@ pub(super) struct StatusArgs {
     /// Include current memory, process, and CPU use.
     #[arg(long, short = 'r')]
     pub(super) resources: bool,
+    /// Emit stable, machine-readable JSON.
+    #[arg(long)]
+    pub(super) json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct UsageArgs {
+    /// Workspace name or ID. Omit it to show the selected repository.
+    pub(super) workspace: Option<String>,
+    /// Show workspaces across every registered repository.
+    #[arg(long, short = 'a', conflicts_with = "workspace")]
+    pub(super) all_repos: bool,
+    /// Resolve one named workspace across every registered repository.
+    #[arg(long, short = 'g')]
+    pub(super) global: bool,
+    /// Follow usage changes until interrupted.
+    #[arg(long, short = 'f', conflicts_with = "json")]
+    pub(super) follow: bool,
     /// Emit stable, machine-readable JSON.
     #[arg(long)]
     pub(super) json: bool,

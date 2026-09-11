@@ -33,8 +33,12 @@ status: draft
   schema v7's typed worktree mode. Schema v8 adds the separate durable
   workspace-availability state plus close-time binding evidence, and schema v9
   adds the deletion intent needed to recover a partially completed permanent
-  retirement. The database still keeps schema-v5 status columns, turn rows,
-  normalized events, and decision rows as a reversible migration bridge.
+  retirement. Schema v12 extends that intent with open-delete origin and
+  separately authorized commit loss. Schema v13 adds one revisioned desired
+  resource-policy row per configured workspace. Schema v14 adds one compact
+  native token-usage checkpoint per workspace. The database still keeps
+  schema-v5 status columns, turn rows, normalized events, and decision rows as
+  a reversible migration bridge.
   Production no longer writes thread-status
   snapshots, local turns, `active_turn_id`, decisions, sent prompts, turn
   start/completion events, or native status/plan/diff/error and unsupported-
@@ -106,7 +110,7 @@ status: draft
   documented deprecation says otherwise.
 - No public network API, destructive automatic cleanup, implicit dirty-checkout
   capture, multi-agent-runtime abstraction, or early monorepo is part of v0.
-  Explicit checked workspace close and closed-only deletion are user-requested
+  Explicit checked workspace close and open/closed deletion are user-requested
   lifecycle operations, not cleanup automation.
 
 ### Assumed for this draft
@@ -322,7 +326,8 @@ Failure response:
   "id": "8d67...",
   "error": {
     "code": "DIRTY_SOURCE",
-    "message": "repository checkout is dirty: /projects/app"
+    "message": "repository checkout is dirty: /projects/app",
+    "data": { "repositoryPath": "/projects/app" }
   }
 }
 ```
@@ -506,6 +511,10 @@ OPERATION_UNCERTAIN
 INVALID_WORKSPACE_STATE
 INCOMPLETE_WORKSPACE
 PROFILE_CHANGED
+INVALID_RESOURCE_POLICY
+RESOURCE_LIMITS_UNAVAILABLE
+RESOURCE_LIMIT_APPLICATION_FAILED
+RESOURCE_LIMIT_UPDATE_INCOMPLETE
 DIRTY_SOURCE
 INVALID_WORKSPACE_NAME
 WORKSPACE_COLLISION
@@ -532,6 +541,10 @@ table, schema v7 added the typed worktree binding, schema v8 added reversible
 availability, and schema v9 records in-progress deletion intent. Listing a
 legacy native projection below does not assign CoCo long-term ownership of it.
 Schema v10 and v11 separately add signals and their narrow hook outbox.
+Schema v12 extends deletion intent to cover direct open-workspace retirement.
+Schema v13 adds durable workspace resource intent; applied controller state
+remains generation-local. Schema v14 adds the latest native token-usage
+checkpoint; optional billing estimates remain generation-local.
 
 ### `repositories`
 
@@ -574,7 +587,8 @@ Schema v10 and v11 separately add signals and their narrow hook outbox.
 | `thread_archived` | whether the current close operation requested and established native archival; cleared atomically when reopening reaches `open` |
 | `closed_head_sha` | exact worktree `HEAD` captured before close and required for exact restoration and optional owned-branch deletion |
 | `closed_at_ms` | nullable timestamp for the stable `closed` state |
-| `delete_thread_requested`, `delete_branch_requested` | internal saga intent retained only while availability is `deleting`; not public workspace metadata |
+| `delete_thread_requested`, `delete_branch_requested` | actual selected resource effects retained while availability is `deleting` |
+| `delete_discard_unretained_commits`, `delete_from_open` | independently approved commit loss and original availability for safe deletion recovery; default false when migrating older intent |
 
 Base and path are nullable only while Git provisioning has not reached their
 stage. The thread remains nullable after lifecycle `ready`: that represents a
@@ -591,6 +605,40 @@ Repository display names are not selectors because unrelated paths may share a
 basename. CLI repository scope is a canonicalizable path. The stable repository
 ID is returned for identity and correlation but is not currently a CLI path
 selector.
+
+### `workspace_resource_policies`
+
+| Column | Constraint and meaning |
+| --- | --- |
+| `workspace_id` | primary key and cascading foreign key to the owned workspace |
+| `revision` | positive, monotonically increasing compare-and-set revision |
+| `policy_json` | validated versioned desired policy; never observed counters or systemd syntax |
+| `updated_at_ms` | required mutation timestamp |
+
+No row means revision zero and an empty policy. The policy owns portable
+workspace intent for memory pressure and maximums, CPU capacity and weight, and
+task count. The daemon loads all rows before any lazy executor can start. A
+live controller's applied snapshot is held only in the runtime registry, so
+desired and applied state remain distinguishable when an update must wait for
+a restart. Capability checks fail closed during both mutation and activation;
+see [Per-workspace Codex execution runtime](workspace-runtime.md).
+
+### `workspace_token_usage`
+
+| Column | Constraint and meaning |
+| --- | --- |
+| `workspace_id` | primary key and cascading foreign key to the owned workspace |
+| `thread_id` | exact native thread binding duplicated for corruption detection |
+| `checkpoint_json` | validated schema-v1 cumulative `total`, latest `last`, context window, turn/thread identity, daemon generation, and observation time |
+| `updated_at_ms` | required persistence timestamp |
+
+Only one checkpoint is retained. Writes require the workspace's current exact
+thread binding and never replace a greater cumulative total with a smaller
+one. A checkpoint observed before the current daemon generation is exposed as
+stale rather than current. This table is a cache of native evidence, not a
+conversation or billing ledger. The optional `account/usage/read` result is
+kept only in a short-lived in-memory cache and never written here; see
+[Workspace token usage and billing estimates](workspace-usage.md).
 
 ### Context transfer
 
@@ -803,7 +851,7 @@ replaced by another differently named mirror.
 
 ## Transaction and transition rules
 
-Schema v11 uses short `BEGIN IMMEDIATE` transactions for each CoCo-owned state
+Schema v14 uses short `BEGIN IMMEDIATE` transactions for each CoCo-owned state
 transition:
 
 1. Persist and validate the owned intent or lifecycle precondition.
@@ -860,7 +908,8 @@ workspace identity:
 | `closing` | verified worktree absent and requested archive established | `closed` | retain workspace, Git binding, branch, and optional native thread |
 | `closed` | accepted reopen | `reopening` | recreate the exact managed path and binding at the close-time `HEAD` |
 | `reopening` | binding verified and CoCo-archived thread unarchived | `open` | atomically clear close-only evidence and archive marker |
-| `closed` | accepted permanent delete | `deleting` | retain independent thread/branch deletion intent until its saga completes |
+| `open` or `closed` | accepted permanent delete | `deleting` | retain pinned HEAD, actual thread/branch effects, origin, and commit-discard policy until the combined saga completes |
+| `deleting` from open | recovery finds original verified worktree present | `open` | cancel intent without repeating destructive file removal; ask for a fresh plan |
 | `deleting` | requested native/branch effects complete | absent | delete the CoCo record and its compatibility children |
 
 Close and reopen failures are compensated to their prior stable state when the
@@ -870,6 +919,10 @@ then converges from the actual Git path/registration and native thread state.
 It never invents a replacement binding. A proven native or branch deletion
 rejection returns a `deleting` row to `closed`; an ambiguous native result or a
 crash between proven side effects remains retryable from the stored intent.
+File-discard authorization is deliberately not persisted: restart recovery
+never removes a surviving worktree automatically. Partial failure after removal
+reports `WORKSPACE_DELETION_INCOMPLETE`, including a stable workspace ID and
+sanitized underlying error, so a caller cannot mistake it for full rollback.
 
 The thread-runtime truth is the exact `ThreadStatus` returned by stable
 `thread/read`: `notLoaded`, `idle`, `systemError`, or `active` with the complete
@@ -927,9 +980,11 @@ category, not shell-expanded commands.
 
 - Obtain the top level and common Git directory from Git, then canonicalize.
 - Record whether the supplied checkout is itself a linked worktree.
-- Source cleanliness for the default `create` path uses porcelain status
-  including ordinary untracked files. Explicit local-state carry is evaluated
-  only against the checkout through which creation was invoked; dirty state in
+- Source cleanliness checks use porcelain status including ordinary untracked
+  files. The CLI initially requests the strict check so it can warn before a
+  dirty source is accepted, then retries with the typed ignore policy before
+  any workspace state exists. Explicit local-state carry is evaluated only
+  against the checkout through which creation was invoked; dirty state in
   unrelated linked worktrees does not participate.
 - Resolve the base as a commit object with the equivalent of
   `rev-parse --verify --end-of-options <ref>^{commit}` and persist its complete
@@ -966,10 +1021,14 @@ registered worktree rather than an ephemeral directory. A later atomic
 promotion operation must create and verify a branch before changing persisted
 binding metadata; it is not part of the current alpha.
 
-### Explicit local-state carry
+### Explicit local-state policy
 
-The no-carry default rejects tracked and ordinary untracked changes. The typed
-carry request may add two independent source-checkout categories:
+The protocol distinguishes strict rejection, leaving source changes behind,
+and explicit carry. The CLI uses strict rejection as a side-effect-free
+preflight: `DIRTY_SOURCE` produces a warning and one retry with the ignore
+policy. The resulting worktree therefore starts from the selected committed
+base, while tracked and ordinary untracked changes remain unchanged in the
+invoking checkout. Carry may add two source-checkout categories:
 
 - staged and unstaged tracked changes, captured as separate full-index binary
   patches so destination index placement is preserved; and
@@ -1012,9 +1071,10 @@ stages untracked files to make them appear in a patch.
 Under the same repository mutex used for creation and activation, close first
 verifies the stored mode, branch, canonical managed path, Git registration,
 and current `HEAD`. Its plan separately reports tracked changes, ordinary
-untracked files, ignored files, a worktree lock, and detached commits relative
-to the immutable base. A lock, binding drift, or a detached `HEAD` beyond the
-base always blocks. Any local file state blocks unless the caller explicitly
+untracked files, ignored files, a worktree lock, and commits losing durable
+branch/tag/remote-ref reachability. A lock or binding drift always blocks.
+Detached close requires retaining refs, independent of the original base.
+Any local file state blocks unless the caller explicitly
 requests `--discard-changes`.
 
 The stored path must equal the destination derived from the canonical managed
@@ -1043,11 +1103,27 @@ Reopen derives the destination again from the managed worktree root,
 repository ID, and validated workspace name. It refuses an occupied path,
 moved or separately checked-out branch, changed mode, or close-time `HEAD`
 mismatch, then uses `git worktree add` and verifies the restored binding. A
-detached workspace is restored detached at its close-time commit. Optional
-permanent branch deletion is available only for `new_branch`, after the
-worktree is closed, and only while the ref still equals the recorded
-close-time `HEAD`; an existing branch or detached binding can never acquire
-that authority.
+detached workspace is restored detached at its close-time commit.
+
+Deletion has one combined planner for open, closed, and failed/prepared
+workspaces. Before effects it checks all Git, runtime, descendant, attachment,
+and context-dependency constraints. A present worktree runs both close and
+delete guards before intent, followed by a fresh plan comparison. Removal
+stops its executor and removes the exact worktree, then deletes the selected
+native thread and owned ref, finally committing record deletion and the
+`workspace.deleted` outbox event. It does not call the public close operation
+or produce an intermediate `workspace.closed` event.
+
+Permanent branch deletion applies only to verified `new_branch` ownership.
+A successful persisted worktree-creation event also proves ownership after
+failure; a planned name by itself cannot claim a ref left by a creation
+collision. Existing branches are always retained. A matching HEAD and checkout
+check precedes native deletion and the final Git action. Branch removal uses
+`git update-ref -d <ref> <expected-head>` as a compare-and-delete, protecting a
+concurrent ref update. `git rev-list --count` excludes the selected branch and
+compares against remaining local branches, tags, and remote refs; reflogs and
+stored SHAs do not count as retention. Commit discard is separate from file
+discard, and no bulk removal policy is implied by either.
 
 ## Codex App Server adapter
 
@@ -1491,8 +1567,9 @@ tests before a service manager may restart `cocod` automatically.
   projection, and idempotency without child processes.
 - Test SQLite migrations and binding/operation/retirement atomicity against
   temporary on-disk databases, including legacy v1/v5 fixtures migrating
-  through current schema v11 and restart recovery from every transitional
-  availability.
+  through current schema v14 and restart recovery from every transitional
+  availability. Resource-policy coverage additionally proves monotonic
+  compare-and-set updates and cascading removal.
 - Test Git behavior with temporary repositories and native worktrees,
   including new/existing/detached bindings, staged and unstaged patches,
   ordinary untracked and `.worktreeinclude` files, ref collisions, divergence,
@@ -1658,9 +1735,9 @@ physical cleanup and product-proof gates.
 
 ### Phase D - stop writes, migrate, then remove
 
-- Implemented in schema v6 and retained through schema v11: the minimal `turn_start`
-  ledger commits intent and
-  dispatch boundaries, accepts only a direct native result, and makes an
+- Implemented in schema v6 and retained through schema v14: the minimal
+  `turn_start` ledger commits intent and dispatch boundaries, accepts only a
+  direct native result, and makes an
   unconfirmed dispatch permanently non-retrying under the same operation ID.
 - Implemented stop-write: production no longer creates local turns,
   `active_turn_id`, thread snapshots, turn start/completion events, or durable
@@ -1670,7 +1747,7 @@ physical cleanup and product-proof gates.
   Never combine that cleanup with another authority change or replace one
   native mirror with another.
 
-Stop-write exit: historical database fixtures migrate through v11, dispatch
+Stop-write exit: historical database fixtures migrate through v14, dispatch
 crash injection does not issue a second `turn/start`, and restart rebuilds
 user-visible state from the stored binding plus Git/App Server. Physical
 cleanup remains gated on Phase E rather than blocking it.

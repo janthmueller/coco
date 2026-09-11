@@ -141,6 +141,9 @@ src/
     retirement.rs                # checked close/reopen/delete sagas and recovery
     retirement/
       safety.rs                  # path, descendant activity, and context dependency guards
+      deletion.rs                # combined open/closed deletion saga and recovery
+      deletion/
+        plan.rs                  # resource ownership and loss/retention planning
     turn.rs                      # turn start and idempotency
     codex_events.rs              # App Server event projection
     error.rs
@@ -151,6 +154,8 @@ src/
       retirement_safety.rs      # worktree, runtime, TUI, and recovery safety
       retirement_confirmation.rs # acknowledged target and resource-plan identity
       retirement_dependencies.rs # prepared context references and deletion races
+      retirement_deletion.rs     # direct deletion, retention, file and commit loss policy
+      retirement_deletion_recovery.rs # failed preparation and interrupted open deletion
       context.rs                # fork, compact, attach, and activation behavior
       operations.rs             # turn-start idempotency and ambiguous dispatch
       decisions.rs              # approvals and structured-input behavior
@@ -209,6 +214,7 @@ src/
     worker.rs                    # WorkerRuntime adapter around CodexClient
     execution.rs                 # lazy workspace executor lifecycle
     execution/
+      containment.rs             # platform selection and systemd/cgroup ownership
       resources.rs               # platform-specific ephemeral observation
 
   bin/                           # thin executable entry points only

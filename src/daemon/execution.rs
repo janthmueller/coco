@@ -9,7 +9,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt};
-use tokio::process::{Child, Command};
+use tokio::process::Child;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
@@ -18,11 +18,17 @@ use tracing::{debug, warn};
 use crate::codex::{CodexClient, CodexError};
 use crate::coordinator::WorkerExecutionEnvironment;
 use crate::domain::runtime::{
-    WorkspaceResourceScope, WorkspaceRuntimeBackend, WorkspaceRuntimeResources,
+    WorkspaceResourceCapabilities, WorkspaceResourceControllerStatus, WorkspaceResourcePolicyError,
+    WorkspaceResourcePolicySnapshot, WorkspaceRuntimeBackend, WorkspaceRuntimeResources,
     WorkspaceRuntimeState,
 };
 
+mod containment;
 mod resources;
+
+pub(in crate::daemon) use containment::ContainmentError;
+pub(super) use containment::WorkspaceContainment;
+use containment::{ActiveContainment, PendingContainment};
 
 const EXEC_SERVER_START_TIMEOUT: Duration = Duration::from_secs(10);
 const EXEC_SERVER_OUTPUT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
@@ -82,6 +88,14 @@ pub(super) enum WorkspaceExecutionError {
     Shutdown(#[source] std::io::Error),
     #[error("workspace executor output collection failed: {0}")]
     OutputCollection(#[source] tokio::task::JoinError),
+    #[error("workspace executor containment failed: {0}")]
+    Containment(#[from] ContainmentError),
+    #[error("invalid workspace resource policy: {0}")]
+    InvalidResourcePolicy(#[source] WorkspaceResourcePolicyError),
+    #[error("stale workspace resource policy revision {requested}; current revision is {current}")]
+    StaleResourcePolicy { requested: u64, current: u64 },
+    #[error("workspace resource policy revision {0} has conflicting contents")]
+    ResourcePolicyRevisionConflict(u64),
 }
 
 #[derive(Clone)]
@@ -101,7 +115,13 @@ struct WorkspaceExecutorsInner {
     client: CodexClient,
     codex_binary: PathBuf,
     codex_home: Option<PathBuf>,
-    runtimes: Mutex<HashMap<String, ManagedExecServer>>,
+    containment: WorkspaceContainment,
+    state: Mutex<WorkspaceExecutorState>,
+}
+
+struct WorkspaceExecutorState {
+    runtimes: HashMap<String, ManagedExecServer>,
+    policies: HashMap<String, WorkspaceResourcePolicySnapshot>,
 }
 
 impl WorkspaceExecutors {
@@ -109,13 +129,19 @@ impl WorkspaceExecutors {
         client: CodexClient,
         codex_binary: PathBuf,
         codex_home: Option<PathBuf>,
+        containment: WorkspaceContainment,
+        policies: HashMap<String, WorkspaceResourcePolicySnapshot>,
     ) -> Self {
         Self {
             inner: Arc::new(WorkspaceExecutorsInner {
                 client,
                 codex_binary,
                 codex_home,
-                runtimes: Mutex::new(HashMap::new()),
+                containment,
+                state: Mutex::new(WorkspaceExecutorState {
+                    runtimes: HashMap::new(),
+                    policies,
+                }),
             }),
         }
     }
@@ -131,28 +157,40 @@ impl WorkspaceExecutors {
             ));
         }
 
-        let mut runtimes = self.inner.runtimes.lock().await;
-        if let Some(runtime) = runtimes.get_mut(workspace_id) {
+        let mut state = self.inner.state.lock().await;
+        if let Some(runtime) = state.runtimes.get_mut(workspace_id) {
             match runtime.child.try_wait() {
                 Ok(None) if runtime.cwd == cwd => return Ok(runtime.environment.clone()),
                 Ok(None) | Ok(Some(_)) => {}
                 Err(error) => return Err(WorkspaceExecutionError::ProcessInspection(error)),
             }
         }
-        if let Some(runtime) = runtimes.remove(workspace_id) {
+        if let Some(runtime) = state.runtimes.remove(workspace_id) {
             runtime.shutdown().await?;
         }
+
+        let policy = state
+            .policies
+            .get(workspace_id)
+            .cloned()
+            .unwrap_or_default();
 
         let environment = WorkerExecutionEnvironment {
             environment_id: environment_id(workspace_id),
             cwd: cwd.to_owned(),
             runtime_workspace_roots: vec![cwd.to_owned()],
         };
+        let containment = self
+            .inner
+            .containment
+            .prepare_with_policy(workspace_id, policy.clone())?;
         let runtime = ManagedExecServer::spawn(
             &self.inner.codex_binary,
             self.inner.codex_home.as_deref(),
             cwd,
             environment.clone(),
+            containment,
+            policy,
         )
         .await?;
         debug!(
@@ -205,14 +243,15 @@ impl WorkspaceExecutors {
             "workspace exec-server ready"
         );
 
-        runtimes.insert(workspace_id.to_owned(), runtime);
+        state.runtimes.insert(workspace_id.to_owned(), runtime);
         Ok(environment)
     }
 
     pub(super) async fn close(&self) {
         let runtimes = {
-            let mut runtimes = self.inner.runtimes.lock().await;
-            runtimes
+            let mut state = self.inner.state.lock().await;
+            state
+                .runtimes
                 .drain()
                 .map(|(_, runtime)| runtime)
                 .collect::<Vec<_>>()
@@ -225,7 +264,7 @@ impl WorkspaceExecutors {
     }
 
     pub(super) async fn stop(&self, workspace_id: &str) -> Result<(), WorkspaceExecutionError> {
-        let runtime = self.inner.runtimes.lock().await.remove(workspace_id);
+        let runtime = self.inner.state.lock().await.runtimes.remove(workspace_id);
         if let Some(runtime) = runtime {
             debug!(
                 workspace_id,
@@ -241,21 +280,125 @@ impl WorkspaceExecutors {
         &self,
         workspace_id: &str,
     ) -> Result<WorkspaceRuntimeResources, WorkspaceExecutionError> {
-        let mut runtimes = self.inner.runtimes.lock().await;
-        let Some(runtime) = runtimes.get_mut(workspace_id) else {
+        let mut state = self.inner.state.lock().await;
+        let Some(runtime) = state.runtimes.get_mut(workspace_id) else {
             return Ok(WorkspaceRuntimeResources {
                 backend: WorkspaceRuntimeBackend::ExecServer,
                 state: WorkspaceRuntimeState::Inactive,
-                scope: resource_scope(),
+                scope: self.inner.containment.resource_scope(),
                 process_id: None,
                 process_count: None,
+                task_count: None,
                 resident_memory_bytes: None,
+                memory_current_bytes: None,
                 cpu_percent: None,
+                cpu_usage_usec: None,
+                cgroup_unit: None,
+                events: None,
                 sampled_at_ms: None,
             });
         };
         runtime.resources()
     }
+
+    pub(super) fn resource_capabilities(&self) -> WorkspaceResourceCapabilities {
+        self.inner.containment.capabilities()
+    }
+
+    pub(super) async fn resource_policy_status(
+        &self,
+        workspace_id: &str,
+    ) -> Result<WorkspaceResourceControllerStatus, WorkspaceExecutionError> {
+        let mut state = self.inner.state.lock().await;
+        let Some(runtime) = state.runtimes.get_mut(workspace_id) else {
+            return Ok(WorkspaceResourceControllerStatus {
+                capabilities: self.resource_capabilities(),
+                runtime_state: WorkspaceRuntimeState::Inactive,
+                applied_policy: None,
+            });
+        };
+        let running = runtime
+            .child
+            .try_wait()
+            .map_err(WorkspaceExecutionError::ProcessInspection)?
+            .is_none();
+        Ok(WorkspaceResourceControllerStatus {
+            capabilities: self.resource_capabilities(),
+            runtime_state: if running {
+                WorkspaceRuntimeState::Running
+            } else {
+                WorkspaceRuntimeState::Exited
+            },
+            applied_policy: running.then(|| runtime.applied_policy.clone()),
+        })
+    }
+
+    pub(super) async fn configure_resource_policy(
+        &self,
+        workspace_id: &str,
+        snapshot: WorkspaceResourcePolicySnapshot,
+    ) -> Result<WorkspaceResourceControllerStatus, WorkspaceExecutionError> {
+        snapshot
+            .policy
+            .validate()
+            .map_err(WorkspaceExecutionError::InvalidResourcePolicy)?;
+        self.inner.containment.validate_policy(&snapshot.policy)?;
+
+        let mut state = self.inner.state.lock().await;
+        let current = state
+            .policies
+            .get(workspace_id)
+            .cloned()
+            .unwrap_or_default();
+        if snapshot.revision < current.revision {
+            return Err(WorkspaceExecutionError::StaleResourcePolicy {
+                requested: snapshot.revision,
+                current: current.revision,
+            });
+        }
+        if snapshot.revision == current.revision {
+            if snapshot.policy != current.policy {
+                return Err(WorkspaceExecutionError::ResourcePolicyRevisionConflict(
+                    snapshot.revision,
+                ));
+            }
+            drop(state);
+            return self.resource_policy_status(workspace_id).await;
+        }
+
+        let mut runtime_state = WorkspaceRuntimeState::Inactive;
+        let mut applied_policy = None;
+        if let Some(runtime) = state.runtimes.get_mut(workspace_id) {
+            if runtime
+                .child
+                .try_wait()
+                .map_err(WorkspaceExecutionError::ProcessInspection)?
+                .is_none()
+            {
+                if !resource_policy_update_requires_restart(&runtime.applied_policy, &snapshot) {
+                    runtime.apply_policy(&snapshot).await?;
+                }
+                runtime_state = WorkspaceRuntimeState::Running;
+                applied_policy = Some(runtime.applied_policy.clone());
+            } else {
+                runtime_state = WorkspaceRuntimeState::Exited;
+            }
+        }
+        state.policies.insert(workspace_id.to_owned(), snapshot);
+        Ok(WorkspaceResourceControllerStatus {
+            capabilities: self.resource_capabilities(),
+            runtime_state,
+            applied_policy,
+        })
+    }
+}
+
+pub(super) async fn initialize_containment(
+    data_dir: &Path,
+) -> Result<WorkspaceContainment, WorkspaceExecutionError> {
+    WorkspaceContainment::initialize(data_dir)
+        .await
+        .map_err(Into::into)
 }
 
 struct ManagedExecServer {
@@ -264,9 +407,12 @@ struct ManagedExecServer {
     cwd: PathBuf,
     endpoint: String,
     environment: WorkerExecutionEnvironment,
+    containment: ActiveContainment,
     stderr_tail: Arc<Mutex<ByteTail>>,
     stderr_task: JoinHandle<()>,
     cpu_counters: Option<resources::CpuCounters>,
+    cgroup_cpu_counters: Option<resources::CgroupCpuCounters>,
+    applied_policy: WorkspaceResourcePolicySnapshot,
 }
 
 impl ManagedExecServer {
@@ -275,34 +421,40 @@ impl ManagedExecServer {
         codex_home: Option<&Path>,
         cwd: &Path,
         environment: WorkerExecutionEnvironment,
+        containment: PendingContainment,
+        policy: WorkspaceResourcePolicySnapshot,
     ) -> Result<Self, WorkspaceExecutionError> {
-        let mut command = Command::new(codex_binary);
+        let mut command = containment.command(
+            codex_binary,
+            &["exec-server", "--listen", "ws://127.0.0.1:0"],
+        );
         command
-            .args(["exec-server", "--listen", "ws://127.0.0.1:0"])
             .current_dir(cwd)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true);
+            .stderr(std::process::Stdio::piped());
         if let Some(codex_home) = codex_home {
             command.env("CODEX_HOME", codex_home);
         }
         let mut child = command.spawn().map_err(WorkspaceExecutionError::Spawn)?;
-        let process_id = child.id().ok_or_else(|| {
-            WorkspaceExecutionError::InvalidEndpoint(
+        let Some(process_id) = child.id() else {
+            abort_pending_start(&mut child, &containment).await?;
+            return Err(WorkspaceExecutionError::InvalidEndpoint(
                 "the child process did not expose a process ID".to_owned(),
-            )
-        })?;
-        let mut stdout = child.stdout.take().ok_or_else(|| {
-            WorkspaceExecutionError::InvalidEndpoint(
+            ));
+        };
+        let Some(mut stdout) = child.stdout.take() else {
+            abort_pending_start(&mut child, &containment).await?;
+            return Err(WorkspaceExecutionError::InvalidEndpoint(
                 "the child process did not expose stdout".to_owned(),
-            )
-        })?;
-        let stderr = child.stderr.take().ok_or_else(|| {
-            WorkspaceExecutionError::InvalidEndpoint(
+            ));
+        };
+        let Some(stderr) = child.stderr.take() else {
+            abort_pending_start(&mut child, &containment).await?;
+            return Err(WorkspaceExecutionError::InvalidEndpoint(
                 "the child process did not expose stderr".to_owned(),
-            )
-        })?;
+            ));
+        };
         let stderr_tail = Arc::new(Mutex::new(ByteTail::new(EXEC_SERVER_STDERR_BYTES)));
         let stderr_task = tokio::spawn(collect_stderr(stderr, Arc::clone(&stderr_tail)));
 
@@ -314,32 +466,32 @@ impl ManagedExecServer {
         {
             Ok(Ok(Some(endpoint))) => endpoint,
             Ok(Ok(None)) => {
-                let _ = child.wait().await;
-                let _ = stderr_task.await;
+                abort_started_process(&mut child, &containment, stderr_task, process_id).await?;
                 return Err(WorkspaceExecutionError::EarlyExit {
                     stderr: stderr_tail.lock().await.display(),
                 });
             }
             Ok(Err(error)) => {
-                let _ = child.start_kill();
-                let _ = child.wait().await;
-                let _ = stderr_task.await;
+                abort_started_process(&mut child, &containment, stderr_task, process_id).await?;
                 return Err(WorkspaceExecutionError::EndpointRead(error));
             }
             Err(_) => {
-                let _ = child.start_kill();
-                let _ = child.wait().await;
-                let _ = stderr_task.await;
+                abort_started_process(&mut child, &containment, stderr_task, process_id).await?;
                 return Err(WorkspaceExecutionError::StartupTimeout);
             }
         };
         let endpoint = match validate_endpoint(endpoint) {
             Ok(endpoint) => endpoint,
             Err(error) => {
-                let _ = child.start_kill();
-                let _ = child.wait().await;
-                let _ = stderr_task.await;
+                abort_started_process(&mut child, &containment, stderr_task, process_id).await?;
                 return Err(error);
+            }
+        };
+        let active_containment = match containment.clone().activate(process_id).await {
+            Ok(active) => active,
+            Err(error) => {
+                abort_started_process(&mut child, &containment, stderr_task, process_id).await?;
+                return Err(WorkspaceExecutionError::Containment(error));
             }
         };
 
@@ -349,10 +501,22 @@ impl ManagedExecServer {
             cwd: cwd.to_owned(),
             endpoint,
             environment,
+            containment: active_containment,
             stderr_tail,
             stderr_task,
             cpu_counters: None,
+            cgroup_cpu_counters: None,
+            applied_policy: policy,
         })
+    }
+
+    async fn apply_policy(
+        &mut self,
+        snapshot: &WorkspaceResourcePolicySnapshot,
+    ) -> Result<(), WorkspaceExecutionError> {
+        self.containment.apply_policy(&snapshot.policy).await?;
+        self.applied_policy = snapshot.clone();
+        Ok(())
     }
 
     fn resources(&mut self) -> Result<WorkspaceRuntimeResources, WorkspaceExecutionError> {
@@ -365,17 +529,56 @@ impl ManagedExecServer {
         {
             return Ok(self.resource_snapshot(WorkspaceRuntimeState::Exited, None, sampled_at_ms));
         }
+        if let Some(cgroup_path) = self.containment.cgroup_path() {
+            return match resources::inspect_cgroup(cgroup_path, self.cgroup_cpu_counters) {
+                Ok(Some(usage)) => {
+                    self.cgroup_cpu_counters = usage.counters;
+                    Ok(WorkspaceRuntimeResources {
+                        backend: WorkspaceRuntimeBackend::ExecServer,
+                        state: WorkspaceRuntimeState::Running,
+                        scope: self.containment.resource_scope(),
+                        process_id: Some(self.process_id),
+                        process_count: usage.process_count,
+                        task_count: usage.task_count,
+                        resident_memory_bytes: None,
+                        memory_current_bytes: usage.memory_current_bytes,
+                        cpu_percent: usage.cpu_percent,
+                        cpu_usage_usec: usage.cpu_usage_usec,
+                        cgroup_unit: self.containment.unit().map(str::to_owned),
+                        events: usage.events,
+                        sampled_at_ms: Some(sampled_at_ms),
+                    })
+                }
+                Ok(None) => {
+                    Ok(self.resource_snapshot(WorkspaceRuntimeState::Exited, None, sampled_at_ms))
+                }
+                Err(error) => {
+                    warn!(%error, workspace_executor_pid = self.process_id, "workspace cgroup resource observation failed");
+                    Ok(self.resource_snapshot(
+                        WorkspaceRuntimeState::Running,
+                        Some(self.process_id),
+                        sampled_at_ms,
+                    ))
+                }
+            };
+        }
+
         match resources::inspect(self.process_id, self.cpu_counters) {
             Ok(Some(usage)) => {
                 self.cpu_counters = usage.counters;
                 Ok(WorkspaceRuntimeResources {
                     backend: WorkspaceRuntimeBackend::ExecServer,
                     state: WorkspaceRuntimeState::Running,
-                    scope: resource_scope(),
+                    scope: self.containment.resource_scope(),
                     process_id: Some(self.process_id),
                     process_count: usage.process_count,
+                    task_count: None,
                     resident_memory_bytes: usage.resident_memory_bytes,
+                    memory_current_bytes: None,
                     cpu_percent: usage.cpu_percent,
+                    cpu_usage_usec: None,
+                    cgroup_unit: None,
+                    events: None,
                     sampled_at_ms: Some(sampled_at_ms),
                 })
             }
@@ -402,58 +605,129 @@ impl ManagedExecServer {
         WorkspaceRuntimeResources {
             backend: WorkspaceRuntimeBackend::ExecServer,
             state,
-            scope: resource_scope(),
+            scope: self.containment.resource_scope(),
             process_id,
             process_count: None,
+            task_count: None,
             resident_memory_bytes: None,
+            memory_current_bytes: None,
             cpu_percent: None,
+            cpu_usage_usec: None,
+            cgroup_unit: self.containment.unit().map(str::to_owned),
+            events: None,
             sampled_at_ms: Some(sampled_at_ms),
         }
     }
 
     async fn shutdown(mut self) -> Result<(), WorkspaceExecutionError> {
+        let mut containment_error = self.containment.stop().await.err();
+        let mut shutdown_error = None;
         if self
             .child
             .try_wait()
             .map_err(WorkspaceExecutionError::ProcessInspection)?
             .is_none()
         {
-            self.child
-                .kill()
-                .await
-                .map_err(WorkspaceExecutionError::Shutdown)?;
+            shutdown_error = self.child.kill().await.err();
         }
-        let mut stderr_task = self.stderr_task;
-        match timeout(EXEC_SERVER_OUTPUT_SHUTDOWN_TIMEOUT, &mut stderr_task).await {
-            Ok(result) => result.map_err(WorkspaceExecutionError::OutputCollection)?,
-            Err(_) => {
-                stderr_task.abort();
-                let _ = stderr_task.await;
-                warn!(
-                    workspace_executor_pid = self.process_id,
-                    "workspace exec-server stderr remained open after shutdown"
-                );
-            }
+        // A failed scope stop must not skip the direct-process fallback, and
+        // killing the direct process must not replace a second attempt to
+        // stop any descendants that may still belong to the scope.
+        if containment_error.is_some() {
+            containment_error = self.containment.stop().await.err();
         }
+        finish_stderr_collection(self.stderr_task, self.process_id).await?;
         let stderr = self.stderr_tail.lock().await.display();
         if !stderr.is_empty() {
             tracing::debug!(%stderr, "workspace exec-server stopped");
+        }
+        if let Some(error) = containment_error {
+            return Err(WorkspaceExecutionError::Containment(error));
+        }
+        if let Some(error) = shutdown_error
+            && self
+                .child
+                .try_wait()
+                .map_err(WorkspaceExecutionError::ProcessInspection)?
+                .is_none()
+        {
+            return Err(WorkspaceExecutionError::Shutdown(error));
         }
         Ok(())
     }
 }
 
-const fn resource_scope() -> WorkspaceResourceScope {
-    if cfg!(target_os = "linux") {
-        WorkspaceResourceScope::ProcessTree
-    } else {
-        WorkspaceResourceScope::RootProcess
+async fn abort_started_process(
+    child: &mut Child,
+    containment: &PendingContainment,
+    stderr_task: JoinHandle<()>,
+    process_id: u32,
+) -> Result<(), WorkspaceExecutionError> {
+    let cleanup = abort_pending_start(child, containment).await;
+    if let Err(error) = finish_stderr_collection(stderr_task, process_id).await {
+        warn!(%error, workspace_executor_pid = process_id, "workspace exec-server output collection failed during startup cleanup");
     }
+    cleanup
+}
+
+async fn finish_stderr_collection(
+    mut stderr_task: JoinHandle<()>,
+    process_id: u32,
+) -> Result<(), WorkspaceExecutionError> {
+    match timeout(EXEC_SERVER_OUTPUT_SHUTDOWN_TIMEOUT, &mut stderr_task).await {
+        Ok(result) => result.map_err(WorkspaceExecutionError::OutputCollection),
+        Err(_) => {
+            stderr_task.abort();
+            let _ = stderr_task.await;
+            warn!(
+                workspace_executor_pid = process_id,
+                "workspace exec-server stderr remained open after shutdown"
+            );
+            Ok(())
+        }
+    }
+}
+
+async fn abort_pending_start(
+    child: &mut Child,
+    containment: &PendingContainment,
+) -> Result<(), WorkspaceExecutionError> {
+    let mut cleanup_error = containment.cleanup().await.err();
+    let mut shutdown_error = None;
+    if child
+        .try_wait()
+        .map_err(WorkspaceExecutionError::ProcessInspection)?
+        .is_none()
+    {
+        shutdown_error = child.kill().await.err();
+    }
+    if cleanup_error.is_some() {
+        cleanup_error = containment.cleanup().await.err();
+    }
+    if let Some(error) = cleanup_error {
+        return Err(WorkspaceExecutionError::Containment(error));
+    }
+    if let Some(error) = shutdown_error
+        && child
+            .try_wait()
+            .map_err(WorkspaceExecutionError::ProcessInspection)?
+            .is_none()
+    {
+        return Err(WorkspaceExecutionError::Shutdown(error));
+    }
+    Ok(())
 }
 
 fn environment_id(workspace_id: &str) -> String {
     let digest = Sha256::digest(workspace_id.as_bytes());
     format!("coco-{}", hex::encode(&digest[..16]))
+}
+
+fn resource_policy_update_requires_restart(
+    applied: &WorkspaceResourcePolicySnapshot,
+    desired: &WorkspaceResourcePolicySnapshot,
+) -> bool {
+    applied.policy.cpu_max_millicores.is_some() && desired.policy.cpu_max_millicores.is_none()
 }
 
 fn parse_mode(value: Option<&str>) -> Result<WorkspaceExecutionMode, WorkspaceExecutionError> {
@@ -608,5 +882,30 @@ mod tests {
         ] {
             assert!(validate_endpoint(endpoint.to_owned()).is_err());
         }
+    }
+
+    #[test]
+    fn removing_an_applied_cpu_cap_is_staged_for_the_next_runtime() {
+        let applied = WorkspaceResourcePolicySnapshot {
+            revision: 3,
+            policy: crate::domain::runtime::WorkspaceResourcePolicy {
+                cpu_max_millicores: Some(750),
+                ..crate::domain::runtime::WorkspaceResourcePolicy::default()
+            },
+        };
+        let removed = WorkspaceResourcePolicySnapshot {
+            revision: 4,
+            policy: crate::domain::runtime::WorkspaceResourcePolicy::default(),
+        };
+        let changed = WorkspaceResourcePolicySnapshot {
+            revision: 4,
+            policy: crate::domain::runtime::WorkspaceResourcePolicy {
+                cpu_max_millicores: Some(1_500),
+                ..crate::domain::runtime::WorkspaceResourcePolicy::default()
+            },
+        };
+
+        assert!(resource_policy_update_requires_restart(&applied, &removed));
+        assert!(!resource_policy_update_requires_restart(&applied, &changed));
     }
 }

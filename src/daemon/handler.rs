@@ -8,14 +8,16 @@ use tracing::error;
 
 use crate::codex::CodexError;
 use crate::coordinator::{Coordinator, CoordinatorError, WorkerError};
-use crate::daemon::execution::WorkspaceExecutionError;
+use crate::daemon::execution::{ContainmentError, WorkspaceExecutionError};
 use crate::protocol::{
     AuditRecordParams, DaemonMethod, DecisionGetParams, DecisionRespondParams, EventListParams,
     HealthParams, HealthResult, HookDeliveryListParams, HookListParams, HookReloadParams,
     ModelListParams, RepositoryResolveParams, TurnResultParams, TurnStartParams,
     WorkspaceAttachAdoptParams, WorkspaceAttachParams, WorkspaceAttachReleaseParams,
     WorkspaceAttachRenewParams, WorkspaceCloseParams, WorkspaceCreateParams, WorkspaceDeleteParams,
-    WorkspaceDiffParams, WorkspaceGetParams, WorkspaceListParams, WorkspaceReopenParams,
+    WorkspaceDiffParams, WorkspaceGetParams, WorkspaceLimitsGetParams, WorkspaceLimitsResetParams,
+    WorkspaceLimitsSetParams, WorkspaceListParams, WorkspaceReopenParams, WorkspaceUsageGetParams,
+    WorkspaceUsageListParams,
 };
 use crate::rpc::{RpcErrorPayload, RpcHandler};
 
@@ -86,6 +88,11 @@ impl RpcHandler for DaemonHandler {
             | DaemonMethod::WorkspaceDelete
             | DaemonMethod::WorkspaceList
             | DaemonMethod::WorkspaceGet
+            | DaemonMethod::WorkspaceUsageList
+            | DaemonMethod::WorkspaceUsageGet
+            | DaemonMethod::WorkspaceLimitsGet
+            | DaemonMethod::WorkspaceLimitsSet
+            | DaemonMethod::WorkspaceLimitsReset
             | DaemonMethod::WorkspaceAttach
             | DaemonMethod::WorkspaceAttachRenew
             | DaemonMethod::WorkspaceAttachAdopt
@@ -162,6 +169,31 @@ impl DaemonHandler {
                     .get_workspace(decode::<WorkspaceGetParams>(params)?)
                     .await,
             ),
+            DaemonMethod::WorkspaceUsageList => execute(
+                self.coordinator
+                    .list_workspace_usage(decode::<WorkspaceUsageListParams>(params)?)
+                    .await,
+            ),
+            DaemonMethod::WorkspaceUsageGet => execute(
+                self.coordinator
+                    .get_workspace_usage(decode::<WorkspaceUsageGetParams>(params)?)
+                    .await,
+            ),
+            DaemonMethod::WorkspaceLimitsGet => execute(
+                self.coordinator
+                    .get_workspace_limits(decode::<WorkspaceLimitsGetParams>(params)?)
+                    .await,
+            ),
+            DaemonMethod::WorkspaceLimitsSet => execute(
+                self.coordinator
+                    .set_workspace_limits(decode::<WorkspaceLimitsSetParams>(params)?)
+                    .await,
+            ),
+            DaemonMethod::WorkspaceLimitsReset => execute(
+                self.coordinator
+                    .reset_workspace_limits(decode::<WorkspaceLimitsResetParams>(params)?)
+                    .await,
+            ),
             DaemonMethod::WorkspaceAttach => execute(
                 self.coordinator
                     .attach_workspace(decode::<WorkspaceAttachParams>(params)?)
@@ -222,21 +254,7 @@ where
 fn map_coordinator_error(source: CoordinatorError) -> RpcErrorPayload {
     let code = source.code();
     let data = source.data();
-    let message = match &source {
-        CoordinatorError::Worker(error) => {
-            error!(%error, "Codex operation failed");
-            public_worker_error(error)
-        }
-        CoordinatorError::Store(error) => {
-            error!(%error, "persistence operation failed");
-            if code == "INTERNAL" {
-                "CoCo could not persist the operation".to_owned()
-            } else {
-                source.to_string()
-            }
-        }
-        _ => source.to_string(),
-    };
+    let message = public_coordinator_message(&source);
     RpcErrorPayload {
         code: code.to_owned(),
         message,
@@ -244,7 +262,39 @@ fn map_coordinator_error(source: CoordinatorError) -> RpcErrorPayload {
     }
 }
 
+fn public_coordinator_message(source: &CoordinatorError) -> String {
+    match source {
+        CoordinatorError::WorkspaceDeletionIncomplete { source, .. } => format!(
+            "The worktree is gone, but deletion is incomplete. Inspect status and retry delete to finish cleanup. {}",
+            public_coordinator_message(source),
+        ),
+        CoordinatorError::Worker(error) => {
+            error!(%error, "Codex operation failed");
+            public_worker_error(error)
+        }
+        CoordinatorError::ResourcePolicyApplication(error) => {
+            error!(%error, "workspace resource limit application failed");
+            public_worker_error(error)
+        }
+        CoordinatorError::Store(error) => {
+            error!(%error, "persistence operation failed");
+            if source.code() == "INTERNAL" {
+                "CoCo could not persist the operation".to_owned()
+            } else {
+                source.to_string()
+            }
+        }
+        _ => source.to_string(),
+    }
+}
+
 fn public_worker_error(error: &WorkerError) -> String {
+    if let WorkerError::ResourcePolicyUnsupported { fields } = error {
+        return format!(
+            "The selected workspace execution backend cannot enforce: {}",
+            fields.join(", ")
+        );
+    }
     let WorkerError::Runtime(source) = error else {
         return "Codex returned a response CoCo could not use".to_owned();
     };
@@ -276,6 +326,25 @@ fn public_workspace_execution_error(error: &WorkspaceExecutionError) -> String {
         | WorkspaceExecutionError::EarlyExit { .. }
         | WorkspaceExecutionError::StartupTimeout => {
             "The Codex workspace runtime could not start; check the cocod log or set COCO_WORKSPACE_EXECUTION=shared before restarting cocod"
+                .to_owned()
+        }
+        WorkspaceExecutionError::Containment(ContainmentError::UnsupportedPolicy { fields }) => {
+            format!(
+                "The selected workspace execution backend cannot enforce: {}",
+                fields.join(", ")
+            )
+        }
+        WorkspaceExecutionError::Containment(
+            ContainmentError::MemoryMaximumBelowCurrent { requested, current },
+        ) => format!(
+            "The requested memory maximum ({requested} bytes) is below the workspace's current use ({current} bytes)"
+        ),
+        WorkspaceExecutionError::Containment(
+            ContainmentError::CpuMaximumRemovalRequiresRestart,
+        ) => "The CPU maximum can be removed after the workspace runtime restarts".to_owned(),
+        WorkspaceExecutionError::InvalidResourcePolicy(error) => error.to_string(),
+        WorkspaceExecutionError::Containment(_) => {
+            "The Linux workspace containment failed; check the cocod log or set COCO_WORKSPACE_CONTAINMENT=process-tree before restarting cocod"
                 .to_owned()
         }
         _ => "The Codex workspace runtime failed; check the cocod log".to_owned(),
@@ -336,6 +405,21 @@ mod tests {
     }
 
     #[test]
+    fn incomplete_deletion_reports_partial_effects_without_leaking_private_errors() {
+        let payload = map_coordinator_error(CoordinatorError::WorkspaceDeletionIncomplete {
+            workspace_id: "workspace-id".into(),
+            source: Box::new(CoordinatorError::Worker(WorkerError::runtime(
+                std::io::Error::other("private detail"),
+            ))),
+        });
+        assert_eq!(payload.code, "WORKSPACE_DELETION_INCOMPLETE");
+        assert!(payload.message.contains("worktree is gone"));
+        assert!(payload.message.contains("retry delete"));
+        assert!(!payload.message.contains("private detail"));
+        assert_eq!(payload.data.unwrap()["causeCode"], "CODEX_ERROR");
+    }
+
+    #[test]
     fn workspace_runtime_compatibility_errors_offer_a_safe_fallback() {
         let payload = map_coordinator_error(CoordinatorError::Worker(WorkerError::runtime(
             WorkspaceExecutionError::Registration {
@@ -352,5 +436,16 @@ mod tests {
             "The installed Codex cannot register workspace runtimes; use codex-cli 0.154.0 or set COCO_WORKSPACE_EXECUTION=shared before starting cocod"
         );
         assert!(!payload.message.contains("private upstream detail"));
+    }
+
+    #[test]
+    fn dirty_source_errors_expose_only_the_checkout_path_needed_for_recovery() {
+        let path = std::path::PathBuf::from("/projects/example");
+        let payload = map_coordinator_error(CoordinatorError::Git(
+            crate::git::GitError::DirtyRepository(path.clone()),
+        ));
+
+        assert_eq!(payload.code, "DIRTY_SOURCE");
+        assert_eq!(payload.data, Some(json!({"repositoryPath": path})));
     }
 }

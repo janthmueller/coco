@@ -1,0 +1,215 @@
+---
+title: Troubleshooting and limitations
+description: Resolve common CoCo alpha problems and understand its current boundaries.
+---
+
+CoCo is alpha software for supervised local use. Start with the checks below
+when a command does not behave as expected.
+
+## CoCo cannot connect
+
+Run `cocod` in another terminal and leave it open:
+
+```bash
+cocod
+```
+
+With the default paths, only one coordinator should run for your user. If a
+second instance says another process already owns CoCo, keep using the first
+one.
+
+## Codex cannot be started
+
+Check the Codex command that CoCo will find:
+
+```bash
+codex --version
+```
+
+This alpha is tested with `codex-cli 0.154.0`. If `codex` is installed outside
+`PATH`, set its absolute path before starting `cocod` and before using `jump`:
+
+```bash
+export COCO_CODEX_BINARY=/absolute/path/to/codex
+cocod
+```
+
+Set the same variable in the other terminal that runs `coco jump`, or add it
+to your shell configuration so both commands inherit it.
+
+A different Codex version may expose incompatible commands or App Server
+behavior.
+
+If startup succeeds but an activating command says that Codex cannot register
+or start a workspace runtime, restart the coordinator in compatibility mode:
+
+```bash
+COCO_WORKSPACE_EXECUTION=shared cocod
+```
+
+This runs without separate workspace execution processes or their resource
+observations.
+
+## Cargo cannot build CoCo
+
+Cargo installation compiles native code locally. In addition to Rust 1.98.1
+or newer, Linux needs a working C compiler and linker; macOS needs the Command
+Line Tools. Nix installation supplies the project toolchain as an alternative.
+
+## A repository is rejected
+
+Workspace creation needs a Git repository with at least one commit. The
+new worktree uses a committed Git base. Inspect the source checkout and its
+base with:
+
+```bash
+git status --short
+git log -1 --oneline
+```
+
+If the source checkout is dirty, CoCo warns and leaves its tracked and ordinary
+untracked changes there. Use `--carry-changes` and optionally
+`--carry-untracked` when the new workspace needs them. CoCo never stashes or
+resets the source checkout for you. Ignored files are copied only when they
+match the repository's `.worktreeinclude`.
+
+## A workspace name is ambiguous
+
+The same name can exist in different repositories. Retry with a leading
+repository path:
+
+```bash
+coco ../api status fix/login
+```
+
+You can also use a full workspace ID from `coco list --all-repos --json`; IDs
+resolve from any directory. The normal terminal overview leaves opaque IDs out
+so the workspace name, state, repository, and branch remain easy to scan.
+
+## A workspace is already working
+
+CoCo accepts another `send` only when the workspace is ready. It does not queue
+messages behind an active turn. Follow the current one first:
+
+```bash
+coco status fix/login --follow
+```
+
+`Ready` means the thread is idle and can accept another message; it does not
+mean the code was reviewed, merged, or otherwise complete.
+
+## A Codex thread is unloaded
+
+This is expected for an inactive workspace after restarting `cocod`. `list` and
+`status` do not load saved conversations. Use `send` to continue the work or
+`jump` to enter its terminal UI; CoCo loads the conversation before continuing.
+
+## A workspace stays Prepared after jump
+
+`Prepared` means the worktree is ready but no persistent Codex thread exists
+yet. The first `send` creates it with the first turn. A first `jump` opens the
+workspace interactively and binds the thread after your first action; if you
+leave the empty UI, the workspace correctly remains prepared.
+
+## A named profile changed
+
+When `send` or `jump` needs to load a workspace, CoCo verifies
+that its parsed named-profile settings still match those used at creation.
+Restore the configuration at `$CODEX_HOME/<name>.config.toml` or create a new
+workspace with a new profile name. Comments and formatting may change; setting
+changes may not. CoCo will not silently resume the old workspace with a
+different named overlay. `list` and `status` do not load the conversation or run
+this check.
+
+Codex's base configuration is not pinned by this check. Changing it can affect
+settings that a loaded workspace does not override in its named profile.
+
+## Local data and secrets
+
+CoCo keeps workspace details and a limited operational history in your local
+user data. It does not add the text passed to `coco send` or completed Codex
+messages to that history. To support `send --wait`, the current `cocod` process
+temporarily retains a bounded set of recent final responses in memory. Codex
+still owns and retains the conversation itself, and Git changes remain in the
+managed worktrees.
+
+Pending approval and question details exist only while the current `cocod`
+connection is alive. Secret answers entered through `coco decide` are hidden
+while typing and are not retained by CoCo.
+
+An MCP host can receive repository paths, workspace metadata, and code diffs.
+Configure `coco-mcp` only in applications you trust with that information.
+
+If you enable [agent signals](../../guides/signals/), CoCo also saves their
+payloads locally. Trusted repository-scoped MCP hosts can read them. The newest
+10,000 signals are retained globally, including signals from closed or deleted
+workspaces; do not put secrets in their payloads.
+
+If you configure [CoCo hooks](../../guides/hooks/), their commands run as your
+operating-system user. CoCo clears the inherited environment except for
+`PATH`, but this is not a filesystem sandbox. Recent delivery outcomes are
+saved locally together with matching event bodies so interrupted deliveries
+can retry; command arguments and event payloads are not shown by the hook
+history command. Use `coco hook reload` after editing the configuration; CoCo
+does not watch it automatically. Guards can deny closing or deletion, but they
+are trusted commands rather than a sandbox or multi-user authorization
+boundary. This alpha does not detect a hook that recursively produces the
+same event.
+
+## Current alpha limitations
+
+- Keep `cocod` running while workspaces are active. Installation does not
+  create or enable a background service.
+- The shared Codex connection uses experimental App Server functionality.
+- Each activated workspace also uses an experimental Codex exec server.
+  On Linux, CoCo uses a cgroup-v2 workspace boundary when a compatible user
+  systemd manager is available and otherwise uses best-effort process-tree
+  observation. Memory, CPU, and task limits require the cgroup-v2 backend;
+  CoCo rejects them on the fallback and on other supported systems. Removing
+  an active CPU cap waits for the workspace runtime's next start, and lowering
+  a hard memory ceiling below current use is rejected.
+- Codex 0.154.0 routes the TUI's `!command` shortcut through a host-local path
+  that is unavailable for a workspace exec server. Normal prompts and agent
+  shell tools still use the workspace; run ad-hoc commands in a separate shell.
+  Immediately after loading or forking a conversation, start a normal prompt
+  before relying on `/review` or `/compact` to use that workspace runtime.
+- `coco decide` handles known command approvals, file-change approvals, and
+  Codex questions. An unknown request type remains blocked instead of being
+  answered unsafely.
+- Prepared workspaces create their conversation only when `send` or `jump`
+  needs it; saved conversations are likewise loaded on demand. A turn active
+  during a `cocod` restart is interrupted and does not continue automatically.
+  The workspace, worktree, and saved conversation remain available, but a
+  pending decision from the old process can no longer be answered.
+- If Codex disconnects while accepting a `send`, CoCo reports that operation
+  as uncertain instead of retrying it automatically. Inspect the workspace
+  with `status` or `jump` before choosing to start another turn.
+- `send --wait` can print a response only while the `cocod` generation that
+  accepted the turn remains available. Stopping the wait does not cancel the
+  turn; use `jump` to read its conversation later.
+- Review and merge a workspace branch with Git. `close` frees its idle worktree
+  for later reopening. `delete` removes an open or closed workspace, its worktree,
+  conversation, and CoCo-created branch; use `--keep-thread` or `--keep-branch`
+  to retain either resource.
+- Commit or move local files before close or delete, or explicitly approve
+  discarding them. Delete also protects commits that have no other retaining
+  branch or tag; discarding those requires separate approval. To close a
+  detached workspace for reopening, first preserve new commits on a branch or
+  tag. Native thread deletion may be refused while another thread or workspace
+  depends on it; `--keep-thread` retains that conversation.
+- A conversation context source must be idle or unloaded. Detached workspaces
+  have no branch, and this alpha cannot yet promote one through CoCo; keep
+  durable work on a branch-backed workspace.
+- CoCo's MCP server can inspect or continue existing workspaces and read or
+  explicitly publish agent signals. A configured hook can run a trusted
+  local command, and `send` starts a follow-up model turn. Configure MCP tools
+  available inside a workspace through its selected Codex profile.
+- Normal `cocod` shutdown, workspace close, and deletion stop tracked exec
+  servers. On the Linux cgroup-v2 backend, the next `cocod` start also removes
+  stale workspace execution groups left by a hard daemon kill. Until that
+  restart, their processes may continue running. The process-tree fallback
+  cannot guarantee cleanup of descendants that detach from their parent.
+
+Review workspace changes before relying on them, and do not depend on an
+in-flight turn continuing through a coordinator restart or on automatic
+cleanup.

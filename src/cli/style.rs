@@ -14,6 +14,7 @@ pub(super) enum Tone {
     GreenBold,
     Red,
     RedBold,
+    YellowBold,
     Magenta,
 }
 
@@ -51,6 +52,7 @@ impl Palette {
             Tone::GreenBold => value.green().bold().to_string(),
             Tone::Red => value.red().to_string(),
             Tone::RedBold => value.red().bold().to_string(),
+            Tone::YellowBold => value.yellow().bold().to_string(),
             Tone::Magenta => value.magenta().to_string(),
         }
     }

@@ -25,8 +25,10 @@ mod events;
 mod hooks;
 mod migrations;
 mod operations;
+mod resources;
 mod rows;
 mod signals;
+mod usage;
 mod workspaces;
 
 use migrations::migrate;
@@ -38,6 +40,8 @@ use rows::{
 pub enum StoreError {
     #[error(transparent)]
     Signal(#[from] crate::domain::signals::SignalError),
+    #[error(transparent)]
+    Usage(#[from] crate::domain::usage::WorkspaceUsageError),
     #[error("database error: {0}")]
     Database(#[from] rusqlite::Error),
     #[error("database filesystem error for {path}: {source}")]
@@ -97,6 +101,10 @@ pub enum StoreError {
     InvalidDecisionState { decision_id: String, actual: String },
     #[error("decision {decision_id} belongs to another App Server generation")]
     DecisionGenerationMismatch { decision_id: String },
+    #[error(
+        "workspace resource policy changed concurrently: expected revision {expected}, observed {actual}"
+    )]
+    ResourcePolicyRevisionMismatch { expected: u64, actual: u64 },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -113,10 +121,12 @@ pub struct NewWorkspace {
     pub worktree_path: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct WorkspaceDeletionIntent {
     pub(crate) delete_thread: bool,
     pub(crate) delete_branch: bool,
+    pub(crate) discard_unretained_commits: bool,
+    pub(crate) from_open: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

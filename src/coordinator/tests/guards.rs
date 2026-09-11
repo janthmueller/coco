@@ -37,6 +37,8 @@ fn delete_params(fixture: &Fixture, workspace: &Workspace) -> WorkspaceDeletePar
         workspace: workspace.id.clone(),
         delete_thread: false,
         delete_branch: false,
+        discard_changes: false,
+        discard_unretained_commits: false,
         dry_run: false,
         expected_plan: None,
     }
@@ -187,6 +189,51 @@ async fn explicit_fail_open_policy_allows_the_checked_action() {
 
     assert!(closed.applied);
     assert_eq!(closed.workspace.availability, WorkspaceAvailability::Closed);
+}
+
+#[tokio::test]
+async fn open_delete_runs_both_guards_before_removing_any_resources() {
+    for action in ["workspace.close", "workspace.delete"] {
+        let temporary = tempfile::tempdir().unwrap();
+        let hooks = registry(
+            temporary.path(),
+            json!([{
+                "id": "protect-open-delete", "action": action,
+                "command": ["/bin/sh", "-c", "printf '%s' '{\"decision\":\"deny\",\"reason\":\"keep work\"}'"],
+                "onError": "deny",
+            }]),
+        );
+        let fixture = Fixture::new_with_hooks(FakeWorker::default(), hooks);
+        fixture.register().await;
+        let workspace = fixture
+            .create_and_materialize(fixture.create_params())
+            .await;
+        let request = super::retirement_deletion::delete_params(&fixture, &workspace);
+        let error = fixture
+            .coordinator
+            .delete_workspace(request)
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "GUARD_DENIED");
+        assert!(workspace.worktree_path.as_ref().unwrap().is_dir());
+        assert!(
+            fixture
+                .worker
+                .native_threads
+                .lock()
+                .unwrap()
+                .contains_key(workspace.codex_thread_id.as_ref().unwrap())
+        );
+        assert_eq!(
+            fixture
+                .store
+                .workspace_by_id(&workspace.id)
+                .unwrap()
+                .unwrap()
+                .availability,
+            WorkspaceAvailability::Open
+        );
+    }
 }
 
 #[tokio::test]

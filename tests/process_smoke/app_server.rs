@@ -321,6 +321,9 @@ pub(super) async fn run_fake_recovery_server(
                 );
                 send_result(&mut websocket, &frame, result).await?;
             }
+            Some("account/usage/read") => {
+                send_result(&mut websocket, &frame, fake_thread_usage(&frame)?).await?;
+            }
             Some(other) => bail!("unexpected recovery App Server method {other:?}"),
             None => bail!("received a recovery frame without a method: {frame}"),
         }
@@ -401,6 +404,9 @@ pub(super) async fn handle_daemon_connection(
             Some("thread/name/set") => {
                 send_result(&mut websocket, &frame, json!({})).await?;
             }
+            Some("account/usage/read") => {
+                send_result(&mut websocket, &frame, fake_thread_usage(&frame)?).await?;
+            }
             Some("turn/start") => {
                 turn_count += 1;
                 if turn_count == 1 {
@@ -449,6 +455,7 @@ async fn complete_waited_fake_turn(
         }),
     )
     .await?;
+    send_token_usage(websocket, WAITED_TURN_ID, 130_000, 86_000).await?;
     send_json(
         websocket,
         json!({
@@ -490,6 +497,7 @@ pub(super) async fn complete_fake_turn(
         }),
     )
     .await?;
+    send_token_usage(websocket, TURN_ID, 123_456, 84_000).await?;
     send_json(
         websocket,
         json!({
@@ -551,6 +559,71 @@ pub(super) async fn complete_fake_turn(
             "text": "Fake Codex completed the turn."
         }]
     })])
+}
+
+async fn send_token_usage(
+    websocket: &mut WebSocketStream<TcpStream>,
+    turn_id: &str,
+    total_tokens: u64,
+    last_tokens: u64,
+) -> Result<()> {
+    send_json(
+        websocket,
+        json!({
+            "method": "thread/tokenUsage/updated",
+            "params": {
+                "threadId": THREAD_ID,
+                "turnId": turn_id,
+                "tokenUsage": {
+                    "total": {
+                        "totalTokens": total_tokens,
+                        "inputTokens": total_tokens - 3_456,
+                        "cachedInputTokens": 40_000,
+                        "cacheWriteInputTokens": 1_000,
+                        "outputTokens": 3_456,
+                        "reasoningOutputTokens": 1_000
+                    },
+                    "last": {
+                        "totalTokens": last_tokens,
+                        "inputTokens": last_tokens - 4_000,
+                        "cachedInputTokens": 20_000,
+                        "cacheWriteInputTokens": 500,
+                        "outputTokens": 4_000,
+                        "reasoningOutputTokens": 1_500
+                    },
+                    "modelContextWindow": 200_000
+                }
+            }
+        }),
+    )
+    .await
+}
+
+fn fake_thread_usage(request: &Value) -> Result<Value> {
+    ensure!(
+        request.pointer("/params/threadId") == Some(&json!(THREAD_ID)),
+        "account/usage/read targeted an unexpected thread: {request}"
+    );
+    Ok(json!({
+        "summary": {},
+        "dailyUsageBuckets": [],
+        "threadUsage": {
+            "threadId": THREAD_ID,
+            "estimatedUsageCreditsMicros": 1_250_000,
+            "estimatedUsageUsdMicros": 420_000,
+            "groups": [{
+                "model": MODEL_OVERRIDE,
+                "reasoningEffort": "high",
+                "speed": "fast",
+                "estimatedUsageCreditsMicros": 1_250_000,
+                "netNewInputTokens": 80_000,
+                "cachedInputTokens": 40_000,
+                "inputTokens": 120_000,
+                "outputTokens": 3_456,
+                "totalTokens": 123_456
+            }]
+        }
+    }))
 }
 
 pub(super) async fn complete_fake_approval(

@@ -43,6 +43,8 @@ it concise, factual, and useful to the next maintainer.
 
 ## Current records
 
+- [`coco/docs/fuma2starlight`](coco/docs/fuma2starlight.md) - Migration of the
+  public documentation from Fumadocs to Astro Starlight.
 - [`feature/signals`](feature/signals.md) - Combined control-plane proof and
   workspace-bound agent signal implementation.
 - [`main`](main.md) - Repository and documentation foundation.

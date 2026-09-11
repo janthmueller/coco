@@ -5,7 +5,10 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::domain::runtime::WorkspaceRuntimeResources;
+use crate::domain::runtime::{
+    WorkspaceResourceControllerStatus, WorkspaceResourcePolicySnapshot, WorkspaceRuntimeResources,
+};
+use crate::domain::usage::{NativeThreadCostGroup, WorkspaceTokenUsageCheckpoint};
 use crate::domain::{
     Audit, AuditOutcome, CodexModel, ContextMode, Decision, GitObservation, NormalizedEvent,
     Repository, Workspace,
@@ -29,6 +32,11 @@ pub enum DaemonMethod {
     WorkspaceDelete,
     WorkspaceList,
     WorkspaceGet,
+    WorkspaceUsageList,
+    WorkspaceUsageGet,
+    WorkspaceLimitsGet,
+    WorkspaceLimitsSet,
+    WorkspaceLimitsReset,
     WorkspaceAttach,
     WorkspaceAttachRenew,
     WorkspaceAttachAdopt,
@@ -51,7 +59,7 @@ pub enum DaemonMethod {
 
 impl DaemonMethod {
     #[cfg(test)]
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 34] = [
         Self::Health,
         Self::ModelList,
         Self::RepositoryRegister,
@@ -63,6 +71,11 @@ impl DaemonMethod {
         Self::WorkspaceDelete,
         Self::WorkspaceList,
         Self::WorkspaceGet,
+        Self::WorkspaceUsageList,
+        Self::WorkspaceUsageGet,
+        Self::WorkspaceLimitsGet,
+        Self::WorkspaceLimitsSet,
+        Self::WorkspaceLimitsReset,
         Self::WorkspaceAttach,
         Self::WorkspaceAttachRenew,
         Self::WorkspaceAttachAdopt,
@@ -96,6 +109,11 @@ impl DaemonMethod {
             Self::WorkspaceDelete => "workspace.delete",
             Self::WorkspaceList => "workspace.list",
             Self::WorkspaceGet => "workspace.get",
+            Self::WorkspaceUsageList => "workspace.usage.list",
+            Self::WorkspaceUsageGet => "workspace.usage.get",
+            Self::WorkspaceLimitsGet => "workspace.limits.get",
+            Self::WorkspaceLimitsSet => "workspace.limits.set",
+            Self::WorkspaceLimitsReset => "workspace.limits.reset",
             Self::WorkspaceAttach => "workspace.attach",
             Self::WorkspaceAttachRenew => "workspace.attach.renew",
             Self::WorkspaceAttachAdopt => "workspace.attach.adopt",
@@ -130,6 +148,11 @@ impl DaemonMethod {
             "workspace.delete" => Some(Self::WorkspaceDelete),
             "workspace.list" => Some(Self::WorkspaceList),
             "workspace.get" => Some(Self::WorkspaceGet),
+            "workspace.usage.list" => Some(Self::WorkspaceUsageList),
+            "workspace.usage.get" => Some(Self::WorkspaceUsageGet),
+            "workspace.limits.get" => Some(Self::WorkspaceLimitsGet),
+            "workspace.limits.set" => Some(Self::WorkspaceLimitsSet),
+            "workspace.limits.reset" => Some(Self::WorkspaceLimitsReset),
             "workspace.attach" => Some(Self::WorkspaceAttach),
             "workspace.attach.renew" => Some(Self::WorkspaceAttachRenew),
             "workspace.attach.adopt" => Some(Self::WorkspaceAttachAdopt),
@@ -269,18 +292,9 @@ pub enum WorkspaceWorktreeRequest {
 #[serde(rename_all = "camelCase")]
 pub enum WorkspaceChangesRequest {
     Reject,
+    Ignore,
     CarryTracked,
     CarryTrackedAndUntracked,
-}
-
-impl WorkspaceChangesRequest {
-    pub const fn carries_tracked(self) -> bool {
-        !matches!(self, Self::Reject)
-    }
-
-    pub const fn carries_untracked(self) -> bool {
-        matches!(self, Self::CarryTrackedAndUntracked)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -335,10 +349,13 @@ pub struct WorkspaceReopenParams {
 pub struct WorkspaceDeleteParams {
     pub scope: RepositoryScope,
     pub workspace: String,
-    #[serde(default)]
+    // Explicit wire policies: omitted fields must never authorize deletion.
     pub delete_thread: bool,
-    #[serde(default)]
     pub delete_branch: bool,
+    #[serde(default)]
+    pub discard_changes: bool,
+    #[serde(default)]
+    pub discard_unretained_commits: bool,
     #[serde(default)]
     pub dry_run: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -352,6 +369,78 @@ pub struct WorkspaceGetParams {
     pub workspace: String,
     #[serde(default, skip_serializing_if = "is_false")]
     pub include_resources: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceUsageListParams {
+    pub scope: RepositoryScope,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceUsageGetParams {
+    pub scope: RepositoryScope,
+    pub workspace: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "action",
+    content = "value",
+    rename_all = "camelCase",
+    deny_unknown_fields
+)]
+pub enum ResourcePolicyUpdate<T> {
+    Set(T),
+    Clear,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceResourcePolicyPatch {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_high_bytes: Option<ResourcePolicyUpdate<u64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_max_bytes: Option<ResourcePolicyUpdate<u64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_max_millicores: Option<ResourcePolicyUpdate<u32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_weight: Option<ResourcePolicyUpdate<u16>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tasks_max: Option<ResourcePolicyUpdate<u64>>,
+}
+
+impl WorkspaceResourcePolicyPatch {
+    pub const fn is_empty(&self) -> bool {
+        self.memory_high_bytes.is_none()
+            && self.memory_max_bytes.is_none()
+            && self.cpu_max_millicores.is_none()
+            && self.cpu_weight.is_none()
+            && self.tasks_max.is_none()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceLimitsGetParams {
+    pub scope: RepositoryScope,
+    pub workspace: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceLimitsSetParams {
+    pub scope: RepositoryScope,
+    pub workspace: String,
+    pub patch: WorkspaceResourcePolicyPatch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceLimitsResetParams {
+    pub scope: RepositoryScope,
+    pub workspace: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -464,6 +553,69 @@ pub struct WorkspaceResult {
     pub turn_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codex_turn_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceLimitsResult {
+    pub workspace: Workspace,
+    pub policy: WorkspaceResourcePolicySnapshot,
+    pub controller: WorkspaceResourceControllerStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceUsageSource {
+    ThreadTokenUsageUpdated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceTokenUsageSnapshot {
+    #[serde(flatten)]
+    pub checkpoint: WorkspaceTokenUsageCheckpoint,
+    pub source: WorkspaceUsageSource,
+    pub is_fresh: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceCostUnavailableReason {
+    NoThread,
+    NotReported,
+    ReadFailed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "status",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum WorkspaceCostEstimate {
+    Available {
+        estimated_usage_credits_micros: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        estimated_usage_usd_micros: Option<u64>,
+        groups: Vec<NativeThreadCostGroup>,
+        observed_at_ms: i64,
+    },
+    Unavailable {
+        reason: WorkspaceCostUnavailableReason,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        checked_at_ms: Option<i64>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceUsageItem {
+    pub workspace: Workspace,
+    pub repository: RepositorySummary,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<WorkspaceTokenUsageSnapshot>,
+    pub cost: WorkspaceCostEstimate,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -599,6 +751,7 @@ pub struct WorkspaceRetirementPlan {
     pub workspace_id: String,
     pub workspace_name: String,
     pub worktree_path: PathBuf,
+    pub remove_worktree: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub head_sha: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -611,6 +764,7 @@ pub struct WorkspaceRetirementPlan {
     pub untracked_file_count: usize,
     pub ignored_file_count: usize,
     pub detached_commits: bool,
+    pub unretained_commit_count: usize,
     pub descendant_thread_count: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blockers: Vec<String>,
@@ -764,6 +918,31 @@ daemon_request!(
 daemon_request!(WorkspaceListParams, WorkspaceList, Vec<WorkspaceListItem>);
 daemon_request!(WorkspaceGetParams, WorkspaceGet, WorkspaceStatusResult);
 daemon_request!(
+    WorkspaceUsageListParams,
+    WorkspaceUsageList,
+    Vec<WorkspaceUsageItem>
+);
+daemon_request!(
+    WorkspaceUsageGetParams,
+    WorkspaceUsageGet,
+    WorkspaceUsageItem
+);
+daemon_request!(
+    WorkspaceLimitsGetParams,
+    WorkspaceLimitsGet,
+    WorkspaceLimitsResult
+);
+daemon_request!(
+    WorkspaceLimitsSetParams,
+    WorkspaceLimitsSet,
+    WorkspaceLimitsResult
+);
+daemon_request!(
+    WorkspaceLimitsResetParams,
+    WorkspaceLimitsReset,
+    WorkspaceLimitsResult
+);
+daemon_request!(
     WorkspaceAttachParams,
     WorkspaceAttach,
     WorkspaceAttachResult
@@ -821,6 +1000,11 @@ mod tests {
                 "workspace.delete",
                 "workspace.list",
                 "workspace.get",
+                "workspace.usage.list",
+                "workspace.usage.get",
+                "workspace.limits.get",
+                "workspace.limits.set",
+                "workspace.limits.reset",
                 "workspace.attach",
                 "workspace.attach.renew",
                 "workspace.attach.adopt",
@@ -1011,6 +1195,8 @@ mod tests {
                 workspace: "workspace".to_owned(),
                 delete_thread: true,
                 delete_branch: true,
+                discard_changes: false,
+                discard_unretained_commits: false,
                 dry_run: false,
                 expected_plan: None,
             },
@@ -1020,6 +1206,8 @@ mod tests {
                 "workspace": "workspace",
                 "deleteThread": true,
                 "deleteBranch": true,
+                "discardChanges": false,
+                "discardUnretainedCommits": false,
                 "dryRun": false,
             }),
         );
@@ -1043,6 +1231,51 @@ mod tests {
                 "scope": {"kind": "allRepositories"},
                 "workspace": "workspace",
                 "includeResources": true,
+            }),
+        );
+        assert_request(
+            WorkspaceLimitsGetParams {
+                scope: RepositoryScope::repository("/repo"),
+                workspace: "workspace".to_owned(),
+            },
+            DaemonMethod::WorkspaceLimitsGet,
+            json!({
+                "scope": {"kind": "repository", "path": "/repo"},
+                "workspace": "workspace",
+            }),
+        );
+        assert_request(
+            WorkspaceLimitsSetParams {
+                scope: RepositoryScope::AllRepositories,
+                workspace: "workspace".to_owned(),
+                patch: WorkspaceResourcePolicyPatch {
+                    memory_high_bytes: Some(ResourcePolicyUpdate::Clear),
+                    memory_max_bytes: Some(ResourcePolicyUpdate::Set(536_870_912)),
+                    cpu_max_millicores: Some(ResourcePolicyUpdate::Set(1_500)),
+                    cpu_weight: None,
+                    tasks_max: None,
+                },
+            },
+            DaemonMethod::WorkspaceLimitsSet,
+            json!({
+                "scope": {"kind": "allRepositories"},
+                "workspace": "workspace",
+                "patch": {
+                    "memoryHighBytes": {"action": "clear"},
+                    "memoryMaxBytes": {"action": "set", "value": 536870912},
+                    "cpuMaxMillicores": {"action": "set", "value": 1500},
+                },
+            }),
+        );
+        assert_request(
+            WorkspaceLimitsResetParams {
+                scope: RepositoryScope::repository("/repo"),
+                workspace: "workspace".to_owned(),
+            },
+            DaemonMethod::WorkspaceLimitsReset,
+            json!({
+                "scope": {"kind": "repository", "path": "/repo"},
+                "workspace": "workspace",
             }),
         );
         assert_request(
@@ -1191,6 +1424,52 @@ mod tests {
     }
 
     #[test]
+    fn workspace_change_policy_preserves_the_explicit_ignore_wire_value() {
+        assert_eq!(
+            serde_json::to_value(WorkspaceChangesRequest::Ignore).unwrap(),
+            json!("ignore")
+        );
+        assert_eq!(
+            serde_json::from_value::<WorkspaceChangesRequest>(json!("ignore")).unwrap(),
+            WorkspaceChangesRequest::Ignore
+        );
+    }
+
+    #[test]
+    fn workspace_deletion_wire_never_defaults_to_destructive_effects() {
+        let mut request = json!({"scope": {"kind": "allRepositories"}, "workspace": "id"});
+        assert!(serde_json::from_value::<WorkspaceDeleteParams>(request.clone()).is_err());
+        request["deleteThread"] = json!(false);
+        assert!(serde_json::from_value::<WorkspaceDeleteParams>(request.clone()).is_err());
+        request["deleteBranch"] = json!(false);
+        let params: WorkspaceDeleteParams = serde_json::from_value(request).unwrap();
+        assert!(!params.delete_thread && !params.delete_branch);
+        assert!(!params.discard_changes && !params.discard_unretained_commits);
+
+        let legacy_name = json!({
+            "scope": {"kind": "allRepositories"},
+            "workspace": "id",
+            "deleteThread": false,
+            "deleteBranch": false,
+            "discardCommits": true,
+        });
+        assert!(serde_json::from_value::<WorkspaceDeleteParams>(legacy_name).is_err());
+
+        let renamed = json!({
+            "scope": {"kind": "allRepositories"},
+            "workspace": "id",
+            "deleteThread": false,
+            "deleteBranch": false,
+            "discardUnretainedCommits": true,
+        });
+        assert!(
+            serde_json::from_value::<WorkspaceDeleteParams>(renamed)
+                .unwrap()
+                .discard_unretained_commits
+        );
+    }
+
+    #[test]
     fn event_listing_defaults_the_cursor() {
         let params: EventListParams = serde_json::from_value(json!({
             "scope": {"kind": "repository", "path": "/repo"},
@@ -1199,6 +1478,72 @@ mod tests {
         .unwrap();
 
         assert_eq!(params.after_sequence, 0);
+    }
+
+    #[test]
+    fn workspace_usage_requests_and_results_preserve_native_evidence() {
+        assert_request(
+            WorkspaceUsageListParams {
+                scope: RepositoryScope::AllRepositories,
+            },
+            DaemonMethod::WorkspaceUsageList,
+            json!({"scope": {"kind": "allRepositories"}}),
+        );
+        assert_request(
+            WorkspaceUsageGetParams {
+                scope: RepositoryScope::repository("/repo"),
+                workspace: "usage".to_owned(),
+            },
+            DaemonMethod::WorkspaceUsageGet,
+            json!({
+                "scope": {"kind": "repository", "path": "/repo"},
+                "workspace": "usage"
+            }),
+        );
+        assert_response::<WorkspaceUsageGetParams>(json!({
+            "workspace": workspace(),
+            "repository": {"id": "repo-1", "displayName": "repo", "rootPath": "/repo"},
+            "tokens": {
+                "schemaVersion": 1,
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "total": {
+                    "totalTokens": 175,
+                    "inputTokens": 150,
+                    "cachedInputTokens": 50,
+                    "cacheWriteInputTokens": 0,
+                    "outputTokens": 25,
+                    "reasoningOutputTokens": 5
+                },
+                "last": {
+                    "totalTokens": 100,
+                    "inputTokens": 90,
+                    "cachedInputTokens": 20,
+                    "cacheWriteInputTokens": 0,
+                    "outputTokens": 10,
+                    "reasoningOutputTokens": 2
+                },
+                "modelContextWindow": 200000,
+                "runtimeGeneration": "runtime-1",
+                "observedAtMs": 1,
+                "source": "threadTokenUsageUpdated",
+                "isFresh": true
+            },
+            "cost": {
+                "status": "available",
+                "estimatedUsageCreditsMicros": 1250000,
+                "estimatedUsageUsdMicros": 420000,
+                "groups": [{
+                    "model": "gpt-test",
+                    "reasoningEffort": "high",
+                    "estimatedUsageCreditsMicros": 1250000,
+                    "inputTokens": 150,
+                    "outputTokens": 25,
+                    "totalTokens": 175
+                }],
+                "observedAtMs": 2
+            }
+        }));
     }
 
     #[test]
@@ -1271,6 +1616,7 @@ mod tests {
         );
         assert_response::<WorkspaceListParams>(json!([listed]));
         assert_workspace_status_response();
+        assert_workspace_limits_response();
         assert_attach_responses();
         assert_response::<TurnStartParams>(json!({
             "workspace": workspace(),
@@ -1325,6 +1671,46 @@ mod tests {
             serde_json::to_value(endpoint).unwrap(),
             json!({"schemaVersion": 1, "url": "ws://127.0.0.1:45123"})
         );
+    }
+
+    fn assert_workspace_limits_response() {
+        assert_response::<WorkspaceLimitsGetParams>(json!({
+            "workspace": workspace(),
+            "policy": {
+                "revision": 2,
+                "policy": {
+                    "schemaVersion": 1,
+                    "memoryHighBytes": 268435456,
+                    "memoryMaxBytes": 536870912,
+                    "cpuMaxMillicores": 1500,
+                    "cpuWeight": 200,
+                    "tasksMax": 128,
+                },
+            },
+            "controller": {
+                "capabilities": {
+                    "backend": "systemd_cgroup_v2",
+                    "dynamicUpdates": true,
+                    "memoryHigh": true,
+                    "memoryMax": true,
+                    "cpuMax": true,
+                    "cpuWeight": true,
+                    "tasksMax": true,
+                },
+                "runtimeState": "running",
+                "appliedPolicy": {
+                    "revision": 2,
+                    "policy": {
+                        "schemaVersion": 1,
+                        "memoryHighBytes": 268435456,
+                        "memoryMaxBytes": 536870912,
+                        "cpuMaxMillicores": 1500,
+                        "cpuWeight": 200,
+                        "tasksMax": 128,
+                    },
+                },
+            },
+        }));
     }
 
     #[test]

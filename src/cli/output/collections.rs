@@ -99,7 +99,7 @@ fn render_workspace_list(
                 "REPOSITORY",
                 "WORKSPACE",
                 "STATE",
-                "RSS",
+                "MEMORY",
                 "PROCS",
                 "CPU",
                 "BRANCH",
@@ -119,7 +119,7 @@ fn render_workspace_list(
         )
     } else if include_resources {
         render_table(
-            &["WORKSPACE", "STATE", "RSS", "PROCS", "CPU", "BRANCH"],
+            &["WORKSPACE", "STATE", "MEMORY", "PROCS", "CPU", "BRANCH"],
             &rows,
             &[32, 26, 14, 8, 10, 48],
             width,
@@ -147,7 +147,8 @@ fn resource_cells(
     }
     (
         resources
-            .resident_memory_bytes
+            .memory_current_bytes
+            .or(resources.resident_memory_bytes)
             .map_or_else(|| "—".to_owned(), super::format_bytes),
         resources
             .process_count
@@ -227,13 +228,13 @@ fn render_model_list(models: &[CodexModel], width: usize, palette: Palette) -> S
 }
 
 #[derive(Debug, Clone)]
-struct Cell {
+pub(super) struct Cell {
     text: String,
     tone: Tone,
 }
 
 impl Cell {
-    fn new(text: String, tone: Tone) -> Self {
+    pub(super) fn new(text: String, tone: Tone) -> Self {
         Self {
             text: safe_line(&text),
             tone,
@@ -241,7 +242,7 @@ impl Cell {
     }
 }
 
-fn render_table(
+pub(super) fn render_table(
     headers: &[&str],
     rows: &[Vec<Cell>],
     caps: &[usize],
@@ -338,7 +339,7 @@ fn display_width(value: &str) -> usize {
     value.chars().count()
 }
 
-fn stdout_width() -> usize {
+pub(super) fn stdout_width() -> usize {
     if io::stdout().is_terminal() {
         usize::from(terminal::size().map_or(120, |(width, _)| width))
             .saturating_sub(1)
@@ -398,8 +399,13 @@ mod tests {
             scope: WorkspaceResourceScope::ProcessTree,
             process_id: Some(42),
             process_count: Some(3),
+            task_count: None,
             resident_memory_bytes: Some(25 * 1024 * 1024),
+            memory_current_bytes: None,
             cpu_percent: Some(12.34),
+            cpu_usage_usec: None,
+            cgroup_unit: None,
+            events: None,
             sampled_at_ms: Some(1),
         };
         assert_eq!(

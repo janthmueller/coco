@@ -604,30 +604,51 @@ impl Store {
         Ok(workspace)
     }
 
+    pub(crate) fn has_worktree_creation_event(
+        &self,
+        workspace_id: &str,
+    ) -> Result<bool, StoreError> {
+        Ok(self.lock()?.query_row(
+            "SELECT EXISTS(SELECT 1 FROM events WHERE workspace_id = ?1 AND kind = 'worktree.created')",
+            [workspace_id], |row| row.get(0),
+        )?)
+    }
+
     pub fn begin_workspace_deletion(
         &self,
         workspace_id: &str,
         intent: WorkspaceDeletionIntent,
+        head_sha: Option<&str>,
     ) -> Result<Workspace, StoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = require_workspace(&transaction, workspace_id)?;
-        if current.availability != WorkspaceAvailability::Closed {
+        let expected = if intent.from_open {
+            WorkspaceAvailability::Open
+        } else {
+            WorkspaceAvailability::Closed
+        };
+        if current.availability != expected {
             return Err(StoreError::InvalidWorkspaceTransition {
                 workspace_id: workspace_id.to_owned(),
-                expected: WorkspaceAvailability::Closed.as_str().to_owned(),
+                expected: expected.as_str().to_owned(),
                 actual: current.availability.as_str().to_owned(),
             });
         }
         transaction.execute(
             "UPDATE workspaces SET availability = 'deleting',
                 delete_thread_requested = ?1, delete_branch_requested = ?2,
+                delete_discard_unretained_commits = ?5, delete_from_open = ?6,
+                closed_head_sha = COALESCE(?7, closed_head_sha),
                 updated_at_ms = ?3 WHERE id = ?4",
             params![
                 intent.delete_thread,
                 intent.delete_branch,
                 now_ms(),
-                workspace_id
+                workspace_id,
+                intent.discard_unretained_commits,
+                intent.from_open,
+                head_sha
             ],
         )?;
         let workspace = require_workspace(&transaction, workspace_id)?;
@@ -643,13 +664,16 @@ impl Store {
         require_workspace(&connection, workspace_id)?;
         connection
             .query_row(
-                "SELECT delete_thread_requested, delete_branch_requested
+                "SELECT delete_thread_requested, delete_branch_requested,
+                        delete_discard_unretained_commits, delete_from_open
                  FROM workspaces WHERE id = ?1",
                 [workspace_id],
                 |row| {
                     Ok(WorkspaceDeletionIntent {
                         delete_thread: row.get(0)?,
                         delete_branch: row.get(1)?,
+                        discard_unretained_commits: row.get(2)?,
+                        from_open: row.get(3)?,
                     })
                 },
             )
@@ -722,7 +746,11 @@ impl Store {
         Ok(())
     }
 
-    pub fn cancel_workspace_deletion(&self, workspace_id: &str) -> Result<Workspace, StoreError> {
+    pub fn cancel_workspace_deletion(
+        &self,
+        workspace_id: &str,
+        worktree_remains: bool,
+    ) -> Result<Workspace, StoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = require_workspace(&transaction, workspace_id)?;
@@ -734,9 +762,12 @@ impl Store {
             });
         }
         transaction.execute(
-            "UPDATE workspaces SET availability = 'closed', delete_thread_requested = 0,
-                delete_branch_requested = 0, updated_at_ms = ?1 WHERE id = ?2",
-            params![now_ms(), workspace_id],
+            "UPDATE workspaces SET availability = CASE WHEN ?3 THEN 'open' ELSE 'closed' END,
+                closed_head_sha = CASE WHEN ?3 THEN NULL ELSE closed_head_sha END,
+                delete_thread_requested = 0, delete_branch_requested = 0,
+                delete_discard_unretained_commits = 0, delete_from_open = 0,
+                updated_at_ms = ?1 WHERE id = ?2",
+            params![now_ms(), workspace_id, worktree_remains],
         )?;
         let workspace = require_workspace(&transaction, workspace_id)?;
         transaction.commit()?;

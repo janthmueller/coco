@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::env;
 use std::fs::{File, OpenOptions, TryLockError};
 #[cfg(unix)]
@@ -12,6 +13,7 @@ use uuid::Uuid;
 
 use crate::codex::{CodexClient, CodexClientOptions, CodexEvent, SharedAppServerOptions};
 use crate::coordinator::Coordinator;
+use crate::domain::runtime::WorkspaceResourcePolicySnapshot;
 use crate::git::Git;
 use crate::hooks::{HookRegistry, run_dispatcher};
 use crate::paths::CocoPaths;
@@ -22,7 +24,9 @@ mod execution;
 mod handler;
 mod worker;
 
-use execution::{WorkspaceExecutionMode, WorkspaceExecutors};
+use execution::{
+    WorkspaceContainment, WorkspaceExecutionMode, WorkspaceExecutors, initialize_containment,
+};
 use handler::DaemonHandler;
 use worker::CodexWorker;
 
@@ -52,36 +56,27 @@ pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<
         HookRegistry::load(&paths.hooks_path)
             .with_context(|| format!("could not load {}", paths.hooks_path.display()))?,
     );
-    let recovered_hook_deliveries = store
-        .recover_hook_deliveries()
-        .context("could not recover interrupted hook deliveries")?;
-    if recovered_hook_deliveries > 0 {
-        warn!(
-            recovered_hook_deliveries,
-            "requeued interrupted hook deliveries after daemon restart"
-        );
-    }
-    let reconciled = store
-        .reconcile_unfinished()
-        .context("could not reconcile unfinished workspaces")?;
-    if reconciled.total() > 0 {
-        warn!(
-            failed_workspace_preparations = reconciled.failed_workspace_preparations,
-            uncertain_operations = reconciled.uncertain_operations,
-            stale_thread_snapshots = reconciled.stale_thread_snapshots,
-            "reconciled unfinished local state after daemon restart"
-        );
-    }
+    reconcile_store_after_restart(&store)?;
     let workspace_execution_mode = WorkspaceExecutionMode::from_env()?;
     let workspace_executor = (
         codex_options.codex_binary.clone(),
         codex_options.codex_home.clone(),
     );
+    let workspace_containment =
+        prepare_workspace_containment(workspace_execution_mode, &paths.data_dir).await?;
+    let workspace_resource_policies = store
+        .workspace_resource_policies()
+        .context("could not load workspace resource policies")?;
     let (codex, events) = CodexClient::spawn(codex_options)
         .await
         .context("could not start the Codex App Server")?;
-    let workspace_executors =
-        build_workspace_executors(workspace_execution_mode, codex.clone(), workspace_executor);
+    let workspace_executors = build_workspace_executors(
+        workspace_execution_mode,
+        codex.clone(),
+        workspace_executor,
+        workspace_containment,
+        workspace_resource_policies,
+    );
     let runtime_generation = Uuid::new_v4().to_string();
     let coordinator = Arc::new(Coordinator::new(
         Arc::clone(&store),
@@ -150,13 +145,56 @@ fn build_workspace_executors(
     mode: WorkspaceExecutionMode,
     codex: CodexClient,
     options: (PathBuf, Option<PathBuf>),
+    containment: Option<WorkspaceContainment>,
+    policies: HashMap<String, WorkspaceResourcePolicySnapshot>,
 ) -> Option<WorkspaceExecutors> {
     match mode {
-        WorkspaceExecutionMode::ExecServer => {
-            Some(WorkspaceExecutors::new(codex, options.0, options.1))
-        }
+        WorkspaceExecutionMode::ExecServer => Some(WorkspaceExecutors::new(
+            codex,
+            options.0,
+            options.1,
+            containment.expect("exec-server mode must initialize containment"),
+            policies,
+        )),
         WorkspaceExecutionMode::Shared => None,
     }
+}
+
+async fn prepare_workspace_containment(
+    mode: WorkspaceExecutionMode,
+    data_dir: &Path,
+) -> Result<Option<WorkspaceContainment>> {
+    match mode {
+        WorkspaceExecutionMode::ExecServer => initialize_containment(data_dir)
+            .await
+            .context("could not initialize workspace execution containment")
+            .map(Some),
+        WorkspaceExecutionMode::Shared => Ok(None),
+    }
+}
+
+fn reconcile_store_after_restart(store: &Store) -> Result<()> {
+    let recovered_hook_deliveries = store
+        .recover_hook_deliveries()
+        .context("could not recover interrupted hook deliveries")?;
+    if recovered_hook_deliveries > 0 {
+        warn!(
+            recovered_hook_deliveries,
+            "requeued interrupted hook deliveries after daemon restart"
+        );
+    }
+    let reconciled = store
+        .reconcile_unfinished()
+        .context("could not reconcile unfinished workspaces")?;
+    if reconciled.total() > 0 {
+        warn!(
+            failed_workspace_preparations = reconciled.failed_workspace_preparations,
+            uncertain_operations = reconciled.uncertain_operations,
+            stale_thread_snapshots = reconciled.stale_thread_snapshots,
+            "reconciled unfinished local state after daemon restart"
+        );
+    }
+    Ok(())
 }
 
 fn acquire_daemon_lock(data_dir: &Path) -> Result<File> {

@@ -1,7 +1,6 @@
 # Public documentation boundary
 
-Everything rendered from `content/docs/`, plus the site landing page, is
-strictly user-facing.
+Everything rendered from `src/content/docs/` is strictly user-facing.
 
 - Write for a person evaluating or using CoCo, not for its maintainers.
 - Every page must answer a concrete user question or enable a concrete action.

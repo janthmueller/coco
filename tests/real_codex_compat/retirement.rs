@@ -119,13 +119,7 @@ async fn delete_source(
         paths,
         codex_binary,
         repository,
-        &[
-            "delete",
-            WORKSPACE_NAME,
-            "--delete-thread",
-            "--delete-branch",
-            "--yes",
-        ],
+        &["delete", WORKSPACE_NAME, "--yes"],
     )
     .await?;
     let branch_status = Command::new("git")
@@ -163,13 +157,7 @@ async fn retire_context_fork(
         paths,
         codex_binary,
         repository,
-        &[
-            "delete",
-            FORK_WORKSPACE_NAME,
-            "--delete-thread",
-            "--delete-branch",
-            "--yes",
-        ],
+        &["delete", FORK_WORKSPACE_NAME, "--yes"],
     )
     .await?;
     Ok(())

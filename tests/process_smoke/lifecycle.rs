@@ -67,7 +67,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     super::hooks::verify_loaded(&paths, &repository).await?;
 
     let models = cli_json(&run_cli(&paths, &repository, &["model", "list", "--json"]).await?)?;
-    assert_eq!(models["schemaVersion"], 9);
+    assert_eq!(models["schemaVersion"], 10);
     assert_eq!(models["models"].as_array().map(Vec::len), Some(2));
     assert_eq!(models["models"][0]["model"], DEFAULT_MODEL);
     assert_eq!(models["models"][0]["isDefault"], true);
@@ -86,7 +86,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
 
     run_cli(&paths, &repository, &["repo", "add", "."]).await?;
     let repositories = cli_json(&run_cli(&paths, &repository, &["repo", "ls", "--json"]).await?)?;
-    assert_eq!(repositories["schemaVersion"], 9);
+    assert_eq!(repositories["schemaVersion"], 10);
     assert_eq!(
         repositories["repositories"].as_array().map(Vec::len),
         Some(1)
@@ -128,6 +128,10 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         String::from_utf8_lossy(&missing_name.stderr)
     );
 
+    fs::write(
+        repository.join("local-only.txt"),
+        "must remain in the source checkout\n",
+    )?;
     let failed_jump = run_cli_with_jump_exit(
         &paths,
         &repository,
@@ -157,14 +161,17 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     );
     let failed_jump_error = String::from_utf8_lossy(&failed_jump.stderr);
     ensure!(
-        failed_jump_error.contains(
+        failed_jump_error.contains("Local changes remain in")
+            && failed_jump_error.contains("and were not copied")
+            && failed_jump_error.contains(
             "workspace \"feat/process-smoke\" was created and its initial turn was accepted, but the Codex terminal UI did not open"
         ),
-        "create did not explain its retained state after jump failure: {failed_jump_error}"
+        "create did not warn about omitted source changes and explain its retained state after jump failure: {failed_jump_error}"
     );
+    fs::remove_file(repository.join("local-only.txt"))?;
 
     let listed = cli_json(&run_cli(&paths, &repository, &["list", "--json"]).await?)?;
-    assert_eq!(listed["schemaVersion"], 9);
+    assert_eq!(listed["schemaVersion"], 10);
     let workspaces = listed["workspaces"]
         .as_array()
         .context("coco list did not return a workspaces array")?;
@@ -193,7 +200,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         "human workspace output was noisy or terminal-dependent: {human_workspaces}"
     );
     let status_overview = cli_json(&run_cli(&paths, &repository, &["status", "--json"]).await?)?;
-    assert_eq!(status_overview["schemaVersion"], 9);
+    assert_eq!(status_overview["schemaVersion"], 10);
     assert_eq!(
         status_overview["workspaces"].as_array().map(Vec::len),
         Some(1)
@@ -207,7 +214,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     let resource_overview = run_cli(&paths, &repository, &["status", "-r"]).await?;
     let resource_overview = String::from_utf8_lossy(&resource_overview.stdout);
     ensure!(
-        resource_overview.contains("RSS")
+        resource_overview.contains("MEMORY")
             && resource_overview.contains("PROCS")
             && resource_overview.contains("CPU")
             && !resource_overview.contains("Exec server"),
@@ -379,6 +386,81 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         .map_err(|_| anyhow::anyhow!("fake App Server stopped before turn completion"))?;
     let completed = wait_for_workspace_phase(&paths, &repository, "idle").await?;
     assert_eq!(completed["workspace"]["activeTurnId"], Value::Null);
+    let usage =
+        cli_json(&run_cli(&paths, &repository, &["usage", WORKSPACE_NAME, "--json"]).await?)?;
+    assert_eq!(usage["schemaVersion"], 10);
+    assert_eq!(usage["workspace"]["name"], WORKSPACE_NAME);
+    assert_eq!(
+        usage.pointer("/tokens/total/totalTokens"),
+        Some(&json!(123_456))
+    );
+    assert_eq!(
+        usage.pointer("/tokens/last/totalTokens"),
+        Some(&json!(84_000))
+    );
+    assert_eq!(
+        usage.pointer("/tokens/modelContextWindow"),
+        Some(&json!(200_000))
+    );
+    assert_eq!(
+        usage.pointer("/tokens/source"),
+        Some(&json!("threadTokenUsageUpdated"))
+    );
+    assert_eq!(usage.pointer("/tokens/isFresh"), Some(&json!(true)));
+    assert_eq!(
+        usage.pointer("/cost/estimatedUsageUsdMicros"),
+        Some(&json!(420_000))
+    );
+    let human_usage = run_cli(&paths, &repository, &["usage", WORKSPACE_NAME]).await?;
+    let human_usage = String::from_utf8_lossy(&human_usage.stdout);
+    ensure!(
+        human_usage.contains("123,456 total")
+            && human_usage.contains("84,000 / 200,000")
+            && human_usage.contains("$0.42 estimate")
+            && !human_usage.contains(THREAD_ID),
+        "workspace usage output was incomplete or noisy: {human_usage}"
+    );
+    let usage_overview = run_cli(&paths, &repository, &["usage"]).await?;
+    let usage_overview = String::from_utf8_lossy(&usage_overview.stdout);
+    ensure!(
+        usage_overview.contains("WORKSPACE")
+            && usage_overview.contains("TOKENS")
+            && usage_overview.contains("CONTEXT")
+            && usage_overview.contains("COST")
+            && usage_overview.contains(WORKSPACE_NAME)
+            && !usage_overview.contains("REPOSITORY"),
+        "repository usage overview was incomplete: {usage_overview}"
+    );
+    let global_usage = run_cli(&paths, &repository, &["usage", "-a"]).await?;
+    ensure!(
+        String::from_utf8_lossy(&global_usage.stdout).contains("REPOSITORY"),
+        "all-repository usage overview did not identify repositories"
+    );
+    let globally_targeted_usage = cli_json(
+        &run_cli(
+            &paths,
+            temporary.path(),
+            &["usage", WORKSPACE_NAME, "-g", "--json"],
+        )
+        .await?,
+    )?;
+    assert_eq!(globally_targeted_usage["workspace"]["id"], workspace["id"]);
+    let followed_usage =
+        run_cli_until_interrupt(&paths, &repository, &["usage", WORKSPACE_NAME, "-f"]).await?;
+    let followed_usage = String::from_utf8_lossy(&followed_usage.stdout);
+    ensure!(
+        followed_usage.contains("123,456 total")
+            && !followed_usage.contains("Fake Codex completed the turn."),
+        "usage --follow omitted usage or leaked conversation output: {followed_usage}"
+    );
+    let followed_usage_collection =
+        run_cli_until_interrupt(&paths, &repository, &["usage", "-af"]).await?;
+    let followed_usage_collection = String::from_utf8_lossy(&followed_usage_collection.stdout);
+    ensure!(
+        followed_usage_collection.contains("REPOSITORY")
+            && followed_usage_collection.contains(WORKSPACE_NAME),
+        "collection usage follow did not print its initial state: {followed_usage_collection}"
+    );
     let followed =
         run_cli_until_interrupt(&paths, &repository, &["status", WORKSPACE_NAME, "--follow"])
             .await?;
@@ -516,6 +598,24 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
             .iter()
             .all(|request| request.get("method") != Some(&json!("thread/resume"))),
         "passive status eagerly resumed the persisted thread"
+    );
+    let recovered_usage =
+        cli_json(&run_cli(&paths, &repository, &["usage", WORKSPACE_NAME, "--json"]).await?)?;
+    assert_eq!(
+        recovered_usage.pointer("/tokens/total/totalTokens"),
+        Some(&json!(130_000))
+    );
+    assert_eq!(
+        recovered_usage.pointer("/tokens/isFresh"),
+        Some(&json!(false))
+    );
+    ensure!(
+        recovery_requests
+            .lock()
+            .expect("recovery request capture mutex was poisoned")
+            .iter()
+            .all(|request| request.get("method") != Some(&json!("thread/resume"))),
+        "passive usage eagerly resumed the persisted thread"
     );
 
     run_cli(&paths, &repository, &["jump", WORKSPACE_NAME]).await?;

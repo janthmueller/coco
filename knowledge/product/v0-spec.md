@@ -75,10 +75,13 @@ peer-response routing remain separate, unimplemented capabilities.
 - That baseline also passes the experimental environment contract CoCo now
   consumes: lazy per-workspace exec-server registration, fresh-thread and
   ordinary-turn selection, distinct process roots for concurrent workspaces,
-  on-demand Linux resource observation, close-time cleanup, and daemon-shutdown
-  cleanup. The same evidence shows that resume/fork do not accept environment
-  selection and that host-local `thread/shellCommand` is not routed to a
-  remote-only workspace executor.
+  rootless Linux cgroup-v2 scope placement with process-tree fallback,
+  on-demand resource observation, close-time cleanup, and daemon-shutdown
+  cleanup. The resource boundary now also accepts revisioned per-workspace
+  memory, CPU, and task policies, applies supported changes dynamically, and
+  verifies the resulting kernel cgroup values. The same evidence shows that
+  resume/fork do not accept environment selection and that host-local
+  `thread/shellCommand` is not routed to a remote-only workspace executor.
 - Schemas and real behavior from selected releases expose the `initialize`,
   `model/list`, `thread/start`, `thread/resume`, and `turn/start` client requests;
   thread/turn, plan, diff, item, token, error, and status notifications; and
@@ -86,10 +89,13 @@ peer-response routing remain separate, unimplemented capabilities.
 - That observed protocol is version-specific. Narrow consumed fields and the
   real behavior test are authoritative; generated schemas remain an upgrade
   review aid and additive schema drift alone is not a compatibility failure.
-- Schema v11 retains schema v6's minimal turn-start operation ledger, schema
+- Schema v14 retains schema v6's minimal turn-start operation ledger, schema
   v7's typed worktree binding, and schema v8/v9's recoverable workspace
   retirement state and deletion intent. Schema v10 adds bounded signals and
-  schema v11 adds the narrow durable hook outbox. It also retains the old
+  schema v11 adds the narrow durable hook outbox. Schema v12 adds open-delete
+  origin and explicit commit-discard intent. Schema v13 adds revisioned
+  workspace resource policies, and schema v14 adds one compact native
+  token-usage checkpoint per workspace. It also retains the old
   native-status columns, local turns, normalized events, completed messages,
   MCP audit events, and decisions as a reversible compatibility bridge. The
   retained shapes are not evidence of long-term CoCo ownership.
@@ -178,13 +184,15 @@ peer-response routing remain separate, unimplemented capabilities.
 - A workspace, Codex thread, worktree, branch, base commit, context provenance,
   and profile are distinct concepts even when one v0 operation creates them
   together.
-- Dirty source checkouts are rejected by default. An explicit local-state
+- Normal CLI creation warns and continues from the selected committed base
+  when its source is dirty; the wire contract retains explicit reject and
+  ignore policies. An explicit local-state
   selection may copy tracked changes and ordinary non-ignored untracked files
   into the destination; CoCo never silently stashes, resets, stages, or mutates
   the source checkout.
 - Worktrees live outside the registered repository by default.
 - CoCo never performs destructive branch or worktree cleanup automatically.
-  Explicit `close` and closed-only `delete` operations expose and validate
+  Explicit `close` and `delete` operations expose and validate
   their effects before applying them.
 - One daemon may register multiple repositories. Workspaces remain
   repository-owned, workspace names are unique only within that repository,
@@ -222,9 +230,10 @@ peer-response routing remain separate, unimplemented capabilities.
   Codex configuration precedence.
 - `coco close` is the reversible worktree-retirement boundary. It retains the
   workspace record, branch, and thread by default; optional native archive is
-  undone by `coco reopen`. Permanent `coco delete` accepts only a closed
-  workspace, always deletes its CoCo record, and makes native thread and
-  CoCo-created branch deletion independent opt-ins. No lifecycle action has a
+  undone by `coco reopen`. Permanent `coco delete` accepts an open or closed
+  workspace and deletes its owned worktree, executor, record, thread, and
+  CoCo-created branch. `--keep-thread` and `--keep-branch` opt into retention;
+  an adopted branch is always retained. No lifecycle action has a
   destructive collection scope, and `--yes` never implies a discard policy.
 - Native worktrees intentionally share their repository's Git object and ref
   storage. CoCo does not proxy ordinary worker commits or allocate a separate
@@ -238,10 +247,22 @@ peer-response routing remain separate, unimplemented capabilities.
 - v0 has no publicly reachable network listener. Its App Server endpoint is
   capability-token protected and bound only to `127.0.0.1`.
 - Status JSON and human `--resources` may expose a generation-local observation
-  of each selected workspace executor. Linux observations include its current descendant count,
-  aggregate RSS, and interval CPU percentage. They are best-effort telemetry,
-  exclude shared App Server cost, are never persisted, and do not imply a hard
-  resource limit.
+  of each selected workspace executor. A compatible Linux cgroup-v2 user
+  manager reports memory charged to the complete execution group, process and
+  task counts, cumulative and interval CPU use, and controller event counters.
+  The Linux compatibility backend reports descendant count, aggregate RSS,
+  and interval CPU instead. Samples exclude shared App Server cost, are never
+  persisted, and are distinct from configured resource policy. Desired limits
+  and their revision are durable; the applied snapshot is live runtime
+  evidence.
+- `coco usage` exposes the latest cumulative native Codex token report for one
+  workspace or an open-workspace collection without loading conversations or
+  starting executors. The complete native breakdown and provenance are
+  available in one-shot JSON; human output keeps cumulative tokens, latest
+  context occupancy, and optional backend-estimated cost distinct. One compact
+  checkpoint is durable, becomes stale across daemon generations, and never
+  becomes a CoCo billing authority. Native cost is optional, cached briefly in
+  memory, and unavailable is distinct from zero.
 - Worktrees may use a new branch, an existing local branch, or detached HEAD.
   Detached worktrees remain registered Git worktrees. CoCo can close one only
   while its `HEAD` still equals its base; detached-to-branch promotion remains
@@ -338,7 +359,9 @@ registered worktree at the resolved base SHA without allocating a branch.
 
 Detached work remains available across daemon restarts because Git, not CoCo's
 process, owns the worktree registration. CoCo never cleans it automatically;
-explicit close is allowed only before detached `HEAD` diverges from its base.
+explicit close requires its commits to remain reachable from another local
+branch, tag, or remote-tracking ref. Delete can discard unretained detached
+commits only with separate explicit approval.
 A later promotion design must atomically
 create and verify a branch before changing persisted binding metadata; until
 then, branch-backed workspaces are the durable default.
@@ -472,6 +495,17 @@ coco [<repository-path>] status [--resources] [--follow] [--json]
 coco status --all-repos [--resources] [--follow] [--json] # `-a`, `-r`, and `-f` are short forms
 coco [<repository-path>] status <workspace> [--resources] [--follow] [--json]
 coco status <workspace> --global [--resources] [--follow] [--json] # `-g` is the short form
+coco [<repository-path>] usage [<workspace>] [--follow] [--json]
+coco usage --all-repos [--follow] [--json] # `-a` and `-f` are short forms
+coco usage <workspace> --global [--follow] [--json] # `-g` is the short form
+coco [<repository-path>] limits show [<workspace>] [--json]
+coco limits show [<workspace>] --global [--json]
+coco [<repository-path>] limits set [<workspace>]
+  [--memory-high <size>] [--memory-max <size>] [--cpu-max <cores>]
+  [--cpu-weight <1..10000>] [--tasks-max <count>] [--clear <field>]... [--json]
+coco limits set [<workspace>] --global <changes> [--json]
+coco [<repository-path>] limits reset [<workspace>] [--json]
+coco limits reset [<workspace>] --global [--json]
 coco [<repository-path>] send [<workspace>] [<message>] [--wait]
 coco send [<workspace>] [<message>] --global [--wait]
 coco [<repository-path>] jump [<workspace>]
@@ -502,9 +536,9 @@ Global name resolution succeeds only for exactly one match. Multiple matches
 return `WORKSPACE_REFERENCE_AMBIGUOUS` with matching workspace IDs, names, and
 repository paths. A local miss never silently targets another repository, but
 the error points out global matches when they exist. `--all-repos` is a
-read-only collection scope for `list`, targetless `status`, and targetless
-`signal list`; it never broadcasts a mutation. CoCo does not encode a path and workspace name into a
-composite string.
+read-only collection scope for `list`, targetless `status`, targetless `usage`,
+and targetless `signal list`; it never broadcasts a mutation. CoCo does not
+encode a path and workspace name into a composite string.
 
 `signal list`/`signal ls` accept an optional positional workspace, not a
 separate `--workspace` flag. `--name` filters the signal type independently.
@@ -579,8 +613,8 @@ does not duplicate thread or turn orchestration.
 - Require a local Git worktree and an accessible common Git directory.
 - Register the repository idempotently and return its stable ID and root.
 - Do not create a Git commit, branch, config entry, or worktree.
-- Do not require a clean checkout merely to register it; cleanliness is a
-  creation precondition and must be reported by `create`.
+- Do not require a clean checkout merely to register it; `create` evaluates
+  local state when deciding whether to warn, omit, or explicitly carry it.
 
 ### `coco repo list` / `coco repo ls`
 
@@ -625,12 +659,14 @@ supplied path always fails directly instead of silently falling back.
    uses an existing local branch that Git reports as free, and `--detached`/
    `-D` allocates no branch. Existing-branch selection supplies its own base
    and therefore rejects a separate base option.
-4. **Local state.** The default rejects tracked or ordinary untracked changes
-   in the invoking checkout. `--carry-changes` preserves staged and unstaged
-   tracked changes with separate binary patches. `--carry-untracked` also
-   copies ordinary non-ignored untracked files and requires tracked carry.
-   `--dirty`/`-d` is the CLI shorthand for both. It is independent from
-   detached mode, so `-dD` combines dirty-state carry with detached HEAD.
+4. **Local state.** The default creates from the selected committed base even
+   when the invoking checkout is dirty. The CLI warns and leaves its tracked
+   and ordinary untracked changes there. `--carry-changes` instead preserves
+   staged and unstaged tracked changes with separate binary patches.
+   `--carry-untracked` also copies ordinary non-ignored untracked files and
+   requires tracked carry. `--dirty`/`-d` is the CLI shorthand for both. It is
+   independent from detached mode, so `-dD` combines dirty-state carry with
+   detached HEAD.
 
 Every creation also honors Codex's repository-root `.worktreeinclude`
 convention for selected ignored local files. Only paths that Git confirms are
@@ -702,7 +738,7 @@ ID must not create duplicate artifacts.
   `thread/read`; do not resume a thread merely to list it. An unbound ready
   workspace projects `prepared`; a missing or invalid existing binding projects
   unavailable instead of falling back to stored status.
-- `--json` emits one schema-version-9 JSON document and no decorative stdout
+- `--json` emits one schema-version-10 JSON document and no decorative stdout
   text. Every row includes a compact repository identity.
 
 ### `coco status`
@@ -724,8 +760,11 @@ ID must not create duplicate artifacts.
   native App Server request IDs are never exposed. When per-workspace execution
   is enabled, it additionally includes the executor backend/state/scope, root
   PID, and only the resource measurements actually available on that host.
-  Collection status JSON attaches the same resource observation to each row.
-  These samples are current, optional, and non-persistent.
+  A cgroup-v2 observation keeps charged memory distinct from fallback resident
+  memory and may include its opaque unit, process/task counts, cumulative CPU
+  use, and controller events. Collection status JSON attaches the same resource
+  observation to each row. These samples are current, optional, and
+  non-persistent.
 - `--json` uses the same field meanings as the relevant daemon projection and
   includes a top-level schema version.
 - One-shot status and every `--follow` poll perform non-loading native reads;
@@ -736,13 +775,73 @@ ID must not create duplicate artifacts.
   control sequences. Neither form reads, persists, or prints conversation
   messages. Ctrl-C detaches only the display and does not cancel a turn.
 - Human status omits executor implementation details and resource sampling by
-  default. `--resources`/`-r` adds only aggregate RSS, process count, and CPU
-  when available; a collection uses dedicated `RSS`, `PROCS`, and `CPU`
-  columns. `--follow`/`-f` composes with it, including clustered `-fr`/`-afr`.
-  JSON status always requests the complete optional observation without
-  requiring `--resources`.
+  default. `--resources`/`-r` adds only memory, process count, and CPU when
+  available; a collection uses dedicated `MEMORY`, `PROCS`, and `CPU` columns.
+  Detailed human output labels fallback resident memory as RSS and cgroup
+  memory as memory rather than conflating them. `--follow`/`-f` composes with
+  it, including clustered `-fr`/`-afr`. JSON status always requests the
+  complete optional observation without requiring `--resources`.
 - `--follow` and `--json` are intentionally mutually exclusive in the current
   CLI; machine clients can poll `status --json`.
+
+### `coco usage`
+
+- With no workspace reference, return open workspaces in the selected/current
+  repository. `--all-repos`/`-a` selects every registered repository and adds
+  repository identity to each human row. This form is a collection, never a
+  picker.
+- With an explicit reference, return exactly one workspace, including a closed
+  one when directly addressable. Use normal repository-local resolution,
+  `--global`/`-g`, or a full workspace ID.
+- Token evidence comes only from `thread/tokenUsage/updated` for the exact
+  bound native thread. Retain the supplied cumulative and latest breakdowns,
+  model context window, thread and turn IDs, observation time, source, and
+  daemon generation. Never recompute the native total or merge different
+  thread bindings.
+- Persist one monotonic checkpoint per workspace. A checkpoint from the
+  current daemon generation is fresh; after restart it remains visible as a
+  stale last-seen value until a newer notification arrives. Absence and stale
+  evidence remain distinct from zero and from complete lifetime attribution.
+- Query native per-thread cost on demand through `account/usage/read`, cache
+  the result briefly in memory, and invalidate it when newer token usage
+  arrives. Preserve credits, optional USD, grouped detail, and observation
+  time. A null or failed native result is explicit unavailable evidence and
+  cannot fail token reporting.
+- Human collection output contains only workspace, cumulative tokens, latest
+  context-window percentage, and optional estimated cost. The targeted view
+  adds input/cached and output/reasoning breakdowns. JSON exposes the complete
+  typed projection with top-level schema version 10.
+- One-shot and `--follow` reads are passive: they do not call `thread/resume`,
+  create context, or start a workspace executor. A terminal replaces the prior
+  frame; redirected output appends only changed frames. `--follow`/`-f` and
+  `--json` are mutually exclusive.
+
+### `coco limits`
+
+- `show` returns the durable desired policy, its revision, the selected
+  controller's capabilities and runtime state, and the policy snapshot
+  actually applied to a live runtime. An omitted workspace uses the normal scoped
+  picker; `--global`/`-g` uses the global picker or exact global resolution.
+- `set` patches only fields named by the caller. `--memory-high` and
+  `--memory-max` accept exact bytes or decimal/binary suffixes through TiB;
+  `--cpu-max` accepts up to three decimal places in logical-core units;
+  `--cpu-weight` accepts 1 through 10,000; and `--tasks-max` counts kernel
+  tasks/threads. Repeatable `--clear <field>` removes individual values, while
+  `reset` removes the complete policy.
+- No limit is enabled by default. A non-empty policy is accepted only when the
+  selected execution backend advertises every requested semantic capability.
+  Activation checks the persisted policy again and fails closed rather than
+  silently using the shared or process-tree fallback.
+- A running systemd/cgroup-v2 runtime applies and verifies supported updates
+  without restarting. Lowering the hard memory ceiling below current charged
+  use is rejected. Removing an already-applied CPU maximum is recorded as
+  desired but remains pending until the next runtime start because the current
+  systemd live-reset path is not reliable; CoCo never stops the runtime
+  implicitly for that update.
+- Mutations are durable, revisioned, and rolled back when enforcement fails.
+  `--json` exposes exact integer fields plus desired/applied snapshots and
+  capability flags; human output uses concise sizes and clearly distinguishes
+  applied, next-start, and pending-restart state.
 
 ### `coco send`
 
@@ -863,7 +962,7 @@ ID must not create duplicate artifacts.
 - A normal close requires ready provisioning state, a quiescent `idle` or
   `notLoaded` native thread when one exists, no current operation, pending
   decision, live TUI lease, loaded background terminal, worktree lock, binding
-  mismatch, or detached `HEAD` changed from the original base. Tracked,
+  mismatch, or detached commits not retained by another branch/tag/remote ref. Tracked,
   ordinary-untracked, and ignored files require explicit `--discard-changes`; `--yes` only bypasses
   the confirmation for that already-selected policy. A thread already archived
   outside CoCo requires `--archive-thread` so reopen retains an explicit
@@ -876,24 +975,44 @@ ID must not create duplicate artifacts.
 - `close --archive-thread` uses native `thread/archive` after descendant checks
   and before removing the worktree. `reopen` restores the exact close-time
   worktree binding and calls `thread/unarchive` only when CoCo archived it.
-- `delete` accepts only one closed workspace, always removes its CoCo record,
-  and always presents its plan before applying. `--delete-thread` and
-  `--delete-branch` are independent opt-ins. The latter is valid only for an
-  unchanged `new_branch` binding created by CoCo; existing branches and
-  detached work are never selected for branch deletion.
+- `delete` accepts one open or closed workspace, including failed provisioning
+  when its actual resources can be safely verified. The CLI defaults to removal
+  of its managed worktree/runtime, record, native thread, and owned branch;
+  `--keep-thread` and `--keep-branch` request retention. Existing/adopted
+  branches are always retained, and detached workspaces have no branch effect.
+  A planned branch name alone does not prove ownership after failed creation:
+  require a verified worktree or persisted successful creation evidence.
+- Both close and delete report local files. Deletion additionally reports
+  commits losing branch/tag/remote-ref reachability. Interactive deletion offers
+  one explicit confirmation naming the selected losses; scripts need
+  `--discard-changes` and/or `--discard-unretained-commits`. `--yes` cannot expand either
+  policy. Close protects detached commits rather than offering to discard
+  them, because reopening must remain possible.
+- Delete computes the combined plan before effects. For a present open
+  worktree, it runs close and delete guards before persisting one deletion
+  intent; it revalidates the plan after those programs return. One successful
+  operation emits `workspace.deleted`, not a synthetic intermediate closed
+  event. A blocker discovered in the combined preview changes nothing.
+- The local RPC retains required explicit `deleteThread`/`deleteBranch`
+  booleans; omission is invalid instead of acquiring the new CLI defaults.
+  The plan reports actual effects, including retaining adopted branches.
 - Native archive/delete is blocked when Codex reports spawned descendants.
   Native delete is additionally blocked for CoCo workspaces whose context
   provenance references the thread; an external native reference may still be
   rejected safely by Codex. A rejected native write returns the record to
   closed when an exact follow-up read proves the thread remains; an ambiguous
   result stays recoverable in `deleting` instead of claiming success or
-  failure.
+  failure. If worktree removal succeeded before a later failure, return
+  `WORKSPACE_DELETION_INCOMPLETE` with the workspace ID and a sanitized cause;
+  do not imply that the operation rolled back all resources.
 - A prepared context fork protects its saved source before a native child
   exists. A workspace source blocks record deletion until the dependant is
   materialized or deleted; a raw thread source only blocks native thread
   deletion. This applies across repositories and during deletion recovery.
-- `--dry-run`/`-n` applies to close and delete. `-t` consistently selects the
-  thread effect, `-b` selects branch deletion, and short options compose.
+- `--dry-run`/`-n` applies to close and delete. Close retains its `-t` archive
+  shorthand. Delete's previous `-t`/`-b` removal flags are removed, not inverted
+  into retention. Long keep/discard flags make that breaking alpha change
+  explicit, while `-g`, `-n`, and `-y` remain.
   There is no `--all-repos` or other destructive collection form.
 
 ## Local MCP surface
@@ -1069,10 +1188,12 @@ full native event mirroring.
 - No lifecycle path uses `git reset --hard`, automatic stash, or automatic
   cleanup. Explicit close delegates removal to `git worktree remove` only
   after exact path/binding, lock, local-state, and detached-commit checks.
-  Explicit branch deletion uses `git branch -D` only for a branch CoCo created
-  and only while its tip still equals the close-time `HEAD`.
+  Explicit branch deletion uses compare-and-delete `git update-ref -d` only
+  for a branch CoCo created and while its tip equals the previewed `HEAD`.
+  It checks other branch/tag/remote-ref reachability before removing commits
+  unless the user explicitly authorized commit discard.
 - Workspace bindings, provisioning failures, and idempotent operation evidence
-  survive daemon or App Server restarts. Schema v11 fails unfinished workspace
+  survive daemon or App Server restarts. The current schema fails unfinished workspace
   preparation and marks a turn-start dispatch without a proven response
   `uncertain`; it never retries that operation automatically. Live decision IDs
   deliberately disappear with the daemon generation because the corresponding
@@ -1085,7 +1206,10 @@ full native event mirroring.
   report guessed success or create a replacement thread.
 - `closing`, `reopening`, and `deleting` are durable saga states. Startup
   reconciles them from verified Git presence/binding and exact native thread
-  state. Proven native delete rejection returns the record to `closed`; an
+  state. Recovery of an open-delete intent never repeats worktree discard:
+  a still-present verified worktree returns to open for fresh confirmation;
+  once absent, the recorded thread/branch effects can finish. Proven native
+  delete rejection after worktree removal returns the record to `closed`; an
   ambiguous result remains `deleting`, and a missing thread is treated as an
   already-applied explicitly requested deletion during reconciliation.
 
@@ -1101,8 +1225,8 @@ The following are intentionally outside v0:
 - autonomous coordinator policy, workspace-to-workspace A2A messaging, or privileged MCP
   tools such as approval, cleanup, integration, and arbitrary command access;
 - multiple simultaneous Codex App Server processes or process pools;
-- hard per-workspace CPU, memory, or process quotas, automatic host-pressure
-  scheduling, and a container execution backend;
+- aggregate CoCo resource pools, automatic host-pressure scheduling, native
+  non-Linux enforcement, and a container execution backend;
 - a user-managed worker MCP catalog, arbitrary per-thread MCP selection, or an
   Agentgateway integration; the future boundary is documented, but
   Agentgateway is not currently planned;
@@ -1119,9 +1243,11 @@ The following are intentionally outside v0:
   existing-branch, and detached bindings agree across the stored mode, optional
   branch, base SHA, and worktree; after activation, the exact bound thread ID
   and native `cwd` agree with that Git binding.
-- Dirty source, invalid base, duplicate name/branch, already checked-out
-  existing branch, and existing destination all fail before an unintended
-  second worktree or thread is created.
+- A dirty source with no carry selection produces a CLI warning, creates from
+  the selected committed base, and leaves the source unchanged. Invalid base,
+  unsafe carry, duplicate name/branch, already-checked-out existing branch,
+  and existing destination all fail before an unintended second worktree or
+  thread is created.
 - A native-fork test selects the Git base independently from either a
   workspace or exact native-thread context source, binds the returned child and
   parent thread, and invokes optional compaction only on that child before it
@@ -1155,9 +1281,8 @@ The following are intentionally outside v0:
   risk, native descendant count, and every blocker without changing state.
 - Normal close refuses active or unavailable native state, pending decisions,
   live TUI leases, loaded background terminals, Git locks, local files without
-  explicit discard, mismatched bindings, and a detached `HEAD` different from
-  its original base (a deliberately conservative check, even if another ref
-  happens to retain that commit).
+  explicit discard, mismatched bindings, and detached commits not retained
+  by another branch/tag/remote ref.
   `--yes` alone does not relax any of those checks.
 - Closing uses only verified `git worktree remove`; it never recursively
   removes a path and never deletes a branch implicitly. Normal lists hide the
@@ -1166,9 +1291,11 @@ The following are intentionally outside v0:
 - Reopen recreates the exact stored path and new/existing/detached binding at
   the recorded close-time `HEAD`, rejects moved or already-checked-out branches,
   and unarchives only a thread CoCo archived for that close.
-- Permanent delete accepts only a closed record. Thread and branch removal are
-  independent opt-ins; branch removal is limited to an unchanged CoCo-created
-  branch. Native descendants and known context dependants block a potentially
+- Permanent delete accepts open and closed workspaces with one plan and one
+  confirmation; thread and owned-branch retention are independent opt-ins.
+  Failed preparation is cleaned only from verified resource evidence. Branch
+  removal is limited to an unchanged CoCo-created branch; commit discard is
+  independent from file discard. Native descendants and context dependants block a potentially
   cascading thread action. No bulk destructive scope exists.
 - Failure-injection tests cover interruption before and after Git/native saga
   boundaries. Startup either completes the observed result or rolls back to a
@@ -1189,10 +1316,20 @@ The following are intentionally outside v0:
   executor roots. Generated-schema drift is reviewed diagnostically rather
   than rejected byte-for-byte.
 - Status returns no invented measurements for an inactive runtime.
-  Linux tests require a live root PID, at least one attributed process, and
-  nonzero RSS; interval CPU remains optional on the first sample. Collection
+  Linux cgroup-v2 tests require a live opaque scope in the instance workspace
+  pool, at least one process and task, nonzero charged memory, cumulative CPU,
+  whole-scope shutdown, and instance-scoped stale cleanup. Process-tree
+  fallback tests require a live root PID, at least one attributed process, and
+  nonzero RSS. Interval CPU remains optional on the first sample. Collection
   scanning occurs only for `--resources`, JSON status, or the read-only MCP
   status projection, and no sample is persisted.
+- Resource-policy tests require exact set/clear patch semantics, monotonic
+  durable revisions, validation before mutation, capability failure before
+  activation, rollback after an enforcement failure, and distinct desired
+  versus applied snapshots. The live Linux test must prove launch-time policy,
+  dynamic update, safe reset of memory/weight/task controls, rejection of a
+  hard memory ceiling below current use, staged CPU-cap removal, and raw cgroup
+  verification.
 - Two sequential `send` operations use the same thread and different turn IDs;
   concurrent sends yield one accepted turn and one deterministic conflict.
 - A crash/error before dispatch leaves a replayable prepared operation. A

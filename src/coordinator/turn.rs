@@ -204,6 +204,7 @@ impl Coordinator {
             let (thread_id, worktree) = self.validated_turn_target(&workspace)?;
             (thread_id.to_owned(), worktree.to_owned())
         };
+        self.require_workspace_resource_policy_support(&workspace.id)?;
         self.worker
             .prepare_workspace_execution(&workspace.id, &worktree)
             .await?;

@@ -10,7 +10,12 @@ use tokio::sync::Notify;
 
 use super::*;
 use crate::codex::CodexEvent;
-use crate::domain::runtime::WorkspaceRuntimeResources;
+use crate::domain::runtime::{
+    WorkspaceResourceCapabilities, WorkspaceResourceControllerBackend,
+    WorkspaceResourceControllerStatus, WorkspaceResourcePolicySnapshot, WorkspaceRuntimeResources,
+    WorkspaceRuntimeState,
+};
+use crate::domain::usage::{NativeThreadCostEstimate, NativeThreadCostGroup};
 use crate::domain::{
     CodexModel, CodexReasoningEffort, CodexThreadStatus, ContextMode, DecisionKind, DecisionPrompt,
     DecisionState, Workspace, WorkspaceAvailability, WorkspaceLifecycle, WorkspacePhase,
@@ -35,10 +40,14 @@ mod events;
 mod guards;
 mod jump;
 mod operations;
+mod resources;
 mod retirement;
 mod retirement_confirmation;
+mod retirement_deletion;
+mod retirement_deletion_recovery;
 mod retirement_dependencies;
 mod retirement_safety;
+mod usage;
 mod workspace;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -81,6 +90,13 @@ enum WorkerCall {
     },
     Resources {
         workspace_id: String,
+    },
+    Cost {
+        thread_id: String,
+    },
+    ConfigureResources {
+        workspace_id: String,
+        snapshot: WorkspaceResourcePolicySnapshot,
     },
     Thread {
         name: String,
@@ -126,6 +142,11 @@ struct FakeWorker {
     descendants: StdMutex<BTreeMap<String, Vec<String>>>,
     background_terminals: StdMutex<BTreeMap<String, usize>>,
     runtime_resources: StdMutex<Option<WorkspaceRuntimeResources>>,
+    thread_costs: StdMutex<BTreeMap<String, NativeThreadCostEstimate>>,
+    resource_policies: StdMutex<BTreeMap<String, WorkspaceResourcePolicySnapshot>>,
+    resource_limits_supported: bool,
+    resource_runtime_running: StdMutex<bool>,
+    fail_next_resource_policy: StdMutex<bool>,
     failed_thread_reads: StdMutex<Vec<String>>,
     fail_thread_start: bool,
     fail_turn_start: bool,
@@ -273,6 +294,13 @@ impl FakeWorker {
     fn set_runtime_resources(&self, resources: WorkspaceRuntimeResources) {
         *self.runtime_resources.lock().unwrap() = Some(resources);
     }
+
+    fn set_thread_cost(&self, estimate: NativeThreadCostEstimate) {
+        self.thread_costs
+            .lock()
+            .unwrap()
+            .insert(estimate.thread_id.clone(), estimate);
+    }
 }
 
 #[async_trait]
@@ -324,6 +352,16 @@ impl WorkerRuntime for FakeWorker {
             .ok_or_else(|| {
                 WorkerError::InvalidThreadRead("fake native thread does not exist".to_owned())
             })
+    }
+
+    async fn read_thread_cost(
+        &self,
+        thread_id: &str,
+    ) -> Result<Option<NativeThreadCostEstimate>, WorkerError> {
+        self.calls.lock().unwrap().push(WorkerCall::Cost {
+            thread_id: thread_id.to_owned(),
+        });
+        Ok(self.thread_costs.lock().unwrap().get(thread_id).cloned())
     }
 
     async fn find_materialized_thread(
@@ -483,6 +521,7 @@ impl WorkerRuntime for FakeWorker {
         self.calls.lock().unwrap().push(WorkerCall::StopExecution {
             workspace_id: workspace_id.to_owned(),
         });
+        *self.resource_runtime_running.lock().unwrap() = false;
         Ok(())
     }
 
@@ -494,6 +533,69 @@ impl WorkerRuntime for FakeWorker {
             workspace_id: workspace_id.to_owned(),
         });
         Ok(self.runtime_resources.lock().unwrap().clone())
+    }
+
+    fn workspace_resource_capabilities(&self) -> WorkspaceResourceCapabilities {
+        if self.resource_limits_supported {
+            WorkspaceResourceCapabilities {
+                backend: WorkspaceResourceControllerBackend::SystemdCgroupV2,
+                dynamic_updates: true,
+                memory_high: true,
+                memory_max: true,
+                cpu_max: true,
+                cpu_weight: true,
+                tasks_max: true,
+            }
+        } else {
+            WorkspaceResourceCapabilities::unavailable()
+        }
+    }
+
+    async fn workspace_resource_policy_status(
+        &self,
+        _workspace_id: &str,
+    ) -> Result<WorkspaceResourceControllerStatus, WorkerError> {
+        Ok(WorkspaceResourceControllerStatus {
+            capabilities: self.workspace_resource_capabilities(),
+            runtime_state: if *self.resource_runtime_running.lock().unwrap() {
+                WorkspaceRuntimeState::Running
+            } else {
+                WorkspaceRuntimeState::Inactive
+            },
+            applied_policy: None,
+        })
+    }
+
+    async fn configure_workspace_resource_policy(
+        &self,
+        workspace_id: &str,
+        snapshot: WorkspaceResourcePolicySnapshot,
+    ) -> Result<WorkspaceResourceControllerStatus, WorkerError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(WorkerCall::ConfigureResources {
+                workspace_id: workspace_id.to_owned(),
+                snapshot: snapshot.clone(),
+            });
+        if std::mem::take(&mut *self.fail_next_resource_policy.lock().unwrap()) {
+            return Err(WorkerError::runtime(std::io::Error::other(
+                "injected resource policy failure",
+            )));
+        }
+        let unsupported = self
+            .workspace_resource_capabilities()
+            .unsupported_fields(&snapshot.policy);
+        if !unsupported.is_empty() {
+            return Err(WorkerError::ResourcePolicyUnsupported {
+                fields: unsupported,
+            });
+        }
+        self.resource_policies
+            .lock()
+            .unwrap()
+            .insert(workspace_id.to_owned(), snapshot);
+        self.workspace_resource_policy_status(workspace_id).await
     }
 
     async fn start_thread(

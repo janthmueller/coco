@@ -13,10 +13,10 @@ Codex terminal UI.
 Codex still performs the reasoning, tool calls, approvals, and file changes.
 CoCo coordinates where that work lives and how you reach it.
 
-[Quickstart](docs/content/docs/getting-started.mdx) ·
-[Workspace guide](docs/content/docs/guides/workspaces.mdx) ·
-[Command reference](docs/content/docs/reference/cli.mdx) ·
-[Limitations](docs/content/docs/reference/current-limitations.mdx)
+[Quickstart](docs/src/content/docs/getting-started.mdx) ·
+[Workspace guide](docs/src/content/docs/guides/workspaces.mdx) ·
+[Command reference](docs/src/content/docs/reference/cli.mdx) ·
+[Limitations](docs/src/content/docs/reference/current-limitations.mdx)
 
 > **Alpha software:** CoCo is intended for supervised local use on Linux and
 > macOS. Keep `cocod` running while work is active and review the limitations
@@ -33,8 +33,9 @@ client that started them:
 - **Return to the exact place.** A named workspace keeps the Codex thread,
   worktree, repository, and selected settings together.
 - **Supervise work from another client.** Check state, inspect current resource
-  use on Linux, answer supported approvals and questions, send another
-  instruction, or enter the native TUI.
+  use, follow token usage and available cost estimates, set workspace limits
+  on Linux, answer supported approvals and questions, send another instruction,
+  or enter the native TUI.
 - **Work across repositories.** List everything together or address one
   workspace without first changing directories.
 - **Control the lifecycle safely.** Prepare without starting a model turn,
@@ -100,6 +101,8 @@ coco jump fix/login
 The command returns after Codex accepts the work. `status --follow` watches
 state without printing chat messages; stop it with Ctrl+C. `jump` opens the
 same conversation in the native Codex UI and the workspace's worktree.
+Use `coco usage fix/login --follow` separately to watch cumulative token use,
+current context-window occupancy, and a cost estimate when Codex reports one.
 
 Leaving the status view or the TUI does not cancel an active turn. Add `--wait`
 to `send` when you want that command to remain attached and print the final
@@ -110,7 +113,22 @@ By default, the first `send` or `jump` starts one dedicated
 `codex exec-server` for that workspace. CoCo reuses it for later turns and
 stops it when the workspace is closed or `cocod` exits normally.
 Add `--resources` (`-r`) to `status` when you want current process count,
-memory, and CPU use on Linux. These are observations, not resource limits.
+memory, and CPU use on Linux. With a usable cgroup-v2 user session, memory is
+the total currently charged to that workspace; the compatibility fallback
+shows aggregate RSS instead.
+
+On a compatible Linux system, you can also set limits for the complete
+workspace runtime:
+
+```bash
+coco limits set fix/login \
+  --memory-high 2GiB --memory-max 4GiB \
+  --cpu-max 2 --tasks-max 512
+coco limits show fix/login
+```
+
+No limit is enabled by default. CoCo refuses a configured limit when the
+current execution backend cannot enforce it.
 
 ## Work with a workspace
 
@@ -121,11 +139,13 @@ The common commands follow one lifecycle:
 | Prepare a separate workspace          | `coco create <name>`                   |
 | Start or continue a Codex turn        | `coco send <workspace> <message>`      |
 | Inspect or follow current state       | `coco status [<workspace>] [-f]`       |
+| Inspect or follow model usage         | `coco usage [<workspace>] [-f]`        |
+| Inspect or change runtime limits      | `coco limits show/set/reset`           |
 | Answer a supported request            | `coco decide <decision-id>`            |
 | Enter the existing Codex conversation | `coco jump <workspace>`                |
 | Review changes from the fixed base    | `coco diff <workspace>`                |
 | Free and later restore the worktree   | `coco close` / `coco reopen`           |
-| Permanently retire a closed record    | `coco delete`                          |
+| Delete a workspace and its resources | `coco delete`                          |
 
 By default, `create` makes a `coco/<workspace>` branch. The workspace remains
 prepared without a Codex thread or exec server until the first `send` or
@@ -139,7 +159,7 @@ or exact Codex thread ID.
 `coco-mcp` exposes the same repository-scoped workspaces to an MCP-capable
 application. Inspection is read-only by default; starting turns requires an
 explicit `--allow-send` capability. See the
-[MCP guide](docs/content/docs/guides/mcp.mdx).
+[MCP guide](docs/src/content/docs/guides/mcp.mdx).
 
 Agents can also publish explicitly enabled, schema-validated signals such as
 `review.requested`. Signals are retained updates for humans or integrations;
@@ -147,5 +167,5 @@ they do not change workspace state or wake another model by themselves.
 Operator-configured hooks can run a trusted local command after a matching
 signal or workspace lifecycle event. Synchronous guards can stop a checked
 workspace close or deletion before it changes anything. See the
-[signals guide](docs/content/docs/guides/signals.mdx) and
-[hooks guide](docs/content/docs/guides/hooks.mdx).
+[signals guide](docs/src/content/docs/guides/signals.mdx) and
+[hooks guide](docs/src/content/docs/guides/hooks.mdx).

@@ -71,6 +71,61 @@ async fn selects_the_git_base_independently_from_workspace_context() {
 }
 
 #[tokio::test]
+async fn ignores_dirty_source_state_without_changing_the_selected_base() {
+    let fixture = Fixture::new(FakeWorker::default());
+    fixture.register().await;
+    run_git(&fixture.source, &["branch", "alternate-base"]);
+    fs::write(fixture.source.join("main-only.txt"), "committed on main\n").unwrap();
+    run_git(&fixture.source, &["add", "main-only.txt"]);
+    run_git(&fixture.source, &["commit", "-m", "advance main"]);
+    fs::write(fixture.source.join("README.md"), "local tracked change\n").unwrap();
+    fs::write(
+        fixture.source.join("local-only.txt"),
+        "local untracked file\n",
+    )
+    .unwrap();
+    let source_status = git_output(&fixture.source, &["status", "--porcelain=v1"]);
+    let alternate_head = git_output(&fixture.source, &["rev-parse", "alternate-base"]);
+
+    let mut params = fixture.create_params();
+    params.name = "ignored-source".to_owned();
+    params.operation_id = "create-ignored-source".to_owned();
+    params.worktree = WorkspaceWorktreeRequest::NewBranch {
+        branch: None,
+        base: WorkspaceBaseRequest::Revision {
+            revision: "alternate-base".to_owned(),
+        },
+    };
+    params.changes = WorkspaceChangesRequest::Ignore;
+
+    let created = fixture
+        .coordinator
+        .create_workspace(params)
+        .await
+        .unwrap()
+        .workspace;
+    let worktree = created.worktree_path.as_deref().unwrap();
+
+    assert_eq!(git_output(worktree, &["rev-parse", "HEAD"]), alternate_head);
+    assert_eq!(
+        fs::read_to_string(worktree.join("README.md")).unwrap(),
+        "fixture\n"
+    );
+    assert!(!worktree.join("main-only.txt").exists());
+    assert!(!worktree.join("local-only.txt").exists());
+    assert!(git_output(worktree, &["status", "--porcelain=v1"]).is_empty());
+    assert_eq!(
+        git_output(&fixture.source, &["status", "--porcelain=v1"]),
+        source_status
+    );
+    assert_eq!(created.context["request"]["changes"], "ignore");
+    assert_eq!(
+        created.context["resolved"]["localState"]["carriedTrackedChanges"],
+        false
+    );
+}
+
+#[tokio::test]
 async fn forks_context_from_an_exact_native_thread_id_without_a_coco_workspace() {
     let fixture = Fixture::new(FakeWorker::default());
     fixture.register().await;

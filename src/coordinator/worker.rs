@@ -5,7 +5,11 @@ use async_trait::async_trait;
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::domain::runtime::WorkspaceRuntimeResources;
+use crate::domain::runtime::{
+    WorkspaceResourceCapabilities, WorkspaceResourceControllerStatus,
+    WorkspaceResourcePolicySnapshot, WorkspaceRuntimeResources, WorkspaceRuntimeState,
+};
+use crate::domain::usage::NativeThreadCostEstimate;
 use crate::domain::{CodexModel, CodexThreadStatus};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -64,10 +68,14 @@ pub(crate) enum WorkerError {
     InvalidModelCatalog(String),
     #[error("Codex returned an invalid thread read response: {0}")]
     InvalidThreadRead(String),
+    #[error("Codex returned an invalid thread usage response: {0}")]
+    InvalidThreadUsage(String),
     #[error("Codex thread ID mismatch: expected {expected}, received {actual}")]
     ThreadIdMismatch { expected: String, actual: String },
     #[error("Codex thread cwd mismatch: expected {expected}, received {actual}")]
     CwdMismatch { expected: PathBuf, actual: PathBuf },
+    #[error("workspace resource limits are unsupported by the selected execution backend: {fields}", fields = .fields.join(", "))]
+    ResourcePolicyUnsupported { fields: Vec<&'static str> },
 }
 
 impl WorkerError {
@@ -88,6 +96,15 @@ pub(crate) trait WorkerRuntime: Send + Sync + 'static {
         Err(WorkerError::InvalidThreadRead(
             "thread/read is not supported by this worker".to_owned(),
         ))
+    }
+
+    /// Reads an optional backend-owned billing estimate without loading the
+    /// native thread or starting its workspace executor.
+    async fn read_thread_cost(
+        &self,
+        _thread_id: &str,
+    ) -> Result<Option<NativeThreadCostEstimate>, WorkerError> {
+        Ok(None)
     }
 
     /// Finds a thread only after Codex has materialized durable history for it.
@@ -144,6 +161,37 @@ pub(crate) trait WorkerRuntime: Send + Sync + 'static {
         _workspace_id: &str,
     ) -> Result<Option<WorkspaceRuntimeResources>, WorkerError> {
         Ok(None)
+    }
+
+    fn workspace_resource_capabilities(&self) -> WorkspaceResourceCapabilities {
+        WorkspaceResourceCapabilities::unavailable()
+    }
+
+    async fn workspace_resource_policy_status(
+        &self,
+        _workspace_id: &str,
+    ) -> Result<WorkspaceResourceControllerStatus, WorkerError> {
+        Ok(WorkspaceResourceControllerStatus {
+            capabilities: self.workspace_resource_capabilities(),
+            runtime_state: WorkspaceRuntimeState::Inactive,
+            applied_policy: None,
+        })
+    }
+
+    async fn configure_workspace_resource_policy(
+        &self,
+        workspace_id: &str,
+        snapshot: WorkspaceResourcePolicySnapshot,
+    ) -> Result<WorkspaceResourceControllerStatus, WorkerError> {
+        let unsupported = self
+            .workspace_resource_capabilities()
+            .unsupported_fields(&snapshot.policy);
+        if !unsupported.is_empty() {
+            return Err(WorkerError::ResourcePolicyUnsupported {
+                fields: unsupported,
+            });
+        }
+        self.workspace_resource_policy_status(workspace_id).await
     }
 
     async fn start_thread(

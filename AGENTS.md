@@ -32,10 +32,9 @@
   product terms once, and remove pages whose main purpose is explaining how
   CoCo is built rather than how it is used. Follow the scoped rules in
   `docs/AGENTS.md` for every change below `docs/`.
-- Build the user-facing documentation with Next.js, Fumadocs, and MDX in the
+- Build the user-facing documentation with Astro Starlight and MDX in the
   visual direction recorded in `knowledge/documentation.md`. It must remain a
-  fully static GitHub Pages export with no runtime server dependency. Do not
-  introduce Astro Starlight unless the user explicitly reverses this decision.
+  fully static GitHub Pages export with no runtime server dependency.
 - Treat implemented behavior, automated tests, generated schemas, and command
   help as authoritative. Update affected public docs and internal concepts
   when behavior changes; a roadmap item is not evidence that a feature exists.

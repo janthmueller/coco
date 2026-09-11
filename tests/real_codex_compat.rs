@@ -32,6 +32,12 @@ const HISTORY_COMMAND: &str = "sleep 1; printf coco-native-history";
 #[path = "real_codex_compat/mcp.rs"]
 mod mcp;
 
+#[path = "real_codex_compat/containment.rs"]
+mod containment;
+
+#[path = "real_codex_compat/resources.rs"]
+mod resources;
+
 #[path = "real_codex_compat/retirement.rs"]
 mod retirement;
 
@@ -730,7 +736,7 @@ async fn run_daemon_lifecycle(
     let log = paths.data_dir.join(format!("cocod-{label}.log"));
     let mut daemon = spawn_daemon(paths, codex_binary, &log)?;
     wait_for_file(&paths.socket, &mut daemon, &log).await?;
-    verify_private_runtime(paths)?;
+    verify_private_runtime(paths).await?;
 
     if label == "first" {
         run_cli(paths, codex_binary, repository, &["repo", "add", "."])
@@ -764,9 +770,11 @@ async fn run_daemon_lifecycle(
         .with_context(|| format!("cocod log:\n{}", read_log(&log)))?;
         let prepared = workspace_status(paths, codex_binary, repository).await?;
         assert_prepared_workspace(&prepared)?;
+        resources::configure_before_runtime_start(paths, codex_binary, repository).await?;
         materialize_workspace_through_remote_action(paths, codex_binary, repository, &model)
             .await
             .with_context(|| format!("cocod log:\n{}", read_log(&log)))?;
+        resources::update_running_policy(paths, codex_binary, repository).await?;
     }
     let status = workspace_status(paths, codex_binary, repository)
         .await
@@ -784,6 +792,7 @@ async fn run_daemon_lifecycle(
         None
     };
     if label == "second" {
+        resources::verify_restart_and_reset(paths, codex_binary, repository).await?;
         verify_context_fork_activation(
             paths,
             codex_binary,
@@ -803,6 +812,12 @@ async fn run_daemon_lifecycle(
     }
     stop_daemon(&mut daemon, &log).await?;
     verify_runtime_cleanup(paths)?;
+    if [&status, loaded.as_ref().unwrap_or(&Value::Null)]
+        .iter()
+        .any(|value| value.pointer("/runtimeResources/scope") == Some(&json!("cgroup_v2")))
+    {
+        containment::verify_scope_cleanup(paths).await?;
+    }
     Ok((status, loaded))
 }
 
@@ -1102,17 +1117,53 @@ async fn verify_workspace_resources(
         "workspace status did not identify its running exec-server: {resources}"
     );
     #[cfg(target_os = "linux")]
-    ensure!(
-        resources
-            .get("processCount")
-            .and_then(Value::as_u64)
-            .is_some_and(|count| count >= 1)
-            && resources
-                .get("residentMemoryBytes")
-                .and_then(Value::as_u64)
-                .is_some_and(|bytes| bytes > 0),
-        "workspace status did not measure its Linux process tree: {resources}"
-    );
+    match resources.get("scope").and_then(Value::as_str) {
+        Some("cgroup_v2") => {
+            ensure!(
+                resources
+                    .get("processCount")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|count| count >= 1)
+                    && resources
+                        .get("taskCount")
+                        .and_then(Value::as_u64)
+                        .is_some_and(|count| count >= 1)
+                    && resources
+                        .get("memoryCurrentBytes")
+                        .and_then(Value::as_u64)
+                        .is_some_and(|bytes| bytes > 0)
+                    && resources
+                        .get("cpuUsageUsec")
+                        .and_then(Value::as_u64)
+                        .is_some()
+                    && resources
+                        .get("cgroupUnit")
+                        .and_then(Value::as_str)
+                        .is_some_and(|unit| unit.starts_with("coco") && unit.ends_with(".scope")),
+                "workspace status did not measure its cgroup-v2 scope: {resources}"
+            );
+            containment::verify_scope_hierarchy(
+                resources["cgroupUnit"]
+                    .as_str()
+                    .context("cgroup resource response had no unit")?,
+            )
+            .await?;
+        }
+        Some("process_tree") => {
+            ensure!(
+                resources
+                    .get("processCount")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|count| count >= 1)
+                    && resources
+                        .get("residentMemoryBytes")
+                        .and_then(Value::as_u64)
+                        .is_some_and(|bytes| bytes > 0),
+                "workspace status did not measure its Linux process tree: {resources}"
+            );
+        }
+        scope => bail!("workspace status reported an unexpected Linux resource scope {scope:?}"),
+    }
     Ok(())
 }
 
@@ -1243,7 +1294,7 @@ async fn daemon_request(paths: &TestPaths, method: &str, params: Value) -> Resul
 
 fn select_default_model(response: &Value) -> Result<String> {
     ensure!(
-        response["schemaVersion"] == 9,
+        response["schemaVersion"] == 10,
         "coco model list returned an unexpected schema version: {response}"
     );
     let models = response["models"]
@@ -1364,7 +1415,7 @@ async fn stop_daemon(daemon: &mut Child, log: &Path) -> Result<()> {
     Ok(())
 }
 
-fn verify_private_runtime(paths: &TestPaths) -> Result<()> {
+async fn verify_private_runtime(paths: &TestPaths) -> Result<()> {
     let descriptor = fs::read_to_string(&paths.endpoint)?;
     let descriptor = serde_json::from_str::<Value>(&descriptor)?;
     ensure!(
@@ -1378,16 +1429,35 @@ fn verify_private_runtime(paths: &TestPaths) -> Result<()> {
         token.len() == 64 && token.bytes().all(|byte| byte.is_ascii_hexdigit()),
         "App Server token was not a 64-character hexadecimal capability"
     );
-    for path in [
+    let protected = [
         &paths.endpoint,
         &paths.token,
         &paths.socket,
         &paths.database,
-    ] {
-        let mode = fs::metadata(path)?.permissions().mode() & 0o777;
-        ensure!(mode == 0o600, "{} had mode {mode:o}", path.display());
+    ];
+    let deadline = Instant::now() + COMPATIBILITY_TIMEOUT;
+    loop {
+        let modes = protected
+            .iter()
+            .map(|path| {
+                fs::metadata(path)
+                    .map(|metadata| metadata.permissions().mode() & 0o777)
+                    .map(|mode| (path, mode))
+            })
+            .collect::<std::io::Result<Vec<_>>>()?;
+        if modes.iter().all(|(_, mode)| *mode == 0o600) {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            let rendered = modes
+                .iter()
+                .map(|(path, mode)| format!("{}={mode:o}", path.display()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            bail!("private runtime files did not settle to mode 600: {rendered}");
+        }
+        sleep(POLL_INTERVAL).await;
     }
-    Ok(())
 }
 
 fn verify_runtime_cleanup(paths: &TestPaths) -> Result<()> {

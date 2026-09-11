@@ -4,6 +4,7 @@ use clap::Parser;
 mod args;
 mod commands;
 mod decision;
+mod follow;
 mod hooks;
 mod jump;
 mod output;
@@ -12,6 +13,7 @@ mod signals;
 mod status;
 mod style;
 mod turn;
+mod usage;
 
 #[cfg(test)]
 mod tests;

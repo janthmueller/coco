@@ -261,12 +261,22 @@ impl Git {
         repository: &GitRepository,
         branch_name: &str,
         expected_head_sha: &str,
+        discard_unretained_commits: bool,
     ) -> Result<(), GitError> {
-        self.validate_created_branch_deletion(repository, branch_name, expected_head_sha)?;
+        self.validate_created_branch_deletion(repository, branch_name, expected_head_sha, None)?;
+        if !discard_unretained_commits
+            && self.unretained_commit_count(repository, expected_head_sha, Some(branch_name))? > 0
+        {
+            return Err(GitError::BindingMismatch(
+                "branch contains commits not retained elsewhere; keep it or explicitly discard commits".into(),
+            ));
+        }
+        // Compare-and-delete: a concurrent ref update must not delete new work.
+        let reference = format!("refs/heads/{branch_name}");
         self.run(
             &repository.root_path,
             "branch-delete",
-            ["branch", "-D", "--", branch_name],
+            ["update-ref", "-d", &reference, expected_head_sha],
         )?;
         match self.resolve_local_branch(repository, branch_name) {
             Err(GitError::BranchNotFound(_)) => Ok(()),
@@ -282,6 +292,7 @@ impl Git {
         repository: &GitRepository,
         branch_name: &str,
         expected_head_sha: &str,
+        removing_worktree: Option<&Path>,
     ) -> Result<(), GitError> {
         let actual = self.resolve_local_branch(repository, branch_name)?;
         if actual != expected_head_sha {
@@ -291,7 +302,9 @@ impl Git {
                 actual,
             });
         }
-        if let Some(path) = self.branch_checkout_path(repository, branch_name)? {
+        if let Some(path) = self.branch_checkout_path(repository, branch_name)?
+            && removing_worktree != Some(path.as_path())
+        {
             return Err(GitError::BranchAlreadyCheckedOut {
                 branch: branch_name.to_owned(),
                 path,
@@ -305,15 +318,52 @@ impl Git {
         repository: &GitRepository,
         branch_name: &str,
         expected_head_sha: &str,
+        discard_unretained_commits: bool,
     ) -> Result<bool, GitError> {
-        match self.validate_created_branch_deletion(repository, branch_name, expected_head_sha) {
+        match self.validate_created_branch_deletion(
+            repository,
+            branch_name,
+            expected_head_sha,
+            None,
+        ) {
             Ok(()) => {
-                self.delete_created_branch(repository, branch_name, expected_head_sha)?;
+                self.delete_created_branch(
+                    repository,
+                    branch_name,
+                    expected_head_sha,
+                    discard_unretained_commits,
+                )?;
                 Ok(true)
             }
             Err(GitError::BranchNotFound(_)) => Ok(false),
             Err(source) => Err(source),
         }
+    }
+
+    /// Commits that lose durable branch/tag retention if the selected ref or
+    /// detached worktree is removed. Reflogs and recorded SHAs are not roots.
+    pub fn unretained_commit_count(
+        &self,
+        repository: &GitRepository,
+        head_sha: &str,
+        deleting_branch: Option<&str>,
+    ) -> Result<usize, GitError> {
+        validate_object_id(head_sha)?;
+        let mut args = vec![
+            "rev-list".to_owned(),
+            "--count".into(),
+            head_sha.into(),
+            "--not".into(),
+        ];
+        if let Some(branch) = deleting_branch {
+            self.validate_branch_name(repository, branch)?;
+            args.push(format!("--exclude={branch}"));
+        }
+        args.extend(["--branches".into(), "--tags".into(), "--remotes".into()]);
+        let count = self.run_text(&repository.root_path, "retirement-commit-count", args)?;
+        count.trim().parse().map_err(|_| {
+            GitError::BindingMismatch("Git returned an invalid unretained commit count".into())
+        })
     }
 
     pub fn worktree_is_registered(

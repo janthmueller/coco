@@ -28,8 +28,13 @@ async fn workspace_resources_are_observed_only_when_requested() {
         scope: crate::domain::runtime::WorkspaceResourceScope::ProcessTree,
         process_id: Some(42),
         process_count: Some(3),
+        task_count: None,
         resident_memory_bytes: Some(25 * 1024 * 1024),
+        memory_current_bytes: None,
         cpu_percent: Some(12.3),
+        cpu_usage_usec: None,
+        cgroup_unit: None,
+        events: None,
         sampled_at_ms: Some(1),
     };
     fixture.worker.set_runtime_resources(resources.clone());

@@ -21,6 +21,8 @@ async fn confirmed_name_must_not_retarget_to_a_replacement_workspace() {
         workspace: original.name.clone(),
         delete_thread: false,
         delete_branch: false,
+        discard_changes: false,
+        discard_unretained_commits: false,
         dry_run: true,
         expected_plan: None,
     };

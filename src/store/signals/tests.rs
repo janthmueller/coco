@@ -186,7 +186,9 @@ fn closing_and_deleting_do_not_erase_signal_history_or_allow_new_emissions() {
             WorkspaceDeletionIntent {
                 delete_thread: false,
                 delete_branch: false,
+                ..Default::default()
             },
+            None,
         )
         .unwrap();
     store.delete_workspace_record(&workspace.id).unwrap();

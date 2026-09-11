@@ -22,6 +22,8 @@ fn delete_params(
         workspace: workspace.id.clone(),
         delete_thread,
         delete_branch: false,
+        discard_changes: false,
+        discard_unretained_commits: false,
         dry_run: false,
         expected_plan: None,
     }
@@ -149,6 +151,8 @@ async fn record_only_delete_preserves_prepared_context_forks() {
             workspace: source.id,
             delete_thread: false,
             delete_branch: false,
+            discard_changes: false,
+            discard_unretained_commits: false,
             dry_run: false,
             expected_plan: None,
         })
@@ -189,6 +193,8 @@ async fn thread_delete_detects_prepared_context_dependants() {
             workspace: source.id,
             delete_thread: true,
             delete_branch: false,
+            discard_changes: false,
+            discard_unretained_commits: false,
             dry_run: false,
             expected_plan: None,
         })
@@ -225,7 +231,9 @@ async fn deletion_recovery_preserves_a_new_prepared_context_dependency() {
             WorkspaceDeletionIntent {
                 delete_thread: true,
                 delete_branch: false,
+                ..Default::default()
             },
+            None,
         )
         .unwrap();
     // Simulate a dependency present at restart after interrupted deletion.

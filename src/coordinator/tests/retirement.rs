@@ -196,6 +196,8 @@ async fn native_archive_is_reversible_and_native_delete_is_opt_in() {
             workspace: workspace.id.clone(),
             delete_thread: true,
             delete_branch: true,
+            discard_changes: false,
+            discard_unretained_commits: false,
             dry_run: false,
             expected_plan: None,
         })
@@ -299,6 +301,8 @@ async fn native_delete_reports_known_context_dependants_before_codex_rejects_it(
             workspace: source.id,
             delete_thread: true,
             delete_branch: false,
+            discard_changes: false,
+            discard_unretained_commits: false,
             dry_run: true,
             expected_plan: None,
         })
@@ -330,11 +334,13 @@ async fn rejected_native_delete_returns_the_workspace_to_closed_for_a_safe_retry
                 workspace: workspace.id.clone(),
                 delete_thread: true,
                 delete_branch: false,
+                discard_changes: false,
+                discard_unretained_commits: false,
                 dry_run: false,
                 expected_plan: None,
             })
             .await,
-        Err(CoordinatorError::Worker(_))
+        Err(CoordinatorError::WorkspaceDeletionIncomplete { .. })
     ));
     let retained = fixture
         .store
@@ -354,6 +360,7 @@ async fn rejected_native_delete_returns_the_workspace_to_closed_for_a_safe_retry
         WorkspaceDeletionIntent {
             delete_thread: false,
             delete_branch: false,
+            ..Default::default()
         }
     );
 }
@@ -376,6 +383,8 @@ async fn verified_absence_completes_an_ambiguous_native_delete() {
             workspace: workspace.id.clone(),
             delete_thread: true,
             delete_branch: false,
+            discard_changes: false,
+            discard_unretained_commits: false,
             dry_run: false,
             expected_plan: None,
         })
@@ -512,6 +521,8 @@ async fn delete_branch_never_claims_an_existing_branch() {
         workspace: workspace.id.clone(),
         delete_thread: false,
         delete_branch: true,
+        discard_changes: false,
+        discard_unretained_commits: false,
         dry_run: true,
         expected_plan: None,
     };
@@ -520,23 +531,16 @@ async fn delete_branch_never_claims_an_existing_branch() {
         .delete_workspace(deletion.clone())
         .await
         .unwrap();
-    assert!(
-        preview
-            .plan
-            .blockers
-            .iter()
-            .any(|blocker| blocker.contains("did not create"))
-    );
-    assert!(matches!(
-        fixture
-            .coordinator
-            .delete_workspace(WorkspaceDeleteParams {
-                dry_run: false,
-                ..deletion
-            })
-            .await,
-        Err(CoordinatorError::WorkspaceRetirementBlocked(_))
-    ));
+    assert!(preview.plan.blockers.is_empty());
+    assert!(!preview.plan.delete_branch);
+    fixture
+        .coordinator
+        .delete_workspace(WorkspaceDeleteParams {
+            dry_run: false,
+            ..deletion
+        })
+        .await
+        .unwrap();
     assert_eq!(
         git_output(&fixture.source, &["rev-parse", "feat/existing"]),
         git_output(&fixture.source, &["rev-parse", "HEAD"])
@@ -748,7 +752,9 @@ async fn interrupted_delete_finishes_already_applied_native_and_git_steps() {
             WorkspaceDeletionIntent {
                 delete_thread: true,
                 delete_branch: true,
+                ..Default::default()
             },
+            None,
         )
         .unwrap();
     fixture.worker.delete_thread(thread_id).await.unwrap();
@@ -760,6 +766,7 @@ async fn interrupted_delete_finishes_already_applied_native_and_git_steps() {
             &repository,
             branch,
             closed.closed_head_sha.as_deref().unwrap(),
+            false,
         )
         .unwrap();
 

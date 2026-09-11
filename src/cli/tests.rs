@@ -11,6 +11,7 @@ use super::output::{phase_label, render_diff};
 
 mod collections;
 mod creation;
+mod resources;
 mod retirement;
 
 #[test]
