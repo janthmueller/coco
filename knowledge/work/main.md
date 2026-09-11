@@ -4287,3 +4287,25 @@ Verification on 2026-09-11:
 
 This slice is included in the requested local checkpoint commit. No push,
 release, model-consuming request, or remote mutation was made.
+
+## Hermetic guard-output test repair — 2026-09-11
+
+The first Rust workflow for the consolidated feature commit failed only in
+`hooks::runner::tests::guard_rejects_invalid_or_oversized_output`. The guard
+fixtures emitted output and exited without consuming stdin, leaving a race
+between the asynchronous request write and process exit. Depending on
+scheduling, the same test could observe either the intended invalid-output
+error or an earlier broken-pipe write error.
+
+Both invalid and oversized-output fixtures now consume the complete guard
+request before emitting their controlled response. This keeps the test focused
+on the output boundary it claims to verify without weakening production guard
+handling.
+
+Verification:
+
+- `nix run .#fmt` passes.
+- The focused guard-output test passes.
+- The exact CI test command `nix run .#test -- --all-targets` passes all 346
+  ordinary library tests and all 5 process tests; 9 deliberate manual/live
+  probes remain ignored.

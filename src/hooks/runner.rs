@@ -474,7 +474,7 @@ mod tests {
             vec![
                 "/bin/sh".to_owned(),
                 "-c".to_owned(),
-                "printf not-json".to_owned(),
+                "IFS= read -r _ || true; printf not-json".to_owned(),
             ],
             5,
         );
@@ -491,7 +491,10 @@ mod tests {
             vec![
                 "/bin/sh".to_owned(),
                 "-c".to_owned(),
-                format!("head -c {} /dev/zero", MAX_GUARD_OUTPUT_BYTES + 1),
+                format!(
+                    "IFS= read -r _ || true; head -c {} /dev/zero",
+                    MAX_GUARD_OUTPUT_BYTES + 1
+                ),
             ],
             5,
         );
