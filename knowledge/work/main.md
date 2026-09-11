@@ -4309,3 +4309,24 @@ Verification:
 - The exact CI test command `nix run .#test -- --all-targets` passes all 346
   ordinary library tests and all 5 process tests; 9 deliberate manual/live
   probes remain ignored.
+
+The next CI run exposed the same scheduling race in two additional static
+guard fixtures. The fixture-only repair was therefore incomplete. The durable
+fix now lives at the process boundary: after a child exits successfully, CoCo
+accepts an early stdin close only when the write error is `BrokenPipe`; guards
+must still return valid bounded JSON, and every other input, exit, output, or
+timeout failure keeps its existing behavior. The same rule applies to hooks,
+which may legitimately ignore an event payload. Large-input regression tests
+force this path for both command kinds, while the original ordering and
+open-delete tests continue to exercise small static guards.
+
+Verification after moving the fix to the process boundary:
+
+- all 16 guard-filtered tests and the static-hook regression pass;
+- the CI-identical Clippy command passes with warnings denied; and
+- `nix run .#test -- --all-targets` passes 348 ordinary library tests and all
+  5 process tests, with 9 deliberate manual/live probes ignored.
+- The remaining Rust workflow gates pass: dependency usage, dependency policy,
+  crates.io publish dry-run, and `nix flake check .`. The local package dry-run
+  required its standard dirty-tree override because this repair had not yet
+  been committed; the packaged contents and upload simulation both completed.

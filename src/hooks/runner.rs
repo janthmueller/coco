@@ -143,17 +143,16 @@ async fn run_hook_command(
         .ok_or_else(|| "hook command did not expose stdin".to_owned())?;
     let duration = Duration::from_secs(definition.timeout_seconds());
     let execution = async {
-        stdin
-            .write_all(event)
-            .await
-            .map_err(|source| format!("could not write hook event to stdin: {source}"))?;
-        stdin
-            .shutdown()
-            .await
-            .map_err(|source| format!("could not close hook stdin: {source}"))?;
+        let input = write_child_input(
+            &mut stdin,
+            event,
+            "write hook event to stdin",
+            "close hook stdin",
+        )
+        .await;
         drop(stdin);
         match child.wait().await {
-            Ok(status) if status.success() => Ok(()),
+            Ok(status) if status.success() => accept_child_input(input),
             Ok(status) => Err(format!("hook command exited with {status}")),
             Err(source) => Err(format!("could not wait for hook command: {source}")),
         }
@@ -227,14 +226,13 @@ pub(super) async fn run_guard(
     let duration = Duration::from_secs(definition.timeout_seconds());
     let execution = async {
         let write = async move {
-            stdin
-                .write_all(request)
-                .await
-                .map_err(|source| format!("could not write guard request to stdin: {source}"))?;
-            let result = stdin
-                .shutdown()
-                .await
-                .map_err(|source| format!("could not close guard stdin: {source}"));
+            let result = write_child_input(
+                &mut stdin,
+                request,
+                "write guard request to stdin",
+                "close guard stdin",
+            )
+            .await;
             drop(stdin);
             result
         };
@@ -248,7 +246,6 @@ pub(super) async fn run_guard(
             Ok::<_, String>(output)
         };
         let (written, output) = tokio::join!(write, read);
-        written?;
         let output = output?;
         if output.len() > MAX_GUARD_OUTPUT_BYTES {
             let _ = child.kill().await;
@@ -256,7 +253,11 @@ pub(super) async fn run_guard(
             return Err("guard output exceeded 8 KiB".to_owned());
         }
         match child.wait().await {
-            Ok(status) if status.success() => parse_guard_output(&output),
+            Ok(status) if status.success() => {
+                let decision = parse_guard_output(&output)?;
+                accept_child_input(written)?;
+                Ok(decision)
+            }
             Ok(status) => Err(format!("guard command exited with {status}")),
             Err(source) => Err(format!("could not wait for guard command: {source}")),
         }
@@ -271,6 +272,32 @@ pub(super) async fn run_guard(
                 definition.timeout_seconds()
             ))
         }
+    }
+}
+
+type ChildInputError = (&'static str, std::io::Error);
+
+async fn write_child_input(
+    stdin: &mut tokio::process::ChildStdin,
+    input: &[u8],
+    write_operation: &'static str,
+    close_operation: &'static str,
+) -> Result<(), ChildInputError> {
+    stdin
+        .write_all(input)
+        .await
+        .map_err(|source| (write_operation, source))?;
+    stdin
+        .shutdown()
+        .await
+        .map_err(|source| (close_operation, source))
+}
+
+fn accept_child_input(result: Result<(), ChildInputError>) -> Result<(), String> {
+    match result {
+        Ok(()) => Ok(()),
+        Err((_, source)) if source.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        Err((operation, source)) => Err(format!("could not {operation}: {source}")),
     }
 }
 
@@ -440,6 +467,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn successful_static_hook_may_close_stdin_without_reading_it() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = load_definition(
+            temporary.path(),
+            vec!["/bin/sh".to_owned(), "-c".to_owned(), "exit 0".to_owned()],
+            5,
+        );
+        let (definition, working_directory) = first_hook(&registry);
+
+        run_hook_command(&definition, &working_directory, &vec![b'x'; 1024 * 1024])
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn guard_receives_exact_request_and_parses_a_decision() {
         let temporary = tempfile::tempdir().unwrap();
         let capture = temporary.path().join("guard.json");
@@ -464,6 +506,28 @@ mod tests {
 
         assert_eq!(decision, GuardDecision::Deny("not merged".to_owned()));
         assert_eq!(fs::read(capture).unwrap(), request);
+    }
+
+    #[tokio::test]
+    async fn valid_static_guard_may_close_stdin_without_reading_it() {
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = load_guard(
+            temporary.path(),
+            vec![
+                "/bin/sh".to_owned(),
+                "-c".to_owned(),
+                "printf '%s' '{\"decision\":\"allow\"}'".to_owned(),
+            ],
+            5,
+        );
+        let (definition, working_directory) = first_guard(&registry);
+
+        assert_eq!(
+            run_guard(&definition, &working_directory, &vec![b'x'; 1024 * 1024])
+                .await
+                .unwrap(),
+            GuardDecision::Allow
+        );
     }
 
     #[tokio::test]

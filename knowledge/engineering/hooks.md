@@ -188,6 +188,13 @@ can still fail after all guards pass, and an external invariant can change
 between a check and the effect, so this is not a transactional authorization
 service.
 
+A trusted command may deliberately return a static hook result or guard
+decision without consuming stdin. When that command exits successfully (and,
+for a guard, returns valid output), CoCo ignores only the expected broken-pipe
+result caused by the child closing its input early. Any other input-delivery
+error remains a command failure. This makes static policy commands reliable
+without weakening exit-status, output, timeout, or error-policy checks.
+
 Recovery does not rerun guards. Reaching a stored `closing` or `deleting`
 state proves the original request crossed the guard boundary; repeating an
 external policy check during compensation or convergence could make recovery
