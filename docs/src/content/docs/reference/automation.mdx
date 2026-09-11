@@ -1,0 +1,175 @@
+---
+title: Automation reference
+description: Configure hooks and guards and implement their command inputs and outputs.
+---
+
+Start with [Run commands with hooks](../../guides/hooks/) or
+[Protect actions with guards](../../guides/guards/) for a working example.
+
+## Configuration
+
+Hooks and guards share `~/.config/coco/hooks.json`. If `XDG_CONFIG_HOME`
+is set, use `$XDG_CONFIG_HOME/coco/hooks.json`. Set `COCO_HOOKS_PATH`
+before starting `cocod` to choose another file.
+
+```json
+{
+  "version": 1,
+  "hooks": [],
+  "guards": []
+}
+```
+
+Keep the file readable and writable only by its owner. It must be a regular
+file, not a symlink. It supports up to 64 hooks and 64 guards within 64 KiB.
+IDs must be unique across both arrays.
+
+Commands use an absolute executable path followed by arguments, without an
+implicit shell. They run in the configuration file's directory, inheriting
+only `PATH`. Standard error is discarded; hooks also have their stdout
+discarded. Configure commands you trust and keep them in the foreground.
+
+After editing:
+
+```bash
+coco hook validate
+coco hook reload
+```
+
+Validation executes no commands. A successful reload replaces the active
+configuration; an invalid file leaves the previous configuration active.
+Files are also loaded at coordinator startup. Changes are not watched.
+
+## Hooks
+
+| Field | Meaning |
+| --- | --- |
+| `id` | Unique lowercase identifier, up to 64 bytes |
+| `event` | One event from the table below |
+| `signal` | Optional exact `NAME@VERSION` filter for `signal.emitted` |
+| `command` | Executable and arguments |
+| `timeoutSeconds` | 1–300; defaults to 30 |
+| `maxAttempts` | 1–5; defaults to 3 |
+
+| Event | Runs after |
+| --- | --- |
+| `signal.emitted` | A new signal is accepted |
+| `workspace.created` | A workspace and its checkout are ready |
+| `workspace.closed` | A workspace is closed |
+| `workspace.reopened` | A closed workspace is restored |
+| `workspace.deleted` | A workspace is deleted |
+
+Filter by repository or workspace inside your command. Exit successfully for
+events you want to skip. New events need a matching loaded hook to trigger
+delivery; configuring one does not replay earlier signals or workspace actions.
+
+### Hook input
+
+CoCo writes one compact JSON object to stdin, then closes stdin. Read to
+end-of-file; the input has no trailing newline.
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "event-id",
+  "kind": "signal.emitted",
+  "occurredAtMs": 1789056000000,
+  "repository": {
+    "id": "repository-id",
+    "name": "project",
+    "path": "/absolute/path/to/project"
+  },
+  "workspace": {
+    "id": "workspace-id",
+    "name": "review/widget",
+    "threadId": "codex-thread-id",
+    "worktreePath": "/absolute/path/to/worktree",
+    "branchName": "coco/review/widget"
+  },
+  "data": {
+    "signalId": "signal-id",
+    "name": "review.requested",
+    "version": 1,
+    "payload": { "pr": 42 }
+  }
+}
+```
+
+A workspace without a thread or branch uses `null` for that field.
+`data` depends on the event. Ignore fields your command does not need.
+For a shell reader, `IFS= read -r event || true` handles the final
+unterminated line; for Python, use `json.load(sys.stdin)`.
+
+### Retries and history
+
+Exit zero on success. Failed commands retry after short delays, up to
+`maxAttempts`. Interrupted deliveries can run again after a coordinator
+restart. This is **at-least-once delivery**: recognize the event `id`
+before repeating an external effect.
+
+A retry of the same retained signal does not create a new hook event.
+Delivery of the original event can still be retried.
+
+Events for one hook run in order; a retry delays newer events for that hook.
+Different hooks can run concurrently. Changed or removed definitions can
+cancel queued deliveries.
+
+```bash
+coco hook history
+coco hook history --limit 100 --json
+```
+
+History shows post-event delivery outcomes, not guard checks or event payloads.
+Avoid commands that trigger the same hook recursively.
+
+## Guards
+
+| Field | Meaning |
+| --- | --- |
+| `id` | Unique identifier, shared namespace with hooks |
+| `action` | `workspace.close` or `workspace.delete` |
+| `command` | Executable and arguments |
+| `timeoutSeconds` | 1–30; defaults to 5 |
+| `onError` | Required: `allow` or `deny` |
+
+Commands receive one compact JSON request on stdin, followed by end-of-file:
+
+| Field | Contents |
+| --- | --- |
+| `schemaVersion` | `1` |
+| `id` | The request ID |
+| `action` | `workspace.close` or `workspace.delete` |
+| `requestedAtMs` | Request time in Unix milliseconds |
+| `repository` | The same repository fields as a hook event |
+| `workspace` | The same workspace fields as a hook event |
+| `data` | The checked cleanup `plan` and selected cleanup options |
+
+The close check during direct deletion also includes `data.deleting: true`.
+
+### Guard output
+
+Exit zero and write exactly one of these JSON objects to stdout:
+
+```json
+{ "decision": "allow" }
+```
+
+```json
+{ "decision": "deny", "reason": "Merge the branch before deleting it." }
+```
+
+An allow answer omits `reason`. A deny answer needs a nonempty reason.
+Output is limited to 8 KiB, and displayed reasons to 512 characters. Extra
+fields or invalid JSON cause failure, as do nonzero exits and timeouts.
+
+`onError` controls command failures; an explicit deny always blocks the
+action. A static command may ignore stdin if it exits successfully and
+produces a valid answer.
+
+Guards run in ID order and stop on denial. They run after CoCo's normal
+checks and before changes begin. Direct deletion of an open worktree checks
+both close and delete guards. Successful deletion emits only
+`workspace.deleted`.
+
+Dry-runs do not execute guards. Checks are not retried. Finishing an action
+already authorized before interruption does not run its guards again.

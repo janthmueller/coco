@@ -1,109 +1,73 @@
 ---
 title: Quickstart
-description: Start Codex work, leave the command, follow its state, and return through the native UI.
+description: Start two agents, watch their progress, and return to either conversation.
 ---
 
-This walkthrough starts one Codex turn, leaves it under CoCo's control, follows
-its state from another command, and then opens the same conversation in the
-Codex terminal UI.
+Give two agents separate workspaces, then move between their conversations.
 
-Before continuing, [install CoCo](../installation/) and keep `cocod` running in
-another terminal.
+Before you begin, [install CoCo](../installation/) and run `cocod` in another
+terminal. Leave it running throughout this walkthrough.
 
-## 1. Prepare a repository
+## Register your repository
 
-Open a clean Git repository with at least one commit, then register it:
+Inside a Git repository with at least one commit:
 
 ```bash
 coco repo add .
 ```
 
-Registration is safe to repeat. It records the repository for CoCo but does
-not create a commit, branch, or worktree.
+You can safely repeat this command.
 
-## 2. Create a workspace
-
-```bash
-coco create feat/first --base HEAD
-```
-
-CoCo creates a separate worktree and the branch `coco/feat/first`. Your current
-checkout remains unchanged. The workspace is now `Prepared`: no Codex thread
-exists yet, no workspace exec server is running, and no model turn has started.
-
-## 3. Send the first instruction
+## Start two agents
 
 ```bash
-coco send feat/first \
-  "Inspect this project and propose one focused improvement"
+coco create fix/login -s "Investigate the login flow and fix a bug if you find one"
+coco create review/cache -s "Review the cache and report possible correctness issues"
 ```
 
-This starts one dedicated `codex exec-server` for the workspace, creates its
-persistent Codex thread, and starts the first real turn. CoCo reuses that exec
-server for later turns. The command returns as soon as Codex accepts the work;
-`cocod` keeps the workspace available while the turn continues. Add `--wait`
-when you want to stay attached and print that turn's final response instead.
+Choose instructions that fit your project. Each agent gets a separate
+checkout and conversation. The commands return once Codex accepts the work.
 
-You can also create and send in one command:
+## Watch their progress
 
 ```bash
-coco create feat/second \
-  --send "Review the command-line interface"
+coco status -f
 ```
 
-## 4. Check or follow state
+The display updates as agents work, become ready, or need your input.
+Press Ctrl+C to leave the display; their work continues.
 
-Show every workspace in the current repository:
+When a workspace needs approval or an answer, status shows a
+`coco decide <decision-id>` command. Run it in another terminal, or open
+the conversation as shown below.
+
+## Jump into a conversation
 
 ```bash
-coco status
+coco jump fix/login
 ```
 
-Inspect one workspace, or follow only its state changes:
+This opens the workspace in the Codex terminal UI. Read its response, answer
+questions, and continue working. Use `/quit` or `/exit` to leave the UI
+while keeping active work running.
+
+Run `coco jump` without a name to choose a workspace interactively.
+
+## Continue from your terminal
+
+Once the agent is ready, send another instruction:
 
 ```bash
-coco status feat/first --follow
+coco send fix/login "Add a regression test for the change" --wait
 ```
 
-The follow command keeps the current state visible as it changes, including
-when the workspace becomes ready, needs your input, or reports a problem. It
-never prints conversation messages. Press `Ctrl+C` to stop following; a Codex
-turn does not stop with the display.
+`--wait` prints the response when the turn finishes. Omit it when you want
+the command to return while the agent works.
 
-Add `--resources` (`-r`) when you also want current memory, process count, and
-CPU use on Linux. Short flags can be combined:
+## Next steps
 
-```bash
-coco status feat/first -fr
-```
-
-When CoCo supports the request Codex is waiting on, `status` prints a decision
-ID and the next command:
-
-```bash
-coco decide <decision-id>
-```
-
-Review the request, then move with the arrow keys and press Enter—or press the
-number beside the answer you want for an immediate choice.
-
-## 5. Enter the Codex terminal UI
-
-```bash
-coco jump feat/first
-```
-
-This opens the existing conversation inside its managed worktree. Use `/quit`
-or `/exit` to leave the UI. Leaving does not cancel work that is still running;
-an explicit Codex interrupt does.
-
-## What you created
-
-Your original checkout is still on its original branch. CoCo's worktree and
-`coco/feat/first` branch remain available for review after you leave the UI.
-If you restart `cocod`, CoCo retains the workspace and thread and starts a new
-exec server when you next use `send` or `jump`.
-
-Continue with [Working with workspaces](../guides/workspaces/) for status,
-token usage, diffs, forks, compaction, multi-repository use, and safe workspace
-retirement.
+- [Run and navigate agents](../guides/workspaces/), including across repositories.
+- [Choose code and context](../guides/context/) for a new workspace.
+- [Monitor usage and set limits](../guides/resources/).
+- [Review and clean up](../guides/cleanup/) when work is finished.
+- [Publish agent updates](../guides/signals/) for your own automation.

@@ -35,26 +35,33 @@ export default defineConfig({
           ],
         },
         {
-          label: 'Guides',
+          label: 'Everyday work',
           items: [
-            { label: 'Working with workspaces', slug: 'guides/workspaces' },
+            { label: 'Run and navigate agents', slug: 'guides/workspaces' },
+            { label: 'Choose code and context', slug: 'guides/context' },
             { label: 'Models and profiles', slug: 'guides/execution-profiles' },
+            { label: 'Monitor usage and set limits', slug: 'guides/resources' },
+            { label: 'Review and clean up', slug: 'guides/cleanup' },
           ],
         },
         {
-          label: 'Integrations',
+          label: 'Automation',
           items: [
+            { label: 'Publish agent updates', slug: 'guides/signals' },
+            { label: 'Run commands with hooks', slug: 'guides/hooks' },
+            { label: 'Protect actions with guards', slug: 'guides/guards' },
             { label: 'Use CoCo through MCP', slug: 'guides/mcp' },
-            { label: 'Agent signals', slug: 'guides/signals' },
-            { label: 'Run hooks and guards', slug: 'guides/hooks' },
           ],
         },
         {
           label: 'Reference',
           items: [
             { label: 'Command reference', slug: 'reference/cli' },
+            { label: 'Automation reference', slug: 'reference/automation' },
+            { label: 'Signal reference', slug: 'reference/signals' },
+            { label: 'Resource accounting', slug: 'reference/resources' },
             {
-              label: 'Troubleshooting and limitations',
+              label: 'Troubleshooting',
               slug: 'reference/current-limitations',
             },
           ],

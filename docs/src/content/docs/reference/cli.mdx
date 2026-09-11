@@ -139,11 +139,10 @@ branch already checked out elsewhere.
 independent of `--detached`. Carrying requires the selected base to match the
 source checkout's `HEAD`. Ignored files require `.worktreeinclude`.
 
-`--send` starts the workspace exec server, prepares the selected conversation
-context, and starts the first turn after Git preparation. `--jump` then opens
-that thread in the Codex terminal UI. Used alone on a fresh prepared workspace,
-`--jump` starts the exec server and lets the TUI bind the thread with your first
-action. Their short forms are independent and may be combined.
+`--send` starts the first instruction after creating the workspace.
+`--jump` opens the Codex terminal UI afterward. With `--jump` alone, a fresh
+conversation is saved after your first action in the UI. Their short forms
+are independent and may be combined.
 
 ## Workspace commands
 
@@ -289,15 +288,15 @@ coco [REPOSITORY_PATH] delete [WORKSPACE]
   [-y, --yes]
 ```
 
-`close` stops the workspace exec server and removes the managed worktree while
+`close` stops workspace execution and removes the managed worktree while
 retaining the workspace record, branch, and thread. `-t` also archives the
 thread until `reopen`. Uncommitted state belongs to the removed worktree, not
 the retained branch. Local tracked, untracked, or ignored files therefore require
 `--discard-changes`; without `-y`, CoCo asks before discarding them. `--yes`
 never implies `--discard-changes`.
 
-`reopen` restores the exact retained Git binding and thread; its exec server
-starts on the next `send` or `jump`.
+`reopen` restores the retained checkout and conversation. Continue with `send`
+or `jump`.
 
 `delete` accepts open or closed workspaces. By default it removes the worktree,
 workspace, Codex conversation, and branch created by CoCo. `--keep-thread` and
@@ -395,8 +394,8 @@ resolves that name across repositories. A full UUID works globally, including
 the UUID of a deleted workspace. `--all-repos` (`-a`) reads every repository
 without a workspace target. `--follow` (`-f`) runs until interrupted. With
 `--json`, it emits one page per line, including the cursor needed to resume.
-See [Agent signals](../../guides/signals/) for a complete example and retention
-limits.
+See [Publish agent updates](../../guides/signals/) for setup and
+[Signal reference](../signals/) for retention and reader contracts.
 
 ## Hook commands
 
@@ -415,5 +414,6 @@ atomically replaces the running configuration; a failed reload keeps the old
 one. `history` shows the newest 20 post-event delivery outcomes by default;
 set `--limit` from 1 through 100. Its `deliveries` alias is equivalent.
 
-See [Run hooks and guards](../../guides/hooks/) to configure commands,
-guard close or deletion, and understand retries.
+See [Run commands with hooks](../../guides/hooks/) and
+[Protect actions with guards](../../guides/guards/) for setup, or
+[Automation reference](../automation/) for command contracts and retries.

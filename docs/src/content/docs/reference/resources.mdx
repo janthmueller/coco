@@ -1,0 +1,74 @@
+---
+title: Resource accounting
+description: Interpret memory, CPU, token counts, and cost estimates.
+---
+
+Use this reference to interpret the values in `status -r` and `usage`.
+For commands to start with, see [Monitor usage and set limits](../../guides/resources/).
+
+## Memory and process counts
+
+On Linux with cgroup-v2 accounting, memory is the total currently charged to
+the workspace's execution group. It includes more than application heap memory,
+such as charged file cache. This differs from adding the memory shown for
+individual processes.
+
+When that accounting is unavailable, CoCo uses process-tree measurements and
+labels memory as RSS. RSS counts resident pages for each process, including
+shared pages; summing it can count those pages more than once. Treat this
+fallback as an observation, especially for processes that detach from their
+parents.
+
+`PROCS` counts processes. The `--tasks-max` limit counts both processes
+and threads, so its number is not directly comparable to `PROCS`.
+
+## CPU
+
+CPU is recent usage expressed in whole-core percentages: approximately 100%
+means one logical core is fully used, and 200% means two. The first observation
+may have no interval measurement yet.
+
+`--cpu-max 2` caps total usage at two logical cores. `--cpu-weight`
+sets relative priority under CPU contention. See the
+[limit options](../cli/#resource-limits) for accepted values.
+
+## Token totals and context
+
+`usage` reports cumulative tokens for the Codex conversation. An explicit
+workspace adds input, cached-input, output, and reasoning-output breakdowns.
+Treat subset fields as breakdowns, not additional counts to add to the total.
+
+Context usage shows the latest reported count against the model's context
+window. The cumulative token total and current context occupancy answer
+different questions; shortening context does not mean earlier work was free.
+
+These are Codex's reported conversation values. When you reuse context,
+do not interpret them as an independently measured cost of work performed only
+in the new workspace.
+
+CoCo saves the latest token report. Following usage watches updates; it does
+not provide a history of every turn. After a restart the saved report is
+marked `last seen` until another report arrives. Inspecting usage leaves
+inactive workspaces inactive.
+
+## Cost
+
+Cost is available only when Codex supplies a per-conversation estimate. CoCo
+shows USD when available and otherwise credits. Estimates can lag token
+updates. An unavailable estimate is shown as a dash, never as zero.
+
+Use the estimate for observation, not as an invoice or enforced spending
+budget. CoCo's resource limits control local computation.
+
+## JSON and follow output
+
+Use `coco status <workspace> --json` for full resource details, including
+measurement source, task count, cumulative CPU, and controller events where
+available. These are current observations, not persisted resource history.
+
+`coco usage <workspace> --json` includes token breakdowns, observation and
+freshness fields, and an estimate or an unavailable reason.
+
+Status and usage follow replace the terminal view in place. Redirected output
+appends changed views. Their `--follow` and `--json` flags are mutually
+exclusive; [signal follow](../signals/#resume-a-reader) supports JSON pages.

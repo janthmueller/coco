@@ -11,11 +11,18 @@ const requiredPages = [
   'installation/index.html',
   'getting-started/index.html',
   'guides/workspaces/index.html',
+  'guides/context/index.html',
+  'guides/cleanup/index.html',
+  'guides/resources/index.html',
+  'guides/guards/index.html',
   'guides/execution-profiles/index.html',
   'guides/mcp/index.html',
   'guides/signals/index.html',
   'guides/hooks/index.html',
   'reference/cli/index.html',
+  'reference/automation/index.html',
+  'reference/signals/index.html',
+  'reference/resources/index.html',
   'reference/current-limitations/index.html',
 ];
 

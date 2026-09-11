@@ -1,100 +1,58 @@
 ---
 title: CoCo
-description: Start Codex work, leave it running, and return to the exact workspace.
+description: Run parallel Codex agents, move between their workspaces, and connect them to your workflow.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+**Run parallel Codex agents. Keep their work organized.**
 
-CoCo stands for **Codex Coordinator**. It is a local control plane that gives
-each piece of Codex work a durable name. A workspace keeps its Git worktree,
-persistent Codex thread, repository, and settings together. By default, an
-active workspace uses its own Codex execution process.
+CoCo — Codex Coordinator — gives each agent a named **workspace** with its own
+checkout and conversation. Start work across repositories, see which agents
+need attention, and return to any conversation from your terminal.
 
-The workspace remains addressable after the CLI command or Codex terminal UI
-that started it exits. You can inspect it from another terminal, answer a
-request, send more work when it is ready, or reopen the same conversation in
-the native Codex UI.
+## Work on several things at once
 
-## When CoCo helps
+Let one agent fix a bug while another investigates a different part of the
+project. Each works in a separate Git checkout, called a **worktree**, so your
+current checkout stays available.
 
-Use CoCo when you want to:
+[Create and navigate workspaces](./guides/workspaces/)
 
-- run several separate pieces of Codex work across one or more repositories;
-- start work from a short-lived command and supervise its state, token usage,
-  available cost estimate, and current resource use separately;
-- move between CLI commands, an MCP client, and the native Codex terminal UI
-  without losing the exact conversation or checkout;
-- prepare code and conversation context independently; or
-- free a worktree and later restore it without losing the workspace;
-- let an agent publish a validated update and run a trusted local hook.
+## Find the work you need
 
-Codex reasons, calls tools, requests approval, and edits files. CoCo
-coordinates the environment around that work and keeps it reachable.
+See activity across repositories with `coco status -a`. Use `coco jump` to
+pick a workspace and open its conversation in the Codex terminal UI. You can
+leave that UI while work continues and return later.
 
-## The core workflow
+[Start your first agents](./getting-started/)
 
-| You want to…                                 | Use…                          |
-| -------------------------------------------- | ----------------------------- |
-| Prepare a separate workspace                 | `coco create`                 |
-| Start or continue a Codex turn               | `coco send`                   |
-| Check once or follow live state              | `coco status`                 |
-| Inspect or follow model usage                | `coco usage`                  |
-| Answer a supported approval or question      | `coco decide`                 |
-| Enter the same conversation in the Codex TUI | `coco jump`                   |
-| Review changes from the workspace base       | `coco diff`                   |
-| Free a worktree without losing the workspace | `coco close`                  |
-| Restore closed work or delete a workspace    | `coco reopen` / `coco delete` |
+## Connect agents to your workflow
 
-`coco` commands normally exit after returning their result. `cocod` stays
-running and keeps the Codex connections and workspace execution processes
-available, so leaving `send`, `status --follow`, or a TUI opened by `jump` does
-not by itself cancel a turn. Add `--wait` to `send` only when that command
-should remain attached and print the final response.
+An agent can publish a **signal** such as “ready for review,” with fields you
+define. CoCo saves it for you and other tools to read. A **hook** runs your
+program when that signal arrives or a workspace is created, closed, reopened,
+or deleted.
 
-## What a workspace keeps together
+Use these building blocks to send notifications, update another tool, or
+connect your own automation. Applications can also inspect workspaces and
+send instructions through CoCo's MCP server.
 
-A workspace has:
+[Publish agent updates](./guides/signals/) ·
+[Run hooks](./guides/hooks/) · [Connect through MCP](./guides/mcp/)
 
-- one registered Git repository and a separate worktree while it is open;
-- one persistent Codex thread once Codex work begins;
-- one dedicated `codex exec-server` while the workspace is activated in the
-  default execution mode;
-- the model and Codex profile selected for that thread; and
-- a fixed Git base plus the chosen conversation context.
+## Control actions and resource use
 
-`create` prepares the worktree without starting Codex. The first `send` or
-`jump` starts the workspace's exec server and materializes its thread when
-needed; in a fresh `jump`, the first interactive action binds that thread.
-CoCo reuses the server until you close the workspace or stop `cocod`. Closing
-frees the worktree and execution process while retaining the workspace record
-and conversation for `reopen`.
+Add a **guard** to check your own rules before a workspace is closed or
+deleted. Watch CPU, memory, and token usage, and set resource limits on
+supported Linux systems.
 
-The code base and conversation context are independent choices. You can start
-from clean code on `main` while inheriting an investigation from another CoCo
-workspace or an exact Codex thread ID. By default, CoCo starts fresh and
-creates a `coco/<workspace>` branch.
+[Protect workspace actions](./guides/guards/) ·
+[Monitor usage and set limits](./guides/resources/)
 
-## More than one terminal
+## Get started
 
-The `coco` CLI is the main control surface. A local MCP server can expose the
-same repository-scoped workspaces to another application; inspection is
-read-only unless you explicitly enable sending. Agents can also publish
-explicitly enabled structured signals for humans or integrations to read
-later. CoCo hooks can run a local command after a matching saved signal or
-workspace lifecycle change, while guards can stop a checked close or deletion.
+CoCo uses Codex App Server and your existing Codex login and configuration.
+It is alpha software for Linux and macOS. Keep the `cocod` coordinator
+running during active work; stopping it interrupts running turns while
+preserving saved conversations and workspaces.
 
-<Aside type="caution" title="Alpha software">
-CoCo is intended for supervised local use on Linux and macOS. Keep `cocod`
-running while a turn is active and read the [troubleshooting and
-limitations](./reference/current-limitations/) before relying on it for
-important work.
-</Aside>
-
-## Next steps
-
-1. [Install CoCo](./installation/).
-2. [Run the quickstart](./getting-started/).
-3. [Learn how workspaces behave](./guides/workspaces/).
-4. Connect another application through [MCP](./guides/mcp/), or add
-   [signals](./guides/signals/) and [hooks](./guides/hooks/) to an automated
-   workflow.
+[Install CoCo](./installation/), then follow the [quickstart](./getting-started/).

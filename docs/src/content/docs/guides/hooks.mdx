@@ -1,72 +1,45 @@
 ---
-title: Run hooks and guards
-description: Run trusted local commands after CoCo events or before destructive workspace actions.
+title: Run commands with hooks
+description: Send agent updates to another tool or run a program after workspace changes.
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+A **hook** runs your program after an agent publishes a signal or a workspace
+is created, closed, reopened, or deleted.
 
-A **CoCo hook** runs a local command after a matching CoCo event. Use one to
-send a notification, update another local tool, or record an update when an
-agent publishes a signal or a workspace changes.
+For example, send each review request to a notification service that accepts
+JSON webhooks.
 
-A **guard** runs before CoCo closes or permanently deletes a workspace. It can
-allow the checked action or stop it with a reason.
+## Connect a review notification
 
-CoCo hooks and Codex hooks have different jobs:
+First follow [Publish agent updates](../signals/) to enable
+`review.requested@1`. For this example you also need `curl` and an HTTP
+endpoint that accepts CoCo's [event JSON](../../reference/automation/#hook-input).
 
-- use a **CoCo hook** for saved signals and workspace creation, closing,
-  reopening, or deletion;
-- use a **Codex hook** for events inside a coding session, such as prompts,
-  tool calls, permissions, compaction, and stopping.
-
-Configure the second kind through
-[Codex's native hooks](https://learn.chatgpt.com/docs/hooks), not in CoCo's
-file below.
-
-Each post-event hook runs only its configured command. Start follow-up model work
-separately with `coco send`.
-
-## Create a hook command
-
-The command receives one JSON event on standard input. This small example
-writes each event to a file so you can inspect it:
+Find the full executable path:
 
 ```bash
+command -v curl
 mkdir -p ~/.config/coco
 ```
 
-```sh title="~/.config/coco/save-hook-event"
-#!/bin/sh
-set -eu
-
-IFS= read -r event
-printf '%s\n' "$event" >> /absolute/path/to/coco-hook-events.ndjson
-```
-
-Replace the output path, then make the script executable:
-
-```bash
-chmod 700 ~/.config/coco/save-hook-event
-```
-
-Hook and guard commands run with a minimal environment containing only `PATH`. Use
-absolute paths for files and do not rely on `HOME` or other inherited
-variables. CoCo ignores a hook command's standard output and error output, so the
-command must save or send anything you need.
-
-## Configure the hook
-
-Create `~/.config/coco/hooks.json`:
+Create `~/.config/coco/hooks.json`. If it already exists, add the entry to
+its `hooks` array while preserving your other hooks and guards:
 
 ```json title="~/.config/coco/hooks.json"
 {
   "version": 1,
   "hooks": [
     {
-      "id": "save-review-request",
+      "id": "notify-review",
       "event": "signal.emitted",
       "signal": "review.requested@1",
-      "command": ["/absolute/path/to/save-hook-event"],
+      "command": [
+        "/absolute/path/to/curl",
+        "--fail", "--silent", "--show-error",
+        "--header", "Content-Type: application/json",
+        "--data-binary", "@-",
+        "https://your-service.example/coco/review"
+      ],
       "timeoutSeconds": 30,
       "maxAttempts": 3
     }
@@ -74,171 +47,46 @@ Create `~/.config/coco/hooks.json`:
 }
 ```
 
-Use an absolute executable path in `command`; following items are passed as
-arguments without a shell. `signal` is an optional exact `NAME@VERSION` filter
-for `signal.emitted`. Remove it to match every accepted signal.
+Replace the executable path and endpoint with your values. This sends the full
+event, including the workspace and signal payload, as the request body.
+Only use an endpoint you trust with those contents.
 
-Event kind and exact signal version are the built-in filters. To limit a hook
-to one repository or workspace, inspect those fields in your command and exit
-successfully when the event is not relevant.
-
-Protect the file from changes by other users:
+## Load and check it
 
 ```bash
 chmod 600 ~/.config/coco/hooks.json
-```
-
-Check the complete file without running a command, then atomically replace the
-configuration used by the running daemon:
-
-```bash
 coco hook validate
 coco hook reload
-```
-
-An invalid reload leaves the previous configuration active. `cocod` also
-loads and validates the file when it starts. An absent file means no hooks or
-guards. CoCo does not watch the file automatically.
-
-## Choose an event
-
-The current events are:
-
-| Event                | Runs after…                                        |
-| -------------------- | -------------------------------------------------- |
-| `signal.emitted`     | a new signal is accepted                           |
-| `workspace.created`  | a new workspace and its worktree are ready         |
-| `workspace.closed`   | a workspace is safely closed                       |
-| `workspace.reopened` | a closed workspace is restored                     |
-| `workspace.deleted`  | an open or closed workspace is permanently deleted |
-
-An event is created only when a loaded hook matches it. Retrying the same
-signal with the same idempotency key does not run the hook twice.
-
-## Protect close or delete with a guard
-
-Deleting an open workspace with a worktree checks both `workspace.close` and
-`workspace.delete` guards before removing anything. Successful deletion emits
-`workspace.deleted`; `workspace.closed` is reserved for an explicit close.
-
-Add a `guards` array to the same file:
-
-```json title="~/.config/coco/hooks.json"
-{
-  "version": 1,
-  "hooks": [],
-  "guards": [
-    {
-      "id": "protect-unmerged-work",
-      "action": "workspace.delete",
-      "command": ["/absolute/path/to/check-workspace"],
-      "timeoutSeconds": 5,
-      "onError": "deny"
-    }
-  ]
-}
-```
-
-The command receives one JSON request on standard input. It contains
-`schemaVersion`, a request `id`, `action`, `requestedAtMs`, the repository and
-workspace, and the exact checked retirement plan under `data.plan`.
-
-Allow the action by writing this JSON to standard output and exiting with
-status zero:
-
-```json
-{ "decision": "allow" }
-```
-
-An allow response must not include a `reason`.
-
-Or stop it with a user-facing reason:
-
-```json
-{ "decision": "deny", "reason": "The branch is not merged." }
-```
-
-`onError` is required. Choose `deny` to stop when the command fails, times out,
-or returns invalid output; choose `allow` for an advisory check that may fail
-open. Guards run synchronously, are not retried, and cannot rewrite an action.
-A dry-run shows the retirement plan without executing guards. Recovery
-finishes an action that had already passed its guards before interruption;
-it does not run them again.
-
-## Read the event
-
-Every command receives this top-level shape:
-
-```json
-{
-  "schemaVersion": 1,
-  "id": "0199...",
-  "kind": "signal.emitted",
-  "occurredAtMs": 1789056000000,
-  "repository": {
-    "id": "...",
-    "name": "project",
-    "path": "/absolute/path/to/project"
-  },
-  "workspace": {
-    "id": "...",
-    "name": "review/widget",
-    "threadId": "...",
-    "worktreePath": "/absolute/path/to/worktree",
-    "branchName": "coco/review/widget"
-  },
-  "data": {
-    "signalId": "...",
-    "name": "review.requested",
-    "version": 1,
-    "payload": { "pr": 42 }
-  }
-}
-```
-
-The contents of `data` depend on the event. For `signal.emitted`, it contains
-the accepted signal and its payload. Treat the event `id` as the idempotency
-key for external effects and ignore fields your command does not need. A
-workspace without a thread or branch uses `null` for the corresponding field.
-
-## Check configuration and deliveries
-
-List the hooks and guards loaded by the running daemon:
-
-```bash
 coco hook list
 ```
 
-Check recent delivery attempts:
+After the agent emits a review request, your endpoint should receive it.
+Check the delivery result:
 
 ```bash
 coco hook history
-coco hook history --limit 100 --json
 ```
 
-History shows pending, running, successful, failed, and cancelled deliveries.
-It covers post-event hooks, not synchronous guards, and does not reveal
-command arguments or event payloads.
+Changes to the file take effect after `hook reload` or a coordinator
+restart. An invalid reload leaves the previous configuration active.
 
-CoCo retries a failed command after a short delay, up to `maxAttempts`. A
-delivery interrupted by a daemon restart is attempted again. Delivery is
-therefore **at least once**: a command may receive the same event more than
-once if CoCo could not record its previous result. Make external effects
-safe to repeat by storing or forwarding the event `id` and ignoring one you
-already processed. Events for one hook run in the order CoCo saved them; a
-retry delays newer events for that hook. Separate hooks may run at the same
-time.
+## Run your own program
 
-Avoid a hook command that performs the same CoCo action it reacts to. This
-alpha does not detect hook loops. Hook commands should also remain in the
-foreground; CoCo does not manage background processes they start.
+Replace the `command` array with your executable and arguments. CoCo
+passes the event as JSON on standard input. Your program can use it to update
+another tool, record an artifact, or decide which follow-up action to take.
 
-<Aside type="caution" title="Hooks run as your user">
-Only configure commands you trust. The minimal environment avoids accidental
-credential inheritance, but a hook or guard still has the filesystem and
-process access of your operating-system user. Keep secrets out of their
-inputs.
-</Aside>
+A command can receive the same event again after a failure or restart. Use
+the event's `id` to avoid repeating external effects, such as creating the
+same ticket twice.
 
-Continue with [Agent signals](../signals/) to define and publish a validated
-signal such as `review.requested`.
+Hooks run as your user with only `PATH` inherited. Use absolute file paths,
+configure any required credentials explicitly, and keep commands in the
+foreground. Avoid actions that trigger the same hook repeatedly.
+
+See [Automation reference](../../reference/automation/) for event names,
+payloads, filters, retries, and configuration fields. To check an action
+before it happens, use a [guard](../guards/).
+
+For prompt, tool, or permission events within Codex itself, configure
+[Codex's native hooks](https://learn.chatgpt.com/docs/hooks).

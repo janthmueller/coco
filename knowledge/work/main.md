@@ -4330,3 +4330,46 @@ Verification after moving the fix to the process boundary:
   crates.io publish dry-run, and `nix flake check .`. The local package dry-run
   required its standard dirty-tree override because this repair had not yet
   been committed; the packaged contents and upload simulation both completed.
+
+## Outcome-led public documentation — 2026-09-11
+
+Active scope: implement the approved editorial restructuring. Lead README and
+overview with parallel agents, navigation, signals/hooks, action guards, and
+resource controls. Split everyday guides by reader task and retain the public
+configuration contracts needed by integration authors in dedicated reference.
+Keep architecture and rationale internal. Preserve existing page routes where
+practical, check internal links and the static Pages export, and record results.
+No runtime changes, release, commit, or push are part of this task.
+
+Completed the editorial slice. README and overview now lead with parallel
+agents and five practical benefits. Quickstart demonstrates two concurrent
+workspaces. Preserved all ten existing page routes and added focused context,
+cleanup, resource, and guard guides plus signal, automation, and accounting
+references. Navigation groups these into getting started, everyday work,
+automation, and reference.
+
+Updated the canonical documentation policy and docs agent instructions:
+signals/hooks are visible product benefits; integration contracts remain
+public reference material, while architecture and rationale stay internal.
+Kept guards limited to close/delete and resource enforcement explicitly Linux
+and capability dependent. Installation distinguishes current Git builds from
+published alphas, so examples do not silently assume unreleased features exist
+in an older package.
+
+The hook example now sends an actual review webhook, with a configurable
+endpoint. The guard example checks branch reachability in Git. The automation
+reference specifies EOF-delimited JSON; the prior shell example could fail on
+the missing trailing newline under `set -e`.
+
+Verification: Astro source diagnostics pass with no errors or warnings.
+The final `/coco` static build verifies 61 files, all 17 pages, Pagefind,
+internal link destinations, and the public-only boundary. An additional check
+validated section-fragment links and README file links. All ten JSON examples
+parse. Executed the documented Python guard with real temporary Git history:
+merged work allows; unmerged, detached, and missing branches deny. No agent
+turn or webhook request was issued. Runtime Rust tests are unnecessary for
+this documentation-only change.
+
+User approved the result and requested a docs commit, rebase onto the current
+origin/main, and push. The verified documentation slice is ready for that
+handoff; no runtime changes accompany it.

@@ -3,9 +3,9 @@ title: Use CoCo through MCP
 description: Let an MCP-capable application inspect or continue workspaces in one repository.
 ---
 
-CoCo includes a local MCP server for applications that should work with the
-same workspaces as the CLI. It uses standard input and output, so the MCP host
-starts it as a child process.
+Connect an assistant or application to inspect your workspaces, read agent
+updates, and optionally send instructions. CoCo provides an MCP (Model Context
+Protocol) server so compatible applications can use these tools.
 
 ## Before you begin
 
@@ -100,7 +100,8 @@ it disabled unless that is the access you intend to grant.
 
 To let a Codex workspace publish structured updates, select schema files with
 `--signal-catalog DIR` and grant specific versions with `--allow-emit NAME@VERSION`.
-See [Agent signals](../signals/) for setup, permissions, and reading the updates.
+See [Publish agent updates](../signals/) for setup and
+[Signal reference](../../reference/signals/) for publication permissions.
 
 This MCP server lets another application control existing CoCo workspaces.
 Configure tools that should be available _inside_ a Codex workspace through

@@ -48,17 +48,25 @@ data.
   behavior.
 - Keep design rationale, speculative alternatives, and agent bookkeeping out
   of public pages.
-- Explain the product with the smallest useful technical model: CoCo is a local
-  orchestration layer around Codex App Server, and a workspace binds a Git
-  worktree, Codex thread, and selected configuration. This helps users
-  understand prerequisites and process lifetime; storage, RPC, schema, and
-  adapter details remain internal.
-- Lead public entry points with the durable user benefit: a named Codex
-  workspace remains addressable outside the client that started it and can be
-  supervised through CLI, the native TUI, or MCP. Worktree creation supports
-  that control-plane promise but is not the product definition. Treat signals
-  and their optional local hooks as an advanced integration rather than a
-  competing onboarding story.
+- Lead entry points with parallel agents, quick navigation across repositories,
+  structured updates and automation, action checks, and resource control.
+  Define a workspace as a named checkout and conversation. Introduce Codex App
+  Server briefly to explain the dependency; execution-process topology belongs
+  in internal knowledge or narrowly relevant troubleshooting.
+- Give signals and hooks visible product value on the README and overview.
+  Their setup belongs in focused automation guides. Distinguish hooks (run a
+  program after an event), guards (check close/delete actions), and resource
+  limits (control local computation). Do not imply a built-in scheduler,
+  arbitrary state-change hooks, or broader guard coverage.
+- Use progressive disclosure: README and overview answer why to use CoCo;
+  guides show an outcome, a working example, and how to check it; public
+  reference documents the contracts users need to configure or integrate it.
+  Keep detailed command inventories out of the README and split large guides
+  by reader task. Avoid repeating setup and lifecycle explanations everywhere.
+- Technical integration users are product users. Public signal schemas, hook
+  inputs/outputs, retry semantics, configuration limits, and resource
+  measurement definitions belong in focused reference pages. Internal storage
+  schemas, protocol implementation, and design rationale remain internal.
 - Call commands that run after saved events **hooks** and checks that run before
   a destructive action **guards**. Do not expose `reaction` as a third public
   category; it is an internal distinction within the hook implementation.
@@ -82,7 +90,7 @@ may contain only:
 The following belong exclusively under `knowledge/` and must never be copied
 or linked into the public site:
 
-- component architecture, daemon/RPC/database internals, schemas, and adapter
+- component architecture, daemon/RPC/database internals, storage schemas, and adapter
   design;
 - decision records, trade-off analysis, implementation sequencing, and test
   strategy;

@@ -1,0 +1,82 @@
+---
+title: Monitor usage and set limits
+description: Watch CPU, memory, and model usage, then set limits for a workspace.
+---
+
+See what your agents consume as you run them in parallel. On supported Linux
+systems, you can also limit how much of your machine each workspace uses.
+
+## Watch CPU and memory
+
+```bash
+coco status -r
+coco status -afr
+```
+
+`-r` adds resource measurements, `-a` includes all repositories, and
+`-f` keeps the display updated. For one workspace:
+
+```bash
+coco status fix/login -fr
+```
+
+Memory shows current use, `PROCS` counts processes, and CPU shows recent
+usage. Measurements are available on Linux. For the precise meaning of each
+measurement, see [Resource accounting](../../reference/resources/).
+
+## Watch tokens and cost
+
+```bash
+coco usage
+coco usage fix/login -f
+coco usage -af
+```
+
+The overview shows total tokens, context-window use, and a cost estimate
+when Codex provides one. Select one workspace for the token breakdown.
+
+A dash means the value is unavailable. A cost dash does not mean the work was
+free. After a coordinator restart, saved token values are marked
+`last seen` until Codex reports an update.
+
+## Set workspace limits
+
+Limits are off by default. They require Linux with cgroup v2 and a compatible
+systemd user session. Check your workspace's support with:
+
+```bash
+coco limits show fix/login
+```
+
+For example, start slowing memory allocation above 2 GiB and cap total CPU
+usage at two logical cores:
+
+```bash
+coco limits set fix/login --memory-high 2GiB --cpu-max 2
+```
+
+You can also set a hard memory ceiling and a combined process/thread limit:
+
+```bash
+coco limits set fix/login --memory-max 4GiB --tasks-max 512
+```
+
+Choose values appropriate to your project. Reaching a hard memory ceiling
+can terminate workspace processes; `--memory-high` is a gentler first
+control. CoCo rejects limits it cannot enforce on your system.
+
+## Change or remove limits
+
+```bash
+coco limits set fix/login --cpu-max 1.5
+coco limits set fix/login --clear memory-max
+coco limits reset fix/login
+```
+
+Most changes apply immediately. Removing an active CPU cap takes effect when
+that workspace's execution next starts; `limits show` displays any pending
+change. A hard memory limit below current use is rejected.
+
+See the [CLI reference](../../reference/cli/#resource-limits) for all settings,
+including relative CPU priority, and [Resource accounting](../../reference/resources/)
+for measurement and token details.

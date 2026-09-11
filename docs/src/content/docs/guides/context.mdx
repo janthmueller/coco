@@ -1,0 +1,115 @@
+---
+title: Choose code and context
+description: Start from the code you need and optionally reuse an existing agent conversation.
+---
+
+Choose a workspace's code and conversation independently. For example, use
+clean code from `main` while keeping the findings from an investigation.
+
+## Choose the code
+
+```bash
+coco create fix/login --base main
+```
+
+`--base` accepts a Git revision and defaults to your current `HEAD`.
+To start from another workspace's committed code:
+
+```bash
+coco create review/login --base-workspace fix/login
+```
+
+Local changes stay in the source checkout unless you explicitly carry them.
+CoCo warns when tracked or ordinary untracked changes were left behind.
+
+## Reuse a conversation
+
+New workspaces start with a fresh conversation by default. Use
+`--context` (`-c`) to copy the history of an existing workspace:
+
+```bash
+coco create review/login --base main --context investigate/login
+```
+
+You can supply an existing Codex thread ID instead:
+
+```bash
+coco create review/login --base main --context <codex-thread-id>
+```
+
+The source conversation must be idle or unloaded. Its history is copied into
+a new conversation, leaving the source available.
+
+To reuse both the committed code and conversation of a workspace:
+
+```bash
+coco create review/login --base-workspace fix/login --context fix/login
+```
+
+### Shorten copied context
+
+Add `--compact-context` (`-C`) to have Codex shorten the copied
+conversation before accepting your first message:
+
+```bash
+coco create review/login -Cc investigate/login
+```
+
+The source conversation stays unchanged.
+
+## Choose a branch
+
+The default branch is `coco/<workspace-name>`. Choose a different new
+branch, an existing branch, or a detached checkout:
+
+```bash
+coco create fix/login --branch feature/login
+coco create review/login --checkout existing-login-branch
+coco create investigate/login --detached
+```
+
+An existing branch must be available locally and not checked out elsewhere.
+`--checkout` selects the branch's code directly, so it cannot be combined
+with a base option.
+
+Detached work has no branch name. Before closing it, retain any new commits
+on a Git branch or tag so you can reopen them.
+
+## Bring local changes
+
+Use `--dirty` (`-d`) to copy staged edits, unstaged edits, and ordinary
+untracked files from your checkout:
+
+```bash
+coco create fix/login -d
+```
+
+The source remains unchanged. Carrying changes requires the selected base to
+match the source checkout's current commit.
+
+`-D` means detached and can be combined with `-d`:
+
+```bash
+coco create investigate/login -dD
+```
+
+For tracked changes only, use `--carry-changes`. Ordinary untracked files
+then block the copy; add `--carry-untracked` to include them.
+
+### Include ignored setup files
+
+Use a `.worktreeinclude` file at the repository root for ignored files you
+need in new checkouts. It accepts Git ignore-style patterns and selects only
+files Git already ignores. For example:
+
+```text title=".worktreeinclude"
+.env.local
+```
+
+Review the selection carefully: these files are copied into new workspaces
+and may contain credentials. An ignored root `AGENTS.override.md` is
+included automatically. Symlinks are skipped and existing destination files
+are preserved.
+
+See the [create reference](../../reference/cli/#create-a-workspace) for name
+rules and context disambiguation, or [choose a model and profile](../execution-profiles/).

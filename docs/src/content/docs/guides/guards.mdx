@@ -1,0 +1,101 @@
+---
+title: Protect actions with guards
+description: Run your own checks before closing or deleting a workspace.
+---
+
+A **guard** checks a rule before CoCo closes or deletes a workspace. It
+allows the action or stops it with a reason.
+
+For example, require a workspace's commits to be merged into `main`
+before allowing deletion.
+
+## Write the check
+
+This example needs Python 3 and Git on your `PATH`. Save the following
+script outside the worktrees your agents edit:
+
+```bash
+mkdir -p ~/.config/coco
+```
+
+```python title="~/.config/coco/check-merged.py"
+import json
+import subprocess
+import sys
+
+request = json.load(sys.stdin)
+branch = request["workspace"]["branchName"]
+merged = False
+
+if branch:
+    result = subprocess.run(
+        ["git", "-C", request["repository"]["path"],
+         "merge-base", "--is-ancestor", branch, "main"],
+        check=False,
+    )
+    merged = result.returncode == 0
+
+if merged:
+    print(json.dumps({"decision": "allow"}))
+else:
+    print(json.dumps({
+        "decision": "deny",
+        "reason": "Merge the workspace branch into main before deleting it."
+    }))
+```
+
+Replace `main` if your integration branch has another name. This checks
+committed history; CoCo's normal file-discard checks still protect local
+edits. The rule also denies detached workspaces, which have no branch.
+
+## Configure the guard
+
+Find your Python executable with `command -v python3`. Add a guard to
+`~/.config/coco/hooks.json`, preserving any existing entries:
+
+```json title="~/.config/coco/hooks.json"
+{
+  "version": 1,
+  "guards": [
+    {
+      "id": "require-merged-branch",
+      "action": "workspace.delete",
+      "command": [
+        "/absolute/path/to/python3",
+        "/absolute/path/to/check-merged.py"
+      ],
+      "timeoutSeconds": 5,
+      "onError": "deny"
+    }
+  ]
+}
+```
+
+Replace both paths. This rule applies to deletion across your CoCo
+repositories; adapt the script if only particular repositories need it.
+
+```bash
+chmod 600 ~/.config/coco/hooks.json
+coco hook validate
+coco hook reload
+```
+
+## Check the result
+
+`coco hook list` shows the loaded guard. On your next actual deletion,
+CoCo runs the check before removing anything and displays its reason if
+denied. A `--dry-run` previews cleanup without executing guards.
+
+Use `workspace.close` for a close guard. Deleting an open worktree checks
+both close and delete guards.
+
+## Choose failure behavior
+
+`onError: "deny"` stops the action if the command fails, times out, or
+returns an invalid answer. Use `"allow"` only when the check is advisory
+and you want the action to proceed on those errors. An explicit deny answer
+always stops it.
+
+Guards run your code as your user. Keep their configuration and scripts in a
+trusted location. See the [Automation reference](../../reference/automation/#guards)
+for request fields, response rules, and ordering.

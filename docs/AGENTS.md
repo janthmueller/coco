@@ -6,6 +6,14 @@ Everything rendered from `src/content/docs/` is strictly user-facing.
 - Every page must answer a concrete user question or enable a concrete action.
 - Prefer a short explanation and one working example over comprehensive
   internals.
+- Introduce features through the problem they solve. README and overview lead
+  with parallel agents, navigation, automation, and resource control. Give
+  signals and hooks visibility there; explain their setup in focused guides.
+- Put exact user configuration, signal schemas, hook input/output contracts,
+  retry guarantees, and measurement definitions in public reference pages.
+  These help integration authors use CoCo; implementation details stay internal.
+- Each guide starts with an outcome and a complete example, then explains how
+  to verify it. Link to reference for edge cases instead of repeating it.
 - Describe CoCo positively through the outcomes and actions it enables. Do not
   define the product or a workspace by what it is not; reserve negative wording
   for an actionable limitation or safety fact that prevents user surprise.

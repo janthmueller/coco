@@ -3,9 +3,9 @@ title: Models and profiles
 description: Choose one model or apply a reusable Codex configuration to a workspace.
 ---
 
-A **model** chooses which model runs the workspace. A **profile** is a named
-Codex configuration file that can group settings such as reasoning effort,
-sandbox mode, approval policy, or instructions.
+Choose the model for a workspace and save recurring settings in a **profile**.
+A profile can group reasoning effort, approvals, instructions, and available
+tools so you can reuse them across workspaces.
 
 ## List available models
 
@@ -36,10 +36,9 @@ coco create refactor/cache --model gpt-5.6-sol
 Without `--model`, Codex selects the model from its normal configuration.
 CoCo does not maintain a separate model catalog or alias list.
 
-## Define a CoCo execution profile
+## Save reusable settings
 
-CoCo's named profiles are complete Codex configuration layers stored next to
-your normal Codex configuration:
+Save a named configuration file next to your normal Codex configuration:
 
 ```toml title="~/.codex/dev.config.toml"
 model_reasoning_effort = "high"

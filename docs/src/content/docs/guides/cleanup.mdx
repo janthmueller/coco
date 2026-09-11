@@ -1,0 +1,85 @@
+---
+title: Review and clean up
+description: Review agent changes, free a checkout, or delete work while choosing what to keep.
+---
+
+Review the agent's work before merging it. Then close the workspace if you
+want to return later, or delete it when you are done.
+
+## Review changes
+
+```bash
+coco diff fix/login
+```
+
+This shows tracked changes since the workspace's original base, including
+committed and uncommitted edits, and lists new untracked files. Large patches
+may be truncated with a notice. Use Git to review the complete changes,
+commit, and merge the branch.
+
+## Close work for later
+
+```bash
+coco close fix/login --dry-run
+coco close fix/login
+```
+
+Closing frees the worktree and stops its execution processes. The branch
+and conversation remain available.
+
+Commit, stash, or move files you need before closing. Tracked changes,
+untracked files, and ignored files all prevent an ordinary close. CoCo also
+blocks close while work, a pending decision, an attached Codex UI, or
+background commands still use the workspace.
+
+Find and restore closed work:
+
+```bash
+coco list --closed
+coco reopen fix/login
+coco jump fix/login
+```
+
+Reopen restores the checkout at the retained commit. For detached work,
+first preserve new commits on a branch or tag before closing.
+
+## Delete finished work
+
+You can delete an open or closed workspace directly:
+
+```bash
+coco delete fix/login --dry-run
+coco delete fix/login
+```
+
+The default removes the workspace, its worktree, its Codex conversation, and
+its CoCo-created branch. Review the plan and confirm with `y`.
+
+### Keep the conversation or branch
+
+```bash
+coco delete fix/login --keep-thread
+coco delete fix/login --keep-branch
+coco delete fix/login --keep-thread --keep-branch
+```
+
+CoCo prints what it retained. Use a retained thread ID as
+`coco create <name> --context <thread-id>` to copy its conversation later.
+Branches selected with `--checkout` are always kept.
+
+### Handle unsaved work
+
+The deletion plan lists local files and commits that would lose their last
+retaining branch, tag, or remote-tracking branch. Commit, move, or merge work
+you want to keep, or use `--keep-branch` to retain the branch's commits.
+
+In a terminal, CoCo asks separately before discarding files or unretained
+commits. If you explicitly want to discard files during close, use
+`coco close fix/login --discard-changes`.
+
+For scripts, `--yes` skips confirmation but never grants permission to
+discard files or commits. See the [lifecycle options](../../reference/cli/#close-reopen-and-delete)
+for explicit discard flags and conversation archiving.
+
+If cleanup is blocked or interrupted, follow
+[Troubleshooting](../../reference/current-limitations/#close-or-delete-is-blocked).

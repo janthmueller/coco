@@ -10,6 +10,12 @@ status: stable
 
 ## 2026-09-11
 
+- **Outcome-led public documentation**: Lead the README and overview with
+  parallel work, navigation, signals/hooks, guards, and resource controls.
+  Split everyday workflows and automation setup into focused guides. Public
+  integration and measurement contracts now have dedicated reference pages;
+  maintainer architecture remains internal. Retain Starlight and static Pages.
+
 - **Passive native workspace usage**: Added `coco usage [workspace]` with
   current/all-repository scope, global exact-name lookup, one-shot JSON, and
   terminal-stable `--follow`/`-f`. CoCo now retains one exact-binding,
