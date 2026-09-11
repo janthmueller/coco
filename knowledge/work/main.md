@@ -4373,3 +4373,15 @@ this documentation-only change.
 User approved the result and requested a docs commit, rebase onto the current
 origin/main, and push. The verified documentation slice is ready for that
 handoff; no runtime changes accompany it.
+
+## Published README links — 2026-09-11
+
+Active scope: make README links to user guides resolve to the published GitHub
+Pages site instead of exposing repository source paths.
+
+Replaced every `docs/src/...` README link with its canonical
+`https://janthmueller.github.io/coco/` route. Recorded the durable rule that
+public user journeys link to the deployed site, while repository-relative links
+remain appropriate for source and contributor material. Verified that every
+linked route exists in the current static export and that no local docs-source
+link remains in README.

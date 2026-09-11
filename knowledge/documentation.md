@@ -44,6 +44,9 @@ data.
   surprise; do not turn the public site into a roadmap.
 - Avoid duplicating exhaustive reference material across the README and site.
   Choose one authoritative surface and link to it.
+- Link user journeys in the README to the published documentation site. Reserve
+  repository-relative links for source or contributor material that has no
+  public-site destination.
 - Update nearby public documentation in the same change as user-visible
   behavior.
 - Keep design rationale, speculative alternatives, and agent bookkeeping out

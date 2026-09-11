@@ -20,9 +20,9 @@ and jump back into any conversation.
 CoCo uses Codex App Server and your existing Codex login and configuration.
 
 [Documentation](https://janthmueller.github.io/coco/) ·
-[Quickstart](docs/src/content/docs/getting-started.mdx) ·
-[Automation](docs/src/content/docs/guides/signals.mdx) ·
-[Resource limits](docs/src/content/docs/guides/resources.mdx)
+[Quickstart](https://janthmueller.github.io/coco/getting-started/) ·
+[Automation](https://janthmueller.github.io/coco/guides/signals/) ·
+[Resource limits](https://janthmueller.github.io/coco/guides/resources/)
 
 ## Install
 
@@ -33,8 +33,8 @@ repository version with Cargo:
 cargo install --locked --git https://github.com/janthmueller/coco codex-coordinator
 ```
 
-See [Installation](docs/src/content/docs/installation.mdx) for published
-releases, Nix, and setup.
+See [Installation](https://janthmueller.github.io/coco/installation/) for
+published releases, Nix, and setup.
 
 ## Start two agents
 
@@ -57,13 +57,14 @@ active work running.
 
 ## Build your workflow
 
-Use [signals](docs/src/content/docs/guides/signals.mdx) to have an agent report
-that a change is ready for review. Attach a
-[hook](docs/src/content/docs/guides/hooks.mdx) to notify you or update another
-tool. Add a [guard](docs/src/content/docs/guides/guards.mdx) when closing or
+Use [signals](https://janthmueller.github.io/coco/guides/signals/) to have an
+agent report that a change is ready for review. Attach a
+[hook](https://janthmueller.github.io/coco/guides/hooks/) to notify you or
+update another tool. Add a
+[guard](https://janthmueller.github.io/coco/guides/guards/) when closing or
 deleting work should require your own checks.
 
-Watch [resource and token usage](docs/src/content/docs/guides/resources.mdx)
+Watch [resource and token usage](https://janthmueller.github.io/coco/guides/resources/)
 as you run more agents, and set workspace limits to control their use of your
 machine.
 
@@ -75,5 +76,5 @@ compatible systemd user session.
 
 Keep `cocod` running during active work. Stopping it interrupts running turns;
 your saved conversations and workspaces remain available.
-See [Troubleshooting](docs/src/content/docs/reference/current-limitations.mdx)
+See [Troubleshooting](https://janthmueller.github.io/coco/reference/current-limitations/)
 for compatibility notes.
