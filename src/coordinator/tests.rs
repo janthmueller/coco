@@ -40,6 +40,7 @@ mod events;
 mod guards;
 mod jump;
 mod operations;
+mod repositories;
 mod resources;
 mod retirement;
 mod retirement_confirmation;
@@ -874,6 +875,7 @@ impl Fixture {
             .register_repository(RepositoryRegisterParams {
                 path: self.source.clone(),
             })
+            .await
             .unwrap()
     }
 

@@ -12,12 +12,12 @@ use crate::daemon::execution::{ContainmentError, WorkspaceExecutionError};
 use crate::protocol::{
     AuditRecordParams, DaemonMethod, DecisionGetParams, DecisionRespondParams, EventListParams,
     HealthParams, HealthResult, HookDeliveryListParams, HookListParams, HookReloadParams,
-    ModelListParams, RepositoryResolveParams, TurnResultParams, TurnStartParams,
-    WorkspaceAttachAdoptParams, WorkspaceAttachParams, WorkspaceAttachReleaseParams,
-    WorkspaceAttachRenewParams, WorkspaceCloseParams, WorkspaceCreateParams, WorkspaceDeleteParams,
-    WorkspaceDiffParams, WorkspaceGetParams, WorkspaceLimitsGetParams, WorkspaceLimitsResetParams,
-    WorkspaceLimitsSetParams, WorkspaceListParams, WorkspaceReopenParams, WorkspaceUsageGetParams,
-    WorkspaceUsageListParams,
+    ModelListParams, RepositoryRemoveParams, RepositoryResolveParams, TurnResultParams,
+    TurnStartParams, WorkspaceAttachAdoptParams, WorkspaceAttachParams,
+    WorkspaceAttachReleaseParams, WorkspaceAttachRenewParams, WorkspaceCloseParams,
+    WorkspaceCreateParams, WorkspaceDeleteParams, WorkspaceDiffParams, WorkspaceGetParams,
+    WorkspaceLimitsGetParams, WorkspaceLimitsResetParams, WorkspaceLimitsSetParams,
+    WorkspaceListParams, WorkspaceReopenParams, WorkspaceUsageGetParams, WorkspaceUsageListParams,
 };
 use crate::rpc::{RpcErrorPayload, RpcHandler};
 
@@ -52,8 +52,13 @@ impl RpcHandler for DaemonHandler {
                 execute(self.coordinator.list_models().await)
             }
             DaemonMethod::RepositoryRegister => {
-                execute(self.coordinator.register_repository(decode(params)?))
+                execute(self.coordinator.register_repository(decode(params)?).await)
             }
+            DaemonMethod::RepositoryRemove => execute(
+                self.coordinator
+                    .remove_repository(decode::<RepositoryRemoveParams>(params)?)
+                    .await,
+            ),
             DaemonMethod::SignalCatalogLoad => {
                 execute(self.coordinator.load_signal_catalog(decode(params)?))
             }
@@ -447,5 +452,21 @@ mod tests {
 
         assert_eq!(payload.code, "DIRTY_SOURCE");
         assert_eq!(payload.data, Some(json!({"repositoryPath": path})));
+    }
+
+    #[test]
+    fn repository_removal_blocker_exposes_a_bounded_actionable_count() {
+        let path = std::path::PathBuf::from("/projects/example");
+        let payload = map_coordinator_error(CoordinatorError::RepositoryHasWorkspaces {
+            path: path.clone(),
+            workspace_count: 2,
+        });
+
+        assert_eq!(payload.code, "REPOSITORY_HAS_WORKSPACES");
+        assert!(payload.message.contains("delete them first"));
+        assert_eq!(
+            payload.data,
+            Some(json!({"repositoryPath": path, "workspaceCount": 2}))
+        );
     }
 }

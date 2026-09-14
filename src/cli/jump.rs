@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::process::Stdio;
+use std::process::{ExitStatus, Stdio};
 
 use anyhow::{Context, Result, bail};
 
@@ -104,10 +104,7 @@ async fn run_fresh_jump(
         }
     };
     let relay_outcome = relay.finish().await;
-    if !status.success() {
-        bail!("Codex terminal UI exited with {status}");
-    }
-    relay_outcome
+    finish_relayed_tui(status, relay_outcome)
 }
 
 async fn run_relayed_resume(
@@ -141,10 +138,17 @@ async fn run_relayed_resume(
         }
     };
     let relay_outcome = relay.finish().await;
-    if !status.success() {
-        bail!("Codex terminal UI exited with {status}");
+    finish_relayed_tui(status, relay_outcome)
+}
+
+fn finish_relayed_tui(status: ExitStatus, relay_outcome: Result<()>) -> Result<()> {
+    match (status.success(), relay_outcome) {
+        (true, outcome) => outcome,
+        (false, Ok(())) => bail!("Codex terminal UI exited with {status}"),
+        (false, Err(relay_error)) => Err(relay_error).context(format!(
+            "Codex terminal UI exited with {status} after its relay failed"
+        )),
     }
-    relay_outcome
 }
 
 async fn run_resume_command(
@@ -326,4 +330,24 @@ fn base_command(target: &JumpTarget, codex_binary: PathBuf) -> tokio::process::C
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
     command
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::process::ExitStatusExt;
+
+    use super::*;
+
+    #[test]
+    fn failed_tui_keeps_the_relay_transport_error() {
+        let error = finish_relayed_tui(
+            ExitStatus::from_raw(1 << 8),
+            Err(anyhow::anyhow!("relay frame exceeded its bound")),
+        )
+        .unwrap_err();
+        let rendered = format!("{error:#}");
+
+        assert!(rendered.contains("Codex terminal UI exited with exit status: 1"));
+        assert!(rendered.contains("relay frame exceeded its bound"));
+    }
 }

@@ -4385,3 +4385,363 @@ public user journeys link to the deployed site, while repository-relative links
 remain appropriate for source and contributor material. Verified that every
 linked route exists in the current static export and that no local docs-source
 link remains in README.
+
+## Existing-context jump failure investigation — 2026-09-14
+
+Active scope: diagnose a `coco jump` failure on a second machine for a
+workspace created from an existing native Codex thread. The native TUI reports
+`Failed to resume session`, a nested `thread/read failed during TUI session
+lookup`, and exits with status 1.
+
+Code tracing confirms that CoCo materializes inherited context through
+`thread/fork`, binds the returned child thread, ensures it is loaded, and then
+starts `codex resume <thread-id> --remote <relay>`. The outer exit-status error
+is only CoCo reporting the failed TUI subprocess; the actionable cause is the
+innermost App Server error following `thread/read failed`.
+
+An empty deferred fork was initially plausible because Codex cannot hydrate
+some thread history before the first user message. The user verified that the
+JSONL named by the error exists, so absence alone is not established. File
+presence also does not prove that App Server can parse, index, hydrate, or
+resume it. Next evidence needed is the exact nested error plus `codex
+--version` and `coco --version` from the affected machine. A direct native
+resume can then distinguish rollout/history failure from CoCo's remote TUI
+path, while accounting for the App Server's active-writer lease.
+
+The affected machine was updated previously. A stale running coordinator is a
+stronger first suspect than repository build output: replacing Nix or Cargo
+binaries does not replace an already-running `cocod` or its App Server and
+workspace-executor children. Restart the coordinator under the current
+environment and compare `coco`, `cocod`, and `codex` versions before touching
+durable state. CoCo stores its database and managed worktrees under
+`$XDG_DATA_HOME/coco` (default `~/.local/share/coco`), transient endpoint and
+socket files under `$XDG_RUNTIME_DIR/coco`, hook configuration under
+`$XDG_CONFIG_HOME/coco`, and native thread history remains owned by
+`$CODEX_HOME` (default `~/.codex`). Do not delete the database, worktrees, or
+Codex home as a compatibility troubleshooting step.
+
+The user reports that `coco send` likely succeeded for the affected workspace.
+That substantially narrows the fault: CoCo can resolve the workspace binding
+and the App Server can load the thread and start a turn. The remaining suspect
+is the native remote-TUI resume/history-hydration path used only by `jump`, or
+version skew in that path. If `jump` succeeds after the first send completes,
+the original trigger was the empty inherited fork. If it still fails, capture
+the innermost error and compare the running and installed component versions.
+
+The user confirmed that `coco`, `cocod`, and Codex are all on the intended
+versions. Version skew is therefore no longer the leading explanation. The
+decisive remaining split is whether `jump` succeeds after the successful first
+turn: success confirms an empty inherited-fork edge case; continued failure
+isolates the defect to remote TUI resume/history hydration and requires the
+exact innermost App Server error.
+
+The shared-execution diagnostic succeeds on the affected machine. This proves
+that the persisted workspace, child thread, rollout, and native TUI can resume;
+the failure is conditional on CoCo's default exec-server path. More precisely,
+shared mode also bypasses the one-use TUI relay, so the result currently
+isolates the pair of per-workspace execution plus relay rather than the exec
+server alone.
+
+The user's Nix configurations reveal a second concrete variable. The normal
+`coco` input is locked to `2d974d1` while `local-coco` is locked to `eb42a61`.
+Both package derivations still identify as `0.1.0-alpha.2`, so executable
+version output cannot distinguish them. The currently resolved executable on
+this machine is the `local-coco` store path. The package derivations themselves
+do not wrap Codex or set different CoCo runtime variables; their material
+difference is source revision. Compare flake-lock revisions and resolved store
+paths on the affected machine before attributing the behavior solely to host
+configuration.
+
+The affected machine uses the remote `coco` input at alpha.3 after a successful
+flake update. Comparing its current source tree with the locally working
+`eb42a61` tree shows no differences in jump, coordinator, or workspace-executor
+runtime code; only package version and hook-runner changes differ. The Nix
+package also applies no runtime wrapper or CoCo/Codex environment overrides.
+Remote packaging is therefore not the leading cause. Next isolate scope with a
+fresh `coco create <diagnostic-name> -j`: if that succeeds, the relay and
+executor work generally and the defect is inherited-thread resume; if it
+fails, the host's default exec-server/relay path is broadly affected.
+
+The fresh `coco create diagnose/jump -j` succeeds under default exec-server
+mode. Combined with the earlier evidence, the matrix is now conclusive:
+fresh relayed TUI start works; inherited-thread send works; inherited-thread
+direct TUI resume in shared mode works; only inherited-thread relayed TUI
+resume with a workspace executor fails. This rules out a generally broken
+relay, executor, rollout, installation, or thread binding. The defect is at the
+intersection implemented by `run_relayed_resume`, likely Codex history lookup
+or environment routing during remote resume. Keep shared execution as the
+safe temporary workaround for affected inherited workspaces. The fix needs a
+real-Codex regression test covering fork, first turn, and actual relayed TUI
+resume; existing live coverage stops at `workspace.attach` and cannot catch
+this boundary.
+
+The first send completed but `jump` still fails, ruling out empty-fork
+materialization as the sufficient cause. Inspection found a coverage gap: the
+real-Codex compatibility test materializes an inherited context and validates
+the `workspace.attach` resume binding plus separate executor, but never starts
+the real native TUI for that child. Process tests substitute a fake TUI and
+therefore cannot exercise Codex's actual resume/history hydration.
+
+CoCo's TUI relay injects the workspace environment only into downstream
+`thread/start` and `turn/start`, matching Codex 0.154.0's environment contract.
+The TUI sends `thread/read` and `thread/resume` directly to the shared control
+App Server. Since ordinary CoCo `send` succeeds, the next safe discriminator is
+to restart the same state with `COCO_WORKSPACE_EXECUTION=shared`: success there
+would isolate an interaction with per-workspace executor routing; continued
+failure would isolate native remote-TUI resume/history hydration. Do not patch
+or delete persisted state before capturing the exact nested App Server error.
+
+The missing live boundary is now covered. The opt-in real-Codex compatibility
+test creates a child from an exact native Codex thread ID, starts its dedicated
+workspace exec server, launches the actual native TUI through CoCo's one-use
+relay, accepts the temporary-worktree trust prompt, and verifies that the
+inherited shell-command history is rendered. It uses isolated dummy API-key
+state and never starts a model turn. The test exits Codex through `Ctrl+D`,
+which allows `coco jump` to release its attachment lease before the existing
+retirement checks continue. A hard PTY teardown is deliberately not used
+because killing the outer jump process also prevents its ordinary lease
+cleanup.
+
+The exact regression test passes locally with `codex-cli 0.154.0`, both when
+the context source is an explicit native thread ID and when the child is
+resumed through the default per-workspace exec-server path. The reported
+failure therefore cannot be reproduced from a fresh isolated CoCo and Codex
+state on this host. No product-code workaround is justified yet: the remaining
+difference is machine-specific persisted state or Codex configuration, and the
+actionable next diagnostic remains the complete innermost `thread/read` error
+from the affected host. Verification: the targeted opt-in test passed in 29.34
+seconds, and the complete ordinary Cargo suite passed with 348 library tests,
+5 process-smoke tests, and no failures.
+
+The affected rollout is 2,828,230,922 bytes. This explains why the isolated
+small-history reproduction passed while the real inherited thread failed.
+Codex 0.154.0 explicitly configures its remote App Server client for bounded
+128 MiB frames and messages, but CoCo's one-use relay had used Tungstenite's
+smaller defaults of 16 MiB per frame and 64 MiB per message on both legs.
+Shared mode bypassed that relay, and a fresh thread produced only small
+responses, matching the complete observed behavior.
+
+Decision: match Codex's finite 128 MiB remote transport bound on both relay
+legs rather than removing limits. Add a deterministic transport regression
+that sends one frame just above Tungstenite's former 16 MiB default, retain
+explicit assertions for both configured bounds, and preserve a relay failure
+in the CLI error chain when the native TUI exits unsuccessfully. The previous
+ordering discarded that transport error in favor of the secondary exit status
+and made the failure unnecessarily opaque.
+
+Implemented the bounded transport correction on both the relay's upstream
+client and downstream server handshake. Relayed fresh and resume TUI launches
+now combine the child exit and relay result so a causal transport failure wins
+over the secondary nonzero TUI status. Verification passed: a Tokio WebSocket
+test transfers a 16 MiB plus one-byte frame through the configured transport;
+the error-chain regression preserves both the TUI exit and relay cause; all
+350 non-ignored library tests and all 5 process-smoke tests pass; Clippy with
+all targets/features and denied warnings passes; and the isolated real Codex
+0.154.0 fork/resume/TUI test passes in 29.35 seconds.
+
+## Repository enrollment lifecycle design — 2026-09-14
+
+Active scope: decide whether repository registration should remain explicit,
+become implicit during workspace creation, and how a repository can be removed
+from CoCo without deleting Git or orphaning durable workspace/signal state.
+
+Current behavior requires `coco repo add` before `workspace.create`, even
+though creation already authorizes the stronger Git mutations of allocating a
+branch and worktree. Proposed direction, pending user confirmation: retain
+explicit `coco repo add [path]` for pre-enrollment and integration discovery,
+but let `workspace.create` enroll a valid unregistered repository as part of
+the daemon-owned use case. Read-only commands must never register implicitly.
+Registration may remain after a later creation failure because it is itself a
+safe, idempotent catalog operation and the user explicitly attempted creation.
+
+Add `coco repo remove [path]` with visible `rm` alias as reversible
+unregistration, not filesystem deletion. It must never cascade into Git
+worktrees, branches, Codex threads, workspaces, signals, or history and needs
+no destructive confirmation. Reject removal while any workspace record in
+that repository remains, including closed or failed records; users explicitly
+delete those workspaces first. Because signal history deliberately outlives a
+workspace, preserve the repository identity row and mark enrollment inactive
+rather than relying on a hard SQL delete. Normal repository lists, pickers,
+and path scope resolution should include only enrolled repositories. Re-adding
+or creating in the same Git identity reactivates the same stable repository
+ID and retained provenance.
+
+The user confirmed the add/remove vocabulary and the initial strict blocker.
+Do not add a force-like cascade to repository removal in this slice. A future
+`--delete-workspaces` option is acceptable only as an explicit bulk retirement
+workflow: preview every affected workspace and selected retained/deleted
+resource, run the same guards and loss checks as individual deletion, require
+one unambiguous repository-named confirmation, remain retryable after partial
+external effects, and unregister the repository only after every workspace is
+gone. It must not weaken dirty-file or uniquely reachable-commit protection,
+and it must never delete the source Git repository itself.
+
+Implementation completed for the non-cascading slice. Schema v15 adds an
+internal `is_registered` enrollment bit while keeping every repository row and
+stable ID. Repository lookup and inventory filter inactive rows; registration
+reactivates an existing common-directory identity. Store unregistration checks
+for every workspace row and flips the bit in one immediate transaction, while
+signal records remain intact after workspace deletion and unregistration.
+
+The daemon protocol now includes `repository.remove`, and the CLI exposes
+`coco repo remove [path]` with `repo rm` as its visible alias. Removal defaults
+to `.`, has no confirmation or force option, reports
+`REPOSITORY_HAS_WORKSPACES` with the path and count when blocked, and never
+touches the filesystem. If a previously registered checkout has disappeared,
+the exact stored root can still be unregistered without requiring Git to be
+available there; an existing but different Git identity is never treated as
+that stored repository. Explicit `repo add`, repository removal, and workspace
+creation serialize on the same stable repository-ID lock. `workspace.create`
+discovers and enrolls its destination while holding that lock, so removal
+cannot race creation into an inactive repository with a retained workspace.
+No read-only method gained enrollment side effects.
+
+The CLI's preflight now distinguishes an unknown valid Git repository from a
+non-Git current directory. The former proceeds to daemon-owned automatic
+enrollment; the latter retains the existing interactive registered-repository
+picker when no explicit path was supplied. The process test proves the full
+`repo add` → `repo rm` → empty inventory → `create` reactivation path. Public
+quickstart material no longer presents `repo add` as mandatory, while the
+workspace and cleanup guides retain its pre-enrollment purpose and explain
+safe repository removal.
+
+Verification: `cargo fmt --all -- --check` and Clippy for all targets/features
+with denied warnings pass. The complete test suite passes serially with 361
+library tests executed, 6 environment-dependent library tests ignored, and 5
+process tests executed; the focused lifecycle process test also passes on its
+own. The static Starlight build verifies 17 pages and 61 exported files under
+the `/coco` Pages base path. A parallel sandbox run transiently denied five
+simultaneous temporary Unix-socket binds with `EPERM`; each focused test and
+the complete serial suite pass. `nix flake check .` evaluates every output and
+starts its three builds, but the package derivation cannot see the new
+untracked Rust modules in a dirty Git-flake snapshot. Re-run that gate after
+the new files are tracked; do not use `path:.`, because it would include
+ignored build output.
+
+## Unified workspace observation — 2026-09-14
+
+Active scope: remove the redundant top-level `usage` query surface and make
+token/cost observation an optional projection of `status`, symmetric with
+runtime resource observation. Preserve single-workspace and collection
+scopes, machine-readable output, and continuous terminal following.
+
+Decision confirmed with the user: add `status --usage` with short flag `-u`;
+allow it to cluster and compose with `-f` and `-r` (for example `-fu` and
+`-fru`). `status --follow` observes whichever state, resource, and usage
+dimensions the invocation requested. Keep the default human status compact,
+show compact usage columns for collections and the existing full breakdown
+for one workspace, and remove the separate public `usage` command during the
+alpha rather than retaining two names for the same observation. `list`
+remains inventory and `limits` remains configuration.
+
+Implemented the consolidation without duplicating native accounting. The
+narrow `workspace.usage.get` and `workspace.usage.list` daemon methods remain
+the internal evidence boundary; the CLI composes them with `workspace.get` or
+`workspace.list` only when `--usage` was requested. A targeted composition
+uses the status result's opaque workspace ID for the second lookup, preventing
+a human name from retargeting between reads. Collection usage is joined by
+opaque workspace ID, so a concurrent membership change cannot attach one
+workspace's counters to another.
+
+Human collections retain `STATE` and add compact `TOKENS`, `CONTEXT`, and
+`COST` columns, optionally alongside `MEMORY`, `PROCS`, and `CPU`. Targeted
+status retains its location, decisions, errors, and requested resource details
+before the full token/context/cost breakdown. Interactive follow replaces one
+frame; redirected follow appends a new complete view only when a requested
+dimension changes. No form prints conversation output or starts an inactive
+workspace. JSON schema v11 nests the exact typed token/cost projection under
+`usage` only for `--usage`; resource sampling retains its existing JSON
+contract.
+
+Updated the public usage guide, CLI and measurement references, canonical v0
+contract, architecture, runtime and usage decisions, and project knowledge
+log. Verification passes with 360 non-ignored library tests, 6 ignored
+environment-dependent library tests, and all 5 process-smoke tests. Clippy
+with all targets/features and denied warnings passes. The static Starlight
+export again verifies 17 pages and 61 files under the `/coco` Pages base path.
+
+## Stable and hierarchical workspace status — 2026-09-14
+
+Active scope: make collection status easier to scan when workspace names use
+slash-separated conventions such as `frontend/login` and when an overview
+spans several repositories. Preserve compact tables, status projections,
+continuous follow, exact workspace identifiers in machine output, and the
+existing repository-scope semantics.
+
+Decision confirmed with the user: collection views use stable natural name
+ordering by default rather than last-update order. All-repository output sorts
+repositories first and workspaces within each repository; `w2` sorts before
+`w10`. Add the human-only `status --tree`/`-t` view for slash-aware hierarchy,
+including separate repository-path sections for `--all-repos`. It must compose
+with follow, resource, and usage flags. Add optional `--sort state` for an
+attention-first flat overview while retaining repository grouping and name
+order as its stable tie-breaker. State sorting is not the default because
+changing states would otherwise move rows during ordinary follow. JSON remains
+flat and free of presentation glyphs.
+
+Implementation checklist:
+
+- [x] Add the status view and sort arguments with unambiguous combinations.
+- [x] Apply one deterministic natural ordering to `list` and collection
+      `status`, including follow frames and JSON arrays.
+- [x] Render a bounded, aligned tree that handles prefix workspaces and more
+      than one repository without hiding status/resource/usage columns.
+- [x] Cover natural ordering, state priority, hierarchy, narrow terminals,
+      argument parsing, and end-to-end combinations.
+- [x] Update the public command/resource guidance and canonical product
+      contract, then run formatting, Clippy, tests, and the static docs build.
+
+Implemented collection ordering in the CLI presentation boundary so daemon and
+MCP result contracts do not acquire a UI-specific ordering dependency. Both
+human and CLI JSON `list`/`status` arrays now sort by natural repository display
+name, canonical path, natural slash-aware workspace name, and opaque ID. The
+numeric comparator is bounded and allocation-free, and makes `w2` precede
+`w10`. `--sort state` keeps repository grouping, applies the confirmed
+attention priority, and uses that natural name order as its deterministic
+tie-breaker.
+
+`status --tree`/`-t` builds a presentation-only trie from validated workspace
+name components. All-repository views render each canonical repository path
+once above its own normal `WORKSPACE` table; synthetic prefix nodes carry no
+invented state, while a real workspace may be both a state-bearing node and a
+parent. The existing table fitter continues to bound every row and align state,
+branch, resources, and usage. Tree composes with follow and the `-r`/`-u`
+projections, but conflicts with targeted status, JSON, and explicit sorting.
+JSON remains a flat, exact collection.
+
+Verification: all 365 non-ignored library tests and all 5 process-smoke tests
+pass serially; 6 environment-dependent library tests and 3 opt-in real-Codex
+tests remain ignored. The lifecycle process test specifically covers local
+tree output, state sorting, and `-aftru`. Formatting and Clippy for all targets
+and features with denied warnings pass. The Starlight export verifies 17 pages
+and 61 static files under the `/coco` Pages base path. `git diff --check`
+passes.
+
+Visual review found that the first all-repository tree combined two semantic
+levels into one table column: `REPOSITORY / WORKSPACE` labeled repository rows
+and workspace rows alike, while `display_name · root_path` repeated the final
+path component. Synthetic workspace-prefix rows were dimmed and therefore
+looked unavailable rather than structural. Revised direction: render each
+repository's canonical path once as a separate section heading, then render a
+normal `WORKSPACE` table beneath it. Separate repository sections with one
+blank line, emphasize synthetic slash-prefix nodes instead of dimming them,
+and keep ordinary workspace leaves and their aligned status projections
+unchanged. Repository headings must obey the same terminal-width and control-
+character bounds as table cells.
+
+Implemented the visual revision. All-repository tree output now renders only
+the canonical path as a bounded bold section heading, followed by a normal
+`WORKSPACE` table, with one blank line between repositories. It no longer
+prints the display-name/path pair or the mixed-level column title. Tree cells
+now carry independently styled segments: connector guides are dim while all
+workspace-name components use ordinary text. The trie collapses every unique
+component chain into one path and allocates structural rows only to prefixes
+shared by multiple workspace entries; a workspace that is itself a prefix
+still retains its own state-bearing row. Tests assert compact unique paths,
+expanded shared paths, the absence of the duplicate repository label, one
+occurrence of each repository path, bounded lines, styling, and the full
+`-aftru` follow composition. The complete serial suite, denied-warning Clippy
+gate, and static documentation export pass after the final compaction
+refinement: 365 library tests and all 5 process-smoke tests pass; 6
+environment-dependent and 3 opt-in real-Codex tests remain ignored. The docs
+export still contains 17 pages and 61 files under the `/coco` base path.

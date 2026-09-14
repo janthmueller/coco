@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{CommandFactory, Parser};
 
-use super::super::args::{Cli, Command, ModelCommand, RepoCommand};
+use super::super::args::{Cli, Command, ModelCommand, RepoCommand, StatusSort};
 use super::super::commands::validate_scope_selection;
 
 #[test]
@@ -101,15 +101,10 @@ fn help_assigns_all_repos_to_overviews_and_global_to_single_targets() {
         .to_string();
     assert!(status_help.contains("--all-repos"));
     assert!(status_help.contains("--global"));
-
-    let mut command = Cli::command();
-    let usage_help = command
-        .find_subcommand_mut("usage")
-        .expect("usage subcommand must exist")
-        .render_long_help()
-        .to_string();
-    assert!(usage_help.contains("--all-repos"));
-    assert!(usage_help.contains("--global"));
+    assert!(status_help.contains("--usage"));
+    assert!(status_help.contains("-t, --tree"));
+    assert!(status_help.contains("--sort <ORDER>"));
+    assert!(Cli::command().find_subcommand("usage").is_none());
 
     for name in ["send", "jump", "diff", "close", "reopen", "delete"] {
         let mut command = Cli::command();
@@ -158,19 +153,11 @@ fn parses_repository_overviews_and_global_workspace_searches_separately() {
         assert!(!parsed.requests_global_search());
     }
 
-    for arguments in [["coco", "-a", "usage"], ["coco", "usage", "-a"]] {
-        let parsed = Cli::try_parse_from(arguments).unwrap();
-        assert!(parsed.requests_all_repositories());
-        assert!(!parsed.requests_global_search());
-    }
-
     for arguments in [
         vec!["coco", "-g", "status"],
         vec!["coco", "status", "-g"],
         vec!["coco", "-g", "status", "feat/login"],
         vec!["coco", "status", "feat/login", "-g"],
-        vec!["coco", "-g", "usage", "feat/login"],
-        vec!["coco", "usage", "feat/login", "-g"],
         vec!["coco", "-g", "jump"],
         vec!["coco", "jump", "-g"],
         vec!["coco", "-g", "jump", "feat/login"],
@@ -194,35 +181,6 @@ fn parses_repository_overviews_and_global_workspace_searches_separately() {
 }
 
 #[test]
-fn usage_supports_passive_collection_and_target_follow_forms() {
-    for arguments in [
-        vec!["coco", "usage"],
-        vec!["coco", "usage", "--json"],
-        vec!["coco", "usage", "--follow"],
-        vec!["coco", "usage", "-f"],
-        vec!["coco", "usage", "-af"],
-        vec!["coco", "usage", "auth"],
-        vec!["coco", "usage", "auth", "--json"],
-        vec!["coco", "usage", "auth", "-f"],
-        vec!["coco", "usage", "auth", "-g"],
-    ] {
-        assert!(
-            Cli::try_parse_from(&arguments).is_ok(),
-            "valid usage form failed: {arguments:?}"
-        );
-    }
-    for arguments in [
-        vec!["coco", "usage", "auth", "-a"],
-        vec!["coco", "usage", "auth", "--follow", "--json"],
-    ] {
-        assert!(
-            Cli::try_parse_from(&arguments).is_err(),
-            "invalid usage form parsed: {arguments:?}"
-        );
-    }
-}
-
-#[test]
 fn status_supports_collection_overviews_and_explicit_workspace_details() {
     for arguments in [
         vec!["coco", "status"],
@@ -231,16 +189,27 @@ fn status_supports_collection_overviews_and_explicit_workspace_details() {
         vec!["coco", "status", "-f"],
         vec!["coco", "status", "--resources"],
         vec!["coco", "status", "-r"],
+        vec!["coco", "status", "--usage"],
+        vec!["coco", "status", "-u"],
+        vec!["coco", "status", "-fu"],
         vec!["coco", "status", "-fr"],
+        vec!["coco", "status", "--tree"],
+        vec!["coco", "status", "-t"],
+        vec!["coco", "status", "-ftru"],
+        vec!["coco", "status", "--sort", "name"],
+        vec!["coco", "status", "--sort", "state"],
+        vec!["coco", "status", "--sort", "state", "--follow"],
         vec!["coco", "status", "-a"],
         vec!["coco", "status", "-a", "--json"],
         vec!["coco", "status", "-a", "--follow"],
         vec!["coco", "status", "-afr"],
+        vec!["coco", "status", "-afru"],
         vec!["coco", "status", "-g"],
         vec!["coco", "status", "auth"],
         vec!["coco", "status", "auth", "--json"],
         vec!["coco", "status", "auth", "--follow"],
         vec!["coco", "status", "auth", "-fr"],
+        vec!["coco", "status", "auth", "-fru"],
         vec!["coco", "status", "auth", "-g"],
     ] {
         assert!(
@@ -249,15 +218,26 @@ fn status_supports_collection_overviews_and_explicit_workspace_details() {
         );
     }
 
-    let parsed = Cli::try_parse_from(["coco", "status", "auth", "-fr"]).unwrap();
+    let parsed = Cli::try_parse_from(["coco", "status", "auth", "-fru"]).unwrap();
     assert!(matches!(
         parsed.command,
-        Command::Status(args) if args.follow && args.resources
+        Command::Status(args) if args.follow && args.resources && args.usage
+    ));
+
+    let parsed = Cli::try_parse_from(["coco", "status", "--sort", "state"]).unwrap();
+    assert!(matches!(
+        parsed.command,
+        Command::Status(args) if args.sort == Some(StatusSort::State)
     ));
 
     for arguments in [
         vec!["coco", "status", "auth", "-a"],
         vec!["coco", "status", "auth", "--follow", "--json"],
+        vec!["coco", "status", "auth", "--tree"],
+        vec!["coco", "status", "auth", "--sort", "state"],
+        vec!["coco", "status", "--tree", "--json"],
+        vec!["coco", "status", "--tree", "--sort", "name"],
+        vec!["coco", "status", "--sort", "recent"],
     ] {
         assert!(
             Cli::try_parse_from(&arguments).is_err(),
@@ -273,7 +253,6 @@ fn incompatible_repository_scopes_are_rejected_before_rpc() {
         vec!["coco", "../other", "list", "-a"],
         vec!["coco", "--global", "../other", "status", "auth"],
         vec!["coco", "../other", "status", "auth", "-g"],
-        vec!["coco", "../other", "usage", "auth", "-g"],
         vec!["coco", "-a", "-g", "status", "auth"],
         vec!["coco", "../other", "signal", "list", "-a"],
         vec!["coco", "../other", "signal", "list", "auth", "-g"],
@@ -327,9 +306,7 @@ async fn leading_scope_flags_are_rejected_by_incompatible_commands() {
         vec!["coco", "-a", "create", "auth"],
         vec!["coco", "-a", "send", "auth", "continue"],
         vec!["coco", "-a", "status", "auth"],
-        vec!["coco", "-a", "usage", "auth"],
         vec!["coco", "-g", "status"],
-        vec!["coco", "-g", "usage"],
         vec!["coco", "-g", "list"],
         vec!["coco", "-g", "repo", "list"],
         vec!["coco", "-g", "model", "list"],

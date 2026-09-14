@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::{Value, json};
 
 use crate::domain::runtime::{
@@ -9,7 +9,7 @@ use crate::domain::{Decision, DecisionKind, DecisionState, Repository, Workspace
 use crate::protocol::{
     RepositorySummary, WorkspaceCloseResult, WorkspaceDeleteResult, WorkspaceDiffResult,
     WorkspaceLimitsResult, WorkspaceListItem, WorkspaceReopenResult, WorkspaceResult,
-    WorkspaceRetirementPlan, WorkspaceStatusResult, WorkspaceThreadDisposition,
+    WorkspaceRetirementPlan, WorkspaceStatusResult, WorkspaceThreadDisposition, WorkspaceUsageItem,
 };
 
 use super::style::{Palette, Tone};
@@ -18,14 +18,11 @@ mod collections;
 mod usage;
 
 pub(super) use collections::{
-    print_model_list, print_repository_list, print_workspace_list, render_workspace_list_for_stdout,
-};
-pub(super) use usage::{
-    print_workspace_usage, print_workspace_usage_list, render_workspace_usage_for_stdout,
-    render_workspace_usage_list_for_stdout,
+    print_model_list, print_repository_list, print_workspace_list, print_workspace_status_list,
+    render_workspace_status_list_for_stdout,
 };
 
-const PUBLIC_SCHEMA_VERSION: u64 = 10;
+const PUBLIC_SCHEMA_VERSION: u64 = 11;
 
 pub(super) fn phase_label(phase: &str) -> &'static str {
     match phase {
@@ -69,6 +66,50 @@ pub(super) fn versioned_array(key: &str, value: Value) -> Value {
     Value::Object(object)
 }
 
+pub(super) fn status_json(
+    result: &WorkspaceStatusResult,
+    usage: Option<&WorkspaceUsageItem>,
+) -> Result<Value> {
+    let mut value = serde_json::to_value(result)?;
+    insert_usage_json(&mut value, usage)?;
+    Ok(versioned(value))
+}
+
+pub(super) fn status_collection_json(
+    workspaces: &[WorkspaceListItem],
+    usage: Option<&[WorkspaceUsageItem]>,
+) -> Result<Value> {
+    let mut values = Vec::with_capacity(workspaces.len());
+    for workspace in workspaces {
+        let mut value = serde_json::to_value(workspace)?;
+        let workspace_usage = usage.and_then(|usage| {
+            usage
+                .iter()
+                .find(|candidate| candidate.workspace.id == workspace.workspace.id)
+        });
+        insert_usage_json(&mut value, workspace_usage)?;
+        values.push(value);
+    }
+    Ok(versioned_array("workspaces", Value::Array(values)))
+}
+
+fn insert_usage_json(value: &mut Value, usage: Option<&WorkspaceUsageItem>) -> Result<()> {
+    let Some(usage) = usage else {
+        return Ok(());
+    };
+    let object = value
+        .as_object_mut()
+        .context("status JSON projection was not an object")?;
+    let mut projection = serde_json::to_value(usage)?;
+    let projection = projection
+        .as_object_mut()
+        .context("usage JSON projection was not an object")?;
+    projection.remove("workspace");
+    projection.remove("repository");
+    object.insert("usage".to_owned(), Value::Object(projection.clone()));
+    Ok(())
+}
+
 pub(super) fn print_json(value: Value) -> Result<()> {
     println!("{}", serde_json::to_string(&value)?);
     Ok(())
@@ -78,6 +119,13 @@ pub(super) fn print_repository_registered(repository: &Repository) {
     print!(
         "{}",
         render_repository_registered(repository, Palette::stdout())
+    );
+}
+
+pub(super) fn print_repository_removed(repository: &Repository) {
+    print!(
+        "{}",
+        render_repository_action(repository, "Removed", Palette::stdout())
     );
 }
 
@@ -381,33 +429,37 @@ pub(super) fn print_decision_sent(workspace: &Workspace) {
     );
 }
 
-pub(super) fn print_status(result: &WorkspaceStatusResult, include_resources: bool) {
-    print!("{}", render_status_for_stdout(result, include_resources));
+pub(super) fn print_status(
+    result: &WorkspaceStatusResult,
+    include_resources: bool,
+    usage: Option<&WorkspaceUsageItem>,
+) {
+    print!(
+        "{}",
+        render_status_for_stdout(result, include_resources, usage)
+    );
 }
 
 pub(super) fn render_status_for_stdout(
     result: &WorkspaceStatusResult,
     include_resources: bool,
+    usage: Option<&WorkspaceUsageItem>,
 ) -> String {
-    render_status(result, None, include_resources, Palette::stdout())
+    render_status(result, None, include_resources, usage, Palette::stdout())
 }
 
 pub(super) fn render_follow_status(
     result: &WorkspaceStatusResult,
     spinner: &str,
     include_resources: bool,
+    usage: Option<&WorkspaceUsageItem>,
 ) -> String {
-    render_status(result, Some(spinner), include_resources, Palette::stdout())
-}
-
-pub(super) fn render_workspace_update(
-    item: &WorkspaceListItem,
-    include_repository: bool,
-) -> String {
-    let repository = include_repository.then_some(&item.repository);
-    format!(
-        "{}\n",
-        render_workspace_state_line(&item.workspace, repository, None, Palette::stdout())
+    render_status(
+        result,
+        Some(spinner),
+        include_resources,
+        usage,
+        Palette::stdout(),
     )
 }
 
@@ -440,8 +492,12 @@ pub(super) fn render_diff(result: &WorkspaceDiffResult) -> String {
 }
 
 fn render_repository_registered(repository: &Repository, palette: Palette) -> String {
+    render_repository_action(repository, "Registered", palette)
+}
+
+fn render_repository_action(repository: &Repository, action: &str, palette: Palette) -> String {
     format!(
-        "{} Registered {}\n  {}\n",
+        "{} {action} {}\n  {}\n",
         palette.paint(Tone::GreenBold, "✓"),
         palette.paint(Tone::Bold, safe_line(&repository.display_name)),
         palette.paint(
@@ -486,6 +542,7 @@ fn render_status(
     result: &WorkspaceStatusResult,
     marker_override: Option<&str>,
     include_resources: bool,
+    usage: Option<&WorkspaceUsageItem>,
     palette: Palette,
 ) -> String {
     let workspace = &result.workspace;
@@ -500,6 +557,9 @@ fn render_status(
     }
     if include_resources && let Some(resources) = &result.runtime_resources {
         output.push_str(&render_runtime_resources(resources, palette));
+    }
+    if let Some(usage) = usage {
+        output.push_str(&usage::render_workspace_usage_details(usage, palette));
     }
     if let Some(message) = &workspace.last_error_message {
         output.push_str(&format!(

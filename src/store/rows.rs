@@ -269,6 +269,22 @@ pub(super) fn get_repository_by_root(
         .map_err(StoreError::from)
 }
 
+pub(super) fn get_registered_repository_by_root(
+    connection: &Connection,
+    path: &Path,
+) -> Result<Option<Repository>, StoreError> {
+    connection
+        .query_row(
+            "SELECT id, root_path, git_common_dir, display_name, is_linked_worktree,
+                created_at_ms, updated_at_ms FROM repositories
+             WHERE root_path = ?1 AND is_registered = 1",
+            [path_text(path)?],
+            map_repository,
+        )
+        .optional()
+        .map_err(StoreError::from)
+}
+
 pub(super) fn get_repository_by_id(
     connection: &Connection,
     id: &str,
@@ -292,6 +308,22 @@ pub(super) fn get_repository_by_common_dir(
         .query_row(
             "SELECT id, root_path, git_common_dir, display_name, is_linked_worktree,
                 created_at_ms, updated_at_ms FROM repositories WHERE git_common_dir = ?1",
+            [path_text(path)?],
+            map_repository,
+        )
+        .optional()
+        .map_err(StoreError::from)
+}
+
+pub(super) fn get_registered_repository_by_common_dir(
+    connection: &Connection,
+    path: &Path,
+) -> Result<Option<Repository>, StoreError> {
+    connection
+        .query_row(
+            "SELECT id, root_path, git_common_dir, display_name, is_linked_worktree,
+                created_at_ms, updated_at_ms FROM repositories
+             WHERE git_common_dir = ?1 AND is_registered = 1",
             [path_text(path)?],
             map_repository,
         )

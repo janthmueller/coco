@@ -244,7 +244,7 @@ Legacy turn, status-snapshot, and decision helpers remain only as migration or
 test inputs; production decision routing is generation-local. None of those
 legacy shapes justifies a second authoritative history.
 
-Coordinator use cases are `RegisterRepository`, `ListRepositories`,
+Coordinator use cases are `RegisterRepository`, `RemoveRepository`, `ListRepositories`,
 `CreateWorkspace`, `ListWorkspaces`, `StatusWorkspace`, `SendTurn`,
 `FollowWorkspace`, `DiffWorkspace`, `CloseWorkspace`, `ReopenWorkspace`,
 `DeleteWorkspace`, `GetDecision`, `RespondDecision`, and `AuditControlCall`.
@@ -338,19 +338,23 @@ call derives current workspace state from a non-loading native `thread/read`.
 Both requests accept an additive `includeResources` observation flag. Human
 status sets it only for `--resources`; JSON status and `workspaces.status` set
 it unconditionally, while ordinary `list` and selectors leave it absent.
-Current thread state never falls back to the database, and status never reads
-conversation history. `send --wait` polls `turn.result` for its exact client
-operation ID. The coordinator correlates agent-message and completion
-notifications in memory, bounds each response to 1 MiB, and retains only the
-latest 256 completed results within an 8 MiB total response budget for the
-current daemon generation. This avoids both unbounded native history reads and
-persisted copies of Codex output.
+With `--usage`, the CLI composes that state response with
+`workspace.usage.get` or `workspace.usage.list`, matches collection rows by
+opaque workspace ID, and emits one human or JSON observation. Current thread
+state never falls back to the database, and status never reads conversation
+history. `send --wait` polls `turn.result` for its exact client operation ID.
+The coordinator correlates agent-message and completion notifications in
+memory, bounds each response to 1 MiB, and retains only the latest 256 completed
+results within an 8 MiB total response budget for the current daemon
+generation. This avoids both unbounded native history reads and persisted
+copies of Codex output.
 
 Methods for the handed-off commands are:
 
 | Daemon method | CLI | MCP tool |
 | --- | --- | --- |
 | `repository.register` | `coco repo add` | not exposed |
+| `repository.remove` | `coco repo remove` / `repo rm` | not exposed |
 | `repository.resolve` | interactive client scope resolution | not exposed |
 | `repository.list` | `coco repo list` / `repo ls` | not exposed |
 | `model.list` | `coco model list` / `model ls` | not exposed |
@@ -360,6 +364,8 @@ Methods for the handed-off commands are:
 | `workspace.delete` | `coco delete` | not exposed in v0 |
 | `workspace.list` | `coco list` / `coco ls`, targetless `status`, and interactive selectors | `workspaces.list` |
 | `workspace.get` | explicitly targeted `coco status` | `workspaces.status` |
+| `workspace.usage.list` | targetless `coco status --usage` composition | not exposed |
+| `workspace.usage.get` | targeted `coco status --usage` composition | not exposed |
 | `workspace.attach` | lease one bound resume or one exclusive fresh `coco jump` | not exposed in v0 |
 | `workspace.attach.renew` | renew this TUI client's presence or pending-adoption lease | not exposed in v0 |
 | `workspace.attach.adopt` | correlate and adopt the exact materialized fresh-TUI thread | not exposed in v0 |
@@ -373,10 +379,16 @@ Methods for the handed-off commands are:
 
 Repository-aware CLI commands carry one repository path, an explicit
 daemon-wide collection scope, or an explicit global-reference scope. An omitted
-path means `.`, and a supplied path may point inside a registered worktree;
-the daemon canonicalizes it through Git and resolves the stored common-directory
-identity. The client never combines a repository path and workspace name into
-one opaque selector.
+path means `.`, and a supplied path may point inside a registered worktree.
+`workspace.create` is the sole command allowed to enroll a valid unregistered
+Git identity implicitly. The daemon canonicalizes paths through Git and
+resolves the stored common-directory identity. The client never combines a
+repository path and workspace name into one opaque selector.
+
+Repository removal normally resolves the same live Git identity. When Git
+discovery fails, it may fall back only to an exact active stored root so a
+checkout that has disappeared can still be unregistered. A path that discovers
+as a different repository never receives that fallback.
 
 Full workspace IDs resolve globally. Human workspace names resolve within the
 selected repository, or across all repositories only when the client
@@ -544,7 +556,9 @@ Schema v10 and v11 separately add signals and their narrow hook outbox.
 Schema v12 extends deletion intent to cover direct open-workspace retirement.
 Schema v13 adds durable workspace resource intent; applied controller state
 remains generation-local. Schema v14 adds the latest native token-usage
-checkpoint; optional billing estimates remain generation-local.
+checkpoint; optional billing estimates remain generation-local. Schema v15
+adds reversible repository enrollment without deleting retained identity or
+signal provenance.
 
 ### `repositories`
 
@@ -555,6 +569,7 @@ checkpoint; optional billing estimates remain generation-local.
 | `git_common_dir` | canonical common Git directory observed at registration |
 | `display_name` | basename used for rendering only |
 | `is_linked_worktree` | whether registration occurred through a linked worktree |
+| `is_registered` | whether normal repository discovery and path resolution include this identity |
 | `created_at_ms`, `updated_at_ms` | required timestamps |
 
 ### `workspaces`
@@ -1219,9 +1234,11 @@ through a one-use authenticated relay. The relay injects the exact workspace
 environment into each downstream `turn/start`; the upstream App Server token
 and relay token are supplied only in child-process memory/environment. In
 explicit shared-execution fallback mode, the CLI retains the direct remote
-resume path. A renewable per-client presence lease prevents retirement while
-the TUI remains open, without excluding another bound TUI or `send` on an idle
-thread.
+resume path. Both sides of the relay retain Codex's finite 128 MiB remote
+WebSocket frame and message bound instead of Tungstenite's smaller defaults,
+so a valid page from a large native history is not rejected by CoCo. A
+renewable per-client presence lease prevents retirement while the TUI remains
+open, without excluding another bound TUI or `send` on an idle thread.
 
 For an unbound fresh workspace, `workspace.attach` acquires one expiring
 generation-local lease and returns no invented thread ID. The CLI starts a
@@ -1567,7 +1584,7 @@ tests before a service manager may restart `cocod` automatically.
   projection, and idempotency without child processes.
 - Test SQLite migrations and binding/operation/retirement atomicity against
   temporary on-disk databases, including legacy v1/v5 fixtures migrating
-  through current schema v14 and restart recovery from every transitional
+  through current schema v15 and restart recovery from every transitional
   availability. Resource-policy coverage additionally proves monotonic
   compare-and-set updates and cascading removal.
 - Test Git behavior with temporary repositories and native worktrees,
@@ -1582,14 +1599,18 @@ tests before a service manager may restart `cocod` automatically.
   supports native thread read/history projections and fresh-TUI adoption, deliberately reorders
   response/notification delivery, requests approval, writes stderr,
   disconnects, deletes a bound thread, and emits an unknown method.
-- Keep an opt-in smoke test against the installed authenticated Codex executable
+- Keep an opt-in smoke test against the installed Codex executable
   for an exact pinned version and concrete wire behavior: initialize, paginated
   model discovery, Git-only preparation, empty-thread non-materialization,
   exact adoption after a model-free shell action, native history reads,
-  archive/unarchive/delete, close/reopen persistence, and resume through fresh
-  daemon and App Server processes. The fake process test owns deterministic
-  model-turn, event-flow, relay, detach, lifecycle-blocker, and interrupted-
-  saga coverage.
+  archive/unarchive/delete, close/reopen persistence, resume through fresh
+  daemon and App Server processes, and a real native TUI resume of a fork from
+  an exact Codex thread ID through the per-workspace relay. The TUI proof uses
+  isolated dummy API-key state without starting a model turn, accepts the
+  temporary-worktree trust prompt, requires `tmux`, verifies inherited history,
+  and exits through Codex's stable `Ctrl+D` path so the jump lease is released.
+  The fake process test owns deterministic model-turn, event-flow, relay,
+  detach, lifecycle-blocker, and interrupted-saga coverage.
   Run it explicitly with
   `COCO_RUN_REAL_CODEX_COMPAT=1 cargo test --locked --test real_codex_compat -- --ignored --test-threads=1`;
   `COCO_REAL_CODEX_BINARY` may select a non-default executable. Generated
@@ -1735,7 +1756,7 @@ physical cleanup and product-proof gates.
 
 ### Phase D - stop writes, migrate, then remove
 
-- Implemented in schema v6 and retained through schema v14: the minimal
+- Implemented in schema v6 and retained through schema v15: the minimal
   `turn_start` ledger commits intent and dispatch boundaries, accepts only a
   direct native result, and makes an
   unconfirmed dispatch permanently non-retrying under the same operation ID.

@@ -41,6 +41,9 @@ mod resources;
 #[path = "real_codex_compat/retirement.rs"]
 mod retirement;
 
+#[path = "real_codex_compat/tui.rs"]
+mod tui;
+
 struct TestPaths {
     home: PathBuf,
     codex_home: PathBuf,
@@ -460,7 +463,7 @@ fn shell_word(path: &Path) -> String {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires COCO_RUN_REAL_CODEX_COMPAT=1 and the pinned local Codex executable"]
+#[ignore = "requires COCO_RUN_REAL_CODEX_COMPAT=1, the pinned local Codex executable, and tmux"]
 async fn installed_codex_matches_the_pinned_preparation_adoption_and_resume_contract() -> Result<()>
 {
     require_explicit_opt_in()?;
@@ -472,7 +475,7 @@ async fn installed_codex_matches_the_pinned_preparation_adoption_and_resume_cont
     fs::create_dir_all(&paths.home)?;
     fs::create_dir_all(&paths.codex_home)?;
     fs::create_dir_all(&paths.data_dir)?;
-
+    tui::install_dummy_auth(&paths)?;
     verify_codex_version(&codex_binary, &paths).await?;
 
     let repository = temporary.path().join("repository");
@@ -835,7 +838,7 @@ async fn verify_context_fork_activation(
         paths,
         codex_binary,
         repository,
-        &["create", FORK_WORKSPACE_NAME, "--context", WORKSPACE_NAME],
+        &["create", FORK_WORKSPACE_NAME, "--context", source_thread_id],
     )
     .await?;
     let prepared =
@@ -875,6 +878,7 @@ async fn verify_context_fork_activation(
         &workspace_status_for(paths, codex_binary, repository, FORK_WORKSPACE_NAME).await?,
     )?;
     release_returned_attach(paths, &attached).await?;
+    tui::verify_inherited_context_resume(paths, codex_binary, repository).await?;
     Ok(())
 }
 
@@ -1294,7 +1298,7 @@ async fn daemon_request(paths: &TestPaths, method: &str, params: Value) -> Resul
 
 fn select_default_model(response: &Value) -> Result<String> {
     ensure!(
-        response["schemaVersion"] == 10,
+        response["schemaVersion"] == 11,
         "coco model list returned an unexpected schema version: {response}"
     );
     let models = response["models"]

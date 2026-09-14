@@ -83,3 +83,15 @@ for explicit discard flags and conversation archiving.
 
 If cleanup is blocked or interrupted, follow
 [Troubleshooting](../../reference/current-limitations/#close-or-delete-is-blocked).
+
+## Remove a repository from CoCo
+
+After deleting all of a repository's workspaces, remove it from CoCo's lists
+and selectors:
+
+```bash
+coco repo remove .
+```
+
+This leaves the Git repository and its files untouched. `repo rm` is the short
+alias. A later `repo add` or workspace creation adds the same repository again.

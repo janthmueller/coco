@@ -23,7 +23,7 @@ coco [OPTIONS] [REPOSITORY_PATH] <COMMAND>
 ```
 
 Workspace commands use the repository containing the current directory by
-default. Put a registered path before the command to select another
+default. Put a repository path before the command to select another
 repository:
 
 ```bash
@@ -31,13 +31,12 @@ coco ../api list
 coco ../api status fix/login
 ```
 
-Use `--all-repos` or `-a` with `list`, targetless `status`, targetless `usage`,
-or targetless `signal list` to include every registered repository:
+Use `--all-repos` or `-a` with `list`, targetless `status`, or targetless
+`signal list` to include every registered repository:
 
 ```bash
 coco list --all-repos
 coco status --all-repos
-coco usage --all-repos
 ```
 
 Use `--global` or `-g` with a command that targets one workspace. Supply a
@@ -57,11 +56,20 @@ globally without `-g`.
 
 ```text
 coco repo add [PATH]
+coco repo <remove|rm> [PATH]
 coco repo <list|ls> [--json]
 ```
 
 `repo add` registers the Git repository containing `PATH`; it defaults to `.`
-and is safe to repeat. `repo list` shows every registered repository.
+and is safe to repeat. Creating a workspace also registers its repository
+automatically.
+
+`repo remove` removes a repository from CoCo's lists and selectors without
+deleting Git data. It defaults to `.` and works only after every CoCo workspace
+for that repository has been deleted. Adding it again restores the same
+repository entry.
+
+`repo list` shows every currently registered repository.
 
 `list` is the documented spelling throughout CoCo; `ls` is its equivalent
 short alias.
@@ -72,7 +80,7 @@ When standard input and the terminal display are connected to a terminal, you
 may omit some values:
 
 - `create` asks for a missing workspace name and lets you choose a registered
-  repository when the current directory does not select one;
+  repository when the current directory is not inside a Git repository;
 - `send`, `jump`, `diff`, `close`, and `limits` let you choose a missing
   workspace;
 - `reopen` offers closed workspaces; `delete` offers open and closed workspaces;
@@ -120,6 +128,10 @@ or number. A dirty source checkout is allowed: CoCo warns and leaves its local
 tracked and ordinary untracked changes behind unless you explicitly carry
 them.
 
+The repository is registered automatically when this command first creates a
+workspace in it. `repo add` remains available when you want to register it
+before creation.
+
 `--base-workspace` selects another workspace's committed `HEAD` as code.
 `--context`/`-c` independently forks conversation history from a workspace in
 the selected repository or an exact native Codex thread ID. Workspace matches
@@ -152,11 +164,9 @@ In the forms below, `<WORKSPACE>` may be a repository-local name or full ID.
 | ------------------------------------------------------------------- | ----------------------------------------------- |
 | `coco list [--json]` (`ls`)                                         | List workspaces in the selected scope           |
 | `coco list --closed [--json]`                                       | List closed workspaces instead                  |
-| `coco status [-a] [-r] [--json]`                                    | Show workspace states in the selected scope     |
-| `coco status [-a] [-r] --follow` (`-f`)                             | Follow state changes for that collection        |
-| `coco status WORKSPACE [-g] [-r] [--json] [--follow]`               | Show or follow one workspace's state            |
-| `coco usage [-a] [--json] [--follow]`                               | Show or follow token use for a collection       |
-| `coco usage WORKSPACE [-g] [--json] [--follow]`                     | Show or follow one workspace's token use        |
+| `coco status [-a] [-t \| --sort name\|state] [-r] [-u] [--json]`   | Show an ordered workspace overview              |
+| `coco status [-a] [-t \| --sort name\|state] [-r] [-u] -f`         | Follow that collection view                     |
+| `coco status WORKSPACE [-g] [-r] [-u] [--json] [--follow]`          | Show or follow one workspace                     |
 | `coco limits show [WORKSPACE] [-g] [--json]`                        | Show desired and currently applied limits       |
 | `coco limits set [WORKSPACE] [-g] [OPTIONS]`                        | Change selected workspace limits                |
 | `coco limits reset [WORKSPACE] [-g] [--json]`                       | Remove all configured workspace limits          |
@@ -171,8 +181,8 @@ Omitted values use interactive input only as described above. A targetless
 `status` is an overview rather than a selector. `status --follow` cannot be
 combined with `--json`. Quote messages containing spaces. `send` returns after
 Codex accepts the turn; `send --wait` instead prints that exact turn's final
-response. `status --follow` watches until Ctrl+C, follows state only, and never
-prints conversation messages.
+response. `status --follow` watches until Ctrl+C and never prints conversation
+messages.
 `list` and `status` inspect without creating or loading conversation context;
 `send` and `jump` activate it when needed.
 
@@ -184,12 +194,28 @@ count, cumulative CPU use, and controller events when available without
 requiring `-r`. `--follow` also has the short form `-f`, so `-fr` follows state
 and resource use together.
 
+Add `--usage` (`-u`) for cumulative tokens, current context-window use, and an
+available cost estimate. It composes with the other short flags: `-fu` follows
+state and model usage, while `-fru` also includes local runtime resources.
+
+Collection output is naturally sorted by repository and workspace name, so
+names such as `frontend/w2` stay together and appear before `frontend/w10`.
+Add `--tree` (`-t`) to show slash-separated names as a hierarchy. With `-a`,
+each repository gets a section headed by its path. Only shared name prefixes
+are unfolded; unique paths stay on one line. `-t` also combines with `-f`,
+`-r`, and `-u`. Tree output is a human-readable view and cannot be combined
+with `--json` or a single workspace.
+
+Use `--sort state` for an attention-first flat overview. Workspaces waiting
+for you appear before failures, active work, ready work, and prepared work.
+This order can move rows as states change, particularly with `--follow`.
+
 Add `--global`/`-g` to `status`, `limits`, `send`, `jump`, `diff`, `close`,
-`reopen`, `delete`, or a targeted `usage` to resolve one workspace name from
-all repositories. For commands with a selector, it also populates an
+`reopen`, or `delete` to resolve one workspace name from all repositories. For
+commands with a selector, it also populates an
 omitted-target selector from all repositories. Add `--all-repos`/`-a` to
-`list`, targetless `status`, or targetless `usage`; it is a read-only
-collection scope and never broadcasts an action.
+`list` or targetless `status`; it is a read-only collection scope and never
+broadcasts an action.
 
 Every `send` has an operation ID. If CoCo reports that ID after an interrupted
 wait or an unconfirmed request, retry the same workspace and exact message with
@@ -199,13 +225,13 @@ the ID for a different message.
 ## Token usage and cost
 
 ```text
-coco [REPOSITORY_PATH] usage [WORKSPACE] [-g] [--json] [--follow]
-coco usage --all-repos [--json] [--follow]
+coco [REPOSITORY_PATH] status [WORKSPACE] [-g] --usage [--json] [--follow]
+coco status --all-repos --usage [--json] [--follow]
 ```
 
-Without a workspace, `usage` shows open workspaces in the current repository.
-Add `-a` for every registered repository, or target one workspace and add `-g`
-to resolve its name globally.
+Without a workspace, `status --usage` shows open workspaces in the current
+repository. Add `-a` for every registered repository, or target one workspace
+and add `-g` to resolve its name globally.
 
 The token total is the cumulative count reported by Codex for that workspace's
 conversation. Context shows the latest reported count against the model's
@@ -217,8 +243,8 @@ Cost appears only when Codex supplies a per-conversation estimate. CoCo shows
 USD when available and otherwise credits. This is an estimate rather than an
 invoice, and an unavailable cost never prevents token reporting.
 
-`usage` only inspects saved and currently available Codex data; it does not
-start a prepared workspace or load an unloaded conversation. Add
+`status --usage` only inspects saved and currently available Codex data; it
+does not start a prepared workspace or load an unloaded conversation. Add
 `--follow`/`-f` to keep the view open until Ctrl+C. Terminal output updates in
 place; redirected output appends only changes. Follow mode cannot be combined
 with `--json`.
@@ -346,20 +372,20 @@ coco list --all-repos --json
 coco status --json
 coco status --all-repos --json
 coco status feat/first --json
-coco usage --json
-coco usage --all-repos --json
-coco usage feat/first --json
+coco status --usage --json
+coco status --all-repos --usage --json
+coco status feat/first --usage --json
 coco limits show feat/first --json
 ```
 
 These commands emit one JSON value to standard output. Human-oriented follow
-mode is intentionally excluded. The current top-level schema version is `10`.
-Only a detailed workspace status may include `runtimeResources`; its optional
-measurements are a current sample and are not persisted.
+mode is intentionally excluded. The current top-level schema version is `11`.
+Status JSON may include `runtimeResources`; its optional measurements are a
+current sample and are not persisted.
 
-Usage JSON preserves the complete native token breakdown, its observation and
-freshness fields, and either the cost estimate reported by Codex or an explicit
-unavailable reason.
+With `--usage`, status JSON adds a nested `usage` object containing the complete
+native token breakdown, its observation and freshness fields, and either the
+cost estimate reported by Codex or an explicit unavailable reason.
 
 Human output uses color only when its output stream is a terminal and honors
 the standard `NO_COLOR` environment variable. Redirected output and JSON never

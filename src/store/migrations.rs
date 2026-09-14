@@ -3,6 +3,7 @@ use rusqlite::Connection;
 use super::StoreError;
 
 mod hooks;
+mod repositories;
 mod resources;
 mod retirement;
 mod signals;
@@ -10,29 +11,36 @@ mod usage;
 
 pub(super) fn migrate(connection: &Connection) -> Result<(), StoreError> {
     let mut version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if version > 14 {
+    if version > 15 {
         return Err(StoreError::UnsupportedSchema(version));
     }
-    if version == 14 {
+    if version == 15 {
         return Ok(());
     }
+    if version == 14 {
+        return repositories::migrate(connection);
+    }
     if version == 13 {
-        return usage::migrate(connection);
+        usage::migrate(connection)?;
+        return repositories::migrate(connection);
     }
     if version == 12 {
         resources::migrate(connection)?;
-        return usage::migrate(connection);
+        usage::migrate(connection)?;
+        return repositories::migrate(connection);
     }
     if version == 11 {
         retirement::migrate(connection)?;
         resources::migrate(connection)?;
-        return usage::migrate(connection);
+        usage::migrate(connection)?;
+        return repositories::migrate(connection);
     }
     if version == 10 {
         hooks::migrate(connection)?;
         retirement::migrate(connection)?;
         resources::migrate(connection)?;
-        return usage::migrate(connection);
+        usage::migrate(connection)?;
+        return repositories::migrate(connection);
     }
     if version == 1 {
         migrate_retired_task_goal(connection)?;
@@ -73,7 +81,8 @@ pub(super) fn migrate(connection: &Connection) -> Result<(), StoreError> {
     hooks::migrate(connection)?;
     retirement::migrate(connection)?;
     resources::migrate(connection)?;
-    usage::migrate(connection)
+    usage::migrate(connection)?;
+    repositories::migrate(connection)
 }
 
 #[expect(

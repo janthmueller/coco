@@ -31,12 +31,13 @@ CoCo queries that route on demand and keeps its short-lived result in memory;
 it does not ship a price table. The response is nullable and eventually
 consistent, so token reporting remains useful without it.
 
-The approved read surface is `coco usage [workspace]`, with current-repository
-collection scope by default, `--all-repos` for a global collection, `--global`
-for one globally resolved name, one-shot JSON, and terminal-aware `--follow`.
-Operational state remains in `status`; a future vocabulary review may consider
-whether read-only surfaces should share a `show` namespace, but that does not
-change the current command contract.
+The approved read surface is `coco status [workspace] --usage`, with
+current-repository collection scope by default, `--all-repos` for a global
+collection, `--global` for one globally resolved name, one-shot JSON, and
+terminal-aware `--follow`. Usage is an optional status projection, symmetric
+with `--resources`; `-fu`, `-ru`, and `-fru` are valid clustered forms. The CLI
+composes existing narrow daemon usage primitives rather than inventing a
+second source of state.
 
 ## Scope and vocabulary
 
@@ -205,23 +206,23 @@ an OTLP collector or intercept model traffic merely to populate local status.
    schema-versioned checkpoint per workspace. Workspace deletion cascades it.
 2. **Read surface**: typed `workspace.usage.get` and
    `workspace.usage.list` local-RPC methods expose the latest checkpoint. JSON
-   retains every consumed native field plus provenance; human output limits
-   itself to cumulative totals, useful breakdowns, context occupancy, and the
-   optional estimate. Collection reads omit closed workspaces, while an exact
-   target remains addressable.
+   retains every consumed native field plus provenance beneath the optional
+   status `usage` projection; human status limits itself to cumulative totals,
+   useful breakdowns, context occupancy, and the optional estimate. Collection
+   reads omit closed workspaces, while an exact target remains addressable.
 3. **Optional native estimate**: the daemon adapter calls
    `account/usage/read` through the `WorkerRuntime` port. Results—including an
    unavailable result—are cached for 15 seconds and invalidated by a new token
    notification. The estimate and its observation time are returned separately
    from tokens and are never persisted. Failure cannot fail raw-token reads.
-4. **Passive follow**: `--follow` polls the read projection without resuming a
-   thread or starting its workspace executor. A terminal replaces its previous
-   frame; redirected output appends only changed frames. JSON is one-shot.
+4. **Passive follow**: `status --usage --follow` polls state and the usage
+   projection without resuming a thread or starting its workspace executor. A
+   terminal replaces its previous frame; redirected output appends only changed
+   requested views. JSON is one-shot.
 
 No per-turn delta, usage history, budget, alert, repository total, local price
 catalog, or MCP usage tool is part of this slice. Those require separate
-ownership and retention decisions. The same applies to any future consolidation
-of `list`, `status`, and `usage` under a shared read command.
+ownership and retention decisions.
 
 ## Compatibility evidence
 

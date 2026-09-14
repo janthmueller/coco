@@ -2,7 +2,7 @@ use super::*;
 use crate::domain::signals::SignalFilter;
 use crate::domain::{Workspace, WorkspaceAvailability};
 use crate::store::{
-    WorkspaceDeletionIntent,
+    RepositoryUnregistration, WorkspaceDeletionIntent,
     tests::{ready_workspace, repository},
 };
 use serde_json::json;
@@ -196,10 +196,21 @@ fn closing_and_deleting_do_not_erase_signal_history_or_allow_new_emissions() {
         workspace_id: Some(workspace.id.clone()),
         ..Default::default()
     };
+    let retained = store.list_signals(&filter, None, 100).unwrap().signals;
+    assert_eq!(retained.as_slice(), std::slice::from_ref(&signal));
+    assert_eq!(
+        store
+            .unregister_repository(&workspace.repository_id)
+            .unwrap(),
+        RepositoryUnregistration::Removed
+    );
     assert_eq!(
         store.list_signals(&filter, None, 100).unwrap().signals,
         [signal]
     );
+    store
+        .register_repository(&repository(Path::new("/tmp/signal-repository")))
+        .unwrap();
     assert!(matches!(
         store.emit_signal(draft(&workspace, "new")),
         Err(StoreError::Signal(SignalError::InvalidSender))

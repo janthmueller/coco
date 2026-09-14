@@ -1,39 +1,12 @@
 use crate::protocol::{WorkspaceCostEstimate, WorkspaceUsageItem};
 
 use super::super::style::{Palette, Tone};
-use super::collections::{Cell, render_table, stdout_width};
-use super::safe_line;
 
-pub(in crate::cli) fn print_workspace_usage(item: &WorkspaceUsageItem) {
-    print!("{}", render_workspace_usage_for_stdout(item));
-}
-
-pub(in crate::cli) fn print_workspace_usage_list(
-    items: &[WorkspaceUsageItem],
-    include_repository: bool,
-) {
-    print!(
-        "{}",
-        render_workspace_usage_list_for_stdout(items, include_repository)
-    );
-}
-
-pub(in crate::cli) fn render_workspace_usage_for_stdout(item: &WorkspaceUsageItem) -> String {
-    render_workspace_usage(item, Palette::stdout())
-}
-
-pub(in crate::cli) fn render_workspace_usage_list_for_stdout(
-    items: &[WorkspaceUsageItem],
-    include_repository: bool,
+pub(super) fn render_workspace_usage_details(
+    item: &WorkspaceUsageItem,
+    palette: Palette,
 ) -> String {
-    render_workspace_usage_list(items, include_repository, stdout_width(), Palette::stdout())
-}
-
-fn render_workspace_usage(item: &WorkspaceUsageItem, palette: Palette) -> String {
-    let mut output = format!(
-        "{}\n",
-        palette.paint(Tone::Bold, safe_line(&item.workspace.name))
-    );
+    let mut output = String::new();
     if let Some(tokens) = &item.tokens {
         output.push_str(&format!(
             "  Tokens   {} total\n",
@@ -75,67 +48,22 @@ fn render_workspace_usage(item: &WorkspaceUsageItem, palette: Palette) -> String
     output
 }
 
-fn render_workspace_usage_list(
-    items: &[WorkspaceUsageItem],
-    include_repository: bool,
-    width: usize,
-    palette: Palette,
-) -> String {
-    if items.is_empty() {
-        return format!("{}\n", palette.paint(Tone::Dim, "No workspaces."));
-    }
-    let rows = items
-        .iter()
-        .map(|item| {
-            let mut cells = Vec::with_capacity(4 + usize::from(include_repository));
-            if include_repository {
-                cells.push(Cell::new(
-                    item.repository.root_path.display().to_string(),
-                    Tone::Dim,
-                ));
-            }
-            cells.push(Cell::new(item.workspace.name.clone(), Tone::Primary));
-            let (tokens, context) = token_cells(item);
-            cells.push(Cell::new(tokens, Tone::Primary));
-            cells.push(Cell::new(context, Tone::Dim));
-            cells.push(Cell::new(cost_cell(&item.cost), Tone::Dim));
-            cells
-        })
-        .collect::<Vec<_>>();
-    if include_repository {
-        render_table(
-            &["REPOSITORY", "WORKSPACE", "TOKENS", "CONTEXT", "COST"],
-            &rows,
-            &[36, 32, 24, 16, 18],
-            width,
-            palette,
-        )
-    } else {
-        render_table(
-            &["WORKSPACE", "TOKENS", "CONTEXT", "COST"],
-            &rows,
-            &[32, 24, 16, 18],
-            width,
-            palette,
-        )
-    }
-}
-
-fn token_cells(item: &WorkspaceUsageItem) -> (String, String) {
+pub(super) fn usage_cells(item: Option<&WorkspaceUsageItem>) -> (String, String, String) {
+    let Some(item) = item else {
+        return ("—".to_owned(), "—".to_owned(), "—".to_owned());
+    };
     let Some(tokens) = &item.tokens else {
-        return ("—".to_owned(), "—".to_owned());
+        return ("—".to_owned(), "—".to_owned(), cost_cell(&item.cost));
     };
     let mut total = format_compact_tokens(tokens.checkpoint.total.total_tokens);
     if !tokens.is_fresh {
         total.push_str(" (last seen)");
     }
-    (
-        total,
-        context_cell(
-            tokens.checkpoint.last.total_tokens,
-            tokens.checkpoint.model_context_window,
-        ),
-    )
+    let context = context_cell(
+        tokens.checkpoint.last.total_tokens,
+        tokens.checkpoint.model_context_window,
+    );
+    (total, context, cost_cell(&item.cost))
 }
 
 fn context_cell(current: u64, window: Option<u64>) -> String {

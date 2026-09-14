@@ -17,14 +17,16 @@ use crate::git::{
 use crate::profile::{load_profile, with_effective_thread_settings};
 use crate::protocol::{
     AuditRecordParams, EventListParams, EventListResult, GitIncomplete, GitObservationError,
-    GitUnavailable, RepositoryListParams, RepositoryRegisterParams, RepositoryResolveParams,
-    RepositoryScope, RepositorySummary, WorkspaceBaseRequest, WorkspaceChangesRequest,
-    WorkspaceContextRequest, WorkspaceContextSource, WorkspaceCreateParams, WorkspaceDiffParams,
-    WorkspaceDiffResult, WorkspaceGetParams, WorkspaceGitStatus, WorkspaceListItem,
-    WorkspaceListParams, WorkspaceResult, WorkspaceStatusResult, WorkspaceWorktreeRequest,
+    GitUnavailable, RepositoryListParams, RepositoryRegisterParams, RepositoryRemoveParams,
+    RepositoryResolveParams, RepositoryScope, RepositorySummary, WorkspaceBaseRequest,
+    WorkspaceChangesRequest, WorkspaceContextRequest, WorkspaceContextSource,
+    WorkspaceCreateParams, WorkspaceDiffParams, WorkspaceDiffResult, WorkspaceGetParams,
+    WorkspaceGitStatus, WorkspaceListItem, WorkspaceListParams, WorkspaceResult,
+    WorkspaceStatusResult, WorkspaceWorktreeRequest,
 };
 use crate::store::{
-    AuditDraft, EventDraft, NewThreadBinding, NewWorkspace, Operation, ThreadOperationAcceptance,
+    AuditDraft, EventDraft, NewThreadBinding, NewWorkspace, Operation, RepositoryUnregistration,
+    ThreadOperationAcceptance,
 };
 
 const DEFAULT_DIFF_BYTES: usize = 4 * 1024 * 1024;
@@ -84,22 +86,64 @@ enum ResolvedContextSource {
 }
 
 impl Coordinator {
-    pub(crate) fn register_repository(
+    pub(crate) async fn register_repository(
         &self,
         params: RepositoryRegisterParams,
     ) -> Result<Repository, CoordinatorError> {
         let discovered = self.git.discover(params.path)?;
+        let repository_lock = self.repository_lock(&discovered.id).await;
+        let _guard = repository_lock.lock().await;
+        self.register_discovered_repository(&discovered)
+    }
+
+    fn register_discovered_repository(
+        &self,
+        discovered: &GitRepository,
+    ) -> Result<Repository, CoordinatorError> {
         let now = Utc::now().timestamp_millis();
         let repository = self.store.register_repository(&Repository {
-            id: discovered.id,
-            root_path: discovered.root_path,
-            git_common_dir: discovered.git_common_dir,
-            display_name: discovered.display_name,
+            id: discovered.id.clone(),
+            root_path: discovered.root_path.clone(),
+            git_common_dir: discovered.git_common_dir.clone(),
+            display_name: discovered.display_name.clone(),
             is_linked_worktree: discovered.is_linked_worktree,
             created_at_ms: now,
             updated_at_ms: now,
         })?;
         Ok(repository)
+    }
+
+    pub(crate) async fn remove_repository(
+        &self,
+        params: RepositoryRemoveParams,
+    ) -> Result<Repository, CoordinatorError> {
+        let requested_path = params.path;
+        let repository = match self.git.discover(&requested_path) {
+            Ok(discovered) => self
+                .store
+                .repository_by_common_dir(&discovered.git_common_dir)?
+                .ok_or_else(|| {
+                    CoordinatorError::RepositoryNotRegistered(discovered.root_path.clone())
+                })?,
+            Err(source) => match self.store.registered_repository_by_root(&requested_path)? {
+                Some(repository) => repository,
+                None => return Err(source.into()),
+            },
+        };
+        let repository_lock = self.repository_lock(&repository.id).await;
+        let _guard = repository_lock.lock().await;
+        match self.store.unregister_repository(&repository.id)? {
+            RepositoryUnregistration::Removed => Ok(repository),
+            RepositoryUnregistration::HasWorkspaces(workspace_count) => {
+                Err(CoordinatorError::RepositoryHasWorkspaces {
+                    path: repository.root_path,
+                    workspace_count,
+                })
+            }
+            RepositoryUnregistration::NotRegistered => Err(
+                CoordinatorError::RepositoryNotRegistered(repository.root_path),
+            ),
+        }
     }
 
     pub(crate) fn list_repositories(
@@ -132,10 +176,10 @@ impl Coordinator {
         validate_operation_id(&params.operation_id)?;
         validate_create_request(&params)?;
 
-        let (repository, git_repository) =
-            self.registered_repository_for_path(&params.repository_path)?;
-        let repository_lock = self.repository_lock(&repository.id).await;
+        let git_repository = self.git.discover(&params.repository_path)?;
+        let repository_lock = self.repository_lock(&git_repository.id).await;
         let guard = repository_lock.lock().await;
+        let repository = self.register_discovered_repository(&git_repository)?;
 
         if let Some(existing) = self
             .store

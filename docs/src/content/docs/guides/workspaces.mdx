@@ -9,7 +9,7 @@ you to return to.
 
 ## Start work
 
-Inside a [registered repository](../../getting-started/):
+Inside a Git repository with at least one commit:
 
 ```bash
 coco create fix/login -s "Fix the login redirect and run its tests"
@@ -24,6 +24,7 @@ coco create investigate/search -s "Investigate slow searches" -j
 
 To prepare a workspace before giving it an instruction, use
 `coco create fix/login`. Its status is `Prepared` until work begins.
+The first `create` also adds that repository to CoCo.
 
 CoCo normally starts from your current commit on a new
 `coco/<workspace-name>` branch. See [Choose code and context](../context/)
@@ -82,26 +83,33 @@ workspace; wait for it to finish before sending the next instruction.
 
 ## Work across repositories
 
-Register another repository once:
-
-```bash
-coco repo add /absolute/path/to/api
-coco repo list
-```
-
-Put its path before a command to work there without changing directories:
+Point `create` at another repository without changing directories:
 
 ```bash
 coco ../api create fix/login -s "Fix the login redirect"
+```
+
+CoCo adds the repository automatically. Put its path before later commands to
+work there:
+
+```bash
 coco ../api jump fix/login
 ```
+
+Use `coco repo add /absolute/path/to/api` when you want a repository to appear
+in lists and selectors before creating a workspace. `coco repo list` shows all
+currently added repositories.
 
 For an overview of every repository, use `-a`:
 
 ```bash
 coco list -a
-coco status -af
+coco status -aft
 ```
+
+The tree view gives each repository its own path heading and unfolds shared
+parts of names such as `frontend/login` and `frontend/search`. A unique path
+stays on one line. Omit `-t` for the flat table.
 
 For one workspace whose name you want to find globally, use `-g`:
 

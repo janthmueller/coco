@@ -6,31 +6,36 @@ use uuid::Uuid;
 
 use crate::paths::CocoPaths;
 use crate::protocol::{
-    ModelListParams, RepositoryListParams, RepositoryRegisterParams, RepositoryResolveParams,
-    RepositoryScope, RepositorySummary, ResourcePolicyUpdate, TurnStartParams,
-    WorkspaceAttachParams, WorkspaceBaseRequest, WorkspaceChangesRequest, WorkspaceCloseParams,
-    WorkspaceContextRequest, WorkspaceContextSource, WorkspaceCreateParams, WorkspaceDeleteParams,
-    WorkspaceDiffParams, WorkspaceGetParams, WorkspaceLimitsGetParams, WorkspaceLimitsResetParams,
-    WorkspaceLimitsResult, WorkspaceLimitsSetParams, WorkspaceListItem, WorkspaceListParams,
-    WorkspaceReopenParams, WorkspaceResourcePolicyPatch, WorkspaceResult, WorkspaceWorktreeRequest,
+    ModelListParams, RepositoryListParams, RepositoryRegisterParams, RepositoryRemoveParams,
+    RepositoryResolveParams, RepositoryScope, RepositorySummary, ResourcePolicyUpdate,
+    TurnStartParams, WorkspaceAttachParams, WorkspaceBaseRequest, WorkspaceChangesRequest,
+    WorkspaceCloseParams, WorkspaceContextRequest, WorkspaceContextSource, WorkspaceCreateParams,
+    WorkspaceDeleteParams, WorkspaceDiffParams, WorkspaceGetParams, WorkspaceLimitsGetParams,
+    WorkspaceLimitsResetParams, WorkspaceLimitsResult, WorkspaceLimitsSetParams, WorkspaceListItem,
+    WorkspaceListParams, WorkspaceReopenParams, WorkspaceResourcePolicyPatch, WorkspaceResult,
+    WorkspaceWorktreeRequest,
 };
 use crate::rpc::{RpcClient, RpcClientError};
 
 use super::args::{
     Cli, CloseArgs, Command, CreateArgs, DeleteArgs, LimitField, LimitsCommand, LimitsSetArgs,
-    LimitsTargetArgs, McpCommand, ModelCommand, RepoCommand, StatusArgs,
+    LimitsTargetArgs, McpCommand, ModelCommand, RepoCommand, StatusArgs, StatusSort,
 };
 use super::decision::decide;
 use super::jump::jump;
 use super::output::{
     print_diff, print_json, print_model_list, print_repository_list, print_repository_registered,
-    print_retirement_plan, print_source_changes_omitted_warning, print_status, print_turn_started,
-    print_workspace_closed, print_workspace_created, print_workspace_deleted,
-    print_workspace_limits, print_workspace_list, print_workspace_reopened, versioned,
-    versioned_array,
+    print_repository_removed, print_retirement_plan, print_source_changes_omitted_warning,
+    print_status, print_turn_started, print_workspace_closed, print_workspace_created,
+    print_workspace_deleted, print_workspace_limits, print_workspace_list,
+    print_workspace_reopened, print_workspace_status_list, status_collection_json, status_json,
+    versioned, versioned_array,
 };
 use super::prompt::{Choice, Interaction, TerminalInteraction};
-use super::status::{follow_status, follow_status_collection};
+use super::status::{
+    follow_status, follow_status_collection, sort_workspace_collection, workspace_usage,
+    workspace_usage_collection,
+};
 
 #[cfg(test)]
 mod resources_tests;
@@ -118,9 +123,6 @@ async fn run_with_interaction(cli: Cli, interaction: &mut dyn Interaction) -> Re
             list_workspaces(&paths, scope, json, closed).await
         }
         Command::Status(args) => run_status(&paths, repository_path, args, all_repos, global).await,
-        Command::Usage(args) => {
-            super::usage::run(&paths, repository_path, args, all_repos, global).await
-        }
         Command::Limits { command } => {
             run_limits_scoped(
                 command,
@@ -525,8 +527,7 @@ async fn run_create(
         require_interactive(interaction, "workspace name")?;
     }
     let repository_path =
-        resolve_interactive_repository(paths, repository_path, has_explicit_path, interaction)
-            .await?;
+        resolve_creation_repository(paths, repository_path, has_explicit_path, interaction).await?;
     create_workspace(paths, repository_path, args, interaction).await
 }
 
@@ -655,15 +656,46 @@ async fn resolve_interactive_repository(
     }
 }
 
+async fn resolve_creation_repository(
+    paths: &CocoPaths,
+    requested_path: PathBuf,
+    has_explicit_path: bool,
+    interaction: &mut dyn Interaction,
+) -> Result<PathBuf> {
+    let client = RpcClient::new(paths.socket_path.clone());
+    match client
+        .request(RepositoryResolveParams {
+            path: requested_path.clone(),
+        })
+        .await
+    {
+        Ok(_) => Ok(requested_path),
+        Err(error) if remote_error_code(&error) == Some("REPOSITORY_NOT_REGISTERED") => {
+            Ok(requested_path)
+        }
+        Err(error)
+            if !has_explicit_path
+                && interaction.is_interactive()
+                && remote_error_code(&error) == Some("NOT_A_GIT_REPOSITORY") =>
+        {
+            choose_repository(&client, interaction).await
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
 fn is_unresolved_repository(error: &RpcClientError) -> bool {
     matches!(
-        error,
-        RpcClientError::Remote(payload)
-            if matches!(
-                payload.code.as_str(),
-                "REPOSITORY_NOT_REGISTERED" | "NOT_A_GIT_REPOSITORY"
-            )
+        remote_error_code(error),
+        Some("REPOSITORY_NOT_REGISTERED" | "NOT_A_GIT_REPOSITORY")
     )
+}
+
+fn remote_error_code(error: &RpcClientError) -> Option<&str> {
+    let RpcClientError::Remote(payload) = error else {
+        return None;
+    };
+    Some(&payload.code)
 }
 
 fn is_dirty_source(error: &RpcClientError) -> bool {
@@ -829,6 +861,12 @@ async fn run_repo(command: RepoCommand, paths: &CocoPaths, cwd: &Path) -> Result
             let path = resolve_repository_path(cwd, Some(path));
             let result = client.request(RepositoryRegisterParams { path }).await?;
             print_repository_registered(&result);
+            Ok(())
+        }
+        RepoCommand::Remove { path } => {
+            let path = resolve_repository_path(cwd, Some(path));
+            let result = client.request(RepositoryRemoveParams { path }).await?;
+            print_repository_removed(&result);
             Ok(())
         }
         RepoCommand::List { json } => {
@@ -1007,13 +1045,14 @@ async fn list_workspaces(
     closed: bool,
 ) -> Result<()> {
     let include_repository = matches!(scope, RepositoryScope::AllRepositories);
-    let result = RpcClient::new(paths.socket_path.clone())
+    let mut result = RpcClient::new(paths.socket_path.clone())
         .request(WorkspaceListParams {
             scope,
             phases: closed.then(|| vec!["closed".to_owned()]),
             include_resources: false,
         })
         .await?;
+    sort_workspace_collection(&mut result, StatusSort::Name);
     if json_output {
         print_json(versioned_array("workspaces", serde_json::to_value(result)?))
     } else {
@@ -1029,6 +1068,7 @@ async fn run_status(
     all_repos: bool,
     global: bool,
 ) -> Result<()> {
+    let sort = args.sort.unwrap_or(StatusSort::Name);
     let repository_scope = RepositoryScope::repository(repository_path);
     if let Some(workspace) = args.workspace {
         if all_repos {
@@ -1043,6 +1083,7 @@ async fn run_status(
             workspace,
             args.follow,
             args.resources,
+            args.usage,
             args.json,
         )
         .await;
@@ -1058,10 +1099,22 @@ async fn run_status(
             &RpcClient::new(paths.socket_path.clone()),
             scope,
             args.resources,
+            args.usage,
+            args.tree,
+            sort,
         )
         .await
     } else {
-        show_status_collection(paths, scope, args.resources, args.json).await
+        show_status_collection(
+            paths,
+            scope,
+            args.resources,
+            args.usage,
+            args.tree,
+            sort,
+            args.json,
+        )
+        .await
     }
 }
 
@@ -1069,20 +1122,32 @@ async fn show_status_collection(
     paths: &CocoPaths,
     scope: RepositoryScope,
     resources: bool,
+    usage: bool,
+    tree: bool,
+    sort: StatusSort,
     json_output: bool,
 ) -> Result<()> {
     let include_repository = matches!(scope, RepositoryScope::AllRepositories);
-    let result = RpcClient::new(paths.socket_path.clone())
+    let client = RpcClient::new(paths.socket_path.clone());
+    let mut result = client
         .request(WorkspaceListParams {
-            scope,
+            scope: scope.clone(),
             phases: None,
             include_resources: resources || json_output,
         })
         .await?;
+    sort_workspace_collection(&mut result, sort);
+    let usage = workspace_usage_collection(&client, scope, usage).await?;
     if json_output {
-        print_json(versioned_array("workspaces", serde_json::to_value(result)?))
+        print_json(status_collection_json(&result, usage.as_deref())?)
     } else {
-        print_workspace_list(&result, include_repository, resources);
+        print_workspace_status_list(
+            &result,
+            include_repository,
+            resources,
+            usage.as_deref(),
+            tree,
+        );
         Ok(())
     }
 }
@@ -1320,11 +1385,12 @@ async fn show_status(
     workspace: String,
     follow: bool,
     resources: bool,
+    usage: bool,
     json_output: bool,
 ) -> Result<()> {
     let client = RpcClient::new(paths.socket_path.clone());
     if follow {
-        return follow_status(&client, scope, &workspace, resources).await;
+        return follow_status(&client, scope, &workspace, resources, usage).await;
     }
     let result = client
         .request(WorkspaceGetParams {
@@ -1333,10 +1399,11 @@ async fn show_status(
             include_resources: resources || json_output,
         })
         .await?;
+    let usage = workspace_usage(&client, &result, usage).await?;
     if json_output {
-        print_json(versioned(serde_json::to_value(result)?))
+        print_json(status_json(&result, usage.as_ref())?)
     } else {
-        print_status(&result, resources);
+        print_status(&result, resources, usage.as_ref());
         Ok(())
     }
 }

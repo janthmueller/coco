@@ -42,7 +42,6 @@ Run `cocod` in another terminal and leave it running. Inside a Git repository
 with at least one commit:
 
 ```bash
-coco repo add .
 coco create fix/login -s "Fix the login redirect and add a regression test"
 coco create review/cache -s "Review the cache for correctness issues"
 

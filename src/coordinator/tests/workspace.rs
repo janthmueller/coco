@@ -579,6 +579,7 @@ async fn prepare_multi_repository_workspaces(fixture: &Fixture) -> MultiReposito
         .register_repository(RepositoryRegisterParams {
             path: second_source.clone(),
         })
+        .await
         .unwrap();
 
     let first = fixture

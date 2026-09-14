@@ -90,6 +90,7 @@ async fn cross_repository_context_creation_cannot_race_source_thread_deletion() 
         .register_repository(RepositoryRegisterParams {
             path: other_repo.clone(),
         })
+        .await
         .unwrap();
     let creation = fixture
         .coordinator

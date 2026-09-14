@@ -67,7 +67,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     super::hooks::verify_loaded(&paths, &repository).await?;
 
     let models = cli_json(&run_cli(&paths, &repository, &["model", "list", "--json"]).await?)?;
-    assert_eq!(models["schemaVersion"], 10);
+    assert_eq!(models["schemaVersion"], 11);
     assert_eq!(models["models"].as_array().map(Vec::len), Some(2));
     assert_eq!(models["models"][0]["model"], DEFAULT_MODEL);
     assert_eq!(models["models"][0]["isDefault"], true);
@@ -86,7 +86,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
 
     run_cli(&paths, &repository, &["repo", "add", "."]).await?;
     let repositories = cli_json(&run_cli(&paths, &repository, &["repo", "ls", "--json"]).await?)?;
-    assert_eq!(repositories["schemaVersion"], 10);
+    assert_eq!(repositories["schemaVersion"], 11);
     assert_eq!(
         repositories["repositories"].as_array().map(Vec::len),
         Some(1)
@@ -126,6 +126,18 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
                 .contains("workspace name is required without interactive input"),
         "non-terminal create unexpectedly prompted or returned an unclear error: {}",
         String::from_utf8_lossy(&missing_name.stderr)
+    );
+
+    let removed_repository = run_cli(&paths, &repository, &["repo", "rm", "."]).await?;
+    let removed_repository = String::from_utf8_lossy(&removed_repository.stdout);
+    ensure!(
+        removed_repository.contains("Removed repository"),
+        "repo rm did not report the removed enrollment: {removed_repository}"
+    );
+    let repositories = cli_json(&run_cli(&paths, &repository, &["repo", "list", "--json"]).await?)?;
+    assert_eq!(
+        repositories["repositories"].as_array().map(Vec::len),
+        Some(0)
     );
 
     fs::write(
@@ -171,7 +183,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     fs::remove_file(repository.join("local-only.txt"))?;
 
     let listed = cli_json(&run_cli(&paths, &repository, &["list", "--json"]).await?)?;
-    assert_eq!(listed["schemaVersion"], 10);
+    assert_eq!(listed["schemaVersion"], 11);
     let workspaces = listed["workspaces"]
         .as_array()
         .context("coco list did not return a workspaces array")?;
@@ -199,8 +211,21 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
             && !human_workspaces.contains('\u{1b}'),
         "human workspace output was noisy or terminal-dependent: {human_workspaces}"
     );
+    let tree_overview = run_cli(&paths, &repository, &["status", "-t"]).await?;
+    let tree_overview = String::from_utf8_lossy(&tree_overview.stdout);
+    ensure!(
+        tree_overview.contains("└─ feat/process-smoke")
+            && tree_overview.contains("STATE")
+            && tree_overview.contains("BRANCH"),
+        "workspace tree did not compact its unique path and preserve status columns: {tree_overview}"
+    );
+    let state_overview = run_cli(&paths, &repository, &["status", "--sort", "state"]).await?;
+    ensure!(
+        String::from_utf8_lossy(&state_overview.stdout).contains(WORKSPACE_NAME),
+        "state-sorted status omitted the workspace"
+    );
     let status_overview = cli_json(&run_cli(&paths, &repository, &["status", "--json"]).await?)?;
-    assert_eq!(status_overview["schemaVersion"], 10);
+    assert_eq!(status_overview["schemaVersion"], 11);
     assert_eq!(
         status_overview["workspaces"].as_array().map(Vec::len),
         Some(1)
@@ -386,32 +411,38 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         .map_err(|_| anyhow::anyhow!("fake App Server stopped before turn completion"))?;
     let completed = wait_for_workspace_phase(&paths, &repository, "idle").await?;
     assert_eq!(completed["workspace"]["activeTurnId"], Value::Null);
-    let usage =
-        cli_json(&run_cli(&paths, &repository, &["usage", WORKSPACE_NAME, "--json"]).await?)?;
-    assert_eq!(usage["schemaVersion"], 10);
+    let usage = cli_json(
+        &run_cli(
+            &paths,
+            &repository,
+            &["status", WORKSPACE_NAME, "--usage", "--json"],
+        )
+        .await?,
+    )?;
+    assert_eq!(usage["schemaVersion"], 11);
     assert_eq!(usage["workspace"]["name"], WORKSPACE_NAME);
     assert_eq!(
-        usage.pointer("/tokens/total/totalTokens"),
+        usage.pointer("/usage/tokens/total/totalTokens"),
         Some(&json!(123_456))
     );
     assert_eq!(
-        usage.pointer("/tokens/last/totalTokens"),
+        usage.pointer("/usage/tokens/last/totalTokens"),
         Some(&json!(84_000))
     );
     assert_eq!(
-        usage.pointer("/tokens/modelContextWindow"),
+        usage.pointer("/usage/tokens/modelContextWindow"),
         Some(&json!(200_000))
     );
     assert_eq!(
-        usage.pointer("/tokens/source"),
+        usage.pointer("/usage/tokens/source"),
         Some(&json!("threadTokenUsageUpdated"))
     );
-    assert_eq!(usage.pointer("/tokens/isFresh"), Some(&json!(true)));
+    assert_eq!(usage.pointer("/usage/tokens/isFresh"), Some(&json!(true)));
     assert_eq!(
-        usage.pointer("/cost/estimatedUsageUsdMicros"),
+        usage.pointer("/usage/cost/estimatedUsageUsdMicros"),
         Some(&json!(420_000))
     );
-    let human_usage = run_cli(&paths, &repository, &["usage", WORKSPACE_NAME]).await?;
+    let human_usage = run_cli(&paths, &repository, &["status", WORKSPACE_NAME, "-u"]).await?;
     let human_usage = String::from_utf8_lossy(&human_usage.stdout);
     ensure!(
         human_usage.contains("123,456 total")
@@ -420,7 +451,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
             && !human_usage.contains(THREAD_ID),
         "workspace usage output was incomplete or noisy: {human_usage}"
     );
-    let usage_overview = run_cli(&paths, &repository, &["usage"]).await?;
+    let usage_overview = run_cli(&paths, &repository, &["status", "-u"]).await?;
     let usage_overview = String::from_utf8_lossy(&usage_overview.stdout);
     ensure!(
         usage_overview.contains("WORKSPACE")
@@ -431,7 +462,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
             && !usage_overview.contains("REPOSITORY"),
         "repository usage overview was incomplete: {usage_overview}"
     );
-    let global_usage = run_cli(&paths, &repository, &["usage", "-a"]).await?;
+    let global_usage = run_cli(&paths, &repository, &["status", "-au"]).await?;
     ensure!(
         String::from_utf8_lossy(&global_usage.stdout).contains("REPOSITORY"),
         "all-repository usage overview did not identify repositories"
@@ -440,26 +471,32 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         &run_cli(
             &paths,
             temporary.path(),
-            &["usage", WORKSPACE_NAME, "-g", "--json"],
+            &["status", WORKSPACE_NAME, "-gu", "--json"],
         )
         .await?,
     )?;
     assert_eq!(globally_targeted_usage["workspace"]["id"], workspace["id"]);
     let followed_usage =
-        run_cli_until_interrupt(&paths, &repository, &["usage", WORKSPACE_NAME, "-f"]).await?;
+        run_cli_until_interrupt(&paths, &repository, &["status", WORKSPACE_NAME, "-fu"]).await?;
     let followed_usage = String::from_utf8_lossy(&followed_usage.stdout);
     ensure!(
         followed_usage.contains("123,456 total")
             && !followed_usage.contains("Fake Codex completed the turn."),
-        "usage --follow omitted usage or leaked conversation output: {followed_usage}"
+        "status --usage --follow omitted usage or leaked conversation output: {followed_usage}"
     );
     let followed_usage_collection =
-        run_cli_until_interrupt(&paths, &repository, &["usage", "-af"]).await?;
+        run_cli_until_interrupt(&paths, &repository, &["status", "-aftru"]).await?;
     let followed_usage_collection = String::from_utf8_lossy(&followed_usage_collection.stdout);
+    let repository_heading = repository.canonicalize()?.display().to_string();
     ensure!(
-        followed_usage_collection.contains("REPOSITORY")
-            && followed_usage_collection.contains(WORKSPACE_NAME),
-        "collection usage follow did not print its initial state: {followed_usage_collection}"
+        followed_usage_collection.contains(&repository_heading)
+            && followed_usage_collection.contains("WORKSPACE")
+            && !followed_usage_collection.contains("repository ·")
+            && followed_usage_collection.contains("feat/")
+            && followed_usage_collection.contains("process-smoke")
+            && followed_usage_collection.contains("MEMORY")
+            && followed_usage_collection.contains("TOKENS"),
+        "tree collection follow did not compose status projections: {followed_usage_collection}"
     );
     let followed =
         run_cli_until_interrupt(&paths, &repository, &["status", WORKSPACE_NAME, "--follow"])
@@ -599,14 +636,20 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
             .all(|request| request.get("method") != Some(&json!("thread/resume"))),
         "passive status eagerly resumed the persisted thread"
     );
-    let recovered_usage =
-        cli_json(&run_cli(&paths, &repository, &["usage", WORKSPACE_NAME, "--json"]).await?)?;
+    let recovered_usage = cli_json(
+        &run_cli(
+            &paths,
+            &repository,
+            &["status", WORKSPACE_NAME, "-u", "--json"],
+        )
+        .await?,
+    )?;
     assert_eq!(
-        recovered_usage.pointer("/tokens/total/totalTokens"),
+        recovered_usage.pointer("/usage/tokens/total/totalTokens"),
         Some(&json!(130_000))
     );
     assert_eq!(
-        recovered_usage.pointer("/tokens/isFresh"),
+        recovered_usage.pointer("/usage/tokens/isFresh"),
         Some(&json!(false))
     );
     ensure!(
@@ -615,7 +658,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
             .expect("recovery request capture mutex was poisoned")
             .iter()
             .all(|request| request.get("method") != Some(&json!("thread/resume"))),
-        "passive usage eagerly resumed the persisted thread"
+        "status usage eagerly resumed the persisted thread"
     );
 
     run_cli(&paths, &repository, &["jump", WORKSPACE_NAME]).await?;

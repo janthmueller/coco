@@ -89,13 +89,14 @@ peer-response routing remain separate, unimplemented capabilities.
 - That observed protocol is version-specific. Narrow consumed fields and the
   real behavior test are authoritative; generated schemas remain an upgrade
   review aid and additive schema drift alone is not a compatibility failure.
-- Schema v14 retains schema v6's minimal turn-start operation ledger, schema
+- Schema v15 retains schema v6's minimal turn-start operation ledger, schema
   v7's typed worktree binding, and schema v8/v9's recoverable workspace
   retirement state and deletion intent. Schema v10 adds bounded signals and
   schema v11 adds the narrow durable hook outbox. Schema v12 adds open-delete
   origin and explicit commit-discard intent. Schema v13 adds revisioned
-  workspace resource policies, and schema v14 adds one compact native
-  token-usage checkpoint per workspace. It also retains the old
+  workspace resource policies, schema v14 adds one compact native token-usage
+  checkpoint per workspace, and schema v15 adds reversible repository
+  enrollment. It also retains the old
   native-status columns, local turns, normalized events, completed messages,
   MCP audit events, and decisions as a reversible compatibility bridge. The
   retained shapes are not evidence of long-term CoCo ownership.
@@ -194,8 +195,11 @@ peer-response routing remain separate, unimplemented capabilities.
 - CoCo never performs destructive branch or worktree cleanup automatically.
   Explicit `close` and `delete` operations expose and validate
   their effects before applying them.
-- One daemon may register multiple repositories. Workspaces remain
-  repository-owned, workspace names are unique only within that repository,
+- One daemon may register multiple repositories. Creating a workspace enrolls
+  a valid repository when necessary; explicit `repo add` remains available for
+  pre-enrollment. `repo remove` reversibly hides an empty repository from
+  normal resolution without deleting Git data or retained history. Workspaces
+  remain repository-owned, workspace names are unique only within that repository,
   and opaque workspace IDs are globally unique.
 - Repository-aware CLI commands use an optional leading repository path that
   defaults to `.`. `--all-repos`/`-a` expands workspace collection to every
@@ -255,14 +259,15 @@ peer-response routing remain separate, unimplemented capabilities.
   persisted, and are distinct from configured resource policy. Desired limits
   and their revision are durable; the applied snapshot is live runtime
   evidence.
-- `coco usage` exposes the latest cumulative native Codex token report for one
-  workspace or an open-workspace collection without loading conversations or
-  starting executors. The complete native breakdown and provenance are
-  available in one-shot JSON; human output keeps cumulative tokens, latest
-  context occupancy, and optional backend-estimated cost distinct. One compact
-  checkpoint is durable, becomes stale across daemon generations, and never
-  becomes a CoCo billing authority. Native cost is optional, cached briefly in
-  memory, and unavailable is distinct from zero.
+- `coco status --usage` exposes the latest cumulative native Codex token report
+  alongside operational state for one workspace or an open-workspace
+  collection without loading conversations or starting executors. The complete
+  native breakdown and provenance are available in one-shot JSON; human output
+  keeps cumulative tokens, latest context occupancy, and optional
+  backend-estimated cost distinct. One compact checkpoint is durable, becomes
+  stale across daemon generations, and never becomes a CoCo billing authority.
+  Native cost is optional, cached briefly in memory, and unavailable is
+  distinct from zero.
 - Worktrees may use a new branch, an existing local branch, or detached HEAD.
   Detached worktrees remain registered Git worktrees. CoCo can close one only
   while its `HEAD` still equals its base; detached-to-branch promotion remains
@@ -481,6 +486,7 @@ is an explicit independent request.
 
 ```text
 coco repo add [path]
+coco repo (remove | rm) [path]
 coco repo (list | ls) [--json]
 coco model (list | ls) [--json]
 coco [<repository-path>] create [<name>]
@@ -491,13 +497,10 @@ coco [<repository-path>] create [<name>]
   [--profile <name>] [--model <model>] [--send <message>] [--jump]
 coco [<repository-path>] (list | ls) [--json]
 coco (list | ls) --all-repos [--json]       # `-a` is the short form
-coco [<repository-path>] status [--resources] [--follow] [--json]
-coco status --all-repos [--resources] [--follow] [--json] # `-a`, `-r`, and `-f` are short forms
-coco [<repository-path>] status <workspace> [--resources] [--follow] [--json]
-coco status <workspace> --global [--resources] [--follow] [--json] # `-g` is the short form
-coco [<repository-path>] usage [<workspace>] [--follow] [--json]
-coco usage --all-repos [--follow] [--json] # `-a` and `-f` are short forms
-coco usage <workspace> --global [--follow] [--json] # `-g` is the short form
+coco [<repository-path>] status [--tree | --sort <name|state>] [--resources] [--usage] [--follow] [--json]
+coco status --all-repos [--tree | --sort <name|state>] [--resources] [--usage] [--follow] [--json] # short: `-a`, `-t`, `-r`, `-u`, `-f`
+coco [<repository-path>] status <workspace> [--resources] [--usage] [--follow] [--json]
+coco status <workspace> --global [--resources] [--usage] [--follow] [--json] # short: `-g`, `-r`, `-u`, `-f`
 coco [<repository-path>] limits show [<workspace>] [--json]
 coco limits show [<workspace>] --global [--json]
 coco [<repository-path>] limits set [<workspace>]
@@ -525,7 +528,8 @@ coco mcp serve --repository <path> [--allow-send] [--signal-catalog <directory>]
 
 For repository-aware commands the omitted leading path is exactly equivalent
 to `.`. An explicit path may point anywhere inside a registered repository;
-the daemon resolves its canonical Git identity. `--all-repos` and `--global`
+`create` additionally enrolls a valid unregistered repository. The daemon
+resolves its canonical Git identity. `--all-repos` and `--global`
 are each mutually exclusive with that path and with one another. Both are
 invalid for `create`, which necessarily creates inside one repository.
 
@@ -536,8 +540,8 @@ Global name resolution succeeds only for exactly one match. Multiple matches
 return `WORKSPACE_REFERENCE_AMBIGUOUS` with matching workspace IDs, names, and
 repository paths. A local miss never silently targets another repository, but
 the error points out global matches when they exist. `--all-repos` is a
-read-only collection scope for `list`, targetless `status`, targetless `usage`,
-and targetless `signal list`; it never broadcasts a mutation. CoCo does not
+read-only collection scope for `list`, targetless `status`, and targetless
+`signal list`; it never broadcasts a mutation. CoCo does not
 encode a path and workspace name into a composite string.
 
 `signal list`/`signal ls` accept an optional positional workspace, not a
@@ -562,8 +566,9 @@ the newest 1–100 post-event delivery summaries without event payloads; they do
 not include synchronous guard checks and are not a manual replay API.
 
 Human terminal commands share one interactive input contract. `create` may
-prompt for a missing name and, when implicit `.` cannot select a registered
-repository, offer the registered repositories. `send`, `jump`, and `diff` may
+prompt for a missing name and, when implicit `.` is not inside a Git
+repository, offer the registered repositories. A valid unregistered Git scope
+continues directly to daemon-owned enrollment. `send`, `jump`, and `diff` may
 select an omitted workspace from the local scope or the daemon-wide `--global`
 scope; `send` then prompts for an omitted message. Targetless `status` is
 always a non-interactive collection view. The picker uses
@@ -616,6 +621,25 @@ does not duplicate thread or turn orchestration.
 - Do not require a clean checkout merely to register it; `create` evaluates
   local state when deciding whether to warn, omit, or explicitly carry it.
 
+### `coco repo remove [path]` / `coco repo rm [path]`
+
+- Default `path` is the current directory and resolve it through the same
+  canonical Git common-directory identity as registration.
+- If Git discovery fails because a registered checkout no longer exists, an
+  exact stored root-path match may still be unregistered. Never use that
+  fallback when the path resolves to a different live Git identity.
+- Reject removal while any workspace record belongs to the repository,
+  regardless of lifecycle or availability; the user deletes those workspaces
+  explicitly first.
+- Mark the enrollment inactive while retaining the stable repository row and
+  any signal provenance. Do not delete the Git repository, worktrees, branches,
+  Codex threads, signals, or history.
+- Omit inactive repositories from normal repository lists, pickers, and path
+  resolution. Re-registration or creation restores the same stable identity.
+- Do not prompt for confirmation and do not offer `--yes` or a force/cascade
+  option in v0; the operation is reversible and has no external destructive
+  effect.
+
 ### `coco repo list` / `coco repo ls`
 
 - List every repository registered with the user-scoped daemon, including its
@@ -639,10 +663,11 @@ does not duplicate thread or turn orchestration.
 Creation has four independent inputs:
 
 The name remains mandatory at the coordinator boundary. The CLI may collect a
-missing name from a human terminal before it constructs that request. When the
-caller omitted the leading path and `.` is not a registered repository, the
-same interactive layer may choose from `repository.list`; an explicitly
-supplied path always fails directly instead of silently falling back.
+missing name from a human terminal before it constructs that request. A valid
+unregistered Git scope is enrolled by the coordinator before provisioning. If
+the caller omitted the leading path and `.` is not inside a Git repository,
+the interactive layer may instead choose from `repository.list`; an explicitly
+supplied invalid path fails directly instead of silently falling back.
 
 1. **Code base.** `--base <revision>` resolves a commit and defaults to the
    invoking checkout's `HEAD`. `--base-workspace <workspace>` instead uses
@@ -733,7 +758,9 @@ ID must not create duplicate artifacts.
   identity in each human and JSON row.
 - Normal lists omit closed workspaces. `--closed` selects closed workspaces
   instead and composes with repository or all-repository scope.
-- Sort deterministically by most recent update, then workspace ID.
+- Sort deterministically by repository and natural workspace name, then
+  workspace ID. Numeric name components compare by value, so `w2` precedes
+  `w10`.
 - For each bound ready workspace, read current Codex status with non-loading
   `thread/read`; do not resume a thread merely to list it. An unbound ready
   workspace projects `prepared`; a missing or invalid existing binding projects
@@ -746,6 +773,19 @@ ID must not create duplicate artifacts.
 - With no workspace reference, return the same compact workspace collection as
   `list` in the selected/current repository. `--all-repos`/`-a` selects every
   registered repository. This form never opens a picker and supports `--json`.
+- Collection status uses the same stable repository and natural-name ordering
+  as `list`. Human `--tree`/`-t` renders slash-separated workspace-name
+  components as a compact trie: only prefixes shared by multiple workspace
+  entries receive structural rows, while unique component chains remain on
+  one row. Workspace names and synthetic name prefixes use ordinary text;
+  only connector guides are dim. For `--all-repos`, the view separates
+  repositories under canonical-path headings. It composes with follow,
+  resource, and usage projections. Tree output is a human presentation and is
+  invalid with JSON or a targeted workspace.
+  `--sort state` instead keeps repositories grouped and uses the stable name
+  order as a tie-breaker while prioritizing waiting, failed/unavailable,
+  active/transitional, ready, prepared/unloaded, then closed phases. Explicit
+  sort and tree views are mutually exclusive.
 - With an explicit reference, return exactly one workspace. The human view
   shows its current state, branch/worktree location, reported error, and any
   actionable decision. JSON returns the complete projection below. Resolve a
@@ -781,10 +821,16 @@ ID must not create duplicate artifacts.
   memory as memory rather than conflating them. `--follow`/`-f` composes with
   it, including clustered `-fr`/`-afr`. JSON status always requests the
   complete optional observation without requiring `--resources`.
+- `--usage`/`-u` adds cumulative native tokens, latest context occupancy, and
+  optional estimated cost to either a targeted or collection status view. It
+  composes with resource and follow flags, including `-fu`, `-ru`, and `-fru`.
+  Targeted human status shows the complete breakdown; collections use compact
+  `TOKENS`, `CONTEXT`, and `COST` columns. JSON nests the typed projection under
+  `usage` only when requested.
 - `--follow` and `--json` are intentionally mutually exclusive in the current
   CLI; machine clients can poll `status --json`.
 
-### `coco usage`
+### Status usage projection
 
 - With no workspace reference, return open workspaces in the selected/current
   repository. `--all-repos`/`-a` selects every registered repository and adds
@@ -807,14 +853,16 @@ ID must not create duplicate artifacts.
   arrives. Preserve credits, optional USD, grouped detail, and observation
   time. A null or failed native result is explicit unavailable evidence and
   cannot fail token reporting.
-- Human collection output contains only workspace, cumulative tokens, latest
-  context-window percentage, and optional estimated cost. The targeted view
-  adds input/cached and output/reasoning breakdowns. JSON exposes the complete
-  typed projection with top-level schema version 10.
+- Human collection output adds cumulative tokens, latest context-window
+  percentage, and optional estimated cost to the existing status row. The
+  targeted view adds input/cached and output/reasoning breakdowns. JSON exposes
+  the complete typed projection beneath `usage` with top-level schema version
+  11.
 - One-shot and `--follow` reads are passive: they do not call `thread/resume`,
   create context, or start a workspace executor. A terminal replaces the prior
-  frame; redirected output appends only changed frames. `--follow`/`-f` and
-  `--json` are mutually exclusive.
+  frame; redirected output appends only changed requested views. State, usage,
+  and resource changes can each trigger an update. `--follow`/`-f` and `--json`
+  are mutually exclusive.
 
 ### `coco limits`
 

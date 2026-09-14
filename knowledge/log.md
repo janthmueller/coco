@@ -8,6 +8,34 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-09-14
+
+- **Stable hierarchical workspace overviews**: Collection `list` and `status`
+  now use repository-first natural workspace-name ordering instead of recent
+  update order. Human status adds `--tree`/`-t` with one canonical-path section
+  per repository and a compact slash-name hierarchy beneath it: only shared
+  prefixes unfold, unique paths stay on one row, and workspace names remain
+  unembellished. `--sort state` provides an explicit attention-first flat view.
+  Tree output composes with follow, runtime resources, and model usage while
+  JSON remains flat.
+
+- **Unified workspace observation**: Replaced the separate public `coco usage`
+  command with `coco status --usage`/`-u`. Usage now composes with resource,
+  scope, JSON, and follow options, including clustered `-fu`, `-ru`, and
+  `-fru`; collection rows retain state while adding compact token, context, and
+  cost columns. The narrow daemon usage methods remain the internal evidence
+  boundary used by the CLI.
+
+- **Reversible repository enrollment**: Keep explicit `coco repo add` for
+  pre-enrollment while allowing `workspace.create` to enroll a valid Git
+  repository automatically. Added `coco repo remove`/`repo rm` as a
+  non-destructive unregistration that is blocked by every retained workspace
+  record. Schema v15 preserves stable repository identity and signal
+  provenance while inactive repositories disappear from normal lists,
+  selectors, and path resolution. Create, add, and remove serialize on the
+  same repository identity lock so an enrolled workspace cannot race with
+  unregistration.
+
 ## 2026-09-11
 
 - **Outcome-led public documentation**: Lead the README and overview with

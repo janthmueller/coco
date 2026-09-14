@@ -13,7 +13,6 @@ mod signals;
 mod status;
 mod style;
 mod turn;
-mod usage;
 
 #[cfg(test)]
 mod tests;

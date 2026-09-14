@@ -61,6 +61,27 @@ fn help_leads_with_persistent_cross_repository_workspaces_without_security_claim
 }
 
 #[test]
+fn repository_remove_and_its_rm_alias_accept_an_optional_path() {
+    for command in ["remove", "rm"] {
+        let parsed = Cli::try_parse_from(["coco", "repo", command, "/repo"]).unwrap();
+        assert!(matches!(
+            parsed.command,
+            Command::Repo {
+                command: super::args::RepoCommand::Remove { path }
+            } if path.as_os_str() == OsStr::new("/repo")
+        ));
+    }
+
+    let parsed = Cli::try_parse_from(["coco", "repo", "remove"]).unwrap();
+    assert!(matches!(
+        parsed.command,
+        Command::Repo {
+            command: super::args::RepoCommand::Remove { path }
+        } if path.as_os_str() == OsStr::new(".")
+    ));
+}
+
+#[test]
 fn diff_help_and_human_output_disclose_bounded_patches() {
     let mut command = Cli::command();
     let help = command

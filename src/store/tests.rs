@@ -22,6 +22,98 @@ pub(super) fn repository(root: &Path) -> Repository {
 }
 
 #[test]
+fn repository_unregistration_preserves_identity_and_can_be_reactivated() {
+    let store = Store::in_memory().unwrap();
+    let repository = repository(Path::new("/tmp/source-repository-lifecycle"));
+    let registered = store.register_repository(&repository).unwrap();
+    let repeated = store
+        .register_repository(&Repository {
+            root_path: PathBuf::from("/tmp/source-repository-linked-worktree"),
+            display_name: "linked-worktree".to_owned(),
+            updated_at_ms: 2,
+            ..repository.clone()
+        })
+        .unwrap();
+    assert_eq!(repeated, registered);
+
+    assert_eq!(
+        store.unregister_repository(&registered.id).unwrap(),
+        RepositoryUnregistration::Removed
+    );
+    assert!(
+        store
+            .repository_by_common_dir(&repository.git_common_dir)
+            .unwrap()
+            .is_none()
+    );
+    assert!(store.list_repositories().unwrap().is_empty());
+    assert_eq!(
+        store.repository_by_id(&registered.id).unwrap().unwrap().id,
+        registered.id
+    );
+
+    let new_root = Path::new("/tmp/source-repository-reactivated");
+    let reactivated = store
+        .register_repository(&Repository {
+            root_path: new_root.to_owned(),
+            display_name: "reactivated".to_owned(),
+            updated_at_ms: 2,
+            ..repository
+        })
+        .unwrap();
+    assert_eq!(reactivated.id, registered.id);
+    assert_eq!(reactivated.root_path, new_root);
+    assert_eq!(reactivated.display_name, "reactivated");
+    assert_eq!(store.list_repositories().unwrap(), [reactivated]);
+}
+
+#[test]
+fn repository_unregistration_is_blocked_by_every_workspace_record() {
+    let store = Store::in_memory().unwrap();
+    let repository = repository(Path::new("/tmp/source-repository-blocked"));
+    store.register_repository(&repository).unwrap();
+    ready_workspace(&store, &repository.id, "retained");
+
+    assert_eq!(
+        store.unregister_repository(&repository.id).unwrap(),
+        RepositoryUnregistration::HasWorkspaces(1)
+    );
+    assert_eq!(store.list_repositories().unwrap().len(), 1);
+}
+
+#[test]
+fn migrates_v14_repositories_as_registered() {
+    let connection = Connection::open_in_memory().unwrap();
+    connection
+        .execute_batch(
+            "CREATE TABLE repositories (
+                id TEXT PRIMARY KEY,
+                root_path TEXT NOT NULL UNIQUE,
+                git_common_dir TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL,
+                is_linked_worktree INTEGER NOT NULL CHECK (is_linked_worktree IN (0, 1)),
+                created_at_ms INTEGER NOT NULL,
+                updated_at_ms INTEGER NOT NULL
+             );
+             INSERT INTO repositories VALUES (
+                'repo-v14', '/tmp/v14', '/tmp/v14/.git', 'v14', 0, 1, 1
+             );
+             PRAGMA user_version = 14;",
+        )
+        .unwrap();
+
+    let store = Store::from_connection(connection).unwrap();
+    assert_eq!(store.list_repositories().unwrap().len(), 1);
+    let connection = store.lock().unwrap();
+    assert_eq!(
+        connection
+            .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        15
+    );
+}
+
+#[test]
 fn workspace_availability_transitions_and_record_deletion_are_atomic() {
     let store = Store::in_memory().unwrap();
     let repo = repository(Path::new("/tmp/source-retirement"));
@@ -292,7 +384,7 @@ fn migrates_v1_tasks_to_workspaces_without_losing_data() {
     let version: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 14);
+    assert_eq!(version, 15);
     assert_eq!(workspace.lifecycle, WorkspaceLifecycle::Ready);
     assert_eq!(workspace.phase, WorkspacePhase::Unavailable);
     assert_eq!(
@@ -840,7 +932,7 @@ fn migrates_v5_turn_idempotency_into_the_operation_ledger() {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 14);
+        assert_eq!(version, 15);
     }
 
     let operation = store

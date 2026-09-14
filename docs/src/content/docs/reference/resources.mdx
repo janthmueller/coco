@@ -3,7 +3,7 @@ title: Resource accounting
 description: Interpret memory, CPU, token counts, and cost estimates.
 ---
 
-Use this reference to interpret the values in `status -r` and `usage`.
+Use this reference to interpret the values in `status -r` and `status -u`.
 For commands to start with, see [Monitor usage and set limits](../../guides/resources/).
 
 ## Memory and process counts
@@ -34,7 +34,7 @@ sets relative priority under CPU contention. See the
 
 ## Token totals and context
 
-`usage` reports cumulative tokens for the Codex conversation. An explicit
+`status -u` reports cumulative tokens for the Codex conversation. An explicit
 workspace adds input, cached-input, output, and reasoning-output breakdowns.
 Treat subset fields as breakdowns, not additional counts to add to the total.
 
@@ -46,10 +46,10 @@ These are Codex's reported conversation values. When you reuse context,
 do not interpret them as an independently measured cost of work performed only
 in the new workspace.
 
-CoCo saves the latest token report. Following usage watches updates; it does
-not provide a history of every turn. After a restart the saved report is
-marked `last seen` until another report arrives. Inspecting usage leaves
-inactive workspaces inactive.
+CoCo saves the latest token report. Following status with `-fu` watches
+updates; it does not provide a history of every turn. After a restart the saved
+report is marked `last seen` until another report arrives. Reading these values
+does not start an inactive workspace.
 
 ## Cost
 
@@ -66,9 +66,10 @@ Use `coco status <workspace> --json` for full resource details, including
 measurement source, task count, cumulative CPU, and controller events where
 available. These are current observations, not persisted resource history.
 
-`coco usage <workspace> --json` includes token breakdowns, observation and
-freshness fields, and an estimate or an unavailable reason.
+`coco status <workspace> --usage --json` adds a nested `usage` object with token
+breakdowns, observation and freshness fields, and an estimate or an
+unavailable reason.
 
-Status and usage follow replace the terminal view in place. Redirected output
-appends changed views. Their `--follow` and `--json` flags are mutually
-exclusive; [signal follow](../signals/#resume-a-reader) supports JSON pages.
+Status follow replaces the terminal view in place. Redirected output appends
+changed views. Its `--follow` and `--json` flags are mutually exclusive;
+[signal follow](../signals/#resume-a-reader) supports JSON pages.

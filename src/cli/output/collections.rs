@@ -1,11 +1,13 @@
+use std::collections::HashMap;
 use std::io::{self, IsTerminal};
 
 use crossterm::terminal;
 
 use crate::domain::CodexModel;
-use crate::protocol::{RepositorySummary, WorkspaceListItem};
+use crate::protocol::{RepositorySummary, WorkspaceListItem, WorkspaceUsageItem};
 
 use super::super::style::{Palette, Tone};
+use super::usage::usage_cells;
 use super::{phase_presentation, safe_line};
 
 const MAX_TABLE_WIDTH: usize = 160;
@@ -30,9 +32,59 @@ pub(in crate::cli) fn render_workspace_list_for_stdout(
         workspaces,
         include_repository,
         include_resources,
+        None,
         stdout_width(),
         Palette::stdout(),
     )
+}
+
+pub(in crate::cli) fn print_workspace_status_list(
+    workspaces: &[WorkspaceListItem],
+    include_repository: bool,
+    include_resources: bool,
+    usage: Option<&[WorkspaceUsageItem]>,
+    tree: bool,
+) {
+    print!(
+        "{}",
+        render_workspace_status_list_for_stdout(
+            workspaces,
+            include_repository,
+            include_resources,
+            usage,
+            tree,
+        )
+    );
+}
+
+pub(in crate::cli) fn render_workspace_status_list_for_stdout(
+    workspaces: &[WorkspaceListItem],
+    include_repository: bool,
+    include_resources: bool,
+    usage: Option<&[WorkspaceUsageItem]>,
+    tree: bool,
+) -> String {
+    let width = stdout_width();
+    let palette = Palette::stdout();
+    if tree {
+        render_workspace_tree(
+            workspaces,
+            include_repository,
+            include_resources,
+            usage,
+            width,
+            palette,
+        )
+    } else {
+        render_workspace_list(
+            workspaces,
+            include_repository,
+            include_resources,
+            usage,
+            width,
+            palette,
+        )
+    }
 }
 
 pub(in crate::cli) fn print_repository_list(repositories: &[RepositorySummary]) {
@@ -53,87 +105,292 @@ fn render_workspace_list(
     workspaces: &[WorkspaceListItem],
     include_repository: bool,
     include_resources: bool,
+    usage: Option<&[WorkspaceUsageItem]>,
     width: usize,
     palette: Palette,
 ) -> String {
     if workspaces.is_empty() {
         return format!("{}\n", palette.paint(Tone::Dim, "No workspaces."));
     }
+    let usage_by_workspace = usage_index(usage);
+    let include_usage = usage_by_workspace.is_some();
     let rows = workspaces
         .iter()
         .map(|item| {
-            let mut cells = Vec::with_capacity(
-                3 + usize::from(include_repository) + 3 * usize::from(include_resources),
-            );
-            if include_repository {
-                cells.push(Cell::new(
-                    item.repository.root_path.display().to_string(),
-                    Tone::Dim,
-                ));
-            }
-            let phase = phase_presentation(item.workspace.phase);
-            cells.push(Cell::new(item.workspace.name.clone(), Tone::Primary));
-            cells.push(Cell::new(
-                format!("{} {}", phase.marker, phase.label),
-                phase.tone,
-            ));
-            if include_resources {
-                let (rss, processes, cpu) = resource_cells(item.runtime_resources.as_ref());
-                cells.push(Cell::new(rss, Tone::Dim));
-                cells.push(Cell::new(processes, Tone::Dim));
-                cells.push(Cell::new(cpu, Tone::Dim));
-            }
-            cells.push(Cell::new(
-                item.workspace
-                    .branch_name
-                    .clone()
-                    .unwrap_or_else(|| "detached".to_owned()),
-                Tone::Dim,
-            ));
-            cells
+            workspace_row(
+                item,
+                Cell::new(item.workspace.name.clone(), Tone::Primary),
+                include_repository,
+                include_resources,
+                usage_by_workspace.as_ref(),
+            )
         })
         .collect::<Vec<_>>();
-    if include_repository && include_resources {
-        render_table(
-            &[
-                "REPOSITORY",
-                "WORKSPACE",
-                "STATE",
-                "MEMORY",
-                "PROCS",
-                "CPU",
-                "BRANCH",
-            ],
-            &rows,
-            &[36, 32, 26, 14, 8, 10, 48],
-            width,
-            palette,
-        )
-    } else if include_repository {
-        render_table(
-            &["REPOSITORY", "WORKSPACE", "STATE", "BRANCH"],
-            &rows,
-            &[36, 32, 26, 48],
-            width,
-            palette,
-        )
-    } else if include_resources {
-        render_table(
-            &["WORKSPACE", "STATE", "MEMORY", "PROCS", "CPU", "BRANCH"],
-            &rows,
-            &[32, 26, 14, 8, 10, 48],
-            width,
-            palette,
-        )
-    } else {
-        render_table(
-            &["WORKSPACE", "STATE", "BRANCH"],
-            &rows,
-            &[32, 26, 48],
-            width,
-            palette,
-        )
+    let (headers, caps) =
+        workspace_table_shape(include_repository, include_resources, include_usage, false);
+    render_table(&headers, &rows, &caps, width, palette)
+}
+
+fn render_workspace_tree(
+    workspaces: &[WorkspaceListItem],
+    include_repository: bool,
+    include_resources: bool,
+    usage: Option<&[WorkspaceUsageItem]>,
+    width: usize,
+    palette: Palette,
+) -> String {
+    if workspaces.is_empty() {
+        return format!("{}\n", palette.paint(Tone::Dim, "No workspaces."));
     }
+    let usage_by_workspace = usage_index(usage);
+    let include_usage = usage_by_workspace.is_some();
+    let (headers, caps) = workspace_table_shape(false, include_resources, include_usage, true);
+
+    if include_repository {
+        let groups = repository_groups(workspaces);
+        let mut output = String::new();
+        for (index, group) in groups.iter().enumerate() {
+            if index > 0 {
+                output.push('\n');
+            }
+            let repository = &group[0].repository;
+            let heading = safe_line(&repository.root_path.display().to_string());
+            output.push_str(&palette.paint(Tone::Bold, truncate(&heading, width)));
+            output.push('\n');
+            let roots = workspace_tree(group);
+            let mut rows = Vec::new();
+            append_tree_rows(
+                &roots,
+                &mut Vec::new(),
+                &mut rows,
+                include_resources,
+                usage_by_workspace.as_ref(),
+                headers.len(),
+            );
+            output.push_str(&render_table(&headers, &rows, &caps, width, palette));
+        }
+        return output;
+    }
+
+    let roots = workspace_tree(workspaces);
+    let mut rows = Vec::new();
+    append_tree_rows(
+        &roots,
+        &mut Vec::new(),
+        &mut rows,
+        include_resources,
+        usage_by_workspace.as_ref(),
+        headers.len(),
+    );
+    render_table(&headers, &rows, &caps, width, palette)
+}
+
+type UsageIndex<'a> = HashMap<&'a str, &'a WorkspaceUsageItem>;
+
+fn usage_index(usage: Option<&[WorkspaceUsageItem]>) -> Option<UsageIndex<'_>> {
+    usage.map(|usage| {
+        usage
+            .iter()
+            .map(|item| (item.workspace.id.as_str(), item))
+            .collect()
+    })
+}
+
+fn workspace_row(
+    item: &WorkspaceListItem,
+    workspace_cell: Cell,
+    include_repository: bool,
+    include_resources: bool,
+    usage_by_workspace: Option<&UsageIndex<'_>>,
+) -> Vec<Cell> {
+    let include_usage = usage_by_workspace.is_some();
+    let mut cells = Vec::with_capacity(
+        3 + usize::from(include_repository)
+            + 3 * usize::from(include_resources)
+            + 3 * usize::from(include_usage),
+    );
+    if include_repository {
+        cells.push(Cell::new(
+            item.repository.root_path.display().to_string(),
+            Tone::Dim,
+        ));
+    }
+    let phase = phase_presentation(item.workspace.phase);
+    cells.push(workspace_cell);
+    cells.push(Cell::new(
+        format!("{} {}", phase.marker, phase.label),
+        phase.tone,
+    ));
+    if include_resources {
+        let (rss, processes, cpu) = resource_cells(item.runtime_resources.as_ref());
+        cells.push(Cell::new(rss, Tone::Dim));
+        cells.push(Cell::new(processes, Tone::Dim));
+        cells.push(Cell::new(cpu, Tone::Dim));
+    }
+    if include_usage {
+        let usage =
+            usage_by_workspace.and_then(|usage| usage.get(item.workspace.id.as_str()).copied());
+        let (tokens, context, cost) = usage_cells(usage);
+        cells.push(Cell::new(tokens, Tone::Primary));
+        cells.push(Cell::new(context, Tone::Dim));
+        cells.push(Cell::new(cost, Tone::Dim));
+    }
+    cells.push(Cell::new(
+        item.workspace
+            .branch_name
+            .clone()
+            .unwrap_or_else(|| "detached".to_owned()),
+        Tone::Dim,
+    ));
+    cells
+}
+
+fn workspace_table_shape(
+    include_repository: bool,
+    include_resources: bool,
+    include_usage: bool,
+    tree: bool,
+) -> (Vec<&'static str>, Vec<usize>) {
+    let mut headers = Vec::with_capacity(
+        3 + usize::from(include_repository)
+            + 3 * usize::from(include_resources)
+            + 3 * usize::from(include_usage),
+    );
+    let mut caps = Vec::with_capacity(headers.capacity());
+    if include_repository {
+        headers.push("REPOSITORY");
+        caps.push(36);
+    }
+    headers.extend(["WORKSPACE", "STATE"]);
+    caps.extend([if tree { 64 } else { 32 }, 26]);
+    if include_resources {
+        headers.extend(["MEMORY", "PROCS", "CPU"]);
+        caps.extend([14, 8, 10]);
+    }
+    if include_usage {
+        headers.extend(["TOKENS", "CONTEXT", "COST"]);
+        caps.extend([24, 16, 18]);
+    }
+    headers.push("BRANCH");
+    caps.push(48);
+    (headers, caps)
+}
+
+#[derive(Debug)]
+struct WorkspaceTreeNode<'a> {
+    component: &'a str,
+    workspace: Option<&'a WorkspaceListItem>,
+    children: Vec<Self>,
+}
+
+fn workspace_tree(workspaces: &[WorkspaceListItem]) -> Vec<WorkspaceTreeNode<'_>> {
+    let mut roots = Vec::new();
+    for workspace in workspaces {
+        let components = workspace.workspace.name.split('/').collect::<Vec<_>>();
+        insert_tree_node(&mut roots, &components, workspace);
+    }
+    roots
+}
+
+fn insert_tree_node<'a>(
+    nodes: &mut Vec<WorkspaceTreeNode<'a>>,
+    components: &[&'a str],
+    workspace: &'a WorkspaceListItem,
+) {
+    let component = components[0];
+    let index = nodes
+        .iter()
+        .position(|node| node.component == component)
+        .unwrap_or_else(|| {
+            nodes.push(WorkspaceTreeNode {
+                component,
+                workspace: None,
+                children: Vec::new(),
+            });
+            nodes.len() - 1
+        });
+    if components.len() == 1 {
+        nodes[index].workspace = Some(workspace);
+    } else {
+        insert_tree_node(&mut nodes[index].children, &components[1..], workspace);
+    }
+}
+
+fn append_tree_rows(
+    nodes: &[WorkspaceTreeNode<'_>],
+    ancestor_is_last: &mut Vec<bool>,
+    rows: &mut Vec<Vec<Cell>>,
+    include_resources: bool,
+    usage_by_workspace: Option<&UsageIndex<'_>>,
+    column_count: usize,
+) {
+    for (index, node) in nodes.iter().enumerate() {
+        let is_last = index + 1 == nodes.len();
+        let mut guide = tree_indent(ancestor_is_last);
+        guide.push_str(if is_last { "└─ " } else { "├─ " });
+        let mut name = node.component.to_owned();
+        let mut visible_node = node;
+        while visible_node.workspace.is_none() && visible_node.children.len() == 1 {
+            visible_node = &visible_node.children[0];
+            name.push('/');
+            name.push_str(visible_node.component);
+        }
+        if visible_node.workspace.is_none() && !visible_node.children.is_empty() {
+            name.push('/');
+        }
+        let workspace_cell =
+            Cell::segmented([(guide, Tone::Dim), (name, Tone::Primary)], Tone::Primary);
+        if let Some(workspace) = visible_node.workspace {
+            rows.push(workspace_row(
+                workspace,
+                workspace_cell,
+                false,
+                include_resources,
+                usage_by_workspace,
+            ));
+        } else {
+            rows.push(grouping_row(workspace_cell, column_count));
+        }
+        ancestor_is_last.push(is_last);
+        append_tree_rows(
+            &visible_node.children,
+            ancestor_is_last,
+            rows,
+            include_resources,
+            usage_by_workspace,
+            column_count,
+        );
+        ancestor_is_last.pop();
+    }
+}
+
+fn tree_indent(ancestor_is_last: &[bool]) -> String {
+    ancestor_is_last
+        .iter()
+        .map(|is_last| if *is_last { "   " } else { "│  " })
+        .collect()
+}
+
+fn grouping_row(first: Cell, column_count: usize) -> Vec<Cell> {
+    let mut row = Vec::with_capacity(column_count);
+    row.push(first);
+    row.resize_with(column_count, || Cell::new(String::new(), Tone::Primary));
+    row
+}
+
+fn repository_groups(workspaces: &[WorkspaceListItem]) -> Vec<&[WorkspaceListItem]> {
+    let mut groups = Vec::new();
+    let mut start = 0;
+    while start < workspaces.len() {
+        let repository_id = &workspaces[start].repository.id;
+        let mut end = start + 1;
+        while end < workspaces.len() && workspaces[end].repository.id == *repository_id {
+            end += 1;
+        }
+        groups.push(&workspaces[start..end]);
+        start = end;
+    }
+    groups
 }
 
 fn resource_cells(
@@ -231,6 +488,13 @@ fn render_model_list(models: &[CodexModel], width: usize, palette: Palette) -> S
 pub(super) struct Cell {
     text: String,
     tone: Tone,
+    segments: Option<Vec<CellSegment>>,
+}
+
+#[derive(Debug, Clone)]
+struct CellSegment {
+    text: String,
+    tone: Tone,
 }
 
 impl Cell {
@@ -238,7 +502,44 @@ impl Cell {
         Self {
             text: safe_line(&text),
             tone,
+            segments: None,
         }
+    }
+
+    fn segmented<const N: usize>(segments: [(String, Tone); N], fallback_tone: Tone) -> Self {
+        let segments = segments
+            .into_iter()
+            .map(|(text, tone)| CellSegment {
+                text: safe_line(&text),
+                tone,
+            })
+            .collect::<Vec<_>>();
+        let text = segments
+            .iter()
+            .map(|segment| segment.text.as_str())
+            .collect();
+        Self {
+            text,
+            tone: fallback_tone,
+            segments: Some(segments),
+        }
+    }
+
+    fn render(&self, width: usize, last: bool, palette: Palette) -> String {
+        let Some(segments) = &self.segments else {
+            return palette.paint(self.tone, padded(&self.text, width, last));
+        };
+        if display_width(&self.text) > width {
+            return palette.paint(self.tone, padded(&self.text, width, last));
+        }
+        let mut rendered = segments
+            .iter()
+            .map(|segment| palette.paint(segment.tone, &segment.text))
+            .collect::<String>();
+        if !last {
+            rendered.push_str(&" ".repeat(width.saturating_sub(display_width(&self.text))));
+        }
+        rendered
     }
 }
 
@@ -278,12 +579,7 @@ pub(super) fn render_table(
         let line = row
             .iter()
             .enumerate()
-            .map(|(index, cell)| {
-                palette.paint(
-                    cell.tone,
-                    padded(&cell.text, widths[index], index + 1 == row.len()),
-                )
-            })
+            .map(|(index, cell)| cell.render(widths[index], index + 1 == row.len(), palette))
             .collect::<Vec<_>>()
             .join("  ");
         output.push_str(&line);
@@ -351,11 +647,69 @@ pub(super) fn stdout_width() -> usize {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
     use crate::domain::runtime::{
         WorkspaceResourceScope, WorkspaceRuntimeBackend, WorkspaceRuntimeResources,
         WorkspaceRuntimeState,
     };
+    use crate::domain::{
+        ContextMode, ProfileSnapshot, Workspace, WorkspaceAvailability, WorkspaceLifecycle,
+        WorkspacePhase, WorktreeMode,
+    };
+    use serde_json::json;
+
+    fn workspace_item(
+        repository: &str,
+        repository_name: &str,
+        name: &str,
+        phase: WorkspacePhase,
+    ) -> WorkspaceListItem {
+        WorkspaceListItem {
+            workspace: Workspace {
+                id: format!("{repository}-{name}"),
+                create_operation_id: None,
+                repository_id: repository.to_owned(),
+                name: name.to_owned(),
+                context_mode: ContextMode::Fresh,
+                context: json!({}),
+                profile: ProfileSnapshot {
+                    name: "default".to_owned(),
+                    source_path: None,
+                    source_hash: "profile-hash".to_owned(),
+                    model_override: None,
+                    effective_settings: json!({}),
+                },
+                lifecycle: WorkspaceLifecycle::Ready,
+                availability: WorkspaceAvailability::Open,
+                thread_runtime: None,
+                phase,
+                wait_reasons: Vec::new(),
+                worktree_mode: WorktreeMode::NewBranch,
+                branch_name: Some(format!("coco/{name}")),
+                base_sha: Some("base".to_owned()),
+                worktree_path: Some(PathBuf::from(format!("/worktrees/{name}"))),
+                codex_thread_id: None,
+                parent_thread_id: None,
+                active_turn_id: None,
+                last_error_code: None,
+                last_error_message: None,
+                created_at_ms: 1,
+                updated_at_ms: 1,
+                completed_at_ms: None,
+                thread_archived: false,
+                closed_head_sha: None,
+                closed_at_ms: None,
+            },
+            repository: RepositorySummary {
+                id: repository.to_owned(),
+                display_name: repository_name.to_owned(),
+                root_path: PathBuf::from(format!("/repos/{repository_name}")),
+            },
+            runtime_resources: None,
+        }
+    }
 
     #[test]
     fn table_alignment_is_plain_and_bounded_before_styling() {
@@ -389,6 +743,100 @@ mod tests {
         let colored = render_table(&["STATE"], &rows, &[20], 20, Palette::colored());
         assert!(colored.contains("\u{1b}["));
         assert!(colored.contains("● Ready"));
+    }
+
+    #[test]
+    fn tree_view_expands_shared_components_and_compacts_unique_paths() {
+        let workspaces = vec![
+            workspace_item(
+                "repo",
+                "project",
+                "backend/services/api",
+                WorkspacePhase::Active,
+            ),
+            workspace_item(
+                "repo",
+                "project",
+                "backend/services/worker",
+                WorkspacePhase::Idle,
+            ),
+            workspace_item("repo", "project", "docs/fix", WorkspacePhase::Idle),
+            workspace_item("repo", "project", "frontend", WorkspacePhase::Idle),
+            workspace_item(
+                "repo",
+                "project",
+                "frontend/w1",
+                WorkspacePhase::WaitingForInput,
+            ),
+            workspace_item("repo", "project", "frontend/w2", WorkspacePhase::Prepared),
+        ];
+        let rendered = render_workspace_tree(
+            &workspaces,
+            false,
+            false,
+            None,
+            usize::MAX,
+            Palette::plain(),
+        );
+
+        for expected in [
+            "├─ backend/services/",
+            "│  ├─ api",
+            "│  └─ worker",
+            "├─ docs/fix",
+            "└─ frontend",
+            "   ├─ w1",
+            "   └─ w2",
+            "Waiting for input",
+        ] {
+            assert!(
+                rendered.contains(expected),
+                "tree omitted {expected:?}:\n{rendered}"
+            );
+        }
+        assert!(!rendered.contains("├─ backend/\n"));
+        assert!(!rendered.contains("├─ docs/\n"));
+    }
+
+    #[test]
+    fn tree_guides_are_dim_without_emphasizing_workspace_names() {
+        let workspaces = vec![
+            workspace_item("repo", "project", "backend/api", WorkspacePhase::Active),
+            workspace_item("repo", "project", "backend/worker", WorkspacePhase::Idle),
+        ];
+        let palette = Palette::colored();
+        let rendered = render_workspace_tree(&workspaces, false, false, None, usize::MAX, palette);
+        let expected = format!(
+            "{}{}",
+            palette.paint(Tone::Dim, "└─ "),
+            palette.paint(Tone::Primary, "backend/")
+        );
+        assert!(
+            rendered.contains(&expected),
+            "tree did not separate guide and workspace styling: {rendered:?}"
+        );
+        assert!(!rendered.contains(&palette.paint(Tone::Bold, "backend/")));
+    }
+
+    #[test]
+    fn all_repository_tree_uses_path_sections_without_duplicate_names_and_remains_bounded() {
+        let workspaces = vec![
+            workspace_item("alpha", "alpha", "frontend/w2", WorkspacePhase::Idle),
+            workspace_item("beta", "beta", "backend/api", WorkspacePhase::Active),
+        ];
+        let rendered = render_workspace_tree(&workspaces, true, false, None, 64, Palette::plain());
+
+        assert!(rendered.starts_with("/repos/alpha\nWORKSPACE"));
+        assert!(rendered.contains("└─ frontend/w2"));
+        assert!(rendered.contains("\n\n/repos/beta\nWORKSPACE"));
+        assert!(rendered.contains("└─ backend/api"));
+        assert!(!rendered.contains("alpha · /repos/alpha"));
+        assert_eq!(rendered.matches("/repos/alpha").count(), 1);
+        assert_eq!(rendered.matches("/repos/beta").count(), 1);
+        assert!(
+            rendered.lines().all(|line| display_width(line) <= 64),
+            "tree exceeded terminal width:\n{rendered}"
+        );
     }
 
     #[test]

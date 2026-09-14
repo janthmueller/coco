@@ -33,6 +33,13 @@ pub(crate) enum CoordinatorError {
     Guard(#[from] GuardRejection),
     #[error("repository is not registered: {0}")]
     RepositoryNotRegistered(PathBuf),
+    #[error(
+        "repository cannot be removed while it has workspaces: {path} ({workspace_count} found); delete them first"
+    )]
+    RepositoryHasWorkspaces {
+        path: PathBuf,
+        workspace_count: usize,
+    },
     #[error("workspace already exists: {0}")]
     WorkspaceExists(String),
     #[error("workspace not found: {reference}")]
@@ -114,6 +121,7 @@ impl CoordinatorError {
             Self::HookConfig(_) => "HOOK_CONFIG_INVALID",
             Self::Guard(error) => error.code(),
             Self::RepositoryNotRegistered(_) => "REPOSITORY_NOT_REGISTERED",
+            Self::RepositoryHasWorkspaces { .. } => "REPOSITORY_HAS_WORKSPACES",
             Self::WorkspaceExists(_) => "WORKSPACE_EXISTS",
             Self::WorkspaceNotFound { .. } => "WORKSPACE_NOT_FOUND",
             Self::WorkspaceReferenceAmbiguous { .. } => "WORKSPACE_REFERENCE_AMBIGUOUS",
@@ -160,6 +168,13 @@ impl CoordinatorError {
                 Some(json!({"matches": candidates}))
             }
             Self::OperationUncertain { operation_id } => Some(json!({"operationId": operation_id})),
+            Self::RepositoryHasWorkspaces {
+                path,
+                workspace_count,
+            } => Some(json!({
+                "repositoryPath": path,
+                "workspaceCount": workspace_count,
+            })),
             Self::WorkspaceRetirementBlocked(blockers) => Some(json!({"blockers": blockers})),
             Self::WorkspaceDeletionIncomplete {
                 workspace_id,

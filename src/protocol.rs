@@ -24,6 +24,7 @@ pub enum DaemonMethod {
     Health,
     ModelList,
     RepositoryRegister,
+    RepositoryRemove,
     RepositoryResolve,
     RepositoryList,
     WorkspaceCreate,
@@ -59,10 +60,11 @@ pub enum DaemonMethod {
 
 impl DaemonMethod {
     #[cfg(test)]
-    pub const ALL: [Self; 34] = [
+    pub const ALL: [Self; 35] = [
         Self::Health,
         Self::ModelList,
         Self::RepositoryRegister,
+        Self::RepositoryRemove,
         Self::RepositoryResolve,
         Self::RepositoryList,
         Self::WorkspaceCreate,
@@ -101,6 +103,7 @@ impl DaemonMethod {
             Self::Health => "health",
             Self::ModelList => "model.list",
             Self::RepositoryRegister => "repository.register",
+            Self::RepositoryRemove => "repository.remove",
             Self::RepositoryResolve => "repository.resolve",
             Self::RepositoryList => "repository.list",
             Self::WorkspaceCreate => "workspace.create",
@@ -140,6 +143,7 @@ impl DaemonMethod {
             "health" => Some(Self::Health),
             "model.list" => Some(Self::ModelList),
             "repository.register" => Some(Self::RepositoryRegister),
+            "repository.remove" => Some(Self::RepositoryRemove),
             "repository.resolve" => Some(Self::RepositoryResolve),
             "repository.list" => Some(Self::RepositoryList),
             "workspace.create" => Some(Self::WorkspaceCreate),
@@ -206,6 +210,12 @@ pub struct ModelListParams {}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RepositoryRegisterParams {
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RepositoryRemoveParams {
     pub path: PathBuf,
 }
 
@@ -897,6 +907,7 @@ macro_rules! daemon_request {
 daemon_request!(HealthParams, Health, HealthResult);
 daemon_request!(ModelListParams, ModelList, Vec<CodexModel>);
 daemon_request!(RepositoryRegisterParams, RepositoryRegister, Repository);
+daemon_request!(RepositoryRemoveParams, RepositoryRemove, Repository);
 daemon_request!(
     RepositoryResolveParams,
     RepositoryResolve,
@@ -992,6 +1003,7 @@ mod tests {
                 "health",
                 "model.list",
                 "repository.register",
+                "repository.remove",
                 "repository.resolve",
                 "repository.list",
                 "workspace.create",
@@ -1671,6 +1683,26 @@ mod tests {
             serde_json::to_value(endpoint).unwrap(),
             json!({"schemaVersion": 1, "url": "ws://127.0.0.1:45123"})
         );
+    }
+
+    #[test]
+    fn repository_removal_preserves_its_exact_wire_contract() {
+        assert_request(
+            RepositoryRemoveParams {
+                path: PathBuf::from("/repo"),
+            },
+            DaemonMethod::RepositoryRemove,
+            json!({"path": "/repo"}),
+        );
+        assert_response::<RepositoryRemoveParams>(json!({
+            "id": "repo-1",
+            "rootPath": "/repo",
+            "gitCommonDir": "/repo/.git",
+            "displayName": "repo",
+            "isLinkedWorktree": false,
+            "createdAtMs": 1,
+            "updatedAtMs": 2,
+        }));
     }
 
     fn assert_workspace_limits_response() {

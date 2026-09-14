@@ -27,13 +27,22 @@ measurement, see [Resource accounting](../../reference/resources/).
 ## Watch tokens and cost
 
 ```bash
-coco usage
-coco usage fix/login -f
-coco usage -af
+coco status -u
+coco status fix/login -fu
+coco status -afu
 ```
 
-The overview shows total tokens, context-window use, and a cost estimate
-when Codex provides one. Select one workspace for the token breakdown.
+`-u` adds total tokens, context-window use, and a cost estimate when Codex
+provides one. Select one workspace for the token breakdown. Combine it with
+`-r` when you want model and machine usage in the same view:
+
+```bash
+coco status fix/login -fru
+```
+
+For a larger workspace set, add `-t` to keep slash-separated names together in
+a tree. For example, `coco status -aftru` follows resources and model usage
+across repository and workspace groups.
 
 A dash means the value is unavailable. A cost dash does not mean the work was
 free. After a coordinator restart, saved token values are marked

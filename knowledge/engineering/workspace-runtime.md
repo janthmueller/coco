@@ -101,6 +101,14 @@ Codex 0.154.0 exposes environment selection only on `thread/start` and
   downstream `thread/start` and `turn/start`, so the official TUI cannot route
   an ordinary turn to a different executor.
 
+Both WebSocket legs of that relay use the same finite 128 MiB maximum frame
+and message size as Codex's remote App Server client. Tungstenite's defaults
+are only 16 MiB per frame and 64 MiB per message; those lower intermediary
+limits can reject a valid paginated history response even though the official
+client and App Server accept it. Do not make the relay unbounded, and keep its
+transport failure in the surfaced `jump` error when the TUI exits as a
+consequence.
+
 `thread/resume` and `thread/fork` do not accept an `environments` field in this
 release. Codex also deliberately does not restore selected environments from
 persisted rollout history when it loads or forks a thread. CoCo therefore
@@ -393,9 +401,10 @@ conditions hold; a later `send` or `jump` may then lazily start a new executor.
 The released App Server assessment and staged recommendation now live in
 [Workspace token usage and billing estimates](workspace-usage.md). Native
 thread notifications are the preferred raw-token source; backend per-thread
-billing is optional and nullable. The implemented passive `coco usage` surface
-keeps those model-side values separate from cgroup resource observations and
-configured runtime limits.
+billing is optional and nullable. The implemented passive surface is the
+`--usage` projection of `coco status`: users may view model-side and cgroup
+observations together, while their evidence and configured runtime limits
+remain separate internally.
 
 ## Compatibility evidence
 

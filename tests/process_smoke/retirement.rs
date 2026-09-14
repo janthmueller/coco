@@ -186,7 +186,7 @@ async fn verify_retirement_hooks(paths: &TestPaths, repository: &Path) -> Result
 
 async fn assert_closed_workspace_listing(paths: &TestPaths, repository: &Path) -> Result<()> {
     let open = cli_json(&run_cli(paths, repository, &["list", "--json"]).await?)?;
-    assert_eq!(open["schemaVersion"], 10);
+    assert_eq!(open["schemaVersion"], 11);
     assert_eq!(open["workspaces"].as_array().map(Vec::len), Some(0));
     let closed = cli_json(&run_cli(paths, repository, &["list", "--closed", "--json"]).await?)?;
     assert_eq!(closed["workspaces"].as_array().map(Vec::len), Some(1));

@@ -26,7 +26,7 @@ fn migrates_v11_deletion_intents_without_expanding_authorized_loss() {
         connection
             .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        14
+        15
     );
     drop(connection);
     assert_eq!(

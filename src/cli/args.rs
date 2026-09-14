@@ -68,10 +68,8 @@ pub(super) enum Command {
         #[arg(long)]
         closed: bool,
     },
-    /// Show workspace state once or follow it live.
+    /// Show workspace state and optional usage once or follow it live.
     Status(StatusArgs),
-    /// Show cumulative Codex token usage and available cost estimates.
-    Usage(UsageArgs),
     /// Inspect or change resource limits for a workspace runtime.
     Limits {
         #[command(subcommand)]
@@ -151,7 +149,6 @@ impl Command {
         match self {
             Self::List { all_repos, .. } => *all_repos,
             Self::Status(args) => args.all_repos,
-            Self::Usage(args) => args.all_repos,
             Self::Signal { command } => command.all_repos(),
             Self::Repo { .. }
             | Self::Model { .. }
@@ -173,7 +170,6 @@ impl Command {
     fn requests_global_search(&self) -> bool {
         match self {
             Self::Status(args) => args.global,
-            Self::Usage(args) => args.global,
             Self::Limits { command } => command.global(),
             Self::Signal { command } => command.global(),
             Self::Send { global, .. } | Self::Jump { global, .. } | Self::Diff { global, .. } => {
@@ -404,33 +400,34 @@ pub(super) struct StatusArgs {
     /// Resolve one named workspace across every registered repository.
     #[arg(long, short = 'g')]
     pub(super) global: bool,
-    /// Follow state changes until interrupted.
+    /// Keep the selected status view updated until interrupted.
     #[arg(long, short = 'f', conflicts_with = "json")]
     pub(super) follow: bool,
     /// Include current memory, process, and CPU use.
     #[arg(long, short = 'r')]
     pub(super) resources: bool,
+    /// Include cumulative Codex token usage and available cost estimates.
+    #[arg(long, short = 'u')]
+    pub(super) usage: bool,
+    /// Show slash-separated workspace names as a hierarchy.
+    #[arg(
+        long,
+        short = 't',
+        conflicts_with_all = ["workspace", "json", "sort"]
+    )]
+    pub(super) tree: bool,
+    /// Order a collection by workspace name or attention-relevant state.
+    #[arg(long, value_enum, value_name = "ORDER", conflicts_with = "workspace")]
+    pub(super) sort: Option<StatusSort>,
     /// Emit stable, machine-readable JSON.
     #[arg(long)]
     pub(super) json: bool,
 }
 
-#[derive(Debug, Args)]
-pub(super) struct UsageArgs {
-    /// Workspace name or ID. Omit it to show the selected repository.
-    pub(super) workspace: Option<String>,
-    /// Show workspaces across every registered repository.
-    #[arg(long, short = 'a', conflicts_with = "workspace")]
-    pub(super) all_repos: bool,
-    /// Resolve one named workspace across every registered repository.
-    #[arg(long, short = 'g')]
-    pub(super) global: bool,
-    /// Follow usage changes until interrupted.
-    #[arg(long, short = 'f', conflicts_with = "json")]
-    pub(super) follow: bool,
-    /// Emit stable, machine-readable JSON.
-    #[arg(long)]
-    pub(super) json: bool,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(super) enum StatusSort {
+    Name,
+    State,
 }
 
 #[derive(Debug, Subcommand)]
@@ -440,7 +437,13 @@ pub(super) enum RepoCommand {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
-    /// List every repository known to CoCo.
+    /// Stop showing and resolving the repository without deleting any Git data.
+    #[command(visible_alias = "rm")]
+    Remove {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+    },
+    /// List every repository registered with CoCo.
     #[command(visible_alias = "ls")]
     List {
         /// Emit stable, machine-readable JSON.

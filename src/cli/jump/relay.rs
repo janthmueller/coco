@@ -12,8 +12,9 @@ use tokio_tungstenite::tungstenite::handshake::server::{
     Callback, ErrorResponse, Request, Response,
 };
 use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::{Message, http};
-use tokio_tungstenite::{WebSocketStream, accept_hdr_async, client_async};
+use tokio_tungstenite::{WebSocketStream, accept_hdr_async_with_config, client_async_with_config};
 use uuid::Uuid;
 
 use crate::protocol::{
@@ -26,6 +27,9 @@ const ADOPTION_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const LEASE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const FINAL_ADOPTION_TIMEOUT: Duration = Duration::from_secs(5);
 const RELAY_COMPLETION_TIMEOUT: Duration = Duration::from_secs(7);
+// Keep the one-use relay compatible with Codex's remote App Server client while
+// retaining a finite bound for authenticated loopback traffic.
+const CODEX_REMOTE_MAX_WEBSOCKET_MESSAGE_SIZE: usize = 128 << 20;
 
 pub(super) struct PreparedRelay {
     endpoint_url: String,
@@ -107,10 +111,16 @@ async fn connect_upstream(endpoint: &str, token: &str) -> Result<WebSocketStream
             .parse()
             .context("could not encode App Server authorization")?,
     );
-    client_async(request, stream)
+    client_async_with_config(request, stream, Some(relay_websocket_config()))
         .await
         .map(|(websocket, _)| websocket)
         .context("the App Server rejected the TUI relay")
+}
+
+fn relay_websocket_config() -> WebSocketConfig {
+    WebSocketConfig::default()
+        .max_frame_size(Some(CODEX_REMOTE_MAX_WEBSOCKET_MESSAGE_SIZE))
+        .max_message_size(Some(CODEX_REMOTE_MAX_WEBSOCKET_MESSAGE_SIZE))
 }
 
 fn websocket_address(endpoint: &str) -> Result<SocketAddr> {
@@ -140,9 +150,13 @@ async fn run_relay(
         peer.ip().is_loopback(),
         "the TUI relay rejected a non-loopback client"
     );
-    let mut downstream = accept_hdr_async(stream, RequireAuthorization(expected_authorization))
-        .await
-        .context("the Codex terminal UI failed to authenticate to its relay")?;
+    let mut downstream = accept_hdr_async_with_config(
+        stream,
+        RequireAuthorization(expected_authorization),
+        Some(relay_websocket_config()),
+    )
+    .await
+    .context("the Codex terminal UI failed to authenticate to its relay")?;
     let (mut state, transport_error) = proxy_session(
         &mut downstream,
         &mut upstream,
@@ -485,8 +499,44 @@ impl Callback for RequireAuthorization {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use tokio::io::duplex;
+    use tokio_tungstenite::{accept_async_with_config, client_async_with_config};
 
     use super::*;
+
+    #[tokio::test]
+    async fn configured_transport_accepts_frames_above_tungstenites_default() {
+        const FRAME_SIZE: usize = (16 << 20) + 1;
+        let (client_io, server_io) = duplex(256 * 1024);
+        let server = tokio::spawn(async move {
+            let mut socket = accept_async_with_config(server_io, Some(relay_websocket_config()))
+                .await
+                .unwrap();
+            let message = socket.next().await.unwrap().unwrap();
+            assert_eq!(message.into_data().len(), FRAME_SIZE);
+        });
+        let request = "ws://localhost/".into_client_request().unwrap();
+        let (mut client, _) =
+            client_async_with_config(request, client_io, Some(relay_websocket_config()))
+                .await
+                .unwrap();
+
+        client
+            .send(Message::Binary(vec![b'x'; FRAME_SIZE].into()))
+            .await
+            .unwrap();
+        server.await.unwrap();
+
+        let config = relay_websocket_config();
+        assert_eq!(
+            config.max_frame_size,
+            Some(CODEX_REMOTE_MAX_WEBSOCKET_MESSAGE_SIZE)
+        );
+        assert_eq!(
+            config.max_message_size,
+            Some(CODEX_REMOTE_MAX_WEBSOCKET_MESSAGE_SIZE)
+        );
+    }
 
     #[test]
     fn correlates_only_the_exact_thread_start_response() {

@@ -8,7 +8,7 @@ use std::time::Duration;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 use chrono::Utc;
-use rusqlite::{Connection, OpenFlags, TransactionBehavior, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, TransactionBehavior, params};
 use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
@@ -33,6 +33,7 @@ mod workspaces;
 
 use migrations::migrate;
 use rows::{
+    get_registered_repository_by_common_dir, get_registered_repository_by_root,
     get_repository_by_common_dir, get_repository_by_id, get_repository_by_root, map_repository,
 };
 
@@ -119,6 +120,13 @@ pub struct NewWorkspace {
     pub branch_name: Option<String>,
     pub base_sha: Option<String>,
     pub worktree_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepositoryUnregistration {
+    Removed,
+    HasWorkspaces(usize),
+    NotRegistered,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -349,14 +357,40 @@ impl Store {
     pub fn register_repository(&self, repository: &Repository) -> Result<Repository, StoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let root_path = path_text(&repository.root_path)?;
+        let git_common_dir = path_text(&repository.git_common_dir)?;
         if let Some(existing) =
             get_repository_by_common_dir(&transaction, &repository.git_common_dir)?
         {
+            transaction.execute(
+                "UPDATE repositories SET
+                    root_path = CASE WHEN is_registered = 0 THEN ?1 ELSE root_path END,
+                    display_name = CASE WHEN is_registered = 0 THEN ?2 ELSE display_name END,
+                    is_linked_worktree = CASE
+                        WHEN is_registered = 0 THEN ?3 ELSE is_linked_worktree
+                    END,
+                    updated_at_ms = CASE
+                        WHEN is_registered = 0 THEN ?4 ELSE updated_at_ms
+                    END,
+                    is_registered = 1
+                 WHERE id = ?5",
+                params![
+                    root_path,
+                    repository.display_name,
+                    repository.is_linked_worktree,
+                    repository.updated_at_ms,
+                    existing.id,
+                ],
+            )?;
+            let existing = get_repository_by_id(&transaction, &existing.id)?.ok_or_else(|| {
+                StoreError::NotFound {
+                    entity: "repository",
+                    id: existing.id,
+                }
+            })?;
             transaction.commit()?;
             return Ok(existing);
         }
-        let root_path = path_text(&repository.root_path)?;
-        let git_common_dir = path_text(&repository.git_common_dir)?;
         transaction.execute(
             "INSERT INTO repositories (
                 id, root_path, git_common_dir, display_name, is_linked_worktree,
@@ -366,6 +400,7 @@ impl Store {
                 git_common_dir = excluded.git_common_dir,
                 display_name = excluded.display_name,
                 is_linked_worktree = excluded.is_linked_worktree,
+                is_registered = 1,
                 updated_at_ms = excluded.updated_at_ms",
             params![
                 repository.id,
@@ -390,7 +425,7 @@ impl Store {
 
     pub fn repository_by_common_dir(&self, path: &Path) -> Result<Option<Repository>, StoreError> {
         let connection = self.lock()?;
-        get_repository_by_common_dir(&connection, path)
+        get_registered_repository_by_common_dir(&connection, path)
     }
 
     pub fn repository_by_id(&self, id: &str) -> Result<Option<Repository>, StoreError> {
@@ -398,17 +433,65 @@ impl Store {
         get_repository_by_id(&connection, id)
     }
 
+    pub fn registered_repository_by_root(
+        &self,
+        path: &Path,
+    ) -> Result<Option<Repository>, StoreError> {
+        let connection = self.lock()?;
+        get_registered_repository_by_root(&connection, path)
+    }
+
     pub fn list_repositories(&self) -> Result<Vec<Repository>, StoreError> {
         let connection = self.lock()?;
         let mut statement = connection.prepare(
             "SELECT id, root_path, git_common_dir, display_name, is_linked_worktree,
                 created_at_ms, updated_at_ms FROM repositories
+             WHERE is_registered = 1
              ORDER BY display_name, root_path, id",
         )?;
         statement
             .query_map([], map_repository)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(StoreError::from)
+    }
+
+    pub(crate) fn unregister_repository(
+        &self,
+        repository_id: &str,
+    ) -> Result<RepositoryUnregistration, StoreError> {
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let is_registered = transaction
+            .query_row(
+                "SELECT is_registered FROM repositories WHERE id = ?1",
+                [repository_id],
+                |row| row.get::<_, bool>(0),
+            )
+            .optional()?;
+        if is_registered != Some(true) {
+            transaction.commit()?;
+            return Ok(RepositoryUnregistration::NotRegistered);
+        }
+        let workspace_count = transaction.query_row(
+            "SELECT count(*) FROM workspaces WHERE repository_id = ?1",
+            [repository_id],
+            |row| row.get::<_, i64>(0),
+        )?;
+        let workspace_count =
+            usize::try_from(workspace_count).map_err(|_| StoreError::InvalidStoredValue {
+                field: "repository workspace count",
+                value: workspace_count.to_string(),
+            })?;
+        if workspace_count > 0 {
+            transaction.commit()?;
+            return Ok(RepositoryUnregistration::HasWorkspaces(workspace_count));
+        }
+        transaction.execute(
+            "UPDATE repositories SET is_registered = 0, updated_at_ms = ?1 WHERE id = ?2",
+            params![Utc::now().timestamp_millis(), repository_id],
+        )?;
+        transaction.commit()?;
+        Ok(RepositoryUnregistration::Removed)
     }
 
     fn lock(&self) -> Result<MutexGuard<'_, Connection>, StoreError> {

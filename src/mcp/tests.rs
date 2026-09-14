@@ -56,7 +56,7 @@ fn fake_response(method: DaemonMethod) -> Value {
         DaemonMethod::HookDeliveryList => json!([]),
         DaemonMethod::Health => json!({"status": "ok"}),
         DaemonMethod::ModelList => json!([]),
-        DaemonMethod::RepositoryRegister => json!({
+        DaemonMethod::RepositoryRegister | DaemonMethod::RepositoryRemove => json!({
             "id": "repo-test",
             "rootPath": "/repo",
             "gitCommonDir": "/repo/.git",
