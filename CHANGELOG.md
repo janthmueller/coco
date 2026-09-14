@@ -2,6 +2,22 @@
 
 <!-- version list -->
 
+## v0.1.0-alpha.4 (2026-09-14)
+
+### Documentation
+
+- Link README to published site
+  ([`4c75a0a`](https://github.com/janthmueller/coco/commit/4c75a0a7726b1b7c1a74c5aec61519e20e6b2a4b))
+
+- Organize guides around user workflows
+  ([`dd4e964`](https://github.com/janthmueller/coco/commit/dd4e964c8ac79911731338d8b2d19621d46e0c50))
+
+### Features
+
+- Expand workspace status and repository lifecycle
+  ([`d1f734a`](https://github.com/janthmueller/coco/commit/d1f734acecb50c865562b047d5f043e4b64cf741))
+
+
 ## v0.1.0-alpha.3 (2026-09-11)
 
 ### Bug Fixes
