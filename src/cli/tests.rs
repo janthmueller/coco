@@ -314,11 +314,15 @@ fn parses_native_workspace_forks_and_requires_an_explicit_context_for_compaction
 
 #[test]
 fn presents_stable_user_facing_workspace_states() {
-    assert_eq!(phase_label("provisioning"), "Preparing worktree");
+    assert_eq!(phase_label("provisioning"), "Preparing");
+    assert_eq!(phase_label("starting"), "Starting");
     assert_eq!(phase_label("active"), "Working");
-    assert_eq!(phase_label("waiting_for_approval"), "Waiting for approval");
+    assert_eq!(phase_label("waiting_for_approval"), "Needs approval");
+    assert_eq!(phase_label("waiting_for_input"), "Needs input");
     assert_eq!(phase_label("idle"), "Ready");
-    assert_eq!(phase_label("unavailable"), "Status unavailable");
+    assert_eq!(phase_label("not_loaded"), "Unloaded");
+    assert_eq!(phase_label("system_error"), "Codex error");
+    assert_eq!(phase_label("unavailable"), "Unavailable");
     assert_eq!(phase_label("closed"), "Closed");
 }
 

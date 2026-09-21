@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
@@ -5,8 +6,9 @@ use anyhow::{Context, Result, bail, ensure};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::Value;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
-use tokio::time::{Instant, MissedTickBehavior, interval, timeout};
+use tokio::time::{Instant, Interval, MissedTickBehavior, interval, timeout};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::handshake::server::{
     Callback, ErrorResponse, Request, Response,
@@ -27,13 +29,15 @@ const ADOPTION_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const LEASE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const FINAL_ADOPTION_TIMEOUT: Duration = Duration::from_secs(5);
 const RELAY_COMPLETION_TIMEOUT: Duration = Duration::from_secs(7);
-// Keep the one-use relay compatible with Codex's remote App Server client while
+const MAX_TRANSPORT_REASON_CHARS: usize = 512;
+// Keep the session relay compatible with Codex's remote App Server client while
 // retaining a finite bound for authenticated loopback traffic.
 const CODEX_REMOTE_MAX_WEBSOCKET_MESSAGE_SIZE: usize = 128 << 20;
 
 pub(super) struct PreparedRelay {
     endpoint_url: String,
     capability_token: String,
+    shutdown: watch::Sender<bool>,
     task: JoinHandle<Result<()>>,
 }
 
@@ -48,25 +52,35 @@ impl PreparedRelay {
     ) -> Result<Self> {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .await
-            .context("could not bind the one-use Codex TUI relay")?;
+            .context("could not bind the Codex TUI relay")?;
         let address = listener
             .local_addr()
-            .context("could not inspect the one-use Codex TUI relay")?;
-        let upstream = connect_upstream(upstream_endpoint, upstream_token).await?;
+            .context("could not inspect the Codex TUI relay")?;
+        let first_upstream = connect_upstream(upstream_endpoint, upstream_token).await?;
         let capability_token = new_capability_token();
         let expected_authorization = format!("Bearer {capability_token}");
-        let task = tokio::spawn(run_relay(
-            listener,
-            upstream,
-            expected_authorization,
-            client,
-            workspace_id,
-            lease_id,
-            execution_environment,
-        ));
+        let (shutdown, shutdown_receiver) = watch::channel(false);
+        let task = tokio::spawn(
+            Relay::new(
+                listener,
+                first_upstream,
+                RelayConfig {
+                    upstream_endpoint: upstream_endpoint.to_owned(),
+                    upstream_token: upstream_token.to_owned(),
+                    expected_authorization,
+                    client,
+                    workspace_id,
+                    lease_id,
+                    execution_environment,
+                    shutdown: shutdown_receiver,
+                },
+            )
+            .run(),
+        );
         Ok(Self {
             endpoint_url: format!("ws://{address}"),
             capability_token,
+            shutdown,
             task,
         })
     }
@@ -80,7 +94,10 @@ impl PreparedRelay {
     }
 
     pub(super) async fn finish(self) -> Result<()> {
-        let mut task = self.task;
+        let Self {
+            mut task, shutdown, ..
+        } = self;
+        let _ = shutdown.send(true);
         match timeout(RELAY_COMPLETION_TIMEOUT, &mut task).await {
             Ok(result) => result.context("the Codex TUI relay task failed")?,
             Err(_) => {
@@ -92,6 +109,7 @@ impl PreparedRelay {
     }
 
     pub(super) async fn abort(self) {
+        let _ = self.shutdown.send(true);
         self.task.abort();
         let _ = self.task.await;
     }
@@ -136,110 +154,379 @@ fn websocket_address(endpoint: &str) -> Result<SocketAddr> {
     Ok(address)
 }
 
-async fn run_relay(
-    listener: TcpListener,
-    mut upstream: WebSocketStream<TcpStream>,
+enum PhaseOutcome<T> {
+    Ready(T),
+    Shutdown,
+}
+
+#[derive(Clone, Copy)]
+enum RelayLeg {
+    TerminalUi,
+    AppServer,
+}
+
+impl RelayLeg {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::TerminalUi => "terminal UI",
+            Self::AppServer => "App Server",
+        }
+    }
+}
+
+struct TransportFailure {
+    leg: RelayLeg,
+    reason: String,
+}
+
+impl TransportFailure {
+    fn new(leg: RelayLeg, reason: impl Into<String>) -> Self {
+        Self {
+            leg,
+            reason: bounded_reason(reason.into()),
+        }
+    }
+}
+
+enum SessionEnd {
+    ClientClosed,
+    Reconnect(TransportFailure),
+    Shutdown,
+}
+
+fn bounded_reason(reason: String) -> String {
+    let mut bounded = reason
+        .trim()
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .take(MAX_TRANSPORT_REASON_CHARS + 1)
+        .collect::<String>();
+    if bounded.chars().count() > MAX_TRANSPORT_REASON_CHARS {
+        bounded = bounded
+            .chars()
+            .take(MAX_TRANSPORT_REASON_CHARS.saturating_sub(1))
+            .collect();
+        bounded.push('…');
+    }
+    let bounded = bounded.trim().to_owned();
+    if bounded.is_empty() {
+        "connection failed without a reason".to_owned()
+    } else {
+        bounded
+    }
+}
+
+struct RelayConfig {
+    upstream_endpoint: String,
+    upstream_token: String,
     expected_authorization: String,
     client: RpcClient,
     workspace_id: String,
     lease_id: String,
     execution_environment: Option<WorkspaceExecutionEnvironment>,
-) -> Result<()> {
-    let (stream, peer) = accept_downstream(&listener, &client, &workspace_id, &lease_id).await?;
-    ensure!(
-        peer.ip().is_loopback(),
-        "the TUI relay rejected a non-loopback client"
-    );
-    let mut downstream = accept_hdr_async_with_config(
-        stream,
-        RequireAuthorization(expected_authorization),
-        Some(relay_websocket_config()),
-    )
-    .await
-    .context("the Codex terminal UI failed to authenticate to its relay")?;
-    let (mut state, transport_error) = proxy_session(
-        &mut downstream,
-        &mut upstream,
-        &client,
-        &workspace_id,
-        &lease_id,
-        execution_environment.as_ref(),
-    )
-    .await;
-    complete_adoption(&client, &workspace_id, &lease_id, &mut state).await?;
-    if let Some(error) = transport_error {
-        bail!("the Codex TUI relay disconnected unexpectedly: {error}");
-    }
-    Ok(())
+    shutdown: watch::Receiver<bool>,
 }
 
-async fn accept_downstream(
-    listener: &TcpListener,
-    client: &RpcClient,
-    workspace_id: &str,
-    lease_id: &str,
-) -> Result<(TcpStream, SocketAddr)> {
-    let mut heartbeat = interval(LEASE_HEARTBEAT_INTERVAL);
-    heartbeat.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    loop {
-        tokio::select! {
-            accepted = listener.accept() => {
-                return accepted.context("could not accept the Codex terminal UI");
-            }
-            _ = heartbeat.tick() => {
-                renew_lease(client, workspace_id, lease_id).await?;
-            }
+struct RelayControl {
+    client: RpcClient,
+    workspace_id: String,
+    lease_id: String,
+    heartbeat: Interval,
+    shutdown: watch::Receiver<bool>,
+}
+
+struct Relay {
+    listener: TcpListener,
+    first_upstream: Option<WebSocketStream<TcpStream>>,
+    upstream_endpoint: String,
+    upstream_token: String,
+    expected_authorization: String,
+    execution_environment: Option<WorkspaceExecutionEnvironment>,
+    control: RelayControl,
+    state: AdoptionState,
+    generation: u64,
+    last_disconnect: Option<TransportFailure>,
+}
+
+impl Relay {
+    fn new(
+        listener: TcpListener,
+        first_upstream: WebSocketStream<TcpStream>,
+        config: RelayConfig,
+    ) -> Self {
+        let mut heartbeat = interval(LEASE_HEARTBEAT_INTERVAL);
+        heartbeat.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        Self {
+            listener,
+            first_upstream: Some(first_upstream),
+            upstream_endpoint: config.upstream_endpoint,
+            upstream_token: config.upstream_token,
+            expected_authorization: config.expected_authorization,
+            execution_environment: config.execution_environment,
+            control: RelayControl {
+                client: config.client,
+                workspace_id: config.workspace_id,
+                lease_id: config.lease_id,
+                heartbeat,
+                shutdown: config.shutdown,
+            },
+            state: AdoptionState::default(),
+            generation: 0,
+            last_disconnect: None,
         }
     }
-}
 
-async fn proxy_session(
-    downstream: &mut WebSocketStream<TcpStream>,
-    upstream: &mut WebSocketStream<TcpStream>,
-    client: &RpcClient,
-    workspace_id: &str,
-    lease_id: &str,
-    execution_environment: Option<&WorkspaceExecutionEnvironment>,
-) -> (AdoptionState, Option<String>) {
-    let mut state = AdoptionState::default();
-    let mut poll = interval(ADOPTION_POLL_INTERVAL);
-    poll.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    let mut heartbeat = interval(LEASE_HEARTBEAT_INTERVAL);
-    heartbeat.set_missed_tick_behavior(MissedTickBehavior::Delay);
-    loop {
-        let outcome = tokio::select! {
-            message = downstream.next() => {
-                forward_downstream(message, upstream, &mut state, execution_environment).await
-            }
-            message = upstream.next() => {
-                forward_upstream(message, downstream, &mut state).await
-            }
-            _ = poll.tick(), if state.should_poll() => {
-                adopt_candidate(client, workspace_id, lease_id, &mut state)
-                    .await
-                    .map(|()| ForwardOutcome::Continue)
-                    .map_err(|error| error.to_string())
-            }
-            _ = heartbeat.tick() => {
-                renew_lease(client, workspace_id, lease_id)
-                    .await
-                    .map(|()| ForwardOutcome::Continue)
-                    .map_err(|error| error.to_string())
-            }
-        };
-        match outcome {
-            Ok(ForwardOutcome::Continue) => {}
-            Ok(ForwardOutcome::CandidateObserved) => {
-                if let Err(error) =
-                    adopt_candidate(client, workspace_id, lease_id, &mut state).await
-                {
-                    return (state, Some(error.to_string()));
+    async fn run(mut self) -> Result<()> {
+        loop {
+            let Some(mut downstream) = self.accept_authenticated().await? else {
+                return self.finish().await;
+            };
+            let Some(upstream) = self.next_upstream().await? else {
+                return self.finish().await;
+            };
+            let mut upstream = match upstream {
+                Ok(upstream) => upstream,
+                Err(error) => {
+                    self.note_upstream_connect_failure(&mut downstream, error)
+                        .await;
+                    continue;
+                }
+            };
+
+            self.generation += 1;
+            self.last_disconnect = None;
+            match self
+                .proxy_generation(&mut downstream, &mut upstream)
+                .await?
+            {
+                SessionEnd::ClientClosed => {
+                    complete_adoption(
+                        &self.control.client,
+                        &self.control.workspace_id,
+                        &self.control.lease_id,
+                        &mut self.state,
+                    )
+                    .await?;
+                    return Ok(());
+                }
+                SessionEnd::Shutdown => return self.finish().await,
+                SessionEnd::Reconnect(failure) => {
+                    self.prepare_reconnect(failure).await?;
                 }
             }
-            Ok(ForwardOutcome::Closed) => return (state, None),
-            Err(error) => return (state, Some(error)),
         }
     }
+
+    async fn accept_authenticated(&mut self) -> Result<Option<WebSocketStream<TcpStream>>> {
+        loop {
+            let accepted = await_relay_phase(self.listener.accept(), &mut self.control).await?;
+            let PhaseOutcome::Ready(accepted) = accepted else {
+                return Ok(None);
+            };
+            let (stream, peer) = accepted.context("could not accept the Codex terminal UI")?;
+            ensure!(
+                peer.ip().is_loopback(),
+                "the TUI relay rejected a non-loopback client"
+            );
+
+            let handshake = accept_hdr_async_with_config(
+                stream,
+                RequireAuthorization(self.expected_authorization.clone()),
+                Some(relay_websocket_config()),
+            );
+            let authenticated = await_relay_phase(handshake, &mut self.control).await?;
+            let PhaseOutcome::Ready(authenticated) = authenticated else {
+                return Ok(None);
+            };
+            match authenticated {
+                Ok(downstream) => return Ok(Some(downstream)),
+                Err(error) => tracing::warn!(
+                    workspace_id = self.control.workspace_id,
+                    peer = %peer,
+                    reason = %bounded_reason(error.to_string()),
+                    "rejected a Codex TUI relay connection"
+                ),
+            }
+        }
+    }
+
+    async fn next_upstream(&mut self) -> Result<Option<Result<WebSocketStream<TcpStream>>>> {
+        if let Some(upstream) = self.first_upstream.take() {
+            return Ok(Some(Ok(upstream)));
+        }
+        let connected = await_relay_phase(
+            connect_upstream(&self.upstream_endpoint, &self.upstream_token),
+            &mut self.control,
+        )
+        .await?;
+        Ok(match connected {
+            PhaseOutcome::Ready(connected) => Some(connected),
+            PhaseOutcome::Shutdown => None,
+        })
+    }
+
+    async fn note_upstream_connect_failure(
+        &mut self,
+        downstream: &mut WebSocketStream<TcpStream>,
+        error: anyhow::Error,
+    ) {
+        let failure = TransportFailure::new(RelayLeg::AppServer, error.to_string());
+        tracing::warn!(
+            workspace_id = self.control.workspace_id,
+            leg = failure.leg.as_str(),
+            reason = %failure.reason,
+            "Codex TUI relay could not restore its upstream connection"
+        );
+        close_for_reconnect(downstream).await;
+        self.last_disconnect = Some(failure);
+    }
+
+    async fn prepare_reconnect(&mut self, failure: TransportFailure) -> Result<()> {
+        self.state.finish_generation();
+        adopt_candidate(
+            &self.control.client,
+            &self.control.workspace_id,
+            &self.control.lease_id,
+            &mut self.state,
+        )
+        .await?;
+        tracing::warn!(
+            workspace_id = self.control.workspace_id,
+            generation = self.generation,
+            leg = failure.leg.as_str(),
+            reason = %failure.reason,
+            "Codex TUI relay connection lost; waiting for reconnect"
+        );
+        self.last_disconnect = Some(failure);
+        Ok(())
+    }
+
+    async fn proxy_generation(
+        &mut self,
+        downstream: &mut WebSocketStream<TcpStream>,
+        upstream: &mut WebSocketStream<TcpStream>,
+    ) -> Result<SessionEnd> {
+        let mut poll = interval(ADOPTION_POLL_INTERVAL);
+        poll.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        loop {
+            let outcome = tokio::select! {
+                changed = self.control.shutdown.changed() => {
+                    if changed.is_err() || *self.control.shutdown.borrow() {
+                        return Ok(SessionEnd::Shutdown);
+                    }
+                    continue;
+                }
+                message = downstream.next() => {
+                    forward_downstream(
+                        message,
+                        upstream,
+                        &mut self.state,
+                        self.execution_environment.as_ref(),
+                    ).await?
+                }
+                message = upstream.next() => {
+                    forward_upstream(message, downstream, &mut self.state).await
+                }
+                _ = poll.tick(), if self.state.should_poll() => {
+                    adopt_candidate(
+                        &self.control.client,
+                        &self.control.workspace_id,
+                        &self.control.lease_id,
+                        &mut self.state,
+                    )
+                    .await
+                    .map(|()| ForwardOutcome::Continue)
+                    .context("could not adopt a reconnecting TUI thread")?
+                }
+                _ = self.control.heartbeat.tick() => {
+                    self.control
+                        .renew()
+                        .await
+                        .map(|()| ForwardOutcome::Continue)
+                        .context("could not keep the reconnecting TUI lease alive")?
+                }
+            };
+            match outcome {
+                ForwardOutcome::Continue => {}
+                ForwardOutcome::CandidateObserved => {
+                    adopt_candidate(
+                        &self.control.client,
+                        &self.control.workspace_id,
+                        &self.control.lease_id,
+                        &mut self.state,
+                    )
+                    .await?;
+                }
+                ForwardOutcome::ClientClosed => return Ok(SessionEnd::ClientClosed),
+                ForwardOutcome::Reconnect(failure) => {
+                    return Ok(SessionEnd::Reconnect(failure));
+                }
+            }
+        }
+    }
+
+    async fn finish(&mut self) -> Result<()> {
+        complete_adoption(
+            &self.control.client,
+            &self.control.workspace_id,
+            &self.control.lease_id,
+            &mut self.state,
+        )
+        .await?;
+        if let Some(failure) = self.last_disconnect.take() {
+            bail!(
+                "the Codex TUI relay lost its {} connection and did not reconnect: {}",
+                failure.leg.as_str(),
+                failure.reason
+            );
+        }
+        Ok(())
+    }
+}
+
+impl RelayControl {
+    async fn renew(&self) -> Result<()> {
+        renew_lease(&self.client, &self.workspace_id, &self.lease_id).await
+    }
+}
+
+async fn await_relay_phase<F, T>(future: F, control: &mut RelayControl) -> Result<PhaseOutcome<T>>
+where
+    F: Future<Output = T>,
+{
+    if *control.shutdown.borrow() {
+        return Ok(PhaseOutcome::Shutdown);
+    }
+    tokio::pin!(future);
+    loop {
+        tokio::select! {
+            changed = control.shutdown.changed() => {
+                if changed.is_err() || *control.shutdown.borrow() {
+                    return Ok(PhaseOutcome::Shutdown);
+                }
+            }
+            result = &mut future => return Ok(PhaseOutcome::Ready(result)),
+            _ = control.heartbeat.tick() => control.renew().await?,
+        }
+    }
+}
+
+async fn close_for_reconnect(downstream: &mut WebSocketStream<TcpStream>) {
+    use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+    use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+
+    let _ = downstream
+        .send(Message::Close(Some(CloseFrame {
+            code: CloseCode::Again,
+            reason: "App Server connection unavailable".into(),
+        })))
+        .await;
 }
 
 async fn renew_lease(client: &RpcClient, workspace_id: &str, lease_id: &str) -> Result<()> {
@@ -258,23 +545,37 @@ async fn forward_downstream(
     upstream: &mut WebSocketStream<TcpStream>,
     state: &mut AdoptionState,
     execution_environment: Option<&WorkspaceExecutionEnvironment>,
-) -> Result<ForwardOutcome, String> {
+) -> Result<ForwardOutcome> {
     let Some(message) = message else {
-        return Ok(ForwardOutcome::Closed);
+        return Ok(ForwardOutcome::Reconnect(TransportFailure::new(
+            RelayLeg::TerminalUi,
+            "connection ended without a close frame",
+        )));
     };
-    let mut message = message.map_err(|error| error.to_string())?;
-    inject_execution_environment(&mut message, execution_environment)?;
+    let mut message = match message {
+        Ok(message) => message,
+        Err(error) => {
+            return Ok(ForwardOutcome::Reconnect(TransportFailure::new(
+                RelayLeg::TerminalUi,
+                error.to_string(),
+            )));
+        }
+    };
+    inject_execution_environment(&mut message, execution_environment)
+        .map_err(anyhow::Error::msg)?;
     state.observe_downstream(&message);
     let closed = matches!(message, Message::Close(_));
-    upstream
-        .send(message)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(if closed {
-        ForwardOutcome::Closed
-    } else {
-        ForwardOutcome::Continue
-    })
+    if closed {
+        let _ = upstream.send(message).await;
+        return Ok(ForwardOutcome::ClientClosed);
+    }
+    if let Err(error) = upstream.send(message).await {
+        return Ok(ForwardOutcome::Reconnect(TransportFailure::new(
+            RelayLeg::AppServer,
+            error.to_string(),
+        )));
+    }
+    Ok(ForwardOutcome::Continue)
 }
 
 fn inject_execution_environment(
@@ -320,24 +621,42 @@ async fn forward_upstream(
     message: Option<Result<Message, tokio_tungstenite::tungstenite::Error>>,
     downstream: &mut WebSocketStream<TcpStream>,
     state: &mut AdoptionState,
-) -> Result<ForwardOutcome, String> {
+) -> ForwardOutcome {
     let Some(message) = message else {
-        return Ok(ForwardOutcome::Closed);
+        return ForwardOutcome::Reconnect(TransportFailure::new(
+            RelayLeg::AppServer,
+            "connection ended without a close frame",
+        ));
     };
-    let message = message.map_err(|error| error.to_string())?;
+    let message = match message {
+        Ok(message) => message,
+        Err(error) => {
+            return ForwardOutcome::Reconnect(TransportFailure::new(
+                RelayLeg::AppServer,
+                error.to_string(),
+            ));
+        }
+    };
     let candidate_observed = state.observe_upstream(&message);
-    let closed = matches!(message, Message::Close(_));
-    downstream
-        .send(message)
-        .await
-        .map_err(|error| error.to_string())?;
-    Ok(if closed {
-        ForwardOutcome::Closed
-    } else if candidate_observed {
+    if let Message::Close(frame) = &message {
+        let reason = frame
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_else(|| "connection closed without a reason".to_owned());
+        let _ = downstream.send(message).await;
+        return ForwardOutcome::Reconnect(TransportFailure::new(RelayLeg::AppServer, reason));
+    }
+    if let Err(error) = downstream.send(message).await {
+        return ForwardOutcome::Reconnect(TransportFailure::new(
+            RelayLeg::TerminalUi,
+            error.to_string(),
+        ));
+    }
+    if candidate_observed {
         ForwardOutcome::CandidateObserved
     } else {
         ForwardOutcome::Continue
-    })
+    }
 }
 
 async fn complete_adoption(
@@ -404,6 +723,14 @@ struct AdoptionState {
 }
 
 impl AdoptionState {
+    fn finish_generation(&mut self) {
+        // JSON-RPC request identifiers are scoped to one transport
+        // connection. Never correlate an unanswered thread/start from an old
+        // connection with a response that reuses the same identifier after a
+        // reconnect.
+        self.thread_start_request_ids.clear();
+    }
+
     fn should_poll(&self) -> bool {
         self.candidate_thread_id.is_some() && self.activation_requested && !self.bound
     }
@@ -463,7 +790,8 @@ impl AdoptionState {
 enum ForwardOutcome {
     Continue,
     CandidateObserved,
-    Closed,
+    ClientClosed,
+    Reconnect(TransportFailure),
 }
 
 fn message_json(message: &Message) -> Option<Value> {
@@ -539,6 +867,21 @@ mod tests {
     }
 
     #[test]
+    fn transport_reasons_are_terminal_safe_and_bounded() {
+        let unsafe_reason = format!("  failed\n\u{1b}[31m{}  ", "x".repeat(600));
+        let reason = bounded_reason(unsafe_reason);
+
+        assert!(!reason.contains('\n'));
+        assert!(!reason.contains('\u{1b}'));
+        assert_eq!(reason.chars().count(), MAX_TRANSPORT_REASON_CHARS);
+        assert!(reason.ends_with('…'));
+        assert_eq!(
+            bounded_reason("\n\t".to_owned()),
+            "connection failed without a reason"
+        );
+    }
+
+    #[test]
     fn correlates_only_the_exact_thread_start_response() {
         let mut state = AdoptionState::default();
         state.observe_downstream(&Message::Text(
@@ -569,6 +912,34 @@ mod tests {
             ))
         );
         assert_eq!(state.candidate_thread_id.as_deref(), Some("thread-exact"));
+    }
+
+    #[test]
+    fn reconnect_drops_only_generation_scoped_request_ids() {
+        let mut pending = AdoptionState::default();
+        pending.observe_downstream(&Message::Text(
+            json!({"id": 2, "method": "thread/start", "params": {}})
+                .to_string()
+                .into(),
+        ));
+        pending.finish_generation();
+        assert!(
+            !pending.observe_upstream(&Message::Text(
+                json!({"id": 2, "result": {"thread": {"id": "wrong"}}})
+                    .to_string()
+                    .into(),
+            )),
+            "a response on a new connection reused a stale request id"
+        );
+
+        let mut adopted = AdoptionState {
+            candidate_thread_id: Some("thread-exact".to_owned()),
+            activation_requested: true,
+            ..AdoptionState::default()
+        };
+        adopted.finish_generation();
+        assert_eq!(adopted.candidate_thread_id.as_deref(), Some("thread-exact"));
+        assert!(adopted.should_poll());
     }
 
     #[test]

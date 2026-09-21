@@ -10,6 +10,7 @@ use tokio::sync::Notify;
 
 use super::*;
 use crate::codex::CodexEvent;
+use crate::domain::activity::WorkspaceActivitySource;
 use crate::domain::runtime::{
     WorkspaceResourceCapabilities, WorkspaceResourceControllerBackend,
     WorkspaceResourceControllerStatus, WorkspaceResourcePolicySnapshot, WorkspaceRuntimeResources,
@@ -29,7 +30,7 @@ use crate::protocol::{
     WorkspaceBaseRequest, WorkspaceChangesRequest, WorkspaceCloseParams, WorkspaceContextRequest,
     WorkspaceContextSource, WorkspaceCreateParams, WorkspaceDeleteParams, WorkspaceDiffParams,
     WorkspaceGetParams, WorkspaceGitStatus, WorkspaceListParams, WorkspaceReopenParams,
-    WorkspaceThreadDisposition, WorkspaceWorktreeRequest,
+    WorkspaceStatusResult, WorkspaceThreadDisposition, WorkspaceWorktreeRequest,
 };
 use crate::store::{OperationState, WorkspaceDeletionIntent};
 

@@ -781,6 +781,7 @@ async fn resolve_workspace_input_with_phases(
             scope,
             phases,
             include_resources: false,
+            include_activity: false,
         })
         .await?;
     if workspaces.is_empty() {
@@ -1050,6 +1051,7 @@ async fn list_workspaces(
             scope,
             phases: closed.then(|| vec!["closed".to_owned()]),
             include_resources: false,
+            include_activity: false,
         })
         .await?;
     sort_workspace_collection(&mut result, StatusSort::Name);
@@ -1134,6 +1136,7 @@ async fn show_status_collection(
             scope: scope.clone(),
             phases: None,
             include_resources: resources || json_output,
+            include_activity: true,
         })
         .await?;
     sort_workspace_collection(&mut result, sort);

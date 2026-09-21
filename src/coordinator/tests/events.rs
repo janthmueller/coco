@@ -1,5 +1,27 @@
 use super::*;
 
+fn record_notification(fixture: &Fixture, method: &str, params: Value) {
+    fixture
+        .coordinator
+        .record_codex_event(CodexEvent::Notification {
+            method: method.to_owned(),
+            params,
+        })
+        .unwrap();
+}
+
+async fn projected_status(fixture: &Fixture, workspace: &Workspace) -> WorkspaceStatusResult {
+    fixture
+        .coordinator
+        .get_workspace(WorkspaceGetParams {
+            scope: RepositoryScope::repository(fixture.source.clone()),
+            workspace: workspace.id.clone(),
+            include_resources: false,
+        })
+        .await
+        .unwrap()
+}
+
 fn record_thread_status(fixture: &Fixture, status: Value) {
     fixture
         .coordinator
@@ -30,16 +52,212 @@ fn assert_status_notification_is_not_persisted(
 }
 
 async fn projected_workspace(fixture: &Fixture, workspace: &Workspace) -> Workspace {
-    fixture
+    projected_status(fixture, workspace).await.workspace
+}
+
+fn start_reasoning_activity(fixture: &Fixture, turn_id: &str, item_id: &str, delta: &str) {
+    record_notification(
+        fixture,
+        "turn/started",
+        json!({"threadId": "thread-1", "turn": {"id": turn_id}}),
+    );
+    record_notification(
+        fixture,
+        "item/started",
+        json!({
+            "threadId": "thread-1",
+            "turnId": turn_id,
+            "item": {"id": item_id, "type": "reasoning"}
+        }),
+    );
+    record_notification(
+        fixture,
+        "item/reasoning/summaryTextDelta",
+        json!({
+            "threadId": "thread-1",
+            "turnId": turn_id,
+            "itemId": item_id,
+            "summaryIndex": 0,
+            "delta": delta
+        }),
+    );
+}
+
+#[tokio::test]
+async fn projects_reasoning_activity_without_persisting_or_exposing_it_through_list() {
+    let fixture = Fixture::new(FakeWorker::default());
+    fixture.register().await;
+    let workspace = fixture
+        .create_and_materialize(fixture.create_params())
+        .await;
+    fixture.worker.set_native_status(
+        "thread-1",
+        CodexThreadStatus::Active {
+            active_flags: Vec::new(),
+        },
+    );
+    let stored = fixture
+        .store
+        .workspace_by_id(&workspace.id)
+        .unwrap()
+        .unwrap();
+
+    start_reasoning_activity(
+        &fixture,
+        "external-turn",
+        "reasoning-1",
+        "**Checking\t tests**",
+    );
+    let status = projected_status(&fixture, &workspace).await;
+    let activity = status.activity.expect("status omitted native activity");
+    assert_eq!(activity.label, "Checking tests");
+    assert_eq!(activity.source, WorkspaceActivitySource::ReasoningSummary);
+    assert_eq!(activity.thread_id, "thread-1");
+    assert_eq!(activity.turn_id, "external-turn");
+    assert_eq!(activity.item_id, "reasoning-1");
+    assert_eq!(activity.runtime_generation, "runtime-test");
+
+    let detailed = fixture
         .coordinator
-        .get_workspace(WorkspaceGetParams {
+        .list_workspaces(WorkspaceListParams {
             scope: RepositoryScope::repository(fixture.source.clone()),
-            workspace: workspace.id.clone(),
+            phases: None,
             include_resources: false,
+            include_activity: true,
         })
         .await
-        .unwrap()
-        .workspace
+        .unwrap();
+    assert_eq!(
+        detailed[0]
+            .activity
+            .as_ref()
+            .map(|value| value.label.as_str()),
+        Some("Checking tests")
+    );
+
+    let compact = fixture
+        .coordinator
+        .list_workspaces(WorkspaceListParams {
+            scope: RepositoryScope::repository(fixture.source.clone()),
+            phases: None,
+            include_resources: false,
+            include_activity: false,
+        })
+        .await
+        .unwrap();
+    assert_eq!(compact.len(), 1);
+    assert!(compact[0].activity.is_none());
+    assert_eq!(
+        fixture
+            .store
+            .workspace_by_id(&workspace.id)
+            .unwrap()
+            .unwrap(),
+        stored
+    );
+}
+
+#[tokio::test]
+async fn structured_activity_has_priority_and_clears_at_native_boundaries() {
+    let fixture = Fixture::new(FakeWorker::default());
+    fixture.register().await;
+    let workspace = fixture
+        .create_and_materialize(fixture.create_params())
+        .await;
+    fixture.worker.set_native_status(
+        "thread-1",
+        CodexThreadStatus::Active {
+            active_flags: Vec::new(),
+        },
+    );
+    start_reasoning_activity(&fixture, "turn-1", "reasoning-1", "**Checking tests**");
+
+    record_notification(
+        &fixture,
+        "item/started",
+        json!({
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "item": {"id": "compact-1", "type": "contextCompaction"}
+        }),
+    );
+    let compaction = projected_status(&fixture, &workspace)
+        .await
+        .activity
+        .expect("status omitted compaction activity");
+    assert_eq!(compaction.label, "Compacting context");
+    assert_eq!(
+        compaction.source,
+        WorkspaceActivitySource::ContextCompaction
+    );
+
+    record_notification(
+        &fixture,
+        "item/completed",
+        json!({
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "item": {"id": "compact-1", "type": "contextCompaction"}
+        }),
+    );
+    assert!(
+        projected_status(&fixture, &workspace)
+            .await
+            .activity
+            .is_none()
+    );
+
+    start_reasoning_activity(&fixture, "turn-2", "reasoning-2", "**Writing report**");
+    record_notification(
+        &fixture,
+        "turn/completed",
+        json!({
+            "threadId": "thread-1",
+            "turn": {"id": "older-turn", "status": "completed"}
+        }),
+    );
+    assert!(
+        projected_status(&fixture, &workspace)
+            .await
+            .activity
+            .is_some()
+    );
+    fixture
+        .worker
+        .set_native_status("thread-1", CodexThreadStatus::Idle);
+    assert!(
+        projected_status(&fixture, &workspace)
+            .await
+            .activity
+            .is_none()
+    );
+    fixture.worker.set_native_status(
+        "thread-1",
+        CodexThreadStatus::Active {
+            active_flags: Vec::new(),
+        },
+    );
+    assert!(
+        projected_status(&fixture, &workspace)
+            .await
+            .activity
+            .is_none()
+    );
+
+    start_reasoning_activity(&fixture, "turn-3", "reasoning-3", "**Final check**");
+    assert!(
+        projected_status(&fixture, &workspace)
+            .await
+            .activity
+            .is_some()
+    );
+    fixture.coordinator.record_codex_disconnected().unwrap();
+    assert!(
+        projected_status(&fixture, &workspace)
+            .await
+            .activity
+            .is_none()
+    );
 }
 
 async fn assert_native_waiting_statuses(fixture: &Fixture, workspace: &Workspace) {

@@ -114,6 +114,7 @@ fn render_workspace_list(
     }
     let usage_by_workspace = usage_index(usage);
     let include_usage = usage_by_workspace.is_some();
+    let include_activity = workspaces.iter().any(|item| item.activity.is_some());
     let rows = workspaces
         .iter()
         .map(|item| {
@@ -126,8 +127,13 @@ fn render_workspace_list(
             )
         })
         .collect::<Vec<_>>();
-    let (headers, caps) =
-        workspace_table_shape(include_repository, include_resources, include_usage, false);
+    let (headers, caps) = workspace_table_shape(
+        include_repository,
+        include_resources,
+        include_usage,
+        include_activity,
+        false,
+    );
     render_table(&headers, &rows, &caps, width, palette)
 }
 
@@ -144,7 +150,14 @@ fn render_workspace_tree(
     }
     let usage_by_workspace = usage_index(usage);
     let include_usage = usage_by_workspace.is_some();
-    let (headers, caps) = workspace_table_shape(false, include_resources, include_usage, true);
+    let include_activity = workspaces.iter().any(|item| item.activity.is_some());
+    let (headers, caps) = workspace_table_shape(
+        false,
+        include_resources,
+        include_usage,
+        include_activity,
+        true,
+    );
 
     if include_repository {
         let groups = repository_groups(workspaces);
@@ -215,12 +228,8 @@ fn workspace_row(
             Tone::Dim,
         ));
     }
-    let phase = phase_presentation(item.workspace.phase);
     cells.push(workspace_cell);
-    cells.push(Cell::new(
-        format!("{} {}", phase.marker, phase.label),
-        phase.tone,
-    ));
+    cells.push(workspace_state_cell(item));
     if include_resources {
         let (rss, processes, cpu) = resource_cells(item.runtime_resources.as_ref());
         cells.push(Cell::new(rss, Tone::Dim));
@@ -249,6 +258,7 @@ fn workspace_table_shape(
     include_repository: bool,
     include_resources: bool,
     include_usage: bool,
+    include_activity: bool,
     tree: bool,
 ) -> (Vec<&'static str>, Vec<usize>) {
     let mut headers = Vec::with_capacity(
@@ -262,7 +272,10 @@ fn workspace_table_shape(
         caps.push(36);
     }
     headers.extend(["WORKSPACE", "STATE"]);
-    caps.extend([if tree { 64 } else { 32 }, 26]);
+    caps.extend([
+        if tree { 64 } else { 32 },
+        if include_activity { 48 } else { 18 },
+    ]);
     if include_resources {
         headers.extend(["MEMORY", "PROCS", "CPU"]);
         caps.extend([14, 8, 10]);
@@ -274,6 +287,22 @@ fn workspace_table_shape(
     headers.push("BRANCH");
     caps.push(48);
     (headers, caps)
+}
+
+fn workspace_state_cell(item: &WorkspaceListItem) -> Cell {
+    let phase = phase_presentation(item.workspace.phase);
+    let state = format!("{} {}", phase.marker, phase.label);
+    match item.activity.as_ref() {
+        Some(activity) => Cell::segmented(
+            [
+                (state, phase.tone),
+                (" · ".to_owned(), Tone::Dim),
+                (activity.label.clone(), Tone::Primary),
+            ],
+            phase.tone,
+        ),
+        None => Cell::new(state, phase.tone),
+    }
 }
 
 #[derive(Debug)]
@@ -650,6 +679,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::domain::activity::{WorkspaceActivity, WorkspaceActivitySource};
     use crate::domain::runtime::{
         WorkspaceResourceScope, WorkspaceRuntimeBackend, WorkspaceRuntimeResources,
         WorkspaceRuntimeState,
@@ -708,6 +738,7 @@ mod tests {
                 root_path: PathBuf::from(format!("/repos/{repository_name}")),
             },
             runtime_resources: None,
+            activity: None,
         }
     }
 
@@ -743,6 +774,33 @@ mod tests {
         let colored = render_table(&["STATE"], &rows, &[20], 20, Palette::colored());
         assert!(colored.contains("\u{1b}["));
         assert!(colored.contains("● Ready"));
+    }
+
+    #[test]
+    fn status_activity_extends_state_without_adding_another_column() {
+        let mut workspace = workspace_item("repo", "project", "feat/login", WorkspacePhase::Active);
+        workspace.activity = Some(WorkspaceActivity {
+            label: "Checking tests".to_owned(),
+            source: WorkspaceActivitySource::ReasoningSummary,
+            thread_id: "thread-1".to_owned(),
+            turn_id: "turn-1".to_owned(),
+            item_id: "item-1".to_owned(),
+            truncated: false,
+            runtime_generation: "runtime-1".to_owned(),
+            observed_at_ms: 1,
+        });
+
+        let rendered = render_workspace_list(
+            &[workspace],
+            false,
+            false,
+            None,
+            usize::MAX,
+            Palette::plain(),
+        );
+        assert!(rendered.contains("STATE"));
+        assert!(!rendered.contains("ACTIVITY"));
+        assert!(rendered.contains("● Working · Checking tests"));
     }
 
     #[test]
@@ -787,7 +845,7 @@ mod tests {
             "└─ frontend",
             "   ├─ w1",
             "   └─ w2",
-            "Waiting for input",
+            "Needs input",
         ] {
             assert!(
                 rendered.contains(expected),

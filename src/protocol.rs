@@ -5,6 +5,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::domain::activity::WorkspaceActivity;
 use crate::domain::runtime::{
     WorkspaceResourceControllerStatus, WorkspaceResourcePolicySnapshot, WorkspaceRuntimeResources,
 };
@@ -330,6 +331,8 @@ pub struct WorkspaceListParams {
     pub phases: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub include_resources: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_activity: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -745,6 +748,8 @@ pub struct WorkspaceListItem {
     pub repository: RepositorySummary,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_resources: Option<WorkspaceRuntimeResources>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<WorkspaceActivity>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -865,6 +870,8 @@ pub struct WorkspaceStatusResult {
     pub git: WorkspaceGitStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_resources: Option<WorkspaceRuntimeResources>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<WorkspaceActivity>,
     pub open_decisions: Vec<Decision>,
     pub next_sequence: i64,
 }
@@ -1156,6 +1163,7 @@ mod tests {
                 scope: RepositoryScope::repository("/repo"),
                 phases: None,
                 include_resources: false,
+                include_activity: false,
             },
             DaemonMethod::WorkspaceList,
             json!({"scope": {"kind": "repository", "path": "/repo"}}),
@@ -1165,11 +1173,13 @@ mod tests {
                 scope: RepositoryScope::repository("/repo"),
                 phases: None,
                 include_resources: true,
+                include_activity: true,
             },
             DaemonMethod::WorkspaceList,
             json!({
                 "scope": {"kind": "repository", "path": "/repo"},
                 "includeResources": true,
+                "includeActivity": true,
             }),
         );
         assert_request(
@@ -1827,6 +1837,16 @@ mod tests {
                 "residentMemoryBytes": 25165824,
                 "cpuPercent": 12.5,
                 "sampledAtMs": 4
+            },
+            "activity": {
+                "label": "Checking tests",
+                "source": "reasoningSummary",
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "item-1",
+                "truncated": false,
+                "runtimeGeneration": "runtime-1",
+                "observedAtMs": 5
             },
             "openDecisions": [],
             "nextSequence": 3,

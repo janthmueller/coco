@@ -958,6 +958,7 @@ impl Coordinator {
         params: WorkspaceListParams,
     ) -> Result<Vec<WorkspaceListItem>, CoordinatorError> {
         let include_resources = params.include_resources;
+        let include_activity = params.include_activity;
         let repository_id = match &params.scope {
             RepositoryScope::Repository { path } => {
                 Some(self.registered_repository_for_path(path)?.0.id)
@@ -997,7 +998,10 @@ impl Coordinator {
             } else {
                 None
             };
-            listed.push(self.workspace_list_item(workspace, runtime_resources)?);
+            let activity = include_activity
+                .then(|| self.workspace_activity(&workspace))
+                .flatten();
+            listed.push(self.workspace_list_item(workspace, runtime_resources, activity)?);
         }
         Ok(listed)
     }
@@ -1048,10 +1052,12 @@ impl Coordinator {
         } else {
             None
         };
+        let activity = self.workspace_activity(&workspace);
         Ok(WorkspaceStatusResult {
             workspace,
             git,
             runtime_resources,
+            activity,
             open_decisions,
             next_sequence,
         })

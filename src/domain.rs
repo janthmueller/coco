@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub(crate) mod activity;
 pub(crate) mod hooks;
 pub(crate) mod runtime;
 pub(crate) mod signals;

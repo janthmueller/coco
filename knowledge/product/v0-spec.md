@@ -217,10 +217,10 @@ peer-response routing remain separate, unimplemented capabilities.
 - `coco create` prepares the Git workspace without allocating an empty native
   thread. Its phase is `prepared`. `--send <message>` materializes context and
   starts its first turn; `--jump` either resumes the bound thread or lets the
-  official TUI create the first fresh thread through a one-use correlated
-  relay. The two options compose in the fixed order create, send, jump. Failure
-  of a later post-action does not roll back a successfully created workspace or
-  accepted turn.
+  official TUI create the first fresh thread through a session-scoped
+  correlated relay. The two options compose in the fixed order create, send,
+  jump. Failure of a later post-action does not roll back a successfully
+  created workspace or accepted turn.
 - `coco create` selects code, conversation context, Git binding, and optional
   local changes independently. `--base-workspace` selects committed code;
   `--context`/`-c` selects native Codex history by workspace reference or
@@ -765,7 +765,7 @@ ID must not create duplicate artifacts.
   `thread/read`; do not resume a thread merely to list it. An unbound ready
   workspace projects `prepared`; a missing or invalid existing binding projects
   unavailable instead of falling back to stored status.
-- `--json` emits one schema-version-10 JSON document and no decorative stdout
+- `--json` emits one schema-version-12 JSON document and no decorative stdout
   text. Every row includes a compact repository identity.
 
 ### `coco status`
@@ -821,6 +821,12 @@ ID must not create duplicate artifacts.
   memory as memory rather than conflating them. `--follow`/`-f` composes with
   it, including clustered `-fr`/`-afr`. JSON status always requests the
   complete optional observation without requiring `--resources`.
+- While a native turn is active, status may append one bounded activity
+  headline such as `Compacting context` or the latest usable Codex reasoning
+  summary. The optional `activity` JSON object retains its structured source,
+  exact thread/turn/item identity, truncation flag, runtime generation, and
+  observation time. It is generation-local, never persisted, never changes
+  phase or wait reasons, and is absent from ordinary `list` requests.
 - `--usage`/`-u` adds cumulative native tokens, latest context occupancy, and
   optional estimated cost to either a targeted or collection status view. It
   composes with resource and follow flags, including `-fu`, `-ru`, and `-fru`.
@@ -939,12 +945,15 @@ ID must not create duplicate artifacts.
   that worktree through the authenticated relay. Every ordinary TUI turn is
   assigned to the workspace executor.
 - For an unbound fresh workspace, acquire one temporary activation lease and
-  launch the TUI in native remote-start mode through a one-use local relay.
-  Correlate the exact `thread/start` response, but bind it only after its first
-  action creates a durable rollout. Empty exit leaves the workspace prepared.
+  launch the TUI in native remote-start mode through a session-scoped local
+  relay. Correlate the exact `thread/start` response, but bind it only after its
+  first action creates a durable rollout. Empty exit leaves the workspace
+  prepared.
 - Renew the lease while that relay is alive so the TUI may remain open before
-  its first action. A missing heartbeat expires after thirty seconds; normal
-  exit, relay startup failure, or App Server disconnect releases the lease.
+  its first action. Keep the listener and lease alive across sequential native
+  TUI reconnects, opening a fresh App Server leg for each connection. A missing
+  heartbeat expires after thirty seconds; normal exit, relay startup failure,
+  or an unrecovered transport failure releases the lease.
 - Once adoption binds the durable thread, the lease records presence rather
   than exclusive activation. An idle thread accepts `send` with its TUI open,
   and multiple bound TUIs may coexist. Every live TUI still prevents close or
@@ -1117,7 +1126,8 @@ autonomous delegation policy remain later work.
 
 The public workspace projection contains CoCo's provisioning/binding
 `lifecycle`, a native `threadRuntime` projection, a derived `phase`, zero or
-more `waitReasons`, and a separate Git projection. `threadRuntime.status`
+more `waitReasons`, an optional transient `activity`, and a separate Git
+projection. `threadRuntime.status`
 retains Codex's native status, `runtimeGeneration`, `observedAtMs`, and
 `isFresh`. Schema v11 retains old schema-v6 snapshots only as migration data and can mark
 them stale on process loss; thread start, resume, and notifications never
@@ -1156,6 +1166,16 @@ Codex reports both wait flags, expose both in `waitReasons` and render
 `waiting_for_approval` as the summary phase. Resolving one flag reveals the
 remaining reason rather than incorrectly returning to `active`. A server
 request by itself never changes phase.
+
+The optional `activity` field is presentation evidence for an active turn,
+not another state authority. A structured context-compaction item takes
+precedence over a bounded, single-line reasoning-summary headline. The
+observation is correlated to exact native thread, turn, and item IDs and the
+current runtime generation. It clears on matching turn completion, non-active
+native status, App Server disconnect, and daemon restart. Reasoning item
+completion may retain the last useful headline for the rest of that turn,
+matching the native Codex TUI. Status suppresses any retained headline while
+the derived phase is not plain `active`.
 
 ### Git facets
 
@@ -1358,8 +1378,9 @@ The following are intentionally outside v0:
   compatibility test consumes no model turn: it checks 0.154.0, registers and
   probes workspace environments, proves an empty remote candidate remains
   unbound, materializes one exact local-shell candidate solely for the history
-  contract, then verifies history and exact resume through fresh daemon and
-  App Server processes. It also proves two active workspaces have distinct exec
+  contract, then verifies history and two simultaneous native TUI resumes of
+  one bound workspace, including independent clean exit, through fresh daemon
+  and App Server processes. It also proves two active workspaces have distinct exec
   server PIDs and that close plus normal daemon shutdown stop their tracked
   executor roots. Generated-schema drift is reviewed diagnostically rather
   than rejected byte-for-byte.
@@ -1386,8 +1407,8 @@ The following are intentionally outside v0:
   returns the same native turn ID, and a different payload under any existing
   operation ID returns `IDEMPOTENCY_CONFLICT`.
 - Explicit `status --follow` can attach during a turn, reflects native phase
-  changes until Ctrl-C, prints no conversation text, and can detach without
-  affecting the turn. Targetless follow observes a local or all-repository
+  and bounded activity changes until Ctrl-C, prints no user or assistant
+  messages, and can detach without affecting the turn. Targetless follow observes a local or all-repository
   collection under the same lifetime rule. `send --wait` separately prints only
   the exact accepted turn's generation-local final response, including when
   completion notifications overtake the direct start response.
@@ -1514,6 +1535,18 @@ The following are intentionally outside v0:
   and App Server restart; repeated operation IDs produce no duplicate external
   artifacts.
 
+The 2026-09-21 proof closes this gate against released `codex-cli 0.154.0`
+through three complementary layers. The deterministic process scenario covers
+the complete two-repository CLI/MCP/decision/jump/restart/replay sequence. The
+model-free real-Codex suite proves native MCP scope isolation, exact TUI resume,
+thread lifecycle, and restart behavior. A separately opted-in authenticated
+acceptance run starts live model work in two temporary repositories, continues
+one through a distinct MCP process, restarts `cocod` and its App Server, and
+proves the workspace/thread/worktree bindings plus an explicit operation replay
+remain exact. Its copied authentication and Codex sessions live only in the
+temporary test directory; no credential or test message is retained by the
+repository.
+
 A public alpha is a **go** only when that multi-client control-plane workflow
 works against the selected released Codex build and a real second client uses
 it. It is a **no-go** if practical use is only one operator running `create`
@@ -1537,13 +1570,14 @@ convenience, but it is not part of the isolation contract.
 
 Codex 0.154.0 is now the selected and proven compatibility baseline;
 maintaining a broader range is optional rather than an alpha blocker. The
-remaining release gate is the two-repository, multi-client product proof.
+two-repository, multi-client product proof now passes locally, so it no longer
+blocks continued public-alpha development. Publishing a particular revision,
+removing legacy schema, or declaring a stable release remain separate actions.
 Windows support, profile configuration UX, and a future explicit
-workspace-completion command remain follow-ups rather than reasons to delay
-the control-plane proof. Background supervision also remains post-alpha: do
-not ship an auto-enabled service until graceful SIGTERM and App Server
-child-failure/recovery semantics are implemented and tested across the
-supported service managers.
+workspace-completion command remain follow-ups. Background supervision also
+remains post-alpha: do not ship an auto-enabled service until graceful SIGTERM
+and App Server child-failure/recovery semantics are implemented and tested
+across the supported service managers.
 
 Creation now separates four choices: Git base, Codex conversation context,
 worktree binding, and explicit local-state carry. A context source may be a

@@ -1,7 +1,7 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
 use tokio::process::Command;
@@ -20,40 +20,74 @@ pub(super) async fn verify_inherited_context_resume(
     repository: &Path,
 ) -> Result<()> {
     ensure_tmux_available().await?;
-    let socket = paths.data_dir.join("real-tui.tmux.sock");
-    let server = TmuxServer::new(socket);
+    let first = TmuxServer::new(paths.data_dir.join("real-tui-first.tmux.sock"));
+    let second = TmuxServer::new(paths.data_dir.join("real-tui-second.tmux.sock"));
     let command = jump_command(paths, codex_binary, repository);
-    server.start().await?;
-    server.send_literal(&command).await?;
-    server.send_keys(&["Enter"]).await?;
+    start_jump(&first, &command).await?;
+    wait_for_inherited_history(&first, "first").await?;
+    start_jump(&second, &command).await?;
+    wait_for_inherited_history(&second, "second").await?;
 
+    ensure_tui_is_open(&first, "first").await?;
+    close_tui(&first, "first").await?;
+    ensure_tui_is_open(&second, "second after the first exited").await?;
+    close_tui(&second, "second").await
+}
+
+async fn start_jump(server: &TmuxServer, command: &str) -> Result<()> {
+    server.start().await?;
+    server.send_literal(command).await?;
+    server.send_keys(&["Enter"]).await
+}
+
+async fn wait_for_inherited_history(server: &TmuxServer, label: &str) -> Result<()> {
     let deadline = Instant::now() + COMPATIBILITY_TIMEOUT;
-    let mut accepted_trust_prompt = false;
+    let mut trust_attempted_at = None;
     let screen = loop {
         let screen = server.capture().await?;
         if let Some(status) = exit_status(&screen) {
             bail!(
-                "the real Codex TUI exited before rendering inherited history with status \
+                "the {label} real Codex TUI exited before rendering inherited history with status \
                  {status}:\n{screen}"
             );
         }
         if screen.contains(INHERITED_HISTORY_MARKER) {
             break screen;
         }
-        if !accepted_trust_prompt && screen.contains(TRUST_PROMPT) {
-            server.send_keys(&["Enter"]).await?;
-            accepted_trust_prompt = true;
+        if screen.contains(TRUST_PROMPT)
+            && trust_attempted_at
+                .is_none_or(|attempted: Instant| attempted.elapsed() >= Duration::from_millis(500))
+        {
+            let visible = server.capture_visible().await?;
+            if visible.contains(TRUST_PROMPT) {
+                server.send_keys(&["Enter"]).await?;
+                trust_attempted_at = Some(Instant::now());
+            }
         }
         if Instant::now() >= deadline {
-            bail!("the real Codex TUI did not render inherited history before timeout:\n{screen}");
+            bail!(
+                "the {label} real Codex TUI did not render inherited history before timeout:\n{screen}"
+            );
         }
         sleep(POLL_INTERVAL).await;
     };
     ensure!(
         screen.contains(FORK_WORKSPACE_NAME),
-        "the real Codex TUI rendered history without the inherited workspace name:\n{screen}"
+        "the {label} real Codex TUI rendered history without the inherited workspace name:\n{screen}"
     );
+    Ok(())
+}
 
+async fn ensure_tui_is_open(server: &TmuxServer, label: &str) -> Result<()> {
+    let screen = server.capture().await?;
+    ensure!(
+        exit_status(&screen).is_none() && screen.contains(INHERITED_HISTORY_MARKER),
+        "the {label} real Codex TUI was no longer attached:\n{screen}"
+    );
+    Ok(())
+}
+
+async fn close_tui(server: &TmuxServer, label: &str) -> Result<()> {
     server.send_keys(&["C-d"]).await?;
     let deadline = Instant::now() + COMPATIBILITY_TIMEOUT;
     loop {
@@ -61,12 +95,12 @@ pub(super) async fn verify_inherited_context_resume(
         if let Some(status) = exit_status(&screen) {
             ensure!(
                 status == 0,
-                "the real Codex TUI exited unsuccessfully after Ctrl+D:\n{screen}"
+                "the {label} real Codex TUI exited unsuccessfully after Ctrl+D:\n{screen}"
             );
             return Ok(());
         }
         if Instant::now() >= deadline {
-            bail!("the real Codex TUI did not exit after Ctrl+D:\n{screen}");
+            bail!("the {label} real Codex TUI did not exit after Ctrl+D:\n{screen}");
         }
         sleep(POLL_INTERVAL).await;
     }
@@ -162,6 +196,11 @@ impl TmuxServer {
         let output = self
             .run(["capture-pane", "-p", "-t", SESSION, "-S", "-"])
             .await?;
+        String::from_utf8(output.stdout).context("tmux captured non-UTF-8 terminal output")
+    }
+
+    async fn capture_visible(&self) -> Result<String> {
+        let output = self.run(["capture-pane", "-p", "-t", SESSION]).await?;
         String::from_utf8(output.stdout).context("tmux captured non-UTF-8 terminal output")
     }
 

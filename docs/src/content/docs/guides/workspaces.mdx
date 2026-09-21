@@ -39,16 +39,18 @@ coco status -f
 
 Both show workspaces in the current repository. `status -f` keeps the
 display updated until Ctrl+C. Use `coco status fix/login` for one
-workspace's details and any pending request.
+workspace's details and any pending request. While an agent is working,
+status may add a short live detail such as `Working · Checking tests` or
+`Working · Compacting context`.
 
 | State | What to do |
 | --- | --- |
 | Prepared | Send an instruction or open the Codex UI |
 | Working | Let the agent continue or enter its conversation |
-| Waiting for approval / input | Use the displayed `decide` command or `jump` |
+| Needs approval / input | Use the displayed `decide` command or `jump` |
 | Ready | Review the response or send more work |
-| Codex thread is unloaded | Use `send` or `jump` to continue the saved conversation |
-| Failed / Status unavailable | Inspect the workspace details and [troubleshoot](../../reference/current-limitations/) |
+| Unloaded | Use `send` or `jump` to continue the saved conversation |
+| Failed / Unavailable | Inspect the workspace details and [troubleshoot](../../reference/current-limitations/) |
 
 Ready means the agent can accept another instruction. Review its changes
 before treating the work as complete.

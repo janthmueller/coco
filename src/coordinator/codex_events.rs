@@ -27,6 +27,7 @@ impl Coordinator {
     pub(crate) fn record_codex_disconnected(&self) -> Result<usize, StoreError> {
         self.clear_jump_leases();
         self.clear_file_change_previews();
+        self.clear_workspace_activities();
         self.fail_pending_compactions();
         self.clear_runtime_turns();
         let orphaned = self.orphan_open_runtime_decisions();
@@ -53,7 +54,9 @@ impl Coordinator {
         }
         if method == "thread/status/changed" {
             // Passive and mutating reads project current status directly from
-            // thread/read. Do not recreate that native truth in SQLite.
+            // thread/read. Activity only uses the notification as a transient
+            // clear boundary and does not recreate native truth in SQLite.
+            self.observe_workspace_activity(method, &params);
             return Ok(());
         }
         if method == "thread/tokenUsage/updated" {
@@ -63,6 +66,7 @@ impl Coordinator {
             debug!(method, "ignoring uncorrelated Codex notification");
             return Ok(());
         };
+        self.observe_workspace_activity(method, &params);
         if self.observe_pending_compaction(method, &params) {
             return Ok(());
         }

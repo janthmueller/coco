@@ -64,6 +64,7 @@ async fn close_hides_a_workspace_and_reopen_restores_its_exact_identity() {
             scope: scope(&fixture),
             phases: None,
             include_resources: false,
+            include_activity: false,
         })
         .await
         .unwrap();
@@ -74,6 +75,7 @@ async fn close_hides_a_workspace_and_reopen_restores_its_exact_identity() {
             scope: scope(&fixture),
             phases: Some(vec!["closed".to_owned()]),
             include_resources: false,
+            include_activity: false,
         })
         .await
         .unwrap();

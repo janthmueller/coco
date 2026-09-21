@@ -45,6 +45,7 @@ async fn workspace_resources_are_observed_only_when_requested() {
             scope: RepositoryScope::repository(fixture.source.clone()),
             phases: None,
             include_resources: false,
+            include_activity: false,
         })
         .await
         .unwrap();
@@ -57,6 +58,7 @@ async fn workspace_resources_are_observed_only_when_requested() {
             scope: RepositoryScope::repository(fixture.source.clone()),
             phases: None,
             include_resources: true,
+            include_activity: false,
         })
         .await
         .unwrap();
@@ -454,6 +456,7 @@ async fn workspace_list_filters_after_hydrating_every_native_phase() {
             scope: RepositoryScope::repository(fixture.source.clone()),
             phases: Some(vec!["waiting_for_input".to_owned()]),
             include_resources: false,
+            include_activity: false,
         })
         .await
         .unwrap();
@@ -520,6 +523,7 @@ async fn serves_repository_views_events_and_bounded_diffs() {
             scope: RepositoryScope::repository(fixture.source.clone()),
             phases: Some(vec!["prepared".to_owned()]),
             include_resources: false,
+            include_activity: false,
         })
         .await
         .unwrap();
@@ -672,6 +676,7 @@ async fn scopes_workspace_names_to_repositories_and_resolves_global_references()
             scope: RepositoryScope::AllRepositories,
             phases: None,
             include_resources: false,
+            include_activity: false,
         })
         .await
         .unwrap();

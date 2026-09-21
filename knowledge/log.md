@@ -8,6 +8,27 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-09-21
+
+- **Multi-client product proof completed**: Closed the remaining behavioral
+  alpha gate with layered evidence against released `codex-cli 0.154.0`. The
+  deterministic two-repository process scenario, all model-free real-Codex
+  contracts, and a new explicitly opted-in authenticated acceptance test now
+  cover CLI exit, MCP continuation, exact TUI resume, daemon/App Server
+  restart, binding recovery, and idempotent operation replay. The live test
+  copies authentication only into temporary private state and retains neither
+  credentials nor test conversation data in the repository.
+
+- **Recoverable native TUI attachments**: Changed the authenticated
+  `coco jump` relay from a single-connection bridge into a session-scoped
+  state machine. It preserves one listener, attachment lease, environment
+  routing, and fresh-thread adoption across sequential native Codex reconnects
+  while opening a new App Server leg for each generation. Connection-scoped
+  JSON-RPC request IDs are discarded between generations, and an unrecovered
+  bounded leg-specific failure remains visible in the final jump error. A
+  deterministic process test now forces a mid-turn disconnect and proves the
+  exact thread resumes without another start, turn, or interruption.
+
 ## 2026-09-14
 
 - **Stable hierarchical workspace overviews**: Collection `list` and `status`

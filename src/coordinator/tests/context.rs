@@ -455,6 +455,7 @@ async fn passive_reads_project_not_loaded_without_resuming_or_persisting_it() {
             scope: scope.clone(),
             phases: None,
             include_resources: false,
+            include_activity: false,
         })
         .await
         .unwrap();

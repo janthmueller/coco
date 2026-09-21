@@ -186,6 +186,11 @@ messages.
 `list` and `status` inspect without creating or loading conversation context;
 `send` and `jump` activate it when needed.
 
+During an active turn, `status` may append one short Codex activity detail to
+`Working`. It follows context compaction and the latest usable reasoning
+summary, updates under `--follow`, and disappears when the turn stops. Plain
+`list` stays compact and does not request this detail.
+
 Add `--resources` (`-r`) to scoped or collection status for current process
 count, memory, and CPU use on Linux. cgroup-v2 hosts report memory charged to
 the complete workspace execution group; the compatibility fallback reports
@@ -379,9 +384,13 @@ coco limits show feat/first --json
 ```
 
 These commands emit one JSON value to standard output. Human-oriented follow
-mode is intentionally excluded. The current top-level schema version is `11`.
+mode is intentionally excluded. The current top-level schema version is `12`.
 Status JSON may include `runtimeResources`; its optional measurements are a
-current sample and are not persisted.
+current sample and are not persisted. During an active turn, it may also
+include `activity` with the displayed label, source, thread, turn, item,
+truncation flag, runtime generation, and observation time. Activity is live
+status information and is not retained after the turn or a coordinator
+restart.
 
 With `--usage`, status JSON adds a nested `usage` object containing the complete
 native token breakdown, its observation and freshness fields, and either the

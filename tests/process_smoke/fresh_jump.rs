@@ -22,7 +22,8 @@ struct FreshServerState {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn fresh_jump_adopts_only_after_an_action_and_detaches_without_interrupting() -> Result<()> {
+async fn fresh_jump_reconnects_and_adopts_only_after_an_action_without_interrupting() -> Result<()>
+{
     let temporary = tempfile::tempdir()?;
     let paths = TestPaths::new(temporary.path());
     let repository = temporary.path().join("repository");
@@ -113,7 +114,7 @@ async fn fresh_jump_adopts_only_after_an_action_and_detaches_without_interruptin
     let authorizations = observed_authorization
         .lock()
         .expect("fresh authorization mutex was poisoned");
-    assert_eq!(authorizations.len(), 3);
+    assert_eq!(authorizations.len(), 4);
     assert!(
         authorizations
             .iter()
@@ -200,7 +201,7 @@ fn verify_fresh_jump_arguments(
     );
     ensure!(
         arguments[1].starts_with("ws://127.0.0.1:") && arguments[1] != daemon_endpoint,
-        "fresh jump did not use its one-use loopback relay: {arguments:?}"
+        "fresh jump did not use its session-scoped loopback relay: {arguments:?}"
     );
     ensure!(
         arguments[2..]
@@ -237,11 +238,24 @@ fn verify_fresh_jump_requests(daemon: &[Value], tui: &[Value], worktree: &Path) 
         );
     }
     ensure!(
-        tui.iter().any(|request| {
-            request["method"] == "turn/start"
-                && request.pointer("/params/threadId") == Some(&json!(FRESH_ACTIVE_THREAD_ID))
-        }),
-        "fresh TUI did not materialize the selected candidate"
+        tui.iter()
+            .filter(|request| {
+                request["method"] == "turn/start"
+                    && request.pointer("/params/threadId") == Some(&json!(FRESH_ACTIVE_THREAD_ID))
+            })
+            .count()
+            == 1,
+        "fresh TUI did not materialize the selected candidate exactly once: {tui:?}"
+    );
+    ensure!(
+        tui.iter()
+            .filter(|request| {
+                request["method"] == "thread/resume"
+                    && request.pointer("/params/threadId") == Some(&json!(FRESH_ACTIVE_THREAD_ID))
+            })
+            .count()
+            == 1,
+        "fresh TUI did not resume the exact candidate after reconnecting: {tui:?}"
     );
     ensure!(
         daemon
@@ -295,7 +309,7 @@ async fn run_fake_fresh_jump_server(
         completion,
     );
     let remote = async {
-        for index in 0..2 {
+        for index in 0..3 {
             let (stream, peer) = listener.accept().await?;
             ensure!(peer.ip().is_loopback(), "relay did not connect locally");
             let websocket = accept_hdr_async(
@@ -440,6 +454,7 @@ async fn handle_fresh_tui_connection(
             Some("initialize") => send_result(&mut websocket, &frame, json!({})).await?,
             Some("initialized") => {}
             Some("thread/start") => {
+                ensure!(index < 2, "TUI created a new thread after reconnecting");
                 let id = if index == 0 {
                     FRESH_EMPTY_THREAD_ID
                 } else {
@@ -478,6 +493,28 @@ async fn handle_fresh_tui_connection(
                     &mut websocket,
                     &frame,
                     json!({"turn": {"id": FRESH_ACTIVE_TURN_ID}}),
+                )
+                .await?;
+                websocket.close(None).await?;
+                return Ok(());
+            }
+            Some("thread/resume") => {
+                ensure!(index == 2, "TUI resumed outside its reconnect");
+                let id = required_string(&frame, "/params/threadId")?;
+                ensure!(
+                    id == FRESH_ACTIVE_THREAD_ID,
+                    "TUI resumed the wrong thread after reconnecting"
+                );
+                let thread = find_thread(&state, id)?;
+                send_result(
+                    &mut websocket,
+                    &frame,
+                    json!({
+                        "thread": {"id": thread.id, "status": native_status(&thread)},
+                        "cwd": thread.cwd,
+                        "model": MODEL_OVERRIDE,
+                        "modelProvider": "test-provider"
+                    }),
                 )
                 .await?;
             }
@@ -578,32 +615,9 @@ async fn fake_tui_process() -> Result<()> {
     };
     let token = env::var("COCO_CODEX_REMOTE_CAPABILITY_TOKEN")?;
     let mode = env::var("COCO_TEST_FRESH_TUI_MODE")?;
-    let address = endpoint
-        .strip_prefix("ws://")
-        .context("fake TUI remote endpoint was not ws://")?
-        .parse::<SocketAddr>()?;
-    let mut request = endpoint.into_client_request()?;
-    request
-        .headers_mut()
-        .insert(AUTHORIZATION, format!("Bearer {token}").parse()?);
-    let stream = TcpStream::connect(address).await?;
-    let (mut websocket, _) = client_async(request, stream).await?;
+    let mut websocket = connect_fake_tui(&endpoint, &token).await?;
+    initialize_fake_tui(&mut websocket).await?;
 
-    send_json(
-        &mut websocket,
-        json!({
-            "id": 1,
-            "method": "initialize",
-            "params": {"clientInfo": {"name": "coco-fake-tui", "version": "0.0.0"}}
-        }),
-    )
-    .await?;
-    request_result(&mut websocket, json!(1)).await?;
-    send_json(
-        &mut websocket,
-        json!({"method": "initialized", "params": {}}),
-    )
-    .await?;
     let cwd = env::current_dir()?;
     send_json(
         &mut websocket,
@@ -637,6 +651,24 @@ async fn fake_tui_process() -> Result<()> {
         )
         .await?;
         request_result(&mut websocket, json!(3)).await?;
+        wait_for_reconnect_signal(&mut websocket).await?;
+
+        websocket = connect_fake_tui(&endpoint, &token).await?;
+        initialize_fake_tui(&mut websocket).await?;
+        send_json(
+            &mut websocket,
+            json!({
+                "id": 2,
+                "method": "thread/resume",
+                "params": {"threadId": thread_id}
+            }),
+        )
+        .await?;
+        let resumed = request_result(&mut websocket, json!(2)).await?;
+        ensure!(
+            resumed.pointer("/thread/id").and_then(Value::as_str) == Some(thread_id.as_str()),
+            "fake TUI resumed a different thread: {resumed}"
+        );
     } else {
         ensure!(mode == "empty", "unknown fake TUI mode {mode:?}");
     }
@@ -653,6 +685,49 @@ async fn fake_tui_process() -> Result<()> {
     request_result(&mut websocket, json!(4)).await?;
     websocket.close(None).await?;
     Ok(())
+}
+
+async fn connect_fake_tui(endpoint: &str, token: &str) -> Result<WebSocketStream<TcpStream>> {
+    let address = endpoint
+        .strip_prefix("ws://")
+        .context("fake TUI remote endpoint was not ws://")?
+        .parse::<SocketAddr>()?;
+    let mut request = endpoint.into_client_request()?;
+    request
+        .headers_mut()
+        .insert(AUTHORIZATION, format!("Bearer {token}").parse()?);
+    let stream = TcpStream::connect(address).await?;
+    client_async(request, stream)
+        .await
+        .map(|(websocket, _)| websocket)
+        .map_err(Into::into)
+}
+
+async fn initialize_fake_tui(websocket: &mut WebSocketStream<TcpStream>) -> Result<()> {
+    send_json(
+        websocket,
+        json!({
+            "id": 1,
+            "method": "initialize",
+            "params": {"clientInfo": {"name": "coco-fake-tui", "version": "0.0.0"}}
+        }),
+    )
+    .await?;
+    request_result(websocket, json!(1)).await?;
+    send_json(websocket, json!({"method": "initialized", "params": {}})).await?;
+    Ok(())
+}
+
+async fn wait_for_reconnect_signal(websocket: &mut WebSocketStream<TcpStream>) -> Result<()> {
+    loop {
+        match websocket.next().await {
+            Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return Ok(()),
+            Some(Ok(Message::Ping(payload))) => websocket.send(Message::Pong(payload)).await?,
+            Some(Ok(
+                Message::Text(_) | Message::Binary(_) | Message::Pong(_) | Message::Frame(_),
+            )) => {}
+        }
+    }
 }
 
 async fn request_result(

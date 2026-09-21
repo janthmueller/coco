@@ -1298,7 +1298,7 @@ async fn daemon_request(paths: &TestPaths, method: &str, params: Value) -> Resul
 
 fn select_default_model(response: &Value) -> Result<String> {
     ensure!(
-        response["schemaVersion"] == 11,
+        response["schemaVersion"] == 12,
         "coco model list returned an unexpected schema version: {response}"
     );
     let models = response["models"]

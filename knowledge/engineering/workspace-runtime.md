@@ -97,9 +97,18 @@ Codex 0.154.0 exposes environment selection only on `thread/start` and
 - a fresh thread is started with exactly its workspace environment;
 - every CoCo-started turn repeats the workspace environment selection, making
   it sticky for subsequent actions in that loaded thread; and
-- the authenticated one-use `jump` relay replaces environment selection on
-  downstream `thread/start` and `turn/start`, so the official TUI cannot route
-  an ordinary turn to a different executor.
+- the authenticated session-scoped `jump` relay replaces environment selection
+  on downstream `thread/start` and `turn/start`, so the official TUI cannot
+  route an ordinary turn to a different executor.
+
+The relay listener lives for the child TUI process rather than for one
+WebSocket connection. A transport loss therefore leaves the listener and
+temporary attachment lease alive while the native TUI reconnects. Each
+authenticated sequential TUI connection gets a fresh authenticated App Server
+connection; fresh-thread adoption state survives between those connection
+generations, while unanswered JSON-RPC request IDs do not. A clean TUI close
+ends the relay. An unrecovered leg-specific transport failure is retained and
+included in the final `jump` error.
 
 Both WebSocket legs of that relay use the same finite 128 MiB maximum frame
 and message size as Codex's remote App Server client. Tungstenite's defaults

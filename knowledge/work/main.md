@@ -5,7 +5,7 @@ description: Tracks repository bootstrap, the Rust baseline, and early CoCo arch
 tags: [work, branch, bootstrap, rust, mcp, architecture]
 status: active
 branch: main
-updated: 2026-09-11
+updated: 2026-09-21
 ---
 
 # main — repository foundation
@@ -17,6 +17,25 @@ architectural baseline for CoCo.
 
 ## Active work
 
+- [x] Finish the bounded native-activity slice behind a real multi-TUI safety
+  proof.
+  - [x] Extend the opt-in installed-Codex compatibility contract so two real
+    `coco jump` TUIs resume the same already-bound workspace concurrently,
+    closing either client does not terminate the other, and both exit cleanly.
+  - [x] Add a generation-local, bounded activity tracker at the Codex event
+    edge. Structured context compaction outranks a sanitized reasoning-summary
+    fallback; neither becomes a workspace phase or durable event.
+  - [x] Project nullable activity into targeted and collection status JSON,
+    show it as secondary human status detail, make follow react to changes,
+    and leave the `list` presentation compact.
+  - [x] Clear activity on turn completion, non-active native status,
+    disconnect, and coordinator restart; cover ordering, bounds, unrelated
+    threads, and output behavior before updating canonical/public docs.
+- [x] Make the authenticated `coco jump` relay honor the native Codex TUI
+  reconnect contract: retain its listener for the child-TUI lifetime, create a
+  fresh App Server leg per sequential connection, preserve adoption and lease
+  state across connection generations, surface bounded leg-specific failures,
+  and cover recovery without duplicating a thread or turn.
 - [ ] Revisit the read-only CLI vocabulary after `usage` has practical use:
   compare the separate `list`, `status`, and `usage` commands with a possible
   shared `show` namespace without changing the current surface prematurely.
@@ -624,7 +643,7 @@ architectural baseline for CoCo.
       the final completed-output event write after `send --wait` owns output.
     - [ ] After the product proof, remove the now-read-only legacy status,
       turn, and decision schema in a separate physical-cleanup revision.
-  - [ ] Run the two-repository/multi-client product proof and revisit the
+  - [x] Run the two-repository/multi-client product proof and revisit the
     private-alpha go/no-go decision with the user.
 - [x] Repair first activation for the published `codex-cli 0.153.4` without
   relying on the unreleased `codex --worktree` surface or fabricating a turn.
@@ -4745,3 +4764,430 @@ gate, and static documentation export pass after the final compaction
 refinement: 365 library tests and all 5 process-smoke tests pass; 6
 environment-dependent and 3 opt-in real-Codex tests remain ignored. The docs
 export still contains 17 pages and 61 files under the `/coco` base path.
+
+## Existing-branch workspace audit — 2026-09-16
+
+Scope: determine how `coco create --checkout <branch>` behaves when the branch
+is already checked out in the invoking checkout, whether CoCo can adopt that
+checkout, and which safe user workflows exist. This is an audit only; no CLI,
+Git, persistence, or public-documentation behavior changed.
+
+Findings:
+
+- `--checkout` means an exclusive existing-branch binding for a newly managed
+  CoCo worktree. `Git::plan_worktree` reads the complete porcelain worktree
+  list and rejects the branch when either the main checkout or another linked
+  worktree already owns it. The same check is repeated immediately before the
+  Git side effect.
+- This is detected before `persist_prepared_workspace`, so the failed request
+  creates no workspace record or managed worktree. Automatic repository
+  enrollment may already have occurred because enrollment intentionally
+  precedes creation planning.
+- CoCo has no in-place adoption mode for the invoking checkout. Adding one
+  would weaken the current isolation and ownership contract: `close` and
+  `delete` assume a separately managed worktree, while the source checkout is
+  deliberately never switched, reset, stashed, or removed by CoCo.
+- The normal safe path from a currently checked-out branch is plain
+  `coco create <workspace>`, which creates `coco/<workspace>` at the current
+  committed `HEAD`; `--dirty` additionally copies selected local state. If the
+  exact existing branch identity is required, the operator must first release
+  it by switching the source checkout to another branch or detached HEAD, then
+  invoke `--checkout <branch>`. Dirty-state carry can be requested after an
+  explicit detach, but it copies rather than removes the source changes.
+- Git has a force mode for sharing one branch across worktrees, but CoCo should
+  not expose it: concurrent commits, resets, or ref movement would make the
+  other checkout's index and files disagree with the shared branch and would
+  undermine CoCo's immutable binding and retirement checks.
+
+UX follow-up worth discussing: map `BranchAlreadyCheckedOut` to a more specific
+public error and show the two safe remedies, especially when the reported path
+is the invoking checkout. Do not automatically detach or switch the user's
+source checkout, and do not add an implicit in-place adoption mode. Verification:
+the focused `refuses_to_share_an_existing_branch_between_worktrees` regression
+passes against the current implementation.
+
+## Codex runtime-status compatibility audit — 2026-09-16
+
+Scope: clarify whether `coco status` forwards Codex App Server states verbatim
+or projects them, and what must be checked when the supported Codex version is
+updated. Audit only; no runtime or public-documentation behavior changed.
+
+Findings:
+
+- `thread/read` is the runtime authority. CoCo retains its typed native
+  snapshot (`notLoaded`, `idle`, `systemError`, or `active` with every
+  `activeFlag`) in `workspace.threadRuntime`, then derives the smaller
+  `WorkspacePhase` used by the human status table.
+- Native `notLoaded`, `idle`, and `systemError` become `not_loaded`, `idle`,
+  and `system_error`. Native `active` normally becomes `active`; the known
+  `waitingOnApproval` and `waitingOnUserInput` flags specialize it to the two
+  waiting phases, with approval taking display precedence when both occur.
+  CoCo-owned phases such as `prepared`, `closing`, and `closed` do not come
+  from Codex.
+- Active flags are deliberately open strings. A newly introduced flag is
+  retained in the JSON snapshot and safely projects to `active` unless CoCo
+  has learned a more specific meaning for it. Existing coverage includes a
+  synthetic `futureFlag` alongside both known wait flags.
+- The top-level native status is currently a closed Rust enum. A new App
+  Server status type would fail `thread/read` decoding; status hydration then
+  clears the native snapshot and normally reports `unavailable` rather than
+  mislabeling it. This is fail-safe but means a Codex upgrade can require a
+  mapping update.
+- The opt-in real-process compatibility suite pins and verifies exactly
+  `codex-cli 0.154.0`, including native `thread/read` projections across load
+  and restart. Advancing the supported Codex version must therefore include
+  reviewing the official App Server status contract and generated/runtime
+  behavior, updating the explicit version pin, and running that suite. A new
+  flag only requires product work when its semantics deserve a distinct CoCo
+  phase; a new top-level status requires decoder and safety-policy review.
+
+## Concise human status language — 2026-09-16
+
+Scope: review visible CLI state labels after the native-status audit and reduce
+table noise without changing wire phases, status derivation, sorting, color,
+or safety guidance.
+
+Decision and implementation:
+
+- Human phase labels are now short states rather than sentences:
+  `Preparing`, `Starting`, `Needs approval`, `Needs input`, `Unloaded`,
+  `Codex error`, and `Unavailable`. Existing compact labels such as `Working`,
+  `Ready`, `Prepared`, and `Closed` remain unchanged.
+- `Unloaded` is preferable to a softer term such as `Sleeping`: it is the
+  native condition, does not imply that CoCo stopped a runtime, and fits both
+  targeted and collection status views. `Codex error` preserves ownership of
+  a native failure, while `Unavailable` remains distinct from a known error.
+- The status-column cap is reduced from 26 to 18 visible characters. The
+  unsupported-decision hint now gives the direct action `Use coco jump to
+  respond.` instead of explaining adapter internals.
+- Destructive confirmations, blockers, and recovery errors remain explicit;
+  brevity does not override safety or actionable diagnostics. JSON phase and
+  native `threadRuntime` values are unchanged. The public workspace guide was
+  updated only where it names the human labels.
+
+Verification: `cargo fmt --all -- --check`, denied-warning Clippy for all
+targets and features, all 365 non-ignored library tests, all 5 process-smoke
+tests, and the static documentation build pass. Six environment-dependent
+library tests and three opt-in real-Codex tests remain ignored. The
+documentation export verifies 17 pages and 61 static files under the `/coco`
+base path.
+
+## Native Codex activity versus workspace state — 2026-09-16
+
+Scope: classify the newer Codex TUI line that replaces the generic `Working`
+label with a description of current work, including its special context-
+compaction presentation. Investigation only; CoCo behavior did not change.
+
+Findings:
+
+- The TUI's live task row is a presentation surface, not another App Server
+  `ThreadStatus`. A turn begins with the fallback header `Working`; streamed
+  `item/reasoning/summaryTextDelta` content supplies the latest usable summary
+  line, which the TUI renders as the changing activity headline.
+- Context compaction is stronger structured evidence but still not a top-level
+  thread state. App Server exposes a `contextCompaction` turn item with
+  `item/started` and `item/completed`; the TUI temporarily renders `Compacting
+  context`, then records `Context compacted`. The thread remains native
+  `active` while that work occurs.
+- Turn status (`inProgress`, then `completed`, `interrupted`, or `failed`),
+  thread runtime status, and transient activity are three distinct layers.
+  CoCo currently projects the first two where needed but does not expose the
+  reasoning-derived activity headline or automatic compaction activity in
+  `coco status`.
+- If CoCo adopts this later, activity should remain a nullable, generation-
+  local observation rather than a new `WorkspacePhase`: for example,
+  `Working · Checking tests` or `Working · Compacting context`. Structured
+  items should outrank model-authored reasoning summaries, and the observation
+  should be cleared on completion, disconnect, or daemon restart rather than
+  persisted as current truth.
+
+Recommended first slice: maintain the native turn lifecycle only as the
+generation-local envelope used to correlate and clear activity; do not add a
+second human `TURN` state beside the existing derived workspace phase. Track a
+bounded primary activity with explicit provenance. Start with structured
+`contextCompaction` item lifecycle and readable reasoning-summary deltas as its
+fallback. The structured event kind and start/completion boundaries are
+authoritative, but fields inside other typed tool items may still be model-
+authored and must never drive policy or be printed unbounded. Expose the
+nullable activity in status JSON and as secondary human status information;
+keep `list` as the compact inventory view. A later expansion to commands,
+tools, hooks, or parallel activities should reuse the same typed tracker rather
+than turn each operation into a workspace phase.
+
+## Jump connection-loss audit — 2026-09-21
+
+Scope: determine why a Codex TUI launched through `coco jump` can show
+`Connection lost. Attempting to reconnect` after being left open, why the
+retry does not recover, and whether the failure belongs to CoCo or Codex.
+Investigation only; no runtime or public behavior changed.
+
+Findings:
+
+- The quoted TUI state belongs to Codex's remote App Server client, not to the
+  workspace exec-server protocol. In the default execution mode the relevant
+  transport chain is TUI -> CoCo jump relay -> daemon-owned App Server. The
+  selected workspace exec-server is a separate downstream execution
+  environment behind that App Server.
+- Codex 0.154.0 implements automatic TUI reconnection by opening a new client
+  connection to the same remote endpoint, initializing it, resuming the exact
+  thread, and rebuilding the view. It makes five attempts with delays of 0, 1,
+  2, 4, and 8 seconds. Its process-level reconnect test deliberately accepts
+  multiple sequential WebSocket connections on one listener.
+- CoCo's relay cannot satisfy that contract. `run_relay` accepts exactly one
+  downstream TUI connection and creates exactly one upstream App Server
+  connection. Close, EOF, or an error on either leg returns from
+  `proxy_session`; `run_relay` then ends and drops the listener. Every Codex
+  reconnect attempt therefore targets an endpoint that no longer exists. The
+  ineffective retry is a confirmed CoCo defect, independent of which side
+  caused the first disconnect.
+- Native thread unloading is not the explanation. The documented 30-minute
+  inactivity grace applies only after the last subscriber leaves, produces a
+  `notLoaded` thread state, and is recoverable through `thread/resume`; it does
+  not close the remote TUI transport. CoCo also has no automatic idle-runtime
+  stop at present.
+- The audit did not establish the trigger of the first transport loss. There
+  is no App Server or TUI idle-disconnect timer in the inspected 0.154.0 path.
+  Plausible triggers include an App Server/cocod process restart or failure, a
+  transient WebSocket failure, or a relay lease-renewal failure. The local
+  host had no matching historical TUI disconnect record and no running cocod
+  log to attribute one of the user's observed failures. Codex documents the
+  WebSocket App Server transport as experimental and unsupported, so an
+  upstream trigger remains possible; the broken recovery remains CoCo-owned.
+- An exec-server connection has its own 30-second Ping, 60-second Pong
+  watchdog, and reconnect strategy. An environment disconnect is surfaced as
+  `thread/environment/disconnected`; the current TUI does not translate that
+  notification into the quoted whole-App-Server reconnect screen. This makes
+  the workspace executor an unlikely direct source of that exact display.
+- `COCO_WORKSPACE_EXECUTION=shared` bypasses the relay and connects the TUI
+  directly to the daemon-owned App Server, so it is a useful diagnostic A/B
+  check. It is not the product fix because it also gives up per-workspace
+  execution attribution and limits. Codex 0.154.0 exposes no TUI flag that
+  selects CoCo's registered workspace environment, so the relay cannot yet be
+  removed in the default mode.
+
+Recommended fix slice:
+
+1. Keep the authenticated loopback listener alive for the complete child-TUI
+   lifetime and accept sequential reconnects while rejecting concurrent reuse.
+2. Open a fresh authenticated upstream App Server connection for each TUI
+   connection, while retaining the workspace environment rewrite and exact
+   fresh-thread adoption state across generations.
+3. Treat clean TUI exit as relay shutdown, but treat an unclean leg loss as a
+   reconnectable generation failure. Keep lease renewal independent of one
+   WebSocket generation.
+4. Add a deterministic relay reconnect test and a real-TUI compatibility case
+   that drops the first connection, resumes the same thread, and proves no
+   duplicate turn, candidate, or lease.
+5. Record which leg closed and its bounded reason before considering App
+   Server supervision. The daemon currently marks a lost control connection
+   stale but does not respawn its owned App Server, so recovery from an actual
+   server-process death is a separate, larger lifecycle slice.
+
+Before the reconnect correction below, quitting the stuck TUI and running
+`coco jump` again was the only safe recovery path; the durable
+workspace/thread binding was not deleted by the failed attachment.
+
+### Reconnect correction
+
+Implemented the session-scoped relay as a small explicit state machine. Its
+authenticated loopback listener now remains alive for the complete child-TUI
+lifetime. Each sequential downstream connection receives a fresh authenticated
+App Server connection, while one continuous heartbeat retains the same attach
+lease across connection generations. A clean TUI close ends the relay; an
+unclean terminal or App Server leg loss retains a bounded, leg-specific reason
+and waits for the native TUI to reconnect. If the child exits without a
+successful replacement connection, that retained cause is included in the
+final `jump` error.
+
+Fresh-thread candidate identity, activation evidence, and completed binding
+survive a reconnect. Outstanding `thread/start` request IDs are cleared at the
+generation boundary because JSON-RPC IDs may be reused after reconnect and
+must not correlate with an old response. The environment rewrite therefore
+continues to apply to the exact fresh start and every later ordinary turn
+without inventing another thread or resending a turn. Invalidly authenticated
+connections are rejected without consuming the relay listener.
+
+The deterministic process test now forces the App Server leg to close after
+accepting one `turn/start`, reconnects the same fake TUI through the same relay
+endpoint, initializes a new App Server leg, and resumes the exact candidate.
+It asserts two candidates only for the two intentional fresh launches, exactly
+one materializing turn, exactly one reconnect resume, four authenticated
+App Server connections including cocod, and no interruption. The existing
+native-TUI compatibility proof continues to cover real Codex resume and clean
+exit.
+
+Durable behavior was promoted to the product contract, architecture, and
+workspace-runtime decision. Public CLI syntax and user action did not change,
+so no public documentation page was added. The initial cause of the observed
+idle-time disconnect remains unproven; App Server process supervision remains
+a separate lifecycle task if failures persist after this correction.
+
+Verification: `cargo fmt --all -- --check`,
+`cargo clippy --locked --all-targets --all-features -- -D warnings`, and
+`cargo test --locked` pass (367 library tests plus all 5 process-smoke tests;
+6 environment-dependent unit tests and the 3 opt-in real-Codex tests are
+ignored by the default suite). The focused reconnect process test passes. The
+opt-in installed-Codex compatibility suite also passes all 3 tests when run
+outside the restricted sandbox required for its loopback listeners and tmux.
+`nix flake check` passes all 150 checks for the current system, including the
+package, formatting, Clippy, policy, application, and static documentation
+derivations.
+
+## Two-repository/multi-client product proof — 2026-09-21
+
+Active scope: close the remaining behavioral alpha gate without adding a new
+feature. Re-run the existing isolated two-repository process scenario after the
+relay correction, exercise the selected released Codex build with distinct CLI
+and MCP clients, prove exact thread/worktree continuity through TUI attachment
+and coordinator/App Server restart, and replay explicit operation IDs without
+creating duplicate native work. Keep all repositories and CoCo state isolated
+from the user's existing workspaces. A model-backed acceptance turn is allowed
+for this explicitly requested proof, but credentials and message bodies must
+not enter repository files or logs.
+
+Planned evidence:
+
+- [x] Confirm the installed Codex version and run the combined fake-worker
+  process scenario that deterministically covers two repositories, CLI/MCP
+  handoff, decisions, jump, restart, and idempotent replay.
+- [x] Run the model-free real-Codex compatibility contracts against the same
+  build, including native MCP isolation and real TUI resume.
+- [x] Exercise one bounded model-backed multi-client acceptance flow in
+  isolated temporary state, or record the exact external blocker if the local
+  authentication cannot be safely reused.
+- [x] Compare artifacts before and after restart/replay, record the release
+  conclusion and any remaining manual evidence, and leave public release,
+  schema deletion, commit, and push as separate actions.
+
+Result: the installed `codex-cli 0.154.0` is still the selected baseline. All
+five deterministic process tests pass outside the socket-restricted sandbox,
+including the combined two-repository flow and the new relay reconnect proof.
+All three opt-in model-free real-Codex contracts pass, including native MCP
+scope isolation and real TUI resume. The new ignored
+`live_product_proof` test then passed twice with a temporary private copy of the
+local authentication: two CLI clients started live model work in separate
+repositories, a repository-scoped MCP process continued one workspace, the
+same operation returned the same native turn before and after a daemon/App
+Server restart, and both workspace IDs, thread IDs, and worktree paths remained
+unchanged. The second pass verified that the durable test requires its prompt
+through an environment variable and does not retain it or credentials in the
+repository.
+
+Decision: the layered evidence meets the behavioral gate for continued public
+alpha development. It does not trigger a push or release, and it does not make
+stable-version, background-supervision, Windows, or broader Codex-version
+claims. The now-eligible physical removal of read-only legacy native-mirror
+schema remains a separate migration task; the optional native activity view is
+still the next bounded user-facing feature.
+
+Final verification: `cargo fmt --all -- --check` and denied-warning Clippy for
+all targets/features pass. `cargo test --locked` passes 367 non-ignored library
+tests and all five process scenarios; six environment-dependent library tests,
+the three real-Codex contracts, and the live proof remain explicitly ignored in
+the default run. With their opt-ins, all three real-Codex contracts pass and the
+authenticated live proof passes after its final prompt/privacy hardening. The
+Git flake includes the staged test and `nix flake check .` reports all current-
+system checks passing. `git diff --check` and the repository secret/prompt scan
+are clean. No push or release was performed.
+
+## Native status activity implementation — 2026-09-21
+
+Active scope: first close the remaining real-client assumption by attaching two
+installed Codex TUIs to one already-bound workspace at the same time. Then add
+one bounded, transient activity observation to status. This slice must improve
+visibility into an active turn without expanding the workspace state machine,
+persisting model narration, or making policy depend on presentation text.
+
+Design invariants:
+
+- Codex `thread/read` remains the sole authority for native thread status and
+  therefore for CoCo's derived workspace phase. Activity is an optional detail
+  attached to that status, never a phase, wait reason, hook event, or guard
+  input.
+- The tracker is owned by the coordinator generation and keyed by exact native
+  thread identity. A daemon/App Server disconnect drops all observations, and
+  a restart begins empty because no activity is stored in SQLite.
+- A structured `contextCompaction` item produces `Compacting context` and has
+  priority over prose. `item/reasoning/summaryTextDelta` may supply a fallback
+  headline only for the current turn and item. The fallback is normalized to a
+  single line and retained within a small UTF-8-safe bound.
+- `turn/started` creates a fresh activity envelope and removes stale text from
+  the preceding turn. A reasoning-item completion retains its last useful
+  heading for the remainder of that turn, matching the native TUI; compaction
+  completion clears the structured override. `turn/completed`, a non-active
+  `thread/status/changed`, an App Server disconnect, or restart clears the
+  applicable observation. Late events from another turn, item, or thread
+  cannot overwrite or clear the current value.
+- CoCo's typed local protocol exposes the observation and its explicit source;
+  raw Codex JSON does not cross the event adapter. Targeted status and status
+  collections request it. Ordinary `list` does not request or render it, so the
+  inventory stays compact. JSON includes the nullable typed detail; human
+  output uses one secondary `Activity ...` line/column rather than lengthening
+  the canonical state label.
+- `status --follow` requires no new transport: its existing polling/frame
+  comparison naturally redraws when the typed activity changes. Redirected
+  output emits only changed frames, preserving its log-friendly contract.
+
+Implementation order and evidence:
+
+1. Generalize the real-TUI tmux fixture to two isolated terminal clients. Keep
+   the first open while the second resumes the same thread, prove both render
+   inherited history, close the first, prove the second remains attached, then
+   close the second. This remains an explicit installed-Codex opt-in test.
+2. Add the smallest coherent activity module beside
+   `coordinator/codex_events.rs`, plus a protocol/domain value containing the
+   bounded label, source, turn/item identity, generation, and observation time.
+3. Route only the documented structured compaction and reasoning-summary
+   notifications into it. Hydrate status results from a snapshot only when the
+   exact bound thread and current generation still match.
+4. Cover source priority, delta accumulation/truncation, whitespace/control
+   normalization, stale-event rejection, every clear boundary, unrelated
+   threads, list opt-out, targeted/collection JSON, human rendering, and follow
+   change detection. Extend the fake process boundary only if the lower-level
+   contracts leave an actual integration gap.
+5. Update the canonical native-event/status contract and concise public status
+   guidance only after behavior is verified. Run formatting, denied-warning
+   Clippy, the full locked test suite, installed-Codex opt-ins, static docs, and
+   the Nix flake sequentially. Do not push or release as part of this slice.
+
+Result: the opt-in Codex 0.154.0 contract now opens two isolated tmux clients
+through two independent `coco jump` relays against the same already-bound
+workspace. Both render the inherited native history at the same time; the
+first exits cleanly without disconnecting the second, and the second then exits
+cleanly. A full parallel compatibility run exposed that a one-shot tmux trust
+confirmation could be sent before the TUI accepted input. The fixture now
+checks the currently visible pane and retries the confirmation at a bounded
+interval only while the prompt remains visible. All three installed-Codex
+contracts pass together after that correction.
+
+The coordinator now owns one generation-local activity registry keyed by
+native thread and turn. It accepts only structured context-compaction item
+lifecycle and public reasoning-summary deltas. Context compaction projects the
+fixed label `Compacting context`; reasoning follows Codex's usable-heading
+rules, collapses whitespace and terminal controls, retains at most 2,048
+Unicode scalar values while streaming, and exposes at most 120 with an
+ellipsis plus an explicit truncation flag. Reasoning item completion retains
+the last useful heading for the same turn, as the native TUI does. Matching
+turn completion, non-active native truth, App Server disconnect, and restart
+remove it. Exact IDs and runtime generation prevent unrelated or late events
+from replacing current activity.
+
+`workspace.get` now returns optional typed activity, while `workspace.list`
+requires an explicit `includeActivity` request. `coco status` requests it for
+collection views, renders `Working · <activity>` in the existing state cell,
+and naturally redraws under the existing follow loop. `coco list` and its JSON
+remain compact because they never request activity. Status JSON schema 12 adds
+the label, source, thread/turn/item IDs, truncation, generation, and observation
+time. No SQLite migration or durable event was added. Canonical architecture,
+the product contract, the workspace guide, and the CLI reference now describe
+only the implemented behavior.
+
+Verification: `cargo fmt --all -- --check` and denied-warning Clippy pass.
+`cargo test --locked` passes 376 non-ignored library tests and all five process
+scenarios; six environment-dependent library tests, three opt-in real-Codex
+tests, and the live model proof remain ignored by the default run. The full
+installed-Codex opt-in suite passes all three contracts, including concurrent
+TUI resume. The static Astro export builds and verifies all 17 public pages and
+61 assets. `nix flake check .` passes for the current system after the two new
+Rust modules were staged so Git-flake source discovery could include them.
+`git diff --check` is clean. No push or release was performed.

@@ -7,6 +7,7 @@ use serde_json::json;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::error;
 
+use crate::domain::activity::WorkspaceActivity;
 use crate::domain::{
     DecisionFileChange, EventKind, EventSource, Repository, Workspace, WorkspaceLifecycle,
 };
@@ -19,6 +20,7 @@ use crate::store::{EventDraft, Store, StoreError};
 
 const MAX_OPERATION_ID_BYTES: usize = 256;
 
+mod activity;
 mod codex_events;
 mod context;
 mod decision;
@@ -58,6 +60,7 @@ pub(crate) struct Coordinator {
     file_change_previews: StdMutex<HashMap<(String, String), Vec<DecisionFileChange>>>,
     jump_leases: StdMutex<jump::JumpLeaseRegistry>,
     usage_costs: StdMutex<HashMap<String, (Instant, WorkspaceCostEstimate)>>,
+    activities: StdMutex<activity::ActivityRegistry>,
 }
 
 impl Coordinator {
@@ -88,6 +91,7 @@ impl Coordinator {
             file_change_previews: StdMutex::new(HashMap::new()),
             jump_leases: StdMutex::new(jump::JumpLeaseRegistry::default()),
             usage_costs: StdMutex::new(HashMap::new()),
+            activities: StdMutex::new(activity::ActivityRegistry::default()),
         }
     }
 
@@ -203,12 +207,14 @@ impl Coordinator {
         &self,
         workspace: Workspace,
         runtime_resources: Option<crate::domain::runtime::WorkspaceRuntimeResources>,
+        activity: Option<WorkspaceActivity>,
     ) -> Result<WorkspaceListItem, CoordinatorError> {
         let repository = self.repository_by_id(&workspace.repository_id)?;
         Ok(WorkspaceListItem {
             workspace,
             repository: RepositorySummary::from(&repository),
             runtime_resources,
+            activity,
         })
     }
 

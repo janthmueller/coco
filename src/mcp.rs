@@ -200,6 +200,7 @@ where
                 scope: RepositoryScope::repository(self.repository.clone()),
                 phases: input.phases,
                 include_resources: false,
+                include_activity: false,
             },
             None,
             None,

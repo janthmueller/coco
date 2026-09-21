@@ -177,6 +177,7 @@ pub(super) async fn follow_status_collection(
                 scope: scope.clone(),
                 phases: None,
                 include_resources,
+                include_activity: true,
             })
             .await?;
         sort_workspace_collection(&mut workspaces, sort);

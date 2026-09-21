@@ -1230,32 +1230,38 @@ The verified 0.154.0 runtime uses this minimal sequence:
 
 For an already bound workspace, `coco jump` reads the user-only endpoint and
 token, prepares the workspace executor, and normally launches `codex resume`
-through a one-use authenticated relay. The relay injects the exact workspace
-environment into each downstream `turn/start`; the upstream App Server token
-and relay token are supplied only in child-process memory/environment. In
-explicit shared-execution fallback mode, the CLI retains the direct remote
-resume path. Both sides of the relay retain Codex's finite 128 MiB remote
-WebSocket frame and message bound instead of Tungstenite's smaller defaults,
-so a valid page from a large native history is not rejected by CoCo. A
-renewable per-client presence lease prevents retirement while the TUI remains
-open, without excluding another bound TUI or `send` on an idle thread.
+through a session-scoped authenticated relay. The relay injects the exact
+workspace environment into each downstream `turn/start`; the upstream App
+Server token and relay token are supplied only in child-process
+memory/environment. In explicit shared-execution fallback mode, the CLI
+retains the direct remote resume path. Both sides of the relay retain Codex's
+finite 128 MiB remote WebSocket frame and message bound instead of
+Tungstenite's smaller defaults, so a valid page from a large native history is
+not rejected by CoCo. A renewable per-client presence lease prevents
+retirement while the TUI remains open, without excluding another bound TUI or
+`send` on an idle thread.
 
 For an unbound fresh workspace, `workspace.attach` acquires one expiring
 generation-local lease and returns no invented thread ID. The CLI starts a
-one-use authenticated loopback WebSocket relay to the daemon's App Server and
-launches the official TUI with `codex --remote <relay> -C <worktree>`, plus the
-stored profile and model options. The relay replaces environment selection on
-the exact `thread/start` and later `turn/start` requests, and correlates the
-start request/response pair. It does not bind an empty candidate. Once that
-candidate receives `turn/start`, `thread/shellCommand`, or `review/start`,
-the daemon verifies through exact `thread/read` that Codex reports a non-empty
-regular rollout file, the expected `cwd`, no fork parent, and the same thread
-ID. It then names and binds that thread and resumes it on the daemon connection
-so background observation survives TUI exit. Candidate substitution,
-concurrent first activation, and stale leases are rejected. Relay startup
-failure and App Server disconnect release or clear the lease. While the relay
-is alive it renews the lease every ten seconds; if the CLI or relay dies, the
-missing heartbeat lets the daemon expire it after thirty seconds.
+session-scoped authenticated loopback WebSocket relay to the daemon's App
+Server and launches the official TUI with
+`codex --remote <relay> -C <worktree>`, plus the stored profile and model
+options. The relay replaces environment selection on the exact `thread/start`
+and later `turn/start` requests, and correlates the start request/response
+pair. It does not bind an empty candidate. Once that candidate receives
+`turn/start`, `thread/shellCommand`, or `review/start`, the daemon verifies
+through exact `thread/read` that Codex reports a non-empty regular rollout
+file, the expected `cwd`, no fork parent, and the same thread ID. It then names
+and binds that thread and resumes it on the daemon connection so background
+observation survives TUI exit. Candidate substitution, concurrent first
+activation, and stale leases are rejected. Relay startup failure and an
+unrecovered App Server disconnect release or clear the lease.
+The relay keeps its listener alive across the native TUI's sequential
+reconnect attempts and opens a fresh authenticated App Server connection for
+each generation. Adoption state survives those generations, but outstanding
+request IDs do not because JSON-RPC correlation is connection-scoped. While
+the relay is alive it renews the lease every ten seconds; if the CLI or relay
+dies, the missing heartbeat lets the daemon expire it after thirty seconds.
 Binding converts the exclusive adoption lease into ordinary TUI presence;
 the relay continues its heartbeat until exit.
 
@@ -1339,13 +1345,15 @@ outcome.
 
 | App Server input consumed from the selected release | CoCo handling |
 | --- | --- |
-| `thread/status/changed` | drain without persistence; `thread/read` remains current-state authority |
-| `turn/started` | drain without local binding; it does not echo `clientUserMessageId`, so it cannot prove a CoCo operation |
+| `thread/status/changed` | drain without persistence; `thread/read` remains current-state authority; non-active status clears transient activity |
+| `turn/started` | reset the generation-local activity envelope without creating a local binding; it does not echo `clientUserMessageId`, so it cannot prove a CoCo operation |
 | `turn/plan/updated` | no persistence; Codex owns the plan |
 | `turn/diff/updated` | no persistence; Git remains authoritative for `coco diff` |
 | `item/agentMessage/delta` | no persistence |
+| `item/reasoning/summaryTextDelta` | derive one bounded, sanitized generation-local activity headline for the exact turn/item; no persistence or policy meaning |
+| context-compaction `item/started` / `item/completed` | temporarily override prose activity with structured `Compacting context`, then clear it; existing compact-fork synchronization remains separate |
 | completed agent `item/completed` | retain only the last bounded response on the matching generation-local turn operation; no durable event |
-| `turn/completed` | finish the matching generation-local result and clear its guard after the direct response has bound the native turn ID; no durable event |
+| `turn/completed` | clear matching transient activity, finish the matching generation-local result, and clear its guard after the direct response has bound the native turn ID; no durable event |
 | non-retrying `error` | no event persistence; native status remains separate |
 | command/file-change approval or `requestUserInput` | register bounded presentation and private native correlation in memory; never infer status from its method |
 | `serverRequest/resolved` | transition the matching runtime decision to `resolved` in memory |
@@ -1423,9 +1431,10 @@ a denial response to a dead callback.
 The current executable slice still exposes cursor-based `event.list` for
 protocol compatibility, but no CLI command consumes it. An explicitly targeted
 `coco status --follow` polls `workspace.get`; collection follow polls
-`workspace.list`. Both use stable, non-loading `thread/read`, so the returned
-phase is native truth rather than replayed event state. They print state and
-decision hints only, and both continue until the observing client receives
+`workspace.list` with transient activity requested. Both use stable,
+non-loading `thread/read`, so the returned phase is native truth rather than
+replayed event state. They print state, an optional bounded activity headline,
+and decision hints, and both continue until the observing client receives
 Ctrl-C. A direct terminal owns one live output region and replaces its previous
 frame; redirected or piped stdout stays ANSI-free and appends only changed
 states so it remains a useful log. Reaching ready, waiting, unavailable, or an
@@ -1763,10 +1772,10 @@ physical cleanup and product-proof gates.
 - Implemented stop-write: production no longer creates local turns,
   `active_turn_id`, thread snapshots, turn start/completion events, or durable
   decisions. Existing schema-v5 rows remain readable as migration data.
-- Pending separately: physically remove legacy tables/columns only after this
-  checkpoint and its migration fixtures have survived the product proof.
-  Never combine that cleanup with another authority change or replace one
-  native mirror with another.
+- Eligible as a separate follow-up after the 2026-09-21 product proof:
+  physically remove legacy tables/columns only in their own migration-tested
+  checkpoint. Never combine that cleanup with another authority change or
+  replace one native mirror with another.
 
 Stop-write exit: historical database fixtures migrate through v14, dispatch
 crash injection does not issue a second `turn/start`, and restart rebuilds
@@ -1787,6 +1796,20 @@ the automated core/integration gap for the signal, reaction, and first guard
 slices; they do not replace a supervised model-backed real-user acceptance run
 or authorize public release.
 
+2026-09-21 completion: the deterministic process scenario passes again after
+the reconnect correction, all three model-free real-Codex 0.154.0 contracts
+pass, and an explicit authenticated acceptance test supplies the missing live
+model evidence. The live test creates and starts workspaces in two temporary
+repositories through short-lived CLI clients, scopes a distinct MCP process to
+one repository, continues that exact thread, proves an immediate replay returns
+the same native turn, restarts the daemon/App Server, then proves both durable
+bindings and the same replay remain exact. The real-Codex suite separately
+proves exact native TUI resume and MCP isolation, while the deterministic
+scenario retains reliable decision and disconnect coverage that should not be
+made model-dependent. This layered evidence satisfies Phase E without
+persisting credentials, test conversations, or repositories outside temporary
+state.
+
 Use existing surfaces rather than adding a speculative feature: create and
 start workspaces in two repositories through the CLI; let the initiating
 clients exit; inspect and continue one through the MCP adapter; answer a live
@@ -1802,13 +1825,17 @@ user. If actual use reduces to one person invoking `create` then immediately
 binding with equivalent multi-client control, stop the release and reduce CoCo
 to private glue instead of competing feature-for-feature.
 
+The 2026-09-21 evidence meets that behavioral go condition for continued alpha
+development. It does not implicitly publish a new revision, approve stable
+status, or waive the separate migration and supervision work below.
+
 ## Open architecture decisions
 
 The following still need confirmation; decision-response closure no longer
 blocks a safe complete v0:
 
-1. Which released Codex CLI build becomes the proven minimum for native reads;
-   a broader compatibility range is optional follow-up evidence.
+1. Whether a compatibility range broader than the proven Codex 0.154.0
+   baseline is worth maintaining; it is optional follow-up evidence.
 2. When the selected Windows named-pipe local-IPC backend and Windows CI become
    release requirements; the cross-platform transport shape itself is settled.
 3. How an explicit atomic promotion operation anchors detached work on a new

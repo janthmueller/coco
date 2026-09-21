@@ -22,20 +22,20 @@ pub(super) use collections::{
     render_workspace_status_list_for_stdout,
 };
 
-const PUBLIC_SCHEMA_VERSION: u64 = 11;
+const PUBLIC_SCHEMA_VERSION: u64 = 12;
 
 pub(super) fn phase_label(phase: &str) -> &'static str {
     match phase {
-        "provisioning" => "Preparing worktree",
-        "starting" => "Starting Codex",
+        "provisioning" => "Preparing",
+        "starting" => "Starting",
         "prepared" => "Prepared",
         "active" => "Working",
-        "waiting_for_approval" => "Waiting for approval",
-        "waiting_for_input" => "Waiting for input",
+        "waiting_for_approval" => "Needs approval",
+        "waiting_for_input" => "Needs input",
         "idle" => "Ready",
-        "not_loaded" => "Codex thread is unloaded",
-        "system_error" => "Codex system error",
-        "unavailable" => "Status unavailable",
+        "not_loaded" => "Unloaded",
+        "system_error" => "Codex error",
+        "unavailable" => "Unavailable",
         "completed" => "Completed",
         "failed" => "Failed",
         "closing" => "Closing",
@@ -546,10 +546,12 @@ fn render_status(
     palette: Palette,
 ) -> String {
     let workspace = &result.workspace;
-    let mut output = format!(
-        "{}\n",
-        render_workspace_state_line(workspace, None, marker_override, palette)
-    );
+    let mut state = render_workspace_state_line(workspace, None, marker_override, palette);
+    if let Some(activity) = &result.activity {
+        state.push_str(&palette.paint(Tone::Dim, " · "));
+        state.push_str(&palette.paint(Tone::Primary, safe_line(&activity.label)));
+    }
+    let mut output = format!("{state}\n");
     if let Some(detail) = workspace_location(workspace) {
         output.push_str("  ");
         output.push_str(&palette.paint(Tone::Dim, detail));
@@ -578,10 +580,7 @@ fn render_status(
         output.push_str(&format!(
             "  {} {}\n",
             palette.paint(Tone::RedBold, "✗"),
-            palette.paint(
-                Tone::Red,
-                "This Codex request cannot be answered with coco decide."
-            ),
+            palette.paint(Tone::Red, "Use coco jump to respond."),
         ));
     }
     output
@@ -767,6 +766,12 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::domain::activity::{WorkspaceActivity, WorkspaceActivitySource};
+    use crate::domain::{
+        ContextMode, ProfileSnapshot, WorkspaceAvailability, WorkspaceLifecycle, WorktreeMode,
+    };
+    use crate::protocol::{GitIncomplete, WorkspaceGitStatus};
+    use serde_json::json;
 
     #[test]
     fn diff_output_remains_exact_unstyled_content() {
@@ -802,6 +807,67 @@ mod tests {
             render_source_changes_omitted_warning("/repo\n\u{1b}[31m", Palette::plain()),
             "! Local changes remain in /repo  [31m and were not copied.\n"
         );
+    }
+
+    #[test]
+    fn targeted_status_shows_activity_as_secondary_state_detail() {
+        let result = WorkspaceStatusResult {
+            workspace: Workspace {
+                id: "workspace-1".to_owned(),
+                create_operation_id: None,
+                repository_id: "repo-1".to_owned(),
+                name: "feat/login".to_owned(),
+                context_mode: ContextMode::Fresh,
+                context: json!({}),
+                profile: ProfileSnapshot {
+                    name: "default".to_owned(),
+                    source_path: None,
+                    source_hash: "hash".to_owned(),
+                    model_override: None,
+                    effective_settings: json!({}),
+                },
+                lifecycle: WorkspaceLifecycle::Ready,
+                availability: WorkspaceAvailability::Open,
+                thread_runtime: None,
+                phase: WorkspacePhase::Active,
+                wait_reasons: Vec::new(),
+                worktree_mode: WorktreeMode::NewBranch,
+                branch_name: Some("coco/feat/login".to_owned()),
+                base_sha: Some("base".to_owned()),
+                worktree_path: Some(PathBuf::from("/worktrees/feat/login")),
+                codex_thread_id: Some("thread-1".to_owned()),
+                parent_thread_id: None,
+                active_turn_id: None,
+                last_error_code: None,
+                last_error_message: None,
+                created_at_ms: 1,
+                updated_at_ms: 1,
+                completed_at_ms: None,
+                thread_archived: false,
+                closed_head_sha: None,
+                closed_at_ms: None,
+            },
+            git: WorkspaceGitStatus::Incomplete(GitIncomplete {
+                observed: false,
+                reason: "not inspected".to_owned(),
+            }),
+            runtime_resources: None,
+            activity: Some(WorkspaceActivity {
+                label: "Checking tests".to_owned(),
+                source: WorkspaceActivitySource::ReasoningSummary,
+                thread_id: "thread-1".to_owned(),
+                turn_id: "turn-1".to_owned(),
+                item_id: "item-1".to_owned(),
+                truncated: false,
+                runtime_generation: "runtime-1".to_owned(),
+                observed_at_ms: 1,
+            }),
+            open_decisions: Vec::new(),
+            next_sequence: 0,
+        };
+
+        let rendered = render_status(&result, None, false, None, Palette::plain());
+        assert!(rendered.starts_with("● feat/login  Working · Checking tests\n"));
     }
 
     #[test]
