@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.1.0-alpha.5 (2026-09-21)
+
+### Features
+
+- Improve workspace session continuity and activity
+  ([`ca2e560`](https://github.com/janthmueller/coco/commit/ca2e5607de0f0b066d9e2d64fce350dce6701570))
+
+
 ## v0.1.0-alpha.4 (2026-09-14)
 
 ### Documentation
