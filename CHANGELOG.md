@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.1.0-alpha.7 (2026-09-22)
+
+### Bug Fixes
+
+- **jump**: Isolate bound relay adoption
+  ([`b45480a`](https://github.com/janthmueller/coco/commit/b45480a24066cfba06b57980de2e24f3c16d5944))
+
+
 ## v0.1.0-alpha.6 (2026-09-22)
 
 ### Bug Fixes
