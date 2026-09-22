@@ -943,7 +943,9 @@ ID must not create duplicate artifacts.
 - For a bound workspace, validate and when needed resume the exact native
   thread so the daemon connection is subscribed, then run `codex resume` in
   that worktree through the authenticated relay. Every ordinary TUI turn is
-  assigned to the workspace executor.
+  assigned to the workspace executor. Do not enable adoption on this relay:
+  later native `thread/start` traffic is forwarded and environment-routed but
+  cannot replace the workspace's already-bound thread.
 - For an unbound fresh workspace, acquire one temporary activation lease and
   launch the TUI in native remote-start mode through a session-scoped local
   relay. Correlate the exact `thread/start` response, but bind it only after its

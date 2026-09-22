@@ -5255,3 +5255,57 @@ Verification:
 - `CARGO_BUILD_JOBS=1 nix flake check . --no-write-lock-file --max-jobs 1`
   passes all current-system package, app, tooling, documentation, and policy
   checks. `git diff --check` is clean.
+
+## Bound relay must not adopt auxiliary Codex threads — 2026-09-22
+
+Active scope: investigate the still-reproducible post-reconnect
+`ATTACH_LEASE_INVALID` failure after the slow-adoption liveness fix. The
+reported workspace remains `Ready`, so its stored Codex thread is already
+bound while the relay nevertheless attempts `workspace.attach.adopt`.
+
+Confirmed finding and intended correction:
+
+- Both fresh start and bound resume currently construct the relay with the
+  same default adoption state. A bound relay therefore correlates the first
+  later `thread/start` request/response it observes and attempts to adopt that
+  unrelated thread into an already-bound workspace.
+- Official Codex 0.154.0 has several legitimate TUI paths that start additional
+  threads, including new/side sessions, temporary structured work, working-
+  directory changes, recap generation, and agent-overview operations. A relay
+  must not infer workspace ownership from an arbitrary later `thread/start`.
+- Give relay construction an explicit binding mode. Only an unbound fresh
+  launch may correlate and adopt its initial `thread/start`; a bound resume
+  must still proxy and inject its execution environment but never create an
+  adoption candidate.
+- Add a regression that feeds an auxiliary `thread/start` through a bound
+  relay and proves it is forwarded without invoking adoption or failing the
+  jump. Preserve the existing exact-candidate and slow-adoption contracts for
+  fresh launches.
+
+Result:
+
+- Relay startup now requires an explicit thread-binding mode. Fresh launches
+  own an adoption tracker; already-bound resumes do not construct one.
+- A bound relay continues to forward and environment-route every native
+  request, including auxiliary `thread/start`, while making it structurally
+  impossible for that traffic to schedule `workspace.attach.adopt`.
+- The regression runs a bound resume and auxiliary start through real local
+  WebSocket legs. Its fake daemon accepts lease renewals but records and
+  rejects adoption, proving that the relay remains usable for a later
+  `thread/read` and makes zero adoption calls.
+- Canonical runtime, architecture, and product knowledge now distinguish
+  fresh adoption from bound resume. Public syntax and user workflow are
+  unchanged, so public documentation was not modified.
+
+Verification:
+
+- `cargo fmt --all -- --check` passes.
+- `cargo clippy --locked --all-targets --all-features -- -D warnings` passes.
+- `cargo test --locked` passes 379 non-ignored library tests and all five
+  process-smoke scenarios; six environment-dependent library tests, three
+  opt-in real-Codex tests, and the live model proof remain ignored by default.
+- `COCO_RUN_REAL_CODEX_COMPAT=1 cargo test --locked --test real_codex_compat -- --ignored --nocapture`
+  passes all three contracts against installed `codex-cli 0.154.0`.
+- `CARGO_BUILD_JOBS=1 nix flake check . --no-write-lock-file --max-jobs 1`
+  passes all current-system package, app, tooling, documentation, and policy
+  checks. `git diff --check` is clean.

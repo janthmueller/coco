@@ -110,6 +110,18 @@ generations, while unanswered JSON-RPC request IDs do not. A clean TUI close
 ends the relay. An unrecovered leg-specific transport failure is retained and
 included in the final `jump` error.
 
+Relay construction encodes whether the workspace is awaiting its first
+thread or already has a durable binding. Only the fresh form observes and
+correlates its initial `thread/start` for adoption. A bound relay has no
+adoption state: it forwards later `thread/start` traffic and still applies the
+workspace environment, but never treats the returned thread as a replacement
+workspace binding. This distinction is required because the official Codex
+TUI legitimately starts auxiliary threads for operations such as background
+work, temporary structured requests, new sessions, and working-directory
+transitions. Inferring ownership from one of those responses can invalidate a
+healthy attachment lease and break native reconnect while the original
+workspace remains idle.
+
 Fresh-thread adoption is deliberately outside the relay's WebSocket data
 path. The relay permits at most one adoption request for the exact correlated
 candidate at a time, but continues forwarding both legs, accepting the next

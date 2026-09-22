@@ -1239,7 +1239,10 @@ finite 128 MiB remote WebSocket frame and message bound instead of
 Tungstenite's smaller defaults, so a valid page from a large native history is
 not rejected by CoCo. A renewable per-client presence lease prevents
 retirement while the TUI remains open, without excluding another bound TUI or
-`send` on an idle thread.
+`send` on an idle thread. This bound-resume relay never runs fresh-thread
+adoption. The native TUI may issue additional `thread/start` requests for its
+own auxiliary and navigation workflows; CoCo forwards and environment-routes
+those requests without replacing the workspace's existing thread binding.
 
 For an unbound fresh workspace, `workspace.attach` acquires one expiring
 generation-local lease and returns no invented thread ID. The CLI starts a
@@ -1263,7 +1266,9 @@ request IDs do not because JSON-RPC correlation is connection-scoped. While
 the relay is alive it renews the lease every ten seconds; if the CLI or relay
 dies, the missing heartbeat lets the daemon expire it after thirty seconds.
 Binding converts the exclusive adoption lease into ordinary TUI presence;
-the relay continues its heartbeat until exit.
+the relay continues its heartbeat until exit. Adoption state exists only for
+that fresh, initially unbound relay. A relay created for an already-bound
+resume cannot infer an adoption candidate from later Codex traffic.
 
 The exact adoption RPC runs independently from WebSocket forwarding. Only one
 request for the correlated candidate may be in flight, while the relay keeps

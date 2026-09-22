@@ -41,11 +41,18 @@ pub(super) struct PreparedRelay {
     task: JoinHandle<Result<()>>,
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum ThreadBinding {
+    AwaitFresh,
+    AlreadyBound,
+}
+
 impl PreparedRelay {
     pub(super) async fn start(
         client: RpcClient,
         workspace_id: String,
         lease_id: String,
+        thread_binding: ThreadBinding,
         upstream_endpoint: &str,
         upstream_token: &str,
         execution_environment: Option<WorkspaceExecutionEnvironment>,
@@ -71,6 +78,7 @@ impl PreparedRelay {
                     client,
                     workspace_id,
                     lease_id,
+                    thread_binding,
                     execution_environment,
                     shutdown: shutdown_receiver,
                 },
@@ -229,6 +237,7 @@ struct RelayConfig {
     client: RpcClient,
     workspace_id: String,
     lease_id: String,
+    thread_binding: ThreadBinding,
     execution_environment: Option<WorkspaceExecutionEnvironment>,
     shutdown: watch::Receiver<bool>,
 }
@@ -249,7 +258,7 @@ struct Relay {
     expected_authorization: String,
     execution_environment: Option<WorkspaceExecutionEnvironment>,
     control: RelayControl,
-    state: AdoptionState,
+    adoption: Option<AdoptionState>,
     adoption_task: Option<JoinHandle<Result<bool>>>,
     generation: u64,
     last_disconnect: Option<TransportFailure>,
@@ -277,7 +286,10 @@ impl Relay {
                 heartbeat,
                 shutdown: config.shutdown,
             },
-            state: AdoptionState::default(),
+            adoption: match config.thread_binding {
+                ThreadBinding::AwaitFresh => Some(AdoptionState::default()),
+                ThreadBinding::AlreadyBound => None,
+            },
             adoption_task: None,
             generation: 0,
             last_disconnect: None,
@@ -385,7 +397,9 @@ impl Relay {
     }
 
     async fn prepare_reconnect(&mut self, failure: TransportFailure) -> Result<()> {
-        self.state.finish_generation();
+        if let Some(adoption) = &mut self.adoption {
+            adoption.finish_generation();
+        }
         self.schedule_adoption();
         tracing::warn!(
             workspace_id = self.control.workspace_id,
@@ -407,6 +421,10 @@ impl Relay {
         poll.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             let adoption_pending = self.adoption_task.is_some();
+            let should_poll = self
+                .adoption
+                .as_ref()
+                .is_some_and(AdoptionState::should_poll);
             let outcome = tokio::select! {
                 changed = self.control.shutdown.changed() => {
                     if changed.is_err() || *self.control.shutdown.borrow() {
@@ -418,14 +436,14 @@ impl Relay {
                     forward_downstream(
                         message,
                         upstream,
-                        &mut self.state,
+                        self.adoption.as_mut(),
                         self.execution_environment.as_ref(),
                     ).await?
                 }
                 message = upstream.next() => {
-                    forward_upstream(message, downstream, &mut self.state).await
+                    forward_upstream(message, downstream, self.adoption.as_mut()).await
                 }
-                _ = poll.tick(), if self.state.should_poll() => {
+                _ = poll.tick(), if should_poll => {
                     self.schedule_adoption();
                     ForwardOutcome::Continue
                 }
@@ -437,7 +455,10 @@ impl Relay {
                         .context("could not keep the reconnecting TUI lease alive")?
                 }
                 result = await_adoption_task(&mut self.adoption_task), if adoption_pending => {
-                    self.state.bound = result?;
+                    self.adoption
+                        .as_mut()
+                        .expect("an adoption task requires fresh binding state")
+                        .bound = result?;
                     ForwardOutcome::Continue
                 }
             };
@@ -467,10 +488,13 @@ impl Relay {
     }
 
     fn schedule_adoption(&mut self) {
-        if self.adoption_task.is_some() || self.state.bound {
+        let Some(adoption) = self.adoption.as_ref() else {
+            return;
+        };
+        if self.adoption_task.is_some() || adoption.bound {
             return;
         }
-        let Some(thread_id) = self.state.candidate_thread_id.clone() else {
+        let Some(thread_id) = adoption.candidate_thread_id.clone() else {
             return;
         };
         let client = self.control.client.clone();
@@ -487,16 +511,22 @@ impl Relay {
             .as_ref()
             .is_some_and(JoinHandle::is_finished)
         {
-            self.state.bound = await_adoption_task(&mut self.adoption_task).await?;
+            self.adoption
+                .as_mut()
+                .expect("an adoption task requires fresh binding state")
+                .bound = await_adoption_task(&mut self.adoption_task).await?;
         }
         Ok(())
     }
 
     async fn complete_adoption(&mut self) -> Result<()> {
-        if self.state.candidate_thread_id.is_none() || self.state.bound {
+        let Some(adoption) = self.adoption.as_ref() else {
+            return Ok(());
+        };
+        if adoption.candidate_thread_id.is_none() || adoption.bound {
             return Ok(());
         }
-        let activation_requested = self.state.activation_requested;
+        let activation_requested = adoption.activation_requested;
         let deadline = Instant::now() + FINAL_ADOPTION_TIMEOUT;
         let mut poll = interval(ADOPTION_POLL_INTERVAL);
         poll.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -505,8 +535,12 @@ impl Relay {
             let adoption_pending = self.adoption_task.is_some();
             tokio::select! {
                 result = await_adoption_task(&mut self.adoption_task), if adoption_pending => {
-                    self.state.bound = result?;
-                    if self.state.bound || !activation_requested {
+                    let bound = result?;
+                    self.adoption
+                        .as_mut()
+                        .expect("an adoption task requires fresh binding state")
+                        .bound = bound;
+                    if bound || !activation_requested {
                         return Ok(());
                     }
                 }
@@ -573,7 +607,7 @@ async fn renew_lease(client: &RpcClient, workspace_id: &str, lease_id: &str) -> 
 async fn forward_downstream(
     message: Option<Result<Message, tokio_tungstenite::tungstenite::Error>>,
     upstream: &mut WebSocketStream<TcpStream>,
-    state: &mut AdoptionState,
+    adoption: Option<&mut AdoptionState>,
     execution_environment: Option<&WorkspaceExecutionEnvironment>,
 ) -> Result<ForwardOutcome> {
     let Some(message) = message else {
@@ -593,7 +627,9 @@ async fn forward_downstream(
     };
     inject_execution_environment(&mut message, execution_environment)
         .map_err(anyhow::Error::msg)?;
-    state.observe_downstream(&message);
+    if let Some(adoption) = adoption {
+        adoption.observe_downstream(&message);
+    }
     let closed = matches!(message, Message::Close(_));
     if closed {
         let _ = upstream.send(message).await;
@@ -650,7 +686,7 @@ fn inject_execution_environment(
 async fn forward_upstream(
     message: Option<Result<Message, tokio_tungstenite::tungstenite::Error>>,
     downstream: &mut WebSocketStream<TcpStream>,
-    state: &mut AdoptionState,
+    adoption: Option<&mut AdoptionState>,
 ) -> ForwardOutcome {
     let Some(message) = message else {
         return ForwardOutcome::Reconnect(TransportFailure::new(
@@ -667,7 +703,7 @@ async fn forward_upstream(
             ));
         }
     };
-    let candidate_observed = state.observe_upstream(&message);
+    let candidate_observed = adoption.is_some_and(|state| state.observe_upstream(&message));
     if let Message::Close(frame) = &message {
         let reason = frame
             .as_ref()
@@ -836,11 +872,41 @@ impl Callback for RequireAuthorization {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use async_trait::async_trait;
     use serde_json::json;
+    use tempfile::tempdir;
     use tokio::io::duplex;
-    use tokio_tungstenite::{accept_async_with_config, client_async_with_config};
+    use tokio_tungstenite::{accept_async, accept_async_with_config, client_async_with_config};
 
     use super::*;
+    use crate::rpc::{RpcErrorPayload, RpcHandler, RpcServer};
+
+    struct LeaseOnlyRpc {
+        adoption_attempts: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl RpcHandler for LeaseOnlyRpc {
+        async fn handle(&self, method: &str, _params: Value) -> Result<Value, RpcErrorPayload> {
+            match method {
+                "workspace.attach.renew" => Ok(json!({})),
+                "workspace.attach.adopt" => {
+                    self.adoption_attempts.fetch_add(1, Ordering::SeqCst);
+                    Err(RpcErrorPayload::new(
+                        "UNEXPECTED_ADOPTION",
+                        "a bound relay must not adopt another thread",
+                    ))
+                }
+                method => Err(RpcErrorPayload::new(
+                    "UNEXPECTED_METHOD",
+                    format!("unexpected test RPC method: {method}"),
+                )),
+            }
+        }
+    }
 
     #[tokio::test]
     async fn configured_transport_accepts_frames_above_tungstenites_default() {
@@ -874,6 +940,154 @@ mod tests {
             config.max_message_size,
             Some(CODEX_REMOTE_MAX_WEBSOCKET_MESSAGE_SIZE)
         );
+    }
+
+    #[tokio::test]
+    async fn bound_relay_never_adopts_an_auxiliary_thread_start() {
+        let (upstream_endpoint, upstream) = start_bound_relay_test_server().await;
+        let temporary = tempdir().unwrap();
+        let socket = temporary.path().join("cocod.sock");
+        let adoption_attempts = Arc::new(AtomicUsize::new(0));
+        let rpc_server = RpcServer::bind(
+            &socket,
+            Arc::new(LeaseOnlyRpc {
+                adoption_attempts: Arc::clone(&adoption_attempts),
+            }),
+        )
+        .await
+        .unwrap();
+        let (rpc_shutdown, rpc_shutdown_receiver) = watch::channel(false);
+        let rpc_task = tokio::spawn(rpc_server.run(rpc_shutdown_receiver));
+        let relay = PreparedRelay::start(
+            RpcClient::new(&socket),
+            "bound-workspace".to_owned(),
+            "bound-lease".to_owned(),
+            ThreadBinding::AlreadyBound,
+            &upstream_endpoint,
+            "upstream-token",
+            None,
+        )
+        .await
+        .unwrap();
+        let relay_address = websocket_address(relay.endpoint_url()).unwrap();
+        let stream = TcpStream::connect(relay_address).await.unwrap();
+        let mut request = relay.endpoint_url().into_client_request().unwrap();
+        request.headers_mut().insert(
+            AUTHORIZATION,
+            format!("Bearer {}", relay.capability_token())
+                .parse()
+                .unwrap(),
+        );
+        let (mut client, _) =
+            client_async_with_config(request, stream, Some(relay_websocket_config()))
+                .await
+                .unwrap();
+
+        assert_eq!(
+            test_request(&mut client, json!(1), "initialize", json!({})).await,
+            json!({})
+        );
+        assert_eq!(
+            test_request(
+                &mut client,
+                json!(2),
+                "thread/resume",
+                json!({"threadId": "bound-thread"}),
+            )
+            .await,
+            json!({"thread": {"id": "bound-thread"}})
+        );
+        assert_eq!(
+            test_request(
+                &mut client,
+                json!(3),
+                "thread/start",
+                json!({"cwd": "/worktree"}),
+            )
+            .await,
+            json!({"thread": {"id": "auxiliary-thread"}})
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        assert_eq!(
+            test_request(
+                &mut client,
+                json!(4),
+                "thread/read",
+                json!({"threadId": "bound-thread"}),
+            )
+            .await,
+            json!({"thread": {"id": "bound-thread"}}),
+            "an auxiliary start must not trigger workspace adoption or stop the relay"
+        );
+        client.close(None).await.unwrap();
+
+        relay.finish().await.unwrap();
+        upstream.await.unwrap();
+        assert_eq!(
+            adoption_attempts.load(Ordering::SeqCst),
+            0,
+            "a bound relay attempted to adopt an auxiliary Codex thread"
+        );
+        rpc_shutdown.send(true).unwrap();
+        rpc_task.await.unwrap().unwrap();
+    }
+
+    async fn start_bound_relay_test_server() -> (String, JoinHandle<()>) {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let endpoint = format!("ws://{}", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            while let Some(Ok(message)) = socket.next().await {
+                if matches!(message, Message::Close(_)) {
+                    return;
+                }
+                let Some(frame) = message_json(&message) else {
+                    continue;
+                };
+                let Some(id) = frame.get("id").cloned() else {
+                    continue;
+                };
+                let result = match frame.get("method").and_then(Value::as_str) {
+                    Some("initialize" | "thread/unsubscribe") => json!({}),
+                    Some("thread/resume") => json!({"thread": {"id": "bound-thread"}}),
+                    Some("thread/start") => json!({"thread": {"id": "auxiliary-thread"}}),
+                    Some("thread/read") => json!({"thread": {"id": "bound-thread"}}),
+                    method => panic!("unexpected bound-relay request {method:?}"),
+                };
+                socket
+                    .send(Message::Text(
+                        json!({"id": id, "result": result}).to_string().into(),
+                    ))
+                    .await
+                    .unwrap();
+            }
+        });
+        (endpoint, task)
+    }
+
+    async fn test_request(
+        socket: &mut WebSocketStream<TcpStream>,
+        id: Value,
+        method: &str,
+        params: Value,
+    ) -> Value {
+        socket
+            .send(Message::Text(
+                json!({"id": id, "method": method, "params": params})
+                    .to_string()
+                    .into(),
+            ))
+            .await
+            .unwrap();
+        loop {
+            let message = socket.next().await.unwrap().unwrap();
+            let frame = message_json(&message).expect("test relay returned a non-JSON response");
+            if frame.get("id") == Some(&id) {
+                assert!(frame.get("error").is_none(), "request failed: {frame}");
+                return frame.get("result").cloned().unwrap();
+            }
+        }
     }
 
     #[test]
