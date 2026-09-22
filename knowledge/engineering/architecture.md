@@ -1265,6 +1265,18 @@ dies, the missing heartbeat lets the daemon expire it after thirty seconds.
 Binding converts the exclusive adoption lease into ordinary TUI presence;
 the relay continues its heartbeat until exit.
 
+The exact adoption RPC runs independently from WebSocket forwarding. Only one
+request for the correlated candidate may be in flight, while the relay keeps
+forwarding, accepts Codex's next connection, and services its lease heartbeat.
+The coordinator pins an adoption only after validating its live lease and
+exact candidate, then releases that pin after native verification returns.
+Consequently, a slow `thread/read` over a large rollout cannot expire the
+operation that CoCo already admitted. A relay release or App Server disconnect
+during that read is remembered and removes the lease after reconciliation;
+it does not substitute a candidate or cancel a durable binding that has
+already passed native validation. Retrying the exact now-bound thread is
+idempotent.
+
 Codex 0.154.0 implements interactive `!command` through host-local
 `thread/shellCommand`, which rejects a remote-only selected environment. It is
 therefore not a valid materialization or shell path for the default workspace

@@ -3,6 +3,7 @@ use crate::protocol::{
     WorkspaceAttachAdoptParams, WorkspaceAttachAdoptResult, WorkspaceAttachReleaseParams,
     WorkspaceAttachRenewParams,
 };
+use std::time::Duration;
 
 #[tokio::test]
 async fn adopts_only_the_exact_materialized_thread_from_a_fresh_jump() {
@@ -104,6 +105,150 @@ async fn adopts_only_the_exact_materialized_thread_from_a_fresh_jump() {
             lease_id,
         })
         .unwrap();
+}
+
+#[tokio::test]
+async fn slow_adoption_cannot_expire_its_own_valid_lease() {
+    let entered = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let fixture = Fixture::new(FakeWorker::paused_materialized_read(
+        Arc::clone(&entered),
+        Arc::clone(&release),
+    ));
+    fixture.register().await;
+    let prepared = fixture
+        .coordinator
+        .create_workspace(fixture.create_params())
+        .await
+        .unwrap()
+        .workspace;
+    fixture
+        .coordinator
+        .set_jump_lease_ttl(Duration::from_millis(25));
+    let attached = fixture
+        .coordinator
+        .attach_workspace(WorkspaceAttachParams {
+            scope: RepositoryScope::repository(fixture.source.clone()),
+            workspace: prepared.id.clone(),
+        })
+        .await
+        .unwrap();
+    let WorkspaceAttachLaunch::Start { lease_id } = attached.launch else {
+        panic!("fresh jump did not return a start lease");
+    };
+    fixture.worker.remember_materialized_thread(NativeThread {
+        id: "slow-tui-thread".to_owned(),
+        cwd: prepared.worktree_path.clone().unwrap(),
+        name: None,
+        status: CodexThreadStatus::Idle,
+        forked_from_id: None,
+    });
+    let params = WorkspaceAttachAdoptParams {
+        workspace_id: prepared.id.clone(),
+        lease_id: lease_id.clone(),
+        thread_id: "slow-tui-thread".to_owned(),
+    };
+
+    let adoption = fixture.coordinator.adopt_workspace_thread(params);
+    let keep_alive = async {
+        entered.notified().await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let renewed = fixture
+            .coordinator
+            .renew_workspace_attach(WorkspaceAttachRenewParams {
+                workspace_id: prepared.id.clone(),
+                lease_id: lease_id.clone(),
+            });
+        release.notify_one();
+        renewed
+    };
+    let (adopted, renewed) = tokio::join!(adoption, keep_alive);
+
+    renewed.expect("an in-flight adoption must keep its admitted lease valid");
+    let WorkspaceAttachAdoptResult::Bound { workspace } =
+        adopted.expect("slow adoption should complete")
+    else {
+        panic!("materialized slow thread was not adopted");
+    };
+    assert_eq!(
+        workspace.codex_thread_id.as_deref(),
+        Some("slow-tui-thread")
+    );
+}
+
+#[tokio::test]
+async fn releasing_a_slow_adoption_does_not_cancel_its_durable_binding() {
+    let entered = Arc::new(Notify::new());
+    let release_read = Arc::new(Notify::new());
+    let fixture = Fixture::new(FakeWorker::paused_materialized_read(
+        Arc::clone(&entered),
+        Arc::clone(&release_read),
+    ));
+    fixture.register().await;
+    let prepared = fixture
+        .coordinator
+        .create_workspace(fixture.create_params())
+        .await
+        .unwrap()
+        .workspace;
+    let attached = fixture
+        .coordinator
+        .attach_workspace(WorkspaceAttachParams {
+            scope: RepositoryScope::repository(fixture.source.clone()),
+            workspace: prepared.id.clone(),
+        })
+        .await
+        .unwrap();
+    let WorkspaceAttachLaunch::Start { lease_id } = attached.launch else {
+        panic!("fresh jump did not return a start lease");
+    };
+    fixture.worker.remember_materialized_thread(NativeThread {
+        id: "released-slow-thread".to_owned(),
+        cwd: prepared.worktree_path.clone().unwrap(),
+        name: None,
+        status: CodexThreadStatus::Idle,
+        forked_from_id: None,
+    });
+
+    let adoption = fixture
+        .coordinator
+        .adopt_workspace_thread(WorkspaceAttachAdoptParams {
+            workspace_id: prepared.id.clone(),
+            lease_id: lease_id.clone(),
+            thread_id: "released-slow-thread".to_owned(),
+        });
+    let release_while_reading = async {
+        entered.notified().await;
+        let released = fixture
+            .coordinator
+            .release_workspace_attach(WorkspaceAttachReleaseParams {
+                workspace_id: prepared.id.clone(),
+                lease_id: lease_id.clone(),
+            });
+        release_read.notify_one();
+        released
+    };
+    let (adopted, released) = tokio::join!(adoption, release_while_reading);
+
+    released.expect("the closing relay may release an in-flight adoption");
+    let WorkspaceAttachAdoptResult::Bound { workspace } =
+        adopted.expect("the admitted adoption should finish after release")
+    else {
+        panic!("materialized slow thread was not adopted");
+    };
+    assert_eq!(
+        workspace.codex_thread_id.as_deref(),
+        Some("released-slow-thread")
+    );
+    assert!(matches!(
+        fixture
+            .coordinator
+            .renew_workspace_attach(WorkspaceAttachRenewParams {
+                workspace_id: prepared.id,
+                lease_id,
+            }),
+        Err(CoordinatorError::InvalidWorkspaceAttachLease)
+    ));
 }
 
 fn assert_adoption_subscribed_to_exact_thread(worker: &FakeWorker) {

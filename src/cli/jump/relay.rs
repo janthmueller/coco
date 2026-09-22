@@ -250,6 +250,7 @@ struct Relay {
     execution_environment: Option<WorkspaceExecutionEnvironment>,
     control: RelayControl,
     state: AdoptionState,
+    adoption_task: Option<JoinHandle<Result<bool>>>,
     generation: u64,
     last_disconnect: Option<TransportFailure>,
 }
@@ -277,6 +278,7 @@ impl Relay {
                 shutdown: config.shutdown,
             },
             state: AdoptionState::default(),
+            adoption_task: None,
             generation: 0,
             last_disconnect: None,
         }
@@ -284,6 +286,7 @@ impl Relay {
 
     async fn run(mut self) -> Result<()> {
         loop {
+            self.harvest_ready_adoption().await?;
             let Some(mut downstream) = self.accept_authenticated().await? else {
                 return self.finish().await;
             };
@@ -306,13 +309,7 @@ impl Relay {
                 .await?
             {
                 SessionEnd::ClientClosed => {
-                    complete_adoption(
-                        &self.control.client,
-                        &self.control.workspace_id,
-                        &self.control.lease_id,
-                        &mut self.state,
-                    )
-                    .await?;
+                    self.complete_adoption().await?;
                     return Ok(());
                 }
                 SessionEnd::Shutdown => return self.finish().await,
@@ -389,13 +386,7 @@ impl Relay {
 
     async fn prepare_reconnect(&mut self, failure: TransportFailure) -> Result<()> {
         self.state.finish_generation();
-        adopt_candidate(
-            &self.control.client,
-            &self.control.workspace_id,
-            &self.control.lease_id,
-            &mut self.state,
-        )
-        .await?;
+        self.schedule_adoption();
         tracing::warn!(
             workspace_id = self.control.workspace_id,
             generation = self.generation,
@@ -415,6 +406,7 @@ impl Relay {
         let mut poll = interval(ADOPTION_POLL_INTERVAL);
         poll.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
+            let adoption_pending = self.adoption_task.is_some();
             let outcome = tokio::select! {
                 changed = self.control.shutdown.changed() => {
                     if changed.is_err() || *self.control.shutdown.borrow() {
@@ -434,15 +426,8 @@ impl Relay {
                     forward_upstream(message, downstream, &mut self.state).await
                 }
                 _ = poll.tick(), if self.state.should_poll() => {
-                    adopt_candidate(
-                        &self.control.client,
-                        &self.control.workspace_id,
-                        &self.control.lease_id,
-                        &mut self.state,
-                    )
-                    .await
-                    .map(|()| ForwardOutcome::Continue)
-                    .context("could not adopt a reconnecting TUI thread")?
+                    self.schedule_adoption();
+                    ForwardOutcome::Continue
                 }
                 _ = self.control.heartbeat.tick() => {
                     self.control
@@ -451,17 +436,15 @@ impl Relay {
                         .map(|()| ForwardOutcome::Continue)
                         .context("could not keep the reconnecting TUI lease alive")?
                 }
+                result = await_adoption_task(&mut self.adoption_task), if adoption_pending => {
+                    self.state.bound = result?;
+                    ForwardOutcome::Continue
+                }
             };
             match outcome {
                 ForwardOutcome::Continue => {}
                 ForwardOutcome::CandidateObserved => {
-                    adopt_candidate(
-                        &self.control.client,
-                        &self.control.workspace_id,
-                        &self.control.lease_id,
-                        &mut self.state,
-                    )
-                    .await?;
+                    self.schedule_adoption();
                 }
                 ForwardOutcome::ClientClosed => return Ok(SessionEnd::ClientClosed),
                 ForwardOutcome::Reconnect(failure) => {
@@ -472,13 +455,7 @@ impl Relay {
     }
 
     async fn finish(&mut self) -> Result<()> {
-        complete_adoption(
-            &self.control.client,
-            &self.control.workspace_id,
-            &self.control.lease_id,
-            &mut self.state,
-        )
-        .await?;
+        self.complete_adoption().await?;
         if let Some(failure) = self.last_disconnect.take() {
             bail!(
                 "the Codex TUI relay lost its {} connection and did not reconnect: {}",
@@ -487,6 +464,59 @@ impl Relay {
             );
         }
         Ok(())
+    }
+
+    fn schedule_adoption(&mut self) {
+        if self.adoption_task.is_some() || self.state.bound {
+            return;
+        }
+        let Some(thread_id) = self.state.candidate_thread_id.clone() else {
+            return;
+        };
+        let client = self.control.client.clone();
+        let workspace_id = self.control.workspace_id.clone();
+        let lease_id = self.control.lease_id.clone();
+        self.adoption_task = Some(tokio::spawn(async move {
+            request_adoption(&client, &workspace_id, &lease_id, &thread_id).await
+        }));
+    }
+
+    async fn harvest_ready_adoption(&mut self) -> Result<()> {
+        if self
+            .adoption_task
+            .as_ref()
+            .is_some_and(JoinHandle::is_finished)
+        {
+            self.state.bound = await_adoption_task(&mut self.adoption_task).await?;
+        }
+        Ok(())
+    }
+
+    async fn complete_adoption(&mut self) -> Result<()> {
+        if self.state.candidate_thread_id.is_none() || self.state.bound {
+            return Ok(());
+        }
+        let activation_requested = self.state.activation_requested;
+        let deadline = Instant::now() + FINAL_ADOPTION_TIMEOUT;
+        let mut poll = interval(ADOPTION_POLL_INTERVAL);
+        poll.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        self.schedule_adoption();
+        loop {
+            let adoption_pending = self.adoption_task.is_some();
+            tokio::select! {
+                result = await_adoption_task(&mut self.adoption_task), if adoption_pending => {
+                    self.state.bound = result?;
+                    if self.state.bound || !activation_requested {
+                        return Ok(());
+                    }
+                }
+                _ = poll.tick(), if !adoption_pending => self.schedule_adoption(),
+                _ = self.control.heartbeat.tick() => self.control.renew().await?,
+                _ = tokio::time::sleep_until(deadline) => {
+                    bail!("Codex did not persist the TUI-created thread after its first action")
+                }
+            }
+        }
     }
 }
 
@@ -659,44 +689,24 @@ async fn forward_upstream(
     }
 }
 
-async fn complete_adoption(
-    client: &RpcClient,
-    workspace_id: &str,
-    lease_id: &str,
-    state: &mut AdoptionState,
-) -> Result<()> {
-    if state.candidate_thread_id.is_none() || state.bound {
-        return Ok(());
-    }
-    adopt_candidate(client, workspace_id, lease_id, state).await?;
-    if state.bound || !state.activation_requested {
-        return Ok(());
-    }
-    let deadline = Instant::now() + FINAL_ADOPTION_TIMEOUT;
-    while Instant::now() < deadline {
-        tokio::time::sleep(ADOPTION_POLL_INTERVAL).await;
-        adopt_candidate(client, workspace_id, lease_id, state).await?;
-        if state.bound {
-            return Ok(());
-        }
-    }
-    bail!("Codex did not persist the TUI-created thread after its first action")
+async fn await_adoption_task(task: &mut Option<JoinHandle<Result<bool>>>) -> Result<bool> {
+    task.take()
+        .expect("guarded adoption task")
+        .await
+        .context("the TUI thread adoption task failed")?
 }
 
-async fn adopt_candidate(
+async fn request_adoption(
     client: &RpcClient,
     workspace_id: &str,
     lease_id: &str,
-    state: &mut AdoptionState,
-) -> Result<()> {
-    let Some(thread_id) = state.candidate_thread_id.clone() else {
-        return Ok(());
-    };
+    thread_id: &str,
+) -> Result<bool> {
     let result = client
         .request(WorkspaceAttachAdoptParams {
             workspace_id: workspace_id.to_owned(),
             lease_id: lease_id.to_owned(),
-            thread_id: thread_id.clone(),
+            thread_id: thread_id.to_owned(),
         })
         .await
         .context("cocod could not adopt the TUI-created Codex thread")?;
@@ -706,12 +716,12 @@ async fn adopt_candidate(
             "cocod adopted the wrong workspace"
         );
         ensure!(
-            workspace.codex_thread_id.as_deref() == Some(thread_id.as_str()),
+            workspace.codex_thread_id.as_deref() == Some(thread_id),
             "cocod adopted a different Codex thread"
         );
-        state.bound = true;
+        return Ok(true);
     }
-    Ok(())
+    Ok(false)
 }
 
 #[derive(Default)]

@@ -954,6 +954,11 @@ ID must not create duplicate artifacts.
   TUI reconnects, opening a fresh App Server leg for each connection. A missing
   heartbeat expires after thirty seconds; normal exit, relay startup failure,
   or an unrecovered transport failure releases the lease.
+- Run exact-candidate adoption without pausing WebSocket forwarding, reconnect
+  acceptance, or lease renewal. Once an adoption is admitted under a live
+  matching lease, keep that operation valid until its native metadata read
+  finishes even if the nominal lease deadline passes; a concurrent release is
+  applied after the attempt reconciles.
 - Once adoption binds the durable thread, the lease records presence rather
   than exclusive activation. An idle thread accepts `send` with its TUI open,
   and multiple bound TUIs may coexist. Every live TUI still prevents close or

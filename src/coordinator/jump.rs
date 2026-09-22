@@ -24,11 +24,22 @@ struct JumpLease {
     expires_at: Instant,
     candidate_thread_id: Option<String>,
     pending_adoption: bool,
+    adoption_in_flight: bool,
+    release_requested: bool,
 }
 
-#[derive(Default)]
 pub(super) struct JumpLeaseRegistry {
     leases: HashMap<String, JumpLease>,
+    ttl: Duration,
+}
+
+impl Default for JumpLeaseRegistry {
+    fn default() -> Self {
+        Self {
+            leases: HashMap::new(),
+            ttl: JUMP_LEASE_TTL,
+        }
+    }
 }
 
 impl JumpLeaseRegistry {
@@ -48,15 +59,17 @@ impl JumpLeaseRegistry {
             id.clone(),
             JumpLease {
                 workspace_id: workspace_id.to_owned(),
-                expires_at: Instant::now() + JUMP_LEASE_TTL,
+                expires_at: Instant::now() + self.ttl,
                 candidate_thread_id: None,
                 pending_adoption,
+                adoption_in_flight: false,
+                release_requested: false,
             },
         );
         Ok(id)
     }
 
-    fn claim_candidate(
+    fn begin_adoption(
         &mut self,
         workspace_id: &str,
         lease_id: &str,
@@ -75,9 +88,72 @@ impl JumpLeaseRegistry {
         {
             return Err(CoordinatorError::InvalidWorkspaceAttachLease);
         }
+        if lease.adoption_in_flight {
+            return Err(CoordinatorError::WorkspaceAttachInProgress);
+        }
         lease.candidate_thread_id = Some(thread_id.to_owned());
-        lease.expires_at = Instant::now() + JUMP_LEASE_TTL;
+        lease.adoption_in_flight = true;
+        lease.expires_at = Instant::now() + self.ttl;
         Ok(())
+    }
+
+    fn finish_adoption(
+        &mut self,
+        workspace_id: &str,
+        lease_id: &str,
+        bound: bool,
+    ) -> Result<(), CoordinatorError> {
+        let remove = {
+            let lease = self
+                .leases
+                .get_mut(lease_id)
+                .filter(|lease| lease.workspace_id == workspace_id && lease.adoption_in_flight)
+                .ok_or(CoordinatorError::InvalidWorkspaceAttachLease)?;
+            lease.adoption_in_flight = false;
+            if bound {
+                lease.pending_adoption = false;
+            }
+            if lease.release_requested {
+                true
+            } else {
+                lease.expires_at = Instant::now() + self.ttl;
+                false
+            }
+        };
+        if remove {
+            self.leases.remove(lease_id);
+        }
+        Ok(())
+    }
+
+    fn reconcile_bound(
+        &mut self,
+        workspace_id: &str,
+        lease_id: &str,
+    ) -> Result<(), CoordinatorError> {
+        self.prune();
+        let Some(lease) = self.leases.get(lease_id) else {
+            // Durable thread binding is the authority after adoption. A retry
+            // may arrive after the completing request lost its response or
+            // after its client released the now-unnecessary presence lease.
+            return Ok(());
+        };
+        if lease.workspace_id != workspace_id {
+            return Err(CoordinatorError::InvalidWorkspaceAttachLease);
+        }
+        if lease.adoption_in_flight {
+            self.finish_adoption(workspace_id, lease_id, true)
+        } else {
+            let release_requested = lease.release_requested;
+            if release_requested {
+                self.leases.remove(lease_id);
+            } else {
+                let lease = self.leases.get_mut(lease_id).expect("checked lease");
+                lease.pending_adoption = false;
+                lease.expires_at = Instant::now() + self.ttl;
+            }
+            Ok(())
+        }
     }
 
     fn reject_active(&mut self, workspace_id: &str) -> Result<(), CoordinatorError> {
@@ -106,15 +182,6 @@ impl JumpLeaseRegistry {
         }
     }
 
-    fn mark_bound(&mut self, workspace_id: &str, lease_id: &str) -> Result<(), CoordinatorError> {
-        self.renew(workspace_id, lease_id)?;
-        self.leases
-            .get_mut(lease_id)
-            .expect("renewed lease")
-            .pending_adoption = false;
-        Ok(())
-    }
-
     fn renew(&mut self, workspace_id: &str, lease_id: &str) -> Result<(), CoordinatorError> {
         self.prune();
         let lease = self
@@ -122,7 +189,7 @@ impl JumpLeaseRegistry {
             .get_mut(lease_id)
             .filter(|lease| lease.workspace_id == workspace_id)
             .ok_or(CoordinatorError::InvalidWorkspaceAttachLease)?;
-        lease.expires_at = Instant::now() + JUMP_LEASE_TTL;
+        lease.expires_at = Instant::now() + self.ttl;
         Ok(())
     }
 
@@ -131,6 +198,12 @@ impl JumpLeaseRegistry {
         match self.leases.get(lease_id) {
             Some(lease) if lease.workspace_id != workspace_id => {
                 return Err(CoordinatorError::InvalidWorkspaceAttachLease);
+            }
+            Some(lease) if lease.adoption_in_flight => {
+                self.leases
+                    .get_mut(lease_id)
+                    .expect("checked lease")
+                    .release_requested = true;
             }
             Some(_) => {
                 self.leases.remove(lease_id);
@@ -149,11 +222,19 @@ impl JumpLeaseRegistry {
 
     fn prune(&mut self) {
         let now = Instant::now();
-        self.leases.retain(|_, lease| lease.expires_at > now);
+        self.leases
+            .retain(|_, lease| lease.adoption_in_flight || lease.expires_at > now);
     }
 
     fn clear(&mut self) {
-        self.leases.clear();
+        self.leases.retain(|_, lease| {
+            if lease.adoption_in_flight {
+                lease.release_requested = true;
+                true
+            } else {
+                false
+            }
+        });
     }
 }
 
@@ -240,7 +321,34 @@ impl Coordinator {
         self.jump_leases
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .claim_candidate(&params.workspace_id, &params.lease_id, &params.thread_id)?;
+            .begin_adoption(&params.workspace_id, &params.lease_id, &params.thread_id)?;
+        let result = self
+            .adopt_unbound_workspace_thread(workspace, &params.thread_id)
+            .await;
+        match result {
+            Ok(Some(workspace)) => self.finish_adoption(workspace, &params.lease_id).await,
+            Ok(None) => {
+                self.jump_leases
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .finish_adoption(&params.workspace_id, &params.lease_id, false)?;
+                Ok(WorkspaceAttachAdoptResult::Pending)
+            }
+            Err(error) => {
+                self.jump_leases
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .finish_adoption(&params.workspace_id, &params.lease_id, false)?;
+                Err(error)
+            }
+        }
+    }
+
+    async fn adopt_unbound_workspace_thread(
+        &self,
+        workspace: Workspace,
+        thread_id: &str,
+    ) -> Result<Option<Workspace>, CoordinatorError> {
         validate_fresh_adoption_target(&workspace)?;
         self.validate_workspace_profile(&workspace)?;
         let worktree = workspace
@@ -249,15 +357,15 @@ impl Coordinator {
             .ok_or(CoordinatorError::IncompleteWorkspace("worktree"))?;
         let Some(native) = self
             .worker
-            .find_materialized_thread(&params.thread_id, worktree)
+            .find_materialized_thread(thread_id, worktree)
             .await?
         else {
-            return Ok(WorkspaceAttachAdoptResult::Pending);
+            return Ok(None);
         };
-        if native.id != params.thread_id {
+        if native.id != thread_id {
             return Err(CoordinatorError::Worker(
                 super::WorkerError::ThreadIdMismatch {
-                    expected: params.thread_id,
+                    expected: thread_id.to_owned(),
                     actual: native.id,
                 },
             ));
@@ -275,7 +383,7 @@ impl Coordinator {
         }
 
         self.worker
-            .set_thread_name(&params.thread_id, &workspace.name)
+            .set_thread_name(thread_id, &workspace.name)
             .await?;
         let workspace = self
             .store
@@ -284,21 +392,21 @@ impl Coordinator {
                 WorkspaceLifecycle::Ready,
                 WorkspaceLifecycle::Ready,
                 NewThreadBinding {
-                    thread_id: params.thread_id.clone(),
+                    thread_id: thread_id.to_owned(),
                     parent_thread_id: None,
                 },
                 EventDraft::workspace(
                     EventKind::AgentStarted,
                     EventSource::Codex,
                     json!({
-                        "threadId": params.thread_id,
+                        "threadId": thread_id,
                         "contextMode": ContextMode::Fresh,
                         "source": "remoteTui",
                     }),
                 ),
             )?
             .0;
-        self.finish_adoption(workspace, &params.lease_id).await
+        Ok(Some(workspace))
     }
 
     async fn finish_adoption(
@@ -309,7 +417,7 @@ impl Coordinator {
         self.jump_leases
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .mark_bound(&workspace.id, lease_id)?;
+            .reconcile_bound(&workspace.id, lease_id)?;
         let workspace = self.ensure_workspace_thread_loaded(workspace).await?;
         Ok(WorkspaceAttachAdoptResult::Bound {
             workspace: Box::new(workspace),
@@ -367,6 +475,14 @@ impl Coordinator {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clear();
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_jump_lease_ttl(&self, ttl: Duration) {
+        self.jump_leases
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .ttl = ttl;
     }
 
     async fn resume_launch(

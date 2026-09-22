@@ -156,6 +156,8 @@ struct FakeWorker {
     turn_start_release: Option<Arc<Notify>>,
     thread_read_entered: Option<Arc<Notify>>,
     thread_read_release: Option<Arc<Notify>>,
+    materialized_read_entered: Option<Arc<Notify>>,
+    materialized_read_release: Option<Arc<Notify>>,
     fail_resume_thread: Option<String>,
     fail_compact: bool,
     fail_delete_thread: bool,
@@ -193,6 +195,14 @@ impl FakeWorker {
         Self {
             thread_read_entered: Some(entered),
             thread_read_release: Some(release),
+            ..Self::default()
+        }
+    }
+
+    fn paused_materialized_read(entered: Arc<Notify>, release: Arc<Notify>) -> Self {
+        Self {
+            materialized_read_entered: Some(entered),
+            materialized_read_release: Some(release),
             ..Self::default()
         }
     }
@@ -378,6 +388,12 @@ impl WorkerRuntime for FakeWorker {
                 thread_id: thread_id.to_owned(),
                 cwd: cwd.to_owned(),
             });
+        if let Some(entered) = &self.materialized_read_entered {
+            entered.notify_one();
+        }
+        if let Some(release) = &self.materialized_read_release {
+            release.notified().await;
+        }
         if !self
             .materialized_threads
             .lock()

@@ -1,9 +1,11 @@
 use std::env;
 use std::net::Ipv4Addr;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::app_server::*;
 use super::support::*;
 use super::*;
+use tokio::sync::Notify;
 
 #[derive(Clone)]
 struct FreshThread {
@@ -19,6 +21,13 @@ struct FreshThread {
 struct FreshServerState {
     threads: Vec<FreshThread>,
     daemon_subscribed: bool,
+}
+
+#[derive(Default)]
+struct DelayedAdoption {
+    claimed: AtomicBool,
+    waiting: AtomicBool,
+    release: Notify,
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -46,6 +55,7 @@ async fn fresh_jump_reconnects_and_adopts_only_after_an_action_without_interrupt
     let observed_daemon_requests = Arc::new(Mutex::new(Vec::new()));
     let observed_tui_requests = Arc::new(Mutex::new(Vec::new()));
     let state = Arc::new(Mutex::new(FreshServerState::default()));
+    let delayed_adoption = Arc::new(DelayedAdoption::default());
     let (completion_tx, completion_rx) = oneshot::channel();
     let app_server = tokio::spawn(run_fake_fresh_jump_server(
         listener,
@@ -53,6 +63,7 @@ async fn fresh_jump_reconnects_and_adopts_only_after_an_action_without_interrupt
         Arc::clone(&observed_daemon_requests),
         Arc::clone(&observed_tui_requests),
         Arc::clone(&state),
+        Arc::clone(&delayed_adoption),
         completion_rx,
     ));
 
@@ -293,6 +304,7 @@ async fn run_fake_fresh_jump_server(
     observed_daemon_requests: Arc<Mutex<Vec<Value>>>,
     observed_tui_requests: Arc<Mutex<Vec<Value>>>,
     state: Arc<Mutex<FreshServerState>>,
+    delayed_adoption: Arc<DelayedAdoption>,
     completion: oneshot::Receiver<()>,
 ) -> Result<()> {
     let (stream, peer) = listener.accept().await?;
@@ -306,6 +318,7 @@ async fn run_fake_fresh_jump_server(
         websocket,
         observed_daemon_requests,
         Arc::clone(&state),
+        Arc::clone(&delayed_adoption),
         completion,
     );
     let remote = async {
@@ -322,6 +335,7 @@ async fn run_fake_fresh_jump_server(
                 index,
                 Arc::clone(&observed_tui_requests),
                 Arc::clone(&state),
+                Arc::clone(&delayed_adoption),
             )
             .await?;
         }
@@ -335,6 +349,7 @@ async fn handle_fresh_daemon_connection(
     mut websocket: WebSocketStream<TcpStream>,
     observed: Arc<Mutex<Vec<Value>>>,
     state: Arc<Mutex<FreshServerState>>,
+    delayed_adoption: Arc<DelayedAdoption>,
     completion: oneshot::Receiver<()>,
 ) -> Result<()> {
     let mut completion = Box::pin(completion);
@@ -366,7 +381,12 @@ async fn handle_fresh_daemon_connection(
                     Message::Pong(_) | Message::Frame(_) => continue,
                 };
                 observed.lock().expect("fresh daemon mutex was poisoned").push(frame.clone());
-                handle_fresh_daemon_request(&mut websocket, &frame, &state).await?;
+                handle_fresh_daemon_request(
+                    &mut websocket,
+                    &frame,
+                    &state,
+                    &delayed_adoption,
+                ).await?;
             }
         }
     }
@@ -376,6 +396,7 @@ async fn handle_fresh_daemon_request(
     websocket: &mut WebSocketStream<TcpStream>,
     frame: &Value,
     state: &Arc<Mutex<FreshServerState>>,
+    delayed_adoption: &Arc<DelayedAdoption>,
 ) -> Result<()> {
     match frame.get("method").and_then(Value::as_str) {
         Some("initialize") => send_result(websocket, frame, json!({})).await?,
@@ -401,6 +422,21 @@ async fn handle_fresh_daemon_request(
         Some("thread/read") => {
             let id = required_string(frame, "/params/threadId")?;
             let thread = find_thread(state, id)?;
+            if id == FRESH_ACTIVE_THREAD_ID
+                && delayed_adoption
+                    .claimed
+                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
+            {
+                delayed_adoption.waiting.store(true, Ordering::SeqCst);
+                let fallback = Arc::clone(delayed_adoption);
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    fallback.release.notify_one();
+                });
+                delayed_adoption.release.notified().await;
+                delayed_adoption.waiting.store(false, Ordering::SeqCst);
+            }
             send_result(websocket, frame, json!({"thread": thread_wire(&thread)})).await?;
         }
         Some("thread/resume") => {
@@ -434,6 +470,7 @@ async fn handle_fresh_tui_connection(
     index: usize,
     observed: Arc<Mutex<Vec<Value>>>,
     state: Arc<Mutex<FreshServerState>>,
+    delayed_adoption: Arc<DelayedAdoption>,
 ) -> Result<()> {
     while let Some(message) = websocket.next().await {
         let frame = match message? {
@@ -500,6 +537,10 @@ async fn handle_fresh_tui_connection(
             }
             Some("thread/resume") => {
                 ensure!(index == 2, "TUI resumed outside its reconnect");
+                ensure!(
+                    delayed_adoption.waiting.load(Ordering::SeqCst),
+                    "relay did not accept the TUI reconnect while adoption was pending"
+                );
                 let id = required_string(&frame, "/params/threadId")?;
                 ensure!(
                     id == FRESH_ACTIVE_THREAD_ID,
@@ -517,6 +558,7 @@ async fn handle_fresh_tui_connection(
                     }),
                 )
                 .await?;
+                delayed_adoption.release.notify_one();
             }
             Some("thread/unsubscribe") => send_result(&mut websocket, &frame, json!({})).await?,
             Some(other) => bail!("unexpected fresh TUI method {other:?}"),

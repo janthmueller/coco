@@ -110,6 +110,17 @@ generations, while unanswered JSON-RPC request IDs do not. A clean TUI close
 ends the relay. An unrecovered leg-specific transport failure is retained and
 included in the final `jump` error.
 
+Fresh-thread adoption is deliberately outside the relay's WebSocket data
+path. The relay permits at most one adoption request for the exact correlated
+candidate at a time, but continues forwarding both legs, accepting the next
+native TUI connection, observing shutdown, and renewing the lease while the
+daemon performs `thread/read`. Once the daemon admits that exact request under
+a live lease, it pins the attempt until verification finishes; the nominal
+thirty-second expiry or a concurrent relay release cannot invalidate CoCo's
+own in-flight read. A requested release takes effect as soon as the attempt is
+reconciled. This matters for very large rollout files whose metadata read can
+otherwise outlast the lease and Codex's reconnect progress.
+
 Both WebSocket legs of that relay use the same finite 128 MiB maximum frame
 and message size as Codex's remote App Server client. Tungstenite's defaults
 are only 16 MiB per frame and 64 MiB per message; those lower intermediary

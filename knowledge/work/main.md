@@ -5191,3 +5191,67 @@ TUI resume. The static Astro export builds and verifies all 17 public pages and
 61 assets. `nix flake check .` passes for the current system after the two new
 Rust modules were staged so Git-flake source discovery could include them.
 `git diff --check` is clean. No push or release was performed.
+
+## Slow fresh-thread adoption and relay liveness — 2026-09-22
+
+Active scope: reproduce and correct an Alpha 5 fresh-jump failure reported for
+a very large Codex thread. The native TUI exhausted its App Server reconnect
+budget and the relay then reported that cocod could not adopt the TUI-created
+thread because the temporary attach lease was no longer valid.
+
+Confirmed design flaw and intended correction:
+
+- The relay currently awaits `workspace.attach.adopt` directly after observing
+  a fresh candidate and again before accepting a reconnect. That RPC performs
+  native `thread/read`; a slow read therefore pauses both WebSocket forwarding
+  and the lease heartbeat. Codex 0.154.0 retries restoration for up to 120
+  seconds, while CoCo's unrenewed attach lease expires after 30 seconds.
+- Move adoption attempts out of the WebSocket data path. At most one attempt
+  may be in flight for the exact candidate, while forwarding, reconnect
+  acceptance, shutdown observation, and the ten-second heartbeat remain live.
+- Treat a coordinator adoption admitted under a valid exact lease as in flight
+  until its native verification finishes. Lease pruning must not invalidate an
+  operation solely because CoCo's own `thread/read` took longer than the TTL;
+  competing fresh attachment and candidate substitution must remain blocked.
+- Add deterministic delayed-adoption coverage that proves traffic and renewal
+  continue during the delay, the same candidate is resumed, and exactly one
+  durable binding results. Preserve bounded shutdown and actionable transport
+  errors; do not broaden thread selection or weaken candidate correlation.
+- Update canonical runtime knowledge after the behavior is proven. Public CLI
+  syntax is unchanged, so public documentation should change only if the user
+  recovery contract materially changes.
+
+Result:
+
+- Fresh-thread adoption now runs as one background RPC for the exact
+  correlated candidate. The relay continues forwarding both WebSocket legs,
+  accepting Codex's sequential reconnect, servicing shutdown, and renewing
+  the ten-second heartbeat while native metadata loading is still pending.
+- The coordinator pins an adoption only after a matching live lease is
+  validated. The admitted attempt cannot invalidate itself by exceeding the
+  nominal thirty-second TTL. A concurrent release or App Server disconnect is
+  deferred until that attempt reconciles; it neither swaps candidates nor
+  discards an exact durable binding.
+- The process fixture now pauses the daemon's first materialized-thread read
+  and requires the native TUI reconnect to resume while that read remains
+  blocked. Coordinator coverage independently proves expiry immunity and
+  release-during-adoption cleanup. The former implementation fails these
+  deterministic contracts with the same invalid-lease or stalled-reconnect
+  sequence as the reported Alpha 5 failure.
+- Public commands and recovery instructions are unchanged, so no public docs
+  were modified. Canonical architecture, product, and workspace-runtime
+  knowledge record the liveness and lease rules.
+
+Verification:
+
+- `cargo fmt --all -- --check` passes.
+- `cargo clippy --locked --all-targets --all-features -- -D warnings` passes.
+- `cargo test --locked` passes 378 non-ignored library tests and all five
+  process-smoke scenarios; six environment-dependent library tests, three
+  opt-in real-Codex tests, and the live model proof remain ignored by default.
+- `COCO_RUN_REAL_CODEX_COMPAT=1 cargo test --locked --test real_codex_compat -- --ignored --nocapture`
+  passes all three contracts against installed `codex-cli 0.154.0`, including
+  real native TUI resume.
+- `CARGO_BUILD_JOBS=1 nix flake check . --no-write-lock-file --max-jobs 1`
+  passes all current-system package, app, tooling, documentation, and policy
+  checks. `git diff --check` is clean.
