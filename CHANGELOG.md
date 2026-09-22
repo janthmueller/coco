@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.1.0-alpha.6 (2026-09-22)
+
+### Bug Fixes
+
+- **jump**: Keep fresh adoption live during reconnect
+  ([`312d474`](https://github.com/janthmueller/coco/commit/312d4742eb216fa5049477d37948c9e0b7bc494c))
+
+
 ## v0.1.0-alpha.5 (2026-09-21)
 
 ### Features
