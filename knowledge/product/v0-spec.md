@@ -268,6 +268,11 @@ peer-response routing remain separate, unimplemented capabilities.
   stale across daemon generations, and never becomes a CoCo billing authority.
   Native cost is optional, cached briefly in memory, and unavailable is
   distinct from zero.
+- `coco status --quota` exposes the active Codex account's native remaining
+  windows once beside the selected workspace view. It is account-global,
+  generation-local, and never persisted or attributed to a workspace. Native
+  authentication, availability, durations, and reset evidence remain explicit;
+  unavailable quota does not fail operational status.
 - Worktrees may use a new branch, an existing local branch, or detached HEAD.
   Detached worktrees remain registered Git worktrees. CoCo can close one only
   while its `HEAD` still equals its base; detached-to-branch promotion remains
@@ -497,10 +502,10 @@ coco [<repository-path>] create [<name>]
   [--profile <name>] [--model <model>] [--send <message>] [--jump]
 coco [<repository-path>] (list | ls) [--json]
 coco (list | ls) --all-repos [--json]       # `-a` is the short form
-coco [<repository-path>] status [--tree | --sort <name|state>] [--resources] [--usage] [--follow] [--json]
-coco status --all-repos [--tree | --sort <name|state>] [--resources] [--usage] [--follow] [--json] # short: `-a`, `-t`, `-r`, `-u`, `-f`
-coco [<repository-path>] status <workspace> [--resources] [--usage] [--follow] [--json]
-coco status <workspace> --global [--resources] [--usage] [--follow] [--json] # short: `-g`, `-r`, `-u`, `-f`
+coco [<repository-path>] status [--tree | --sort <name|state>] [--resources] [--usage] [--quota] [--follow] [--json]
+coco status --all-repos [--tree | --sort <name|state>] [--resources] [--usage] [--quota] [--follow] [--json] # short: `-a`, `-t`, `-r`, `-u`, `-q`, `-f`
+coco [<repository-path>] status <workspace> [--resources] [--usage] [--quota] [--follow] [--json]
+coco status <workspace> --global [--resources] [--usage] [--quota] [--follow] [--json] # short: `-g`, `-r`, `-u`, `-q`, `-f`
 coco [<repository-path>] limits show [<workspace>] [--json]
 coco limits show [<workspace>] --global [--json]
 coco [<repository-path>] limits set [<workspace>]
@@ -765,7 +770,7 @@ ID must not create duplicate artifacts.
   `thread/read`; do not resume a thread merely to list it. An unbound ready
   workspace projects `prepared`; a missing or invalid existing binding projects
   unavailable instead of falling back to stored status.
-- `--json` emits one schema-version-12 JSON document and no decorative stdout
+- `--json` emits one schema-version-13 JSON document and no decorative stdout
   text. Every row includes a compact repository identity.
 
 ### `coco status`
@@ -780,7 +785,7 @@ ID must not create duplicate artifacts.
   one row. Workspace names and synthetic name prefixes use ordinary text;
   only connector guides are dim. For `--all-repos`, the view separates
   repositories under canonical-path headings. It composes with follow,
-  resource, and usage projections. Tree output is a human presentation and is
+  resource, usage, and account-quota projections. Tree output is a human presentation and is
   invalid with JSON or a targeted workspace.
   `--sort state` instead keeps repositories grouped and uses the stable name
   order as a tie-breaker while prioritizing waiting, failed/unavailable,
@@ -833,6 +838,12 @@ ID must not create duplicate artifacts.
   Targeted human status shows the complete breakdown; collections use compact
   `TOKENS`, `CONTEXT`, and `COST` columns. JSON nests the typed projection under
   `usage` only when requested.
+- `--quota`/`-q` adds the active Codex account's remaining native usage
+  windows once after either a targeted or collection view. It composes with
+  scope, tree, resources, usage, follow, and JSON, but repository/workspace
+  scope never filters or duplicates the account-global result. Human output
+  derives labels such as `5h` and `weekly` from native window duration. JSON
+  adds one top-level `accountQuota` object only when requested.
 - `--follow` and `--json` are intentionally mutually exclusive in the current
   CLI; machine clients can poll `status --json`.
 
@@ -863,12 +874,38 @@ ID must not create duplicate artifacts.
   percentage, and optional estimated cost to the existing status row. The
   targeted view adds input/cached and output/reasoning breakdowns. JSON exposes
   the complete typed projection beneath `usage` with top-level schema version
-  11.
+  13.
 - One-shot and `--follow` reads are passive: they do not call `thread/resume`,
   create context, or start a workspace executor. A terminal replaces the prior
   frame; redirected output appends only changed requested views. State, usage,
   and resource changes can each trigger an update. `--follow`/`-f` and `--json`
   are mutually exclusive.
+
+### Status account-quota projection
+
+- Read quota only through the shared control App Server's
+  `account/rateLimits/read`. The operation is account-global and must not load a
+  thread, start a workspace executor, or depend on repository registration.
+- Prefer `rateLimitsByLimitId` and fall back to the legacy `rateLimits`
+  snapshot. Preserve every bucket, primary/secondary window, native used
+  percentage, duration, reset timestamp, and optional
+  `ordinaryUsageAllowed`. Do not assume that a primary or secondary position
+  has one fixed duration.
+- Derive human remaining percentage as clamped `100 - usedPercent`. Treat
+  `ordinaryUsageAllowed: false` as authoritative blocked state; do not infer
+  permission from percentages or reset times.
+- Keep one short-lived in-memory snapshot. Invalidate it on account/rate-limit
+  notifications, native token-usage updates, account change, or App Server
+  disconnect. Sparse rolling notifications trigger a complete refetch rather
+  than clearing omitted fields.
+- Authentication or server-version incompatibility and backend/read failures
+  are typed unavailable results. They do not fail the surrounding workspace
+  status command. No quota state, account identity, banner, or promotion data
+  is persisted or exposed.
+- `status --quota --follow` updates quota in the same live frame. Redirected
+  output still appends only changed complete views. Quota history, alerts,
+  budgets, enforcement, reset-credit actions, and MCP exposure are outside this
+  slice.
 
 ### `coco limits`
 

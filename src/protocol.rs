@@ -24,6 +24,7 @@ pub(crate) use signals::*;
 pub enum DaemonMethod {
     Health,
     ModelList,
+    AccountQuotaGet,
     RepositoryRegister,
     RepositoryRemove,
     RepositoryResolve,
@@ -61,9 +62,10 @@ pub enum DaemonMethod {
 
 impl DaemonMethod {
     #[cfg(test)]
-    pub const ALL: [Self; 35] = [
+    pub const ALL: [Self; 36] = [
         Self::Health,
         Self::ModelList,
+        Self::AccountQuotaGet,
         Self::RepositoryRegister,
         Self::RepositoryRemove,
         Self::RepositoryResolve,
@@ -103,6 +105,7 @@ impl DaemonMethod {
         match self {
             Self::Health => "health",
             Self::ModelList => "model.list",
+            Self::AccountQuotaGet => "account.quota.get",
             Self::RepositoryRegister => "repository.register",
             Self::RepositoryRemove => "repository.remove",
             Self::RepositoryResolve => "repository.resolve",
@@ -143,6 +146,7 @@ impl DaemonMethod {
         match value {
             "health" => Some(Self::Health),
             "model.list" => Some(Self::ModelList),
+            "account.quota.get" => Some(Self::AccountQuotaGet),
             "repository.register" => Some(Self::RepositoryRegister),
             "repository.remove" => Some(Self::RepositoryRemove),
             "repository.resolve" => Some(Self::RepositoryResolve),
@@ -207,6 +211,10 @@ pub struct HealthParams {}
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelListParams {}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AccountQuotaGetParams {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -576,6 +584,61 @@ pub struct WorkspaceLimitsResult {
     pub controller: WorkspaceResourceControllerStatus,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AccountQuotaWindow {
+    pub used_percent: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_duration_mins: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AccountQuotaBucket {
+    pub limit_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normal_model_slug: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primary: Option<AccountQuotaWindow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secondary: Option<AccountQuotaWindow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit_reached_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AccountQuotaUnavailableReason {
+    UnsupportedAuthentication,
+    UnsupportedServer,
+    NotReported,
+    ReadFailed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "status",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum AccountQuotaResult {
+    Available {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ordinary_usage_allowed: Option<bool>,
+        buckets: Vec<AccountQuotaBucket>,
+        observed_at_ms: i64,
+    },
+    Unavailable {
+        reason: AccountQuotaUnavailableReason,
+        checked_at_ms: i64,
+    },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum WorkspaceUsageSource {
@@ -913,6 +976,7 @@ macro_rules! daemon_request {
 
 daemon_request!(HealthParams, Health, HealthResult);
 daemon_request!(ModelListParams, ModelList, Vec<CodexModel>);
+daemon_request!(AccountQuotaGetParams, AccountQuotaGet, AccountQuotaResult);
 daemon_request!(RepositoryRegisterParams, RepositoryRegister, Repository);
 daemon_request!(RepositoryRemoveParams, RepositoryRemove, Repository);
 daemon_request!(
@@ -1009,6 +1073,7 @@ mod tests {
             [
                 "health",
                 "model.list",
+                "account.quota.get",
                 "repository.register",
                 "repository.remove",
                 "repository.resolve",
@@ -1565,6 +1630,38 @@ mod tests {
                 }],
                 "observedAtMs": 2
             }
+        }));
+    }
+
+    #[test]
+    fn account_quota_preserves_global_availability_and_native_windows() {
+        assert_request(
+            AccountQuotaGetParams {},
+            DaemonMethod::AccountQuotaGet,
+            json!({}),
+        );
+        assert_response::<AccountQuotaGetParams>(json!({
+            "status": "available",
+            "ordinaryUsageAllowed": true,
+            "buckets": [{
+                "limitId": "codex",
+                "primary": {
+                    "usedPercent": 16,
+                    "windowDurationMins": 300,
+                    "resetsAt": 10
+                },
+                "secondary": {
+                    "usedPercent": 39,
+                    "windowDurationMins": 10080,
+                    "resetsAt": 11
+                }
+            }],
+            "observedAtMs": 12
+        }));
+        assert_response::<AccountQuotaGetParams>(json!({
+            "status": "unavailable",
+            "reason": "unsupportedAuthentication",
+            "checkedAtMs": 13
         }));
     }
 

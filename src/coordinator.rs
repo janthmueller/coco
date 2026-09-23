@@ -14,7 +14,8 @@ use crate::domain::{
 use crate::git::{Git, GitRepository};
 use crate::hooks::HookRegistry;
 use crate::protocol::{
-    RepositoryScope, RepositorySummary, WorkspaceCostEstimate, WorkspaceListItem, WorkspaceResult,
+    AccountQuotaResult, RepositoryScope, RepositorySummary, WorkspaceCostEstimate,
+    WorkspaceListItem, WorkspaceResult,
 };
 use crate::store::{EventDraft, Store, StoreError};
 
@@ -27,6 +28,7 @@ mod decision;
 mod error;
 mod hooks;
 mod jump;
+mod quota;
 mod recovery;
 mod resources;
 mod retirement;
@@ -38,7 +40,8 @@ mod workspace;
 
 pub(crate) use error::{CoordinatorError, WorkspaceReferenceCandidate};
 pub(crate) use worker::{
-    LocatedNativeThread, NativeThread, StartedThread, StartedTurn, WorkerError,
+    LocatedNativeThread, NativeAccountQuota, NativeAccountQuotaBucket, NativeAccountQuotaRead,
+    NativeAccountQuotaWindow, NativeThread, StartedThread, StartedTurn, WorkerError,
     WorkerExecutionEnvironment, WorkerRuntime,
 };
 
@@ -60,6 +63,7 @@ pub(crate) struct Coordinator {
     file_change_previews: StdMutex<HashMap<(String, String), Vec<DecisionFileChange>>>,
     jump_leases: StdMutex<jump::JumpLeaseRegistry>,
     usage_costs: StdMutex<HashMap<String, (Instant, WorkspaceCostEstimate)>>,
+    account_quota: StdMutex<Option<(Instant, AccountQuotaResult)>>,
     activities: StdMutex<activity::ActivityRegistry>,
 }
 
@@ -91,6 +95,7 @@ impl Coordinator {
             file_change_previews: StdMutex::new(HashMap::new()),
             jump_leases: StdMutex::new(jump::JumpLeaseRegistry::default()),
             usage_costs: StdMutex::new(HashMap::new()),
+            account_quota: StdMutex::new(None),
             activities: StdMutex::new(activity::ActivityRegistry::default()),
         }
     }

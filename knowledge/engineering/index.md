@@ -22,6 +22,9 @@ agents.
 - [Workspace token usage and billing estimates](workspace-usage.md) - Defines
   native token evidence, optional billing estimates, attribution/recovery
   requirements, and the implemented passive status projection.
+- [Account-wide Codex quota projection](account-quota.md) - Defines the native
+  rate-limit source, account-global ownership, cache invalidation, and optional
+  status projection for remaining usage windows.
 - [Release process](release.md) - Defines semantic versioning, the tested-main
   release guard, Cargo version synchronization, alpha tags, and native binary
   archives.

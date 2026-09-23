@@ -324,6 +324,9 @@ pub(super) async fn run_fake_recovery_server(
             Some("account/usage/read") => {
                 send_result(&mut websocket, &frame, fake_thread_usage(&frame)?).await?;
             }
+            Some("account/rateLimits/read") => {
+                send_result(&mut websocket, &frame, fake_account_quota(&frame)?).await?;
+            }
             Some(other) => bail!("unexpected recovery App Server method {other:?}"),
             None => bail!("received a recovery frame without a method: {frame}"),
         }
@@ -406,6 +409,9 @@ pub(super) async fn handle_daemon_connection(
             }
             Some("account/usage/read") => {
                 send_result(&mut websocket, &frame, fake_thread_usage(&frame)?).await?;
+            }
+            Some("account/rateLimits/read") => {
+                send_result(&mut websocket, &frame, fake_account_quota(&frame)?).await?;
             }
             Some("turn/start") => {
                 turn_count += 1;
@@ -623,6 +629,47 @@ fn fake_thread_usage(request: &Value) -> Result<Value> {
                 "totalTokens": 123_456
             }]
         }
+    }))
+}
+
+fn fake_account_quota(request: &Value) -> Result<Value> {
+    ensure!(
+        request.pointer("/params/excludeResetCreditDetails") == Some(&json!(true)),
+        "account/rateLimits/read did not suppress unused reset-credit details: {request}"
+    );
+    Ok(json!({
+        "ordinaryUsageAllowed": true,
+        "rateLimits": {
+            "limitId": "codex",
+            "primary": {
+                "usedPercent": 16,
+                "windowDurationMins": 300,
+                "resetsAt": 2_000_000_000
+            },
+            "secondary": {
+                "usedPercent": 39,
+                "windowDurationMins": 10_080,
+                "resetsAt": 2_000_100_000
+            }
+        },
+        "rateLimitsByLimitId": {
+            "codex": {
+                "limitId": "codex",
+                "primary": {
+                    "usedPercent": 16,
+                    "windowDurationMins": 300,
+                    "resetsAt": 2_000_000_000
+                },
+                "secondary": {
+                    "usedPercent": 39,
+                    "windowDurationMins": 10_080,
+                    "resetsAt": 2_000_100_000
+                }
+            }
+        },
+        "rateLimitResetCredits": null,
+        "accountId": "account-private-test",
+        "rateLimitUpsell": null
     }))
 }
 

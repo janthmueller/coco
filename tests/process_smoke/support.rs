@@ -527,6 +527,11 @@ pub(super) fn verify_codex_requests(requests: &[Value], worktree: &Path) -> Resu
             .is_some_and(|value| value.starts_with("coco-")),
         "turn/start had no CoCo message id"
     );
+    verify_account_reads(requests)?;
+    verify_bound_thread_reads(requests)
+}
+
+fn verify_account_reads(requests: &[Value]) -> Result<()> {
     let usage_reads = requests
         .iter()
         .filter(|request| request.get("method") == Some(&json!("account/usage/read")))
@@ -536,7 +541,26 @@ pub(super) fn verify_codex_requests(requests: &[Value], worktree: &Path) -> Resu
         usage_reads[0].pointer("/params/threadId"),
         Some(&json!(THREAD_ID))
     );
-    verify_bound_thread_reads(requests)
+
+    let quota_reads = requests
+        .iter()
+        .filter(|request| request.get("method") == Some(&json!("account/rateLimits/read")))
+        .collect::<Vec<_>>();
+    ensure!(
+        !quota_reads.is_empty(),
+        "CoCo did not read native account quota"
+    );
+    assert_eq!(
+        quota_reads[0].pointer("/params/excludeResetCreditDetails"),
+        Some(&json!(true))
+    );
+    ensure!(
+        quota_reads[0]
+            .pointer("/params/supportsLunaReserve")
+            .is_none(),
+        "CoCo claimed Luna Reserve support without implementing fallback"
+    );
+    Ok(())
 }
 
 fn verify_bound_thread_reads(requests: &[Value]) -> Result<()> {

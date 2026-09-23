@@ -12,6 +12,37 @@ use crate::domain::runtime::{
 use crate::domain::usage::NativeThreadCostEstimate;
 use crate::domain::{CodexModel, CodexThreadStatus};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NativeAccountQuota {
+    pub(crate) ordinary_usage_allowed: Option<bool>,
+    pub(crate) buckets: Vec<NativeAccountQuotaBucket>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NativeAccountQuotaBucket {
+    pub(crate) limit_id: String,
+    pub(crate) limit_name: Option<String>,
+    pub(crate) normal_model_slug: Option<String>,
+    pub(crate) primary: Option<NativeAccountQuotaWindow>,
+    pub(crate) secondary: Option<NativeAccountQuotaWindow>,
+    pub(crate) rate_limit_reached_type: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NativeAccountQuotaWindow {
+    pub(crate) used_percent: i32,
+    pub(crate) window_duration_mins: Option<i64>,
+    pub(crate) resets_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum NativeAccountQuotaRead {
+    Available(NativeAccountQuota),
+    UnsupportedAuthentication,
+    UnsupportedServer,
+    NotReported,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct StartedThread {
     pub(crate) id: String,
@@ -70,6 +101,8 @@ pub(crate) enum WorkerError {
     InvalidThreadRead(String),
     #[error("Codex returned an invalid thread usage response: {0}")]
     InvalidThreadUsage(String),
+    #[error("Codex returned an invalid account quota response: {0}")]
+    InvalidAccountQuota(String),
     #[error("Codex thread ID mismatch: expected {expected}, received {actual}")]
     ThreadIdMismatch { expected: String, actual: String },
     #[error("Codex thread cwd mismatch: expected {expected}, received {actual}")]
@@ -87,6 +120,12 @@ impl WorkerError {
 #[async_trait]
 pub(crate) trait WorkerRuntime: Send + Sync + 'static {
     async fn list_models(&self) -> Result<Vec<CodexModel>, WorkerError>;
+
+    /// Reads account-global Codex quota without loading a native thread or
+    /// starting a workspace executor.
+    async fn read_account_quota(&self) -> Result<NativeAccountQuotaRead, WorkerError> {
+        Ok(NativeAccountQuotaRead::NotReported)
+    }
 
     /// Reads native thread truth without loading it or applying configuration.
     ///

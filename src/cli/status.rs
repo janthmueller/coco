@@ -5,8 +5,9 @@ use std::time::Duration;
 use anyhow::Result;
 
 use crate::protocol::{
-    RepositoryScope, WorkspaceGetParams, WorkspaceListItem, WorkspaceListParams,
-    WorkspaceStatusResult, WorkspaceUsageGetParams, WorkspaceUsageItem, WorkspaceUsageListParams,
+    AccountQuotaGetParams, AccountQuotaResult, RepositoryScope, WorkspaceGetParams,
+    WorkspaceListItem, WorkspaceListParams, WorkspaceStatusResult, WorkspaceUsageGetParams,
+    WorkspaceUsageItem, WorkspaceUsageListParams,
 };
 use crate::rpc::RpcClient;
 
@@ -19,6 +20,13 @@ const FOLLOW_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const COLLECTION_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const SPINNER_FRAME_INTERVAL: Duration = Duration::from_millis(125);
 const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct StatusProjection {
+    pub(super) resources: bool,
+    pub(super) usage: bool,
+    pub(super) quota: bool,
+}
 
 pub(super) fn sort_workspace_collection(workspaces: &mut [WorkspaceListItem], order: StatusSort) {
     workspaces.sort_by(|left, right| {
@@ -117,8 +125,7 @@ pub(super) async fn follow_status(
     client: &RpcClient,
     scope: RepositoryScope,
     workspace: &str,
-    include_resources: bool,
-    include_usage: bool,
+    projection: StatusProjection,
 ) -> Result<()> {
     let interactive = stdout_supports_live_updates();
     let mut output = FollowOutput::new(io::stdout(), interactive)?;
@@ -129,17 +136,19 @@ pub(super) async fn follow_status(
             .request(WorkspaceGetParams {
                 scope: scope.clone(),
                 workspace: workspace.to_owned(),
-                include_resources,
+                include_resources: projection.resources,
             })
             .await?;
-        let usage = workspace_usage(client, &response, include_usage).await?;
+        let usage = workspace_usage(client, &response, projection.usage).await?;
+        let quota = account_quota(client, projection.quota).await?;
         if interactive {
             for _ in 0..spinner_frames_per_poll() {
                 let frame = render_follow_status(
                     &response,
                     SPINNER[spinner_index % SPINNER.len()],
-                    include_resources,
+                    projection.resources,
                     usage.as_ref(),
+                    quota.as_ref(),
                 );
                 output.write_frame(&frame)?;
                 spinner_index += 1;
@@ -148,7 +157,12 @@ pub(super) async fn follow_status(
                 }
             }
         } else {
-            let frame = render_status_for_stdout(&response, include_resources, usage.as_ref());
+            let frame = render_status_for_stdout(
+                &response,
+                projection.resources,
+                usage.as_ref(),
+                quota.as_ref(),
+            );
             if previous_log_frame.as_deref() != Some(&frame) {
                 output.write_frame(&frame)?;
                 previous_log_frame = Some(frame);
@@ -163,8 +177,7 @@ pub(super) async fn follow_status(
 pub(super) async fn follow_status_collection(
     client: &RpcClient,
     scope: RepositoryScope,
-    include_resources: bool,
-    include_usage: bool,
+    projection: StatusProjection,
     tree: bool,
     sort: StatusSort,
 ) -> Result<()> {
@@ -176,17 +189,19 @@ pub(super) async fn follow_status_collection(
             .request(WorkspaceListParams {
                 scope: scope.clone(),
                 phases: None,
-                include_resources,
+                include_resources: projection.resources,
                 include_activity: true,
             })
             .await?;
         sort_workspace_collection(&mut workspaces, sort);
-        let usage = workspace_usage_collection(client, scope.clone(), include_usage).await?;
+        let usage = workspace_usage_collection(client, scope.clone(), projection.usage).await?;
+        let quota = account_quota(client, projection.quota).await?;
         let frame = render_workspace_status_list_for_stdout(
             &workspaces,
             include_repository,
-            include_resources,
+            projection.resources,
             usage.as_deref(),
+            quota.as_ref(),
             tree,
         );
         if previous_frame.as_deref() != Some(&frame) {
@@ -197,6 +212,16 @@ pub(super) async fn follow_status_collection(
             return Ok(());
         }
     }
+}
+
+pub(super) async fn account_quota(
+    client: &RpcClient,
+    include_quota: bool,
+) -> Result<Option<AccountQuotaResult>> {
+    if !include_quota {
+        return Ok(None);
+    }
+    Ok(Some(client.request(AccountQuotaGetParams {}).await?))
 }
 
 pub(super) async fn workspace_usage(

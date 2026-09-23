@@ -1,9 +1,10 @@
 ---
 title: Resource accounting
-description: Interpret memory, CPU, token counts, and cost estimates.
+description: Interpret memory, CPU, token counts, costs, and account quota.
 ---
 
-Use this reference to interpret the values in `status -r` and `status -u`.
+Use this reference to interpret the values in `status -r`, `status -u`, and
+`status -q`.
 For commands to start with, see [Monitor usage and set limits](../../guides/resources/).
 
 ## Memory and process counts
@@ -60,6 +61,20 @@ updates. An unavailable estimate is shown as a dash, never as zero.
 Use the estimate for observation, not as an invoice or enforced spending
 budget. CoCo's resource limits control local computation.
 
+## Account quota
+
+`status -q` reports the remaining limits supplied by Codex for the active
+account. A line such as `5h 84% left · weekly 61% left` describes account-wide
+windows, not one workspace or repository.
+
+Window names come from the duration Codex reports. Other accounts may expose
+daily, monthly, annual, or model-specific limits. If Codex says ordinary usage
+is blocked, CoCo shows that state even when a reset time is available.
+
+Quota is kept only briefly for display and is never saved as workspace
+history. Direct API-key and custom-provider authentication cannot supply this
+account view; CoCo shows it as unavailable without affecting workspace status.
+
 ## JSON and follow output
 
 Use `coco status <workspace> --json` for full resource details, including
@@ -69,6 +84,13 @@ available. These are current observations, not persisted resource history.
 `coco status <workspace> --usage --json` adds a nested `usage` object with token
 breakdowns, observation and freshness fields, and an estimate or an
 unavailable reason.
+
+`coco status <workspace> --quota --json` adds one top-level `accountQuota`
+object. Available results include every returned limit bucket, native used
+percentages, window durations in minutes, Unix reset timestamps, and the
+observation time. Unavailable results include a bounded reason and check time.
+Collection JSON also contains this object only once, outside the workspace
+array.
 
 Status follow replaces the terminal view in place. Redirected output appends
 changed views. Its `--follow` and `--json` flags are mutually exclusive;

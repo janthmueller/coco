@@ -67,7 +67,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     super::hooks::verify_loaded(&paths, &repository).await?;
 
     let models = cli_json(&run_cli(&paths, &repository, &["model", "list", "--json"]).await?)?;
-    assert_eq!(models["schemaVersion"], 12);
+    assert_eq!(models["schemaVersion"], 13);
     assert_eq!(models["models"].as_array().map(Vec::len), Some(2));
     assert_eq!(models["models"][0]["model"], DEFAULT_MODEL);
     assert_eq!(models["models"][0]["isDefault"], true);
@@ -86,7 +86,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
 
     run_cli(&paths, &repository, &["repo", "add", "."]).await?;
     let repositories = cli_json(&run_cli(&paths, &repository, &["repo", "ls", "--json"]).await?)?;
-    assert_eq!(repositories["schemaVersion"], 12);
+    assert_eq!(repositories["schemaVersion"], 13);
     assert_eq!(
         repositories["repositories"].as_array().map(Vec::len),
         Some(1)
@@ -183,7 +183,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     fs::remove_file(repository.join("local-only.txt"))?;
 
     let listed = cli_json(&run_cli(&paths, &repository, &["list", "--json"]).await?)?;
-    assert_eq!(listed["schemaVersion"], 12);
+    assert_eq!(listed["schemaVersion"], 13);
     let workspaces = listed["workspaces"]
         .as_array()
         .context("coco list did not return a workspaces array")?;
@@ -225,7 +225,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         "state-sorted status omitted the workspace"
     );
     let status_overview = cli_json(&run_cli(&paths, &repository, &["status", "--json"]).await?)?;
-    assert_eq!(status_overview["schemaVersion"], 12);
+    assert_eq!(status_overview["schemaVersion"], 13);
     assert_eq!(
         status_overview["workspaces"].as_array().map(Vec::len),
         Some(1)
@@ -419,7 +419,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         )
         .await?,
     )?;
-    assert_eq!(usage["schemaVersion"], 12);
+    assert_eq!(usage["schemaVersion"], 13);
     assert_eq!(usage["workspace"]["name"], WORKSPACE_NAME);
     assert_eq!(
         usage.pointer("/usage/tokens/total/totalTokens"),
@@ -450,6 +450,39 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
             && human_usage.contains("$0.42 estimate")
             && !human_usage.contains(THREAD_ID),
         "workspace usage output was incomplete or noisy: {human_usage}"
+    );
+    let quota = cli_json(
+        &run_cli(
+            &paths,
+            &repository,
+            &["status", WORKSPACE_NAME, "--quota", "--json"],
+        )
+        .await?,
+    )?;
+    assert_eq!(quota["schemaVersion"], 13);
+    assert_eq!(quota["workspace"]["name"], WORKSPACE_NAME);
+    assert_eq!(
+        quota.pointer("/accountQuota/ordinaryUsageAllowed"),
+        Some(&json!(true))
+    );
+    assert_eq!(
+        quota.pointer("/accountQuota/buckets/0/primary/usedPercent"),
+        Some(&json!(16))
+    );
+    assert_eq!(
+        quota.pointer("/accountQuota/buckets/0/secondary/windowDurationMins"),
+        Some(&json!(10_080))
+    );
+    assert!(quota.pointer("/workspace/accountQuota").is_none());
+    ensure!(
+        !quota.to_string().contains("account-private-test"),
+        "status quota exposed the native account identifier"
+    );
+    let human_quota = run_cli(&paths, &repository, &["status", WORKSPACE_NAME, "-q"]).await?;
+    let human_quota = String::from_utf8_lossy(&human_quota.stdout);
+    ensure!(
+        human_quota.contains("Quota  5h 84% left · weekly 61% left"),
+        "account quota output was incomplete: {human_quota}"
     );
     let usage_overview = run_cli(&paths, &repository, &["status", "-u"]).await?;
     let usage_overview = String::from_utf8_lossy(&usage_overview.stdout);
@@ -485,7 +518,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         "status --usage --follow omitted usage or leaked conversation output: {followed_usage}"
     );
     let followed_usage_collection =
-        run_cli_until_interrupt(&paths, &repository, &["status", "-aftru"]).await?;
+        run_cli_until_interrupt(&paths, &repository, &["status", "-aftruq"]).await?;
     let followed_usage_collection = String::from_utf8_lossy(&followed_usage_collection.stdout);
     let repository_heading = repository.canonicalize()?.display().to_string();
     ensure!(
@@ -495,7 +528,8 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
             && followed_usage_collection.contains("feat/")
             && followed_usage_collection.contains("process-smoke")
             && followed_usage_collection.contains("MEMORY")
-            && followed_usage_collection.contains("TOKENS"),
+            && followed_usage_collection.contains("TOKENS")
+            && followed_usage_collection.contains("weekly 61% left"),
         "tree collection follow did not compose status projections: {followed_usage_collection}"
     );
     let followed =

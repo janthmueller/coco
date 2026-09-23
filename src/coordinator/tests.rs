@@ -41,6 +41,7 @@ mod events;
 mod guards;
 mod jump;
 mod operations;
+mod quota;
 mod repositories;
 mod resources;
 mod retirement;
@@ -96,6 +97,7 @@ enum WorkerCall {
     Cost {
         thread_id: String,
     },
+    AccountQuota,
     ConfigureResources {
         workspace_id: String,
         snapshot: WorkspaceResourcePolicySnapshot,
@@ -145,6 +147,7 @@ struct FakeWorker {
     background_terminals: StdMutex<BTreeMap<String, usize>>,
     runtime_resources: StdMutex<Option<WorkspaceRuntimeResources>>,
     thread_costs: StdMutex<BTreeMap<String, NativeThreadCostEstimate>>,
+    account_quota: StdMutex<Option<NativeAccountQuotaRead>>,
     resource_policies: StdMutex<BTreeMap<String, WorkspaceResourcePolicySnapshot>>,
     resource_limits_supported: bool,
     resource_runtime_running: StdMutex<bool>,
@@ -313,6 +316,10 @@ impl FakeWorker {
             .unwrap()
             .insert(estimate.thread_id.clone(), estimate);
     }
+
+    fn set_account_quota(&self, quota: NativeAccountQuotaRead) {
+        *self.account_quota.lock().unwrap() = Some(quota);
+    }
 }
 
 #[async_trait]
@@ -333,6 +340,16 @@ impl WorkerRuntime for FakeWorker {
             input_modalities: vec!["text".to_owned(), "image".to_owned()],
             supports_personality: true,
         }])
+    }
+
+    async fn read_account_quota(&self) -> Result<NativeAccountQuotaRead, WorkerError> {
+        self.calls.lock().unwrap().push(WorkerCall::AccountQuota);
+        Ok(self
+            .account_quota
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or(NativeAccountQuotaRead::NotReported))
     }
 
     async fn read_thread(&self, thread_id: &str) -> Result<NativeThread, WorkerError> {

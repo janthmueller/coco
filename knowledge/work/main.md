@@ -5309,3 +5309,116 @@ Verification:
 - `CARGO_BUILD_JOBS=1 nix flake check . --no-write-lock-file --max-jobs 1`
   passes all current-system package, app, tooling, documentation, and policy
   checks. `git diff --check` is clean.
+
+## Account-wide Codex limit visibility — 2026-09-23
+
+Active scope: expose Codex account rate-limit windows such as the native TUI's
+weekly remaining indicator. Use the released App Server contract, keep
+account-global quota distinct from workspace token usage, and integrate it as
+an explicit status projection without starting workspace runtimes.
+
+Review checklist:
+
+- [x] Confirm official request, notification, authentication, and payload
+  semantics for account rate limits.
+- [x] Trace whether CoCo currently decodes, forwards, caches, or discards the
+  relevant App Server messages.
+- [x] Compare standalone and status-integrated CLI designs, including JSON,
+  follow behavior, unavailable states, and multi-repository scope.
+- [x] Record a recommended minimal slice and risks here, then promote the
+  accepted contract into canonical knowledge.
+- [x] Implement the native read, typed daemon boundary, short-lived cache,
+  human/JSON projections, follow behavior, tests, and public documentation.
+
+Findings:
+
+- Codex App Server exposes the authoritative ChatGPT account snapshot through
+  `account/rateLimits/read` and emits sparse
+  `account/rateLimits/updated` notifications. The read includes one legacy
+  bucket plus an optional map of buckets, window duration, used percentage,
+  reset timestamp, and the independent `ordinaryUsageAllowed` decision.
+- Window labels must come from `windowDurationMins`; `primary` and `secondary`
+  do not semantically mean `5h` and `weekly`. Remaining percentage is a
+  presentation value derived as clamped `100 - usedPercent`.
+- Rolling notifications are intentionally incomplete. A client must merge them
+  into a prior complete read or invalidate and refetch. Missing fields do not
+  clear previously known metadata.
+- The read is account-global and ChatGPT-auth dependent. Unsupported auth or
+  unavailable backend data must remain an explicit unavailable state rather
+  than a synthetic zero/full quota.
+- CoCo's shared control App Server can perform this read without loading a
+  workspace or starting a workspace executor. Existing workspace `--usage`
+  instead calls `account/usage/read` with a thread ID and represents cumulative
+  per-thread token/cost data; the two concepts must remain separate.
+- CoCo currently has no account-limit domain or daemon contract. Its generic
+  notification path cannot correlate `account/rateLimits/updated` to a
+  workspace and ignores it. Status currently exposes `-r/--resources` and
+  `-u/--usage`; `-q` is unassigned.
+
+Accepted first slice:
+
+- Add `coco status --quota` with `-q` as an explicit opt-in. Do not add quota to
+  default status: it is global, may require a backend read, and can be
+  unavailable independently from workspace state.
+- Render the account result exactly once, separate from repository/workspace
+  rows. Repository scope still selects workspace rows; it never filters or
+  duplicates quota. A compact terminal form should read like
+  `Quota  5h 84% left · weekly 61% left`, with reset times available in a
+  slightly expanded block when space permits.
+- `coco status --follow --quota` keeps the quota in the same redraw frame as
+  workspace state. Use an in-memory, short-lived snapshot and periodic refresh;
+  invalidate it on a rolling update, account change, or App Server restart.
+  Refetching after invalidation is safer for the first implementation than
+  partially merging sparse updates.
+- Extend status JSON with one optional top-level `accountQuota` object rather
+  than copying it into every workspace. Preserve all returned buckets and raw
+  typed values, an observation timestamp, availability, and
+  `ordinaryUsageAllowed`; omit account identifiers and backend marketing data.
+- The worker-facing port should expose a typed account-limit read backed by the
+  existing shared App Server. Keep the snapshot in memory only; it does not
+  belong in SQLite, repository records, or workspace history.
+- If quota-only access outside any repository proves useful, add a thin
+  `coco quota` view over the same daemon operation later. Avoid a separate
+  implementation or a `--weekly` flag, which would encode one current window
+  shape into the CLI.
+
+Deferred deliberately:
+
+- quota history, alerts, budget enforcement, guards, and signal emission;
+- reset-credit/Luna Reserve workflows, because CoCo does not implement Codex's
+  automatic fallback contract;
+- an MCP account-quota resource/tool until its permission and information-
+  exposure semantics are designed.
+
+Result:
+
+- `coco status --quota` and `-q` now add one account-wide quota line to either
+  targeted or collection status. The projection composes with follow, tree,
+  resources, workspace usage, and all-repository views without duplicating the
+  global value per workspace.
+- The daemon reads `account/rateLimits/read` through its shared control App
+  Server, preserves every typed limit bucket for JSON, and uses the canonical
+  Codex bucket for compact human output. It does not start or load a workspace
+  executor.
+- The coordinator caches results in memory for 15 seconds and invalidates them
+  on account/rate-limit changes or App Server disconnect. Thread token-usage
+  updates deliberately do not invalidate the independent account cache;
+  Codex supplies a dedicated rate-limit notification when relevant.
+  Unsupported authentication, unsupported servers, missing data, and transient
+  read failures remain bounded unavailable results instead of breaking status.
+- Status JSON schema 13 adds the optional top-level `accountQuota` object only
+  when requested. Native account identifiers, banners, credentials, and
+  reset-credit details are not exposed or persisted.
+- Canonical engineering/product knowledge and the public resource, CLI,
+  overview, and README guidance now describe the implemented boundary.
+
+Verification:
+
+- `cargo fmt --all -- --check` passes.
+- `cargo clippy --locked --all-targets --all-features -- -D warnings` passes.
+- `cargo test --locked` passes, including the real daemon/CLI process smoke
+  contract; environment-dependent live-Codex tests remain opt-in.
+- The static documentation build and public-boundary verifier pass for the
+  `/coco` GitHub Pages base path.
+- `CARGO_BUILD_JOBS=1 nix flake check . --no-write-lock-file --max-jobs 1`
+  passes on the current system. `git diff --check` is clean.

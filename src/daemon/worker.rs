@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
@@ -7,7 +7,8 @@ use serde_json::{Value, json};
 
 use crate::codex::{CodexClient, CodexError};
 use crate::coordinator::{
-    LocatedNativeThread, NativeThread, StartedThread, StartedTurn, WorkerError,
+    LocatedNativeThread, NativeAccountQuota, NativeAccountQuotaBucket, NativeAccountQuotaRead,
+    NativeAccountQuotaWindow, NativeThread, StartedThread, StartedTurn, WorkerError,
     WorkerExecutionEnvironment, WorkerRuntime,
 };
 use crate::domain::runtime::{
@@ -62,6 +63,43 @@ struct ThreadReadResponse {
 struct AccountUsageResponse {
     #[serde(default)]
     thread_usage: Option<ThreadUsageWire>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AccountRateLimitsResponseWire {
+    #[serde(default)]
+    ordinary_usage_allowed: Option<bool>,
+    rate_limits: RateLimitSnapshotWire,
+    #[serde(default)]
+    rate_limits_by_limit_id: Option<BTreeMap<String, RateLimitSnapshotWire>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RateLimitSnapshotWire {
+    #[serde(default)]
+    limit_id: Option<String>,
+    #[serde(default)]
+    limit_name: Option<String>,
+    #[serde(default)]
+    normal_model_slug: Option<String>,
+    #[serde(default)]
+    primary: Option<RateLimitWindowWire>,
+    #[serde(default)]
+    secondary: Option<RateLimitWindowWire>,
+    #[serde(default)]
+    rate_limit_reached_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RateLimitWindowWire {
+    used_percent: i32,
+    #[serde(default)]
+    window_duration_mins: Option<i64>,
+    #[serde(default)]
+    resets_at: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -178,6 +216,36 @@ impl WorkerRuntime for CodexWorker {
         Err(WorkerError::InvalidModelCatalog(format!(
             "the catalog exceeded {MAX_MODEL_PAGES} pages"
         )))
+    }
+
+    async fn read_account_quota(&self) -> Result<NativeAccountQuotaRead, WorkerError> {
+        let result = self
+            .client
+            .request(
+                "account/rateLimits/read",
+                json!({"excludeResetCreditDetails": true}),
+            )
+            .await;
+        let result = if result
+            .as_ref()
+            .is_err_and(is_legacy_account_quota_params_error)
+        {
+            self.client
+                .request("account/rateLimits/read", Value::Null)
+                .await
+        } else {
+            result
+        };
+        match result {
+            Ok(response) => decode_account_quota_response(response),
+            Err(error) if is_account_quota_auth_error(&error) => {
+                Ok(NativeAccountQuotaRead::UnsupportedAuthentication)
+            }
+            Err(CodexError::Rpc { code: -32601, .. }) => {
+                Ok(NativeAccountQuotaRead::UnsupportedServer)
+            }
+            Err(error) => Err(WorkerError::runtime(error)),
+        }
     }
 
     async fn read_thread(&self, thread_id: &str) -> Result<NativeThread, WorkerError> {
@@ -715,6 +783,82 @@ fn decode_thread_cost_response(
     }))
 }
 
+fn decode_account_quota_response(response: Value) -> Result<NativeAccountQuotaRead, WorkerError> {
+    let response = serde_json::from_value::<AccountRateLimitsResponseWire>(response)
+        .map_err(|error| WorkerError::InvalidAccountQuota(error.to_string()))?;
+    let mut snapshots = response
+        .rate_limits_by_limit_id
+        .filter(|snapshots| !snapshots.is_empty())
+        .map(|snapshots| snapshots.into_iter().collect::<Vec<_>>())
+        .unwrap_or_else(|| {
+            let limit_id = response
+                .rate_limits
+                .limit_id
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| "codex".to_owned());
+            vec![(limit_id, response.rate_limits)]
+        });
+    snapshots.sort_by(|(left, _), (right, _)| {
+        (left != "codex")
+            .cmp(&(right != "codex"))
+            .then_with(|| left.cmp(right))
+    });
+    let buckets = snapshots
+        .into_iter()
+        .map(|(map_limit_id, snapshot)| NativeAccountQuotaBucket {
+            limit_id: snapshot
+                .limit_id
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or(map_limit_id),
+            limit_name: snapshot.limit_name,
+            normal_model_slug: snapshot.normal_model_slug,
+            primary: snapshot.primary.map(native_account_quota_window),
+            secondary: snapshot.secondary.map(native_account_quota_window),
+            rate_limit_reached_type: snapshot.rate_limit_reached_type,
+        })
+        .collect::<Vec<_>>();
+    if response.ordinary_usage_allowed.is_none()
+        && buckets
+            .iter()
+            .all(|bucket| bucket.primary.is_none() && bucket.secondary.is_none())
+    {
+        return Ok(NativeAccountQuotaRead::NotReported);
+    }
+    Ok(NativeAccountQuotaRead::Available(NativeAccountQuota {
+        ordinary_usage_allowed: response.ordinary_usage_allowed,
+        buckets,
+    }))
+}
+
+fn native_account_quota_window(window: RateLimitWindowWire) -> NativeAccountQuotaWindow {
+    NativeAccountQuotaWindow {
+        used_percent: window.used_percent,
+        window_duration_mins: window.window_duration_mins,
+        resets_at: window.resets_at,
+    }
+}
+
+fn is_legacy_account_quota_params_error(error: &CodexError) -> bool {
+    matches!(
+        error,
+        CodexError::Rpc {
+            code: -32600 | -32602,
+            ..
+        }
+    )
+}
+
+fn is_account_quota_auth_error(error: &CodexError) -> bool {
+    matches!(
+        error,
+        CodexError::Rpc { message, .. }
+            if message
+                .to_ascii_lowercase()
+                .contains("authentication required to read rate limits")
+    )
+}
+
 fn decode_located_thread_response(response: Value) -> Result<LocatedNativeThread, WorkerError> {
     let response = serde_json::from_value::<ThreadReadResponse>(response)
         .map_err(|error| WorkerError::InvalidThreadRead(error.to_string()))?;
@@ -765,10 +909,10 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        decode_located_thread_response, decode_thread_cost_response, decode_thread_read_response,
-        with_environment,
+        decode_account_quota_response, decode_located_thread_response, decode_thread_cost_response,
+        decode_thread_read_response, with_environment,
     };
-    use crate::coordinator::WorkerExecutionEnvironment;
+    use crate::coordinator::{NativeAccountQuotaRead, WorkerExecutionEnvironment};
     use crate::domain::CodexThreadStatus;
 
     #[test]
@@ -954,5 +1098,86 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("thread ID mismatch"));
+    }
+
+    #[test]
+    fn decodes_all_account_quota_buckets_with_codex_first() {
+        let quota = decode_account_quota_response(json!({
+            "ordinaryUsageAllowed": true,
+            "rateLimits": {
+                "limitId": "legacy",
+                "primary": {"usedPercent": 99}
+            },
+            "rateLimitsByLimitId": {
+                "other": {
+                    "limitName": "gpt-other",
+                    "primary": {
+                        "usedPercent": 25,
+                        "windowDurationMins": 1440,
+                        "resetsAt": 12
+                    }
+                },
+                "codex": {
+                    "limitId": "codex",
+                    "primary": {
+                        "usedPercent": 16,
+                        "windowDurationMins": 300,
+                        "resetsAt": 10
+                    },
+                    "secondary": {
+                        "usedPercent": 39,
+                        "windowDurationMins": 10080,
+                        "resetsAt": 11
+                    },
+                    "rateLimitReachedType": "weekly"
+                }
+            }
+        }))
+        .unwrap();
+        let NativeAccountQuotaRead::Available(quota) = quota else {
+            panic!("account quota was not available");
+        };
+        assert_eq!(quota.ordinary_usage_allowed, Some(true));
+        assert_eq!(quota.buckets.len(), 2);
+        assert_eq!(quota.buckets[0].limit_id, "codex");
+        assert_eq!(quota.buckets[0].primary.as_ref().unwrap().used_percent, 16);
+        assert_eq!(
+            quota.buckets[0]
+                .secondary
+                .as_ref()
+                .unwrap()
+                .window_duration_mins,
+            Some(10_080)
+        );
+        assert_eq!(quota.buckets[1].limit_id, "other");
+    }
+
+    #[test]
+    fn falls_back_to_the_legacy_account_quota_bucket() {
+        let quota = decode_account_quota_response(json!({
+            "ordinaryUsageAllowed": null,
+            "rateLimits": {
+                "primary": {"usedPercent": 50, "windowDurationMins": 300}
+            },
+            "rateLimitsByLimitId": null
+        }))
+        .unwrap();
+        let NativeAccountQuotaRead::Available(quota) = quota else {
+            panic!("legacy account quota was not available");
+        };
+        assert_eq!(quota.buckets[0].limit_id, "codex");
+        assert_eq!(quota.buckets[0].primary.as_ref().unwrap().used_percent, 50);
+    }
+
+    #[test]
+    fn empty_account_quota_is_explicitly_not_reported() {
+        assert_eq!(
+            decode_account_quota_response(json!({
+                "ordinaryUsageAllowed": null,
+                "rateLimits": {}
+            }))
+            .unwrap(),
+            NativeAccountQuotaRead::NotReported
+        );
     }
 }

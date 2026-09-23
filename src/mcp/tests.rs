@@ -56,6 +56,11 @@ fn fake_response(method: DaemonMethod) -> Value {
         DaemonMethod::HookDeliveryList => json!([]),
         DaemonMethod::Health => json!({"status": "ok"}),
         DaemonMethod::ModelList => json!([]),
+        DaemonMethod::AccountQuotaGet => json!({
+            "status": "unavailable",
+            "reason": "notReported",
+            "checkedAtMs": 1,
+        }),
         DaemonMethod::RepositoryRegister | DaemonMethod::RepositoryRemove => json!({
             "id": "repo-test",
             "rootPath": "/repo",

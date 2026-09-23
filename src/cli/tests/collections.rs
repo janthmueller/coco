@@ -102,9 +102,11 @@ fn help_assigns_all_repos_to_overviews_and_global_to_single_targets() {
     assert!(status_help.contains("--all-repos"));
     assert!(status_help.contains("--global"));
     assert!(status_help.contains("--usage"));
+    assert!(status_help.contains("-q, --quota"));
     assert!(status_help.contains("-t, --tree"));
     assert!(status_help.contains("--sort <ORDER>"));
     assert!(Cli::command().find_subcommand("usage").is_none());
+    assert!(Cli::command().find_subcommand("quota").is_none());
 
     for name in ["send", "jump", "diff", "close", "reopen", "delete"] {
         let mut command = Cli::command();
@@ -191,7 +193,10 @@ fn status_supports_collection_overviews_and_explicit_workspace_details() {
         vec!["coco", "status", "-r"],
         vec!["coco", "status", "--usage"],
         vec!["coco", "status", "-u"],
+        vec!["coco", "status", "--quota"],
+        vec!["coco", "status", "-q"],
         vec!["coco", "status", "-fu"],
+        vec!["coco", "status", "-fq"],
         vec!["coco", "status", "-fr"],
         vec!["coco", "status", "--tree"],
         vec!["coco", "status", "-t"],
@@ -210,6 +215,7 @@ fn status_supports_collection_overviews_and_explicit_workspace_details() {
         vec!["coco", "status", "auth", "--follow"],
         vec!["coco", "status", "auth", "-fr"],
         vec!["coco", "status", "auth", "-fru"],
+        vec!["coco", "status", "auth", "-fruq"],
         vec!["coco", "status", "auth", "-g"],
     ] {
         assert!(
@@ -218,10 +224,10 @@ fn status_supports_collection_overviews_and_explicit_workspace_details() {
         );
     }
 
-    let parsed = Cli::try_parse_from(["coco", "status", "auth", "-fru"]).unwrap();
+    let parsed = Cli::try_parse_from(["coco", "status", "auth", "-fruq"]).unwrap();
     assert!(matches!(
         parsed.command,
-        Command::Status(args) if args.follow && args.resources && args.usage
+        Command::Status(args) if args.follow && args.resources && args.usage && args.quota
     ));
 
     let parsed = Cli::try_parse_from(["coco", "status", "--sort", "state"]).unwrap();

@@ -409,6 +409,9 @@ pub(super) struct StatusArgs {
     /// Include cumulative Codex token usage and available cost estimates.
     #[arg(long, short = 'u')]
     pub(super) usage: bool,
+    /// Include remaining limits for the active Codex account.
+    #[arg(long, short = 'q')]
+    pub(super) quota: bool,
     /// Show slash-separated workspace names as a hierarchy.
     #[arg(
         long,

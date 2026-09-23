@@ -28,6 +28,7 @@ impl Coordinator {
         self.clear_jump_leases();
         self.clear_file_change_previews();
         self.clear_workspace_activities();
+        self.invalidate_account_quota();
         self.fail_pending_compactions();
         self.clear_runtime_turns();
         let orphaned = self.orphan_open_runtime_decisions();
@@ -40,6 +41,10 @@ impl Coordinator {
     }
 
     fn record_codex_notification(&self, method: &str, params: Value) -> Result<(), StoreError> {
+        if matches!(method, "account/rateLimits/updated" | "account/updated") {
+            self.invalidate_account_quota();
+            return Ok(());
+        }
         if method == "serverRequest/resolved" {
             let Some(thread_id) = params.get("threadId").and_then(Value::as_str) else {
                 warn!("ignoring serverRequest/resolved without a thread id");

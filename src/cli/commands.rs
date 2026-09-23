@@ -33,8 +33,8 @@ use super::output::{
 };
 use super::prompt::{Choice, Interaction, TerminalInteraction};
 use super::status::{
-    follow_status, follow_status_collection, sort_workspace_collection, workspace_usage,
-    workspace_usage_collection,
+    StatusProjection, account_quota, follow_status, follow_status_collection,
+    sort_workspace_collection, workspace_usage, workspace_usage_collection,
 };
 
 #[cfg(test)]
@@ -1071,6 +1071,11 @@ async fn run_status(
     global: bool,
 ) -> Result<()> {
     let sort = args.sort.unwrap_or(StatusSort::Name);
+    let projection = StatusProjection {
+        resources: args.resources,
+        usage: args.usage,
+        quota: args.quota,
+    };
     let repository_scope = RepositoryScope::repository(repository_path);
     if let Some(workspace) = args.workspace {
         if all_repos {
@@ -1079,16 +1084,7 @@ async fn run_status(
             );
         }
         let scope = scope_for_reference(repository_scope, &workspace, global);
-        return show_status(
-            paths,
-            scope,
-            workspace,
-            args.follow,
-            args.resources,
-            args.usage,
-            args.json,
-        )
-        .await;
+        return show_status(paths, scope, workspace, args.follow, projection, args.json).await;
     }
     if global {
         bail!(
@@ -1100,31 +1096,20 @@ async fn run_status(
         follow_status_collection(
             &RpcClient::new(paths.socket_path.clone()),
             scope,
-            args.resources,
-            args.usage,
+            projection,
             args.tree,
             sort,
         )
         .await
     } else {
-        show_status_collection(
-            paths,
-            scope,
-            args.resources,
-            args.usage,
-            args.tree,
-            sort,
-            args.json,
-        )
-        .await
+        show_status_collection(paths, scope, projection, args.tree, sort, args.json).await
     }
 }
 
 async fn show_status_collection(
     paths: &CocoPaths,
     scope: RepositoryScope,
-    resources: bool,
-    usage: bool,
+    projection: StatusProjection,
     tree: bool,
     sort: StatusSort,
     json_output: bool,
@@ -1135,20 +1120,26 @@ async fn show_status_collection(
         .request(WorkspaceListParams {
             scope: scope.clone(),
             phases: None,
-            include_resources: resources || json_output,
+            include_resources: projection.resources || json_output,
             include_activity: true,
         })
         .await?;
     sort_workspace_collection(&mut result, sort);
-    let usage = workspace_usage_collection(&client, scope, usage).await?;
+    let usage = workspace_usage_collection(&client, scope, projection.usage).await?;
+    let quota = account_quota(&client, projection.quota).await?;
     if json_output {
-        print_json(status_collection_json(&result, usage.as_deref())?)
+        print_json(status_collection_json(
+            &result,
+            usage.as_deref(),
+            quota.as_ref(),
+        )?)
     } else {
         print_workspace_status_list(
             &result,
             include_repository,
-            resources,
+            projection.resources,
             usage.as_deref(),
+            quota.as_ref(),
             tree,
         );
         Ok(())
@@ -1387,26 +1378,31 @@ async fn show_status(
     scope: RepositoryScope,
     workspace: String,
     follow: bool,
-    resources: bool,
-    usage: bool,
+    projection: StatusProjection,
     json_output: bool,
 ) -> Result<()> {
     let client = RpcClient::new(paths.socket_path.clone());
     if follow {
-        return follow_status(&client, scope, &workspace, resources, usage).await;
+        return follow_status(&client, scope, &workspace, projection).await;
     }
     let result = client
         .request(WorkspaceGetParams {
             scope,
             workspace,
-            include_resources: resources || json_output,
+            include_resources: projection.resources || json_output,
         })
         .await?;
-    let usage = workspace_usage(&client, &result, usage).await?;
+    let usage = workspace_usage(&client, &result, projection.usage).await?;
+    let quota = account_quota(&client, projection.quota).await?;
     if json_output {
-        print_json(status_json(&result, usage.as_ref())?)
+        print_json(status_json(&result, usage.as_ref(), quota.as_ref())?)
     } else {
-        print_status(&result, resources, usage.as_ref());
+        print_status(
+            &result,
+            projection.resources,
+            usage.as_ref(),
+            quota.as_ref(),
+        );
         Ok(())
     }
 }

@@ -8,6 +8,17 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-09-23
+
+- **Account-wide Codex quota status**: Added the opt-in
+  `coco status --quota`/`-q` projection backed by native
+  `account/rateLimits/read`. The global result composes with targeted and
+  collection status, follow, tree, resources, usage, and schema-version-13
+  JSON without loading a thread or starting a workspace executor. CoCo keeps
+  only a short-lived in-memory snapshot, invalidates sparse native updates for
+  a complete refetch, and reports unsupported authentication or server versions
+  as unavailable rather than failing workspace status.
+
 ## 2026-09-21
 
 - **Multi-client product proof completed**: Closed the remaining behavioral

@@ -164,9 +164,9 @@ In the forms below, `<WORKSPACE>` may be a repository-local name or full ID.
 | ------------------------------------------------------------------- | ----------------------------------------------- |
 | `coco list [--json]` (`ls`)                                         | List workspaces in the selected scope           |
 | `coco list --closed [--json]`                                       | List closed workspaces instead                  |
-| `coco status [-a] [-t \| --sort name\|state] [-r] [-u] [--json]`   | Show an ordered workspace overview              |
-| `coco status [-a] [-t \| --sort name\|state] [-r] [-u] -f`         | Follow that collection view                     |
-| `coco status WORKSPACE [-g] [-r] [-u] [--json] [--follow]`          | Show or follow one workspace                     |
+| `coco status [-a] [-t \| --sort name\|state] [-r] [-u] [-q] [--json]` | Show an ordered workspace overview           |
+| `coco status [-a] [-t \| --sort name\|state] [-r] [-u] [-q] -f`       | Follow that collection view                  |
+| `coco status WORKSPACE [-g] [-r] [-u] [-q] [--json] [--follow]`        | Show or follow one workspace                  |
 | `coco limits show [WORKSPACE] [-g] [--json]`                        | Show desired and currently applied limits       |
 | `coco limits set [WORKSPACE] [-g] [OPTIONS]`                        | Change selected workspace limits                |
 | `coco limits reset [WORKSPACE] [-g] [--json]`                       | Remove all configured workspace limits          |
@@ -203,12 +203,17 @@ Add `--usage` (`-u`) for cumulative tokens, current context-window use, and an
 available cost estimate. It composes with the other short flags: `-fu` follows
 state and model usage, while `-fru` also includes local runtime resources.
 
+Add `--quota` (`-q`) for the active Codex account's remaining limits. The
+result is global, so it appears once below either a targeted or collection
+view. `-fq` follows workspace state and quota together; combine it with `-u`
+when you also need per-workspace token usage.
+
 Collection output is naturally sorted by repository and workspace name, so
 names such as `frontend/w2` stay together and appear before `frontend/w10`.
 Add `--tree` (`-t`) to show slash-separated names as a hierarchy. With `-a`,
 each repository gets a section headed by its path. Only shared name prefixes
 are unfolded; unique paths stay on one line. `-t` also combines with `-f`,
-`-r`, and `-u`. Tree output is a human-readable view and cannot be combined
+`-r`, `-u`, and `-q`. Tree output is a human-readable view and cannot be combined
 with `--json` or a single workspace.
 
 Use `--sort state` for an attention-first flat overview. Workspaces waiting
@@ -253,6 +258,22 @@ does not start a prepared workspace or load an unloaded conversation. Add
 `--follow`/`-f` to keep the view open until Ctrl+C. Terminal output updates in
 place; redirected output appends only changes. Follow mode cannot be combined
 with `--json`.
+
+## Account quota
+
+```text
+coco [REPOSITORY_PATH] status [WORKSPACE] [-g] --quota [--json] [--follow]
+coco status --all-repos --quota [--json] [--follow]
+```
+
+`status --quota` shows remaining account-wide windows such as `5h` and
+`weekly`. Repository scope still controls the workspaces in the view; it does
+not filter or repeat the quota. The short form is `-q`, and it combines with
+the other status flags, including `-fq`, `-fqu`, and `-aftruq`.
+
+If the current Codex login or version cannot provide limits, CoCo prints an
+unavailable quota while preserving the rest of the status view. Reading quota
+does not start or load a workspace.
 
 ## Resource limits
 
@@ -380,11 +401,13 @@ coco status feat/first --json
 coco status --usage --json
 coco status --all-repos --usage --json
 coco status feat/first --usage --json
+coco status --quota --json
+coco status --all-repos --quota --json
 coco limits show feat/first --json
 ```
 
 These commands emit one JSON value to standard output. Human-oriented follow
-mode is intentionally excluded. The current top-level schema version is `12`.
+mode is intentionally excluded. The current top-level schema version is `13`.
 Status JSON may include `runtimeResources`; its optional measurements are a
 current sample and are not persisted. During an active turn, it may also
 include `activity` with the displayed label, source, thread, turn, item,
@@ -395,6 +418,10 @@ restart.
 With `--usage`, status JSON adds a nested `usage` object containing the complete
 native token breakdown, its observation and freshness fields, and either the
 cost estimate reported by Codex or an explicit unavailable reason.
+
+With `--quota`, status JSON adds one top-level `accountQuota` object containing
+all returned limit buckets, windows, reset timestamps, and availability. It is
+never copied into individual workspace rows.
 
 Human output uses color only when its output stream is a terminal and honors
 the standard `NO_COLOR` environment variable. Redirected output and JSON never

@@ -7,14 +7,16 @@ use crate::domain::runtime::{
 };
 use crate::domain::{Decision, DecisionKind, DecisionState, Repository, Workspace, WorkspacePhase};
 use crate::protocol::{
-    RepositorySummary, WorkspaceCloseResult, WorkspaceDeleteResult, WorkspaceDiffResult,
-    WorkspaceLimitsResult, WorkspaceListItem, WorkspaceReopenResult, WorkspaceResult,
-    WorkspaceRetirementPlan, WorkspaceStatusResult, WorkspaceThreadDisposition, WorkspaceUsageItem,
+    AccountQuotaResult, RepositorySummary, WorkspaceCloseResult, WorkspaceDeleteResult,
+    WorkspaceDiffResult, WorkspaceLimitsResult, WorkspaceListItem, WorkspaceReopenResult,
+    WorkspaceResult, WorkspaceRetirementPlan, WorkspaceStatusResult, WorkspaceThreadDisposition,
+    WorkspaceUsageItem,
 };
 
 use super::style::{Palette, Tone};
 
 mod collections;
+mod quota;
 mod usage;
 
 pub(super) use collections::{
@@ -22,7 +24,7 @@ pub(super) use collections::{
     render_workspace_status_list_for_stdout,
 };
 
-const PUBLIC_SCHEMA_VERSION: u64 = 12;
+const PUBLIC_SCHEMA_VERSION: u64 = 13;
 
 pub(super) fn phase_label(phase: &str) -> &'static str {
     match phase {
@@ -69,15 +71,18 @@ pub(super) fn versioned_array(key: &str, value: Value) -> Value {
 pub(super) fn status_json(
     result: &WorkspaceStatusResult,
     usage: Option<&WorkspaceUsageItem>,
+    quota: Option<&AccountQuotaResult>,
 ) -> Result<Value> {
     let mut value = serde_json::to_value(result)?;
     insert_usage_json(&mut value, usage)?;
+    insert_quota_json(&mut value, quota)?;
     Ok(versioned(value))
 }
 
 pub(super) fn status_collection_json(
     workspaces: &[WorkspaceListItem],
     usage: Option<&[WorkspaceUsageItem]>,
+    quota: Option<&AccountQuotaResult>,
 ) -> Result<Value> {
     let mut values = Vec::with_capacity(workspaces.len());
     for workspace in workspaces {
@@ -90,7 +95,9 @@ pub(super) fn status_collection_json(
         insert_usage_json(&mut value, workspace_usage)?;
         values.push(value);
     }
-    Ok(versioned_array("workspaces", Value::Array(values)))
+    let mut value = versioned_array("workspaces", Value::Array(values));
+    insert_quota_json(&mut value, quota)?;
+    Ok(value)
 }
 
 fn insert_usage_json(value: &mut Value, usage: Option<&WorkspaceUsageItem>) -> Result<()> {
@@ -107,6 +114,17 @@ fn insert_usage_json(value: &mut Value, usage: Option<&WorkspaceUsageItem>) -> R
     projection.remove("workspace");
     projection.remove("repository");
     object.insert("usage".to_owned(), Value::Object(projection.clone()));
+    Ok(())
+}
+
+fn insert_quota_json(value: &mut Value, quota: Option<&AccountQuotaResult>) -> Result<()> {
+    let Some(quota) = quota else {
+        return Ok(());
+    };
+    let object = value
+        .as_object_mut()
+        .context("status JSON projection was not an object")?;
+    object.insert("accountQuota".to_owned(), serde_json::to_value(quota)?);
     Ok(())
 }
 
@@ -433,10 +451,11 @@ pub(super) fn print_status(
     result: &WorkspaceStatusResult,
     include_resources: bool,
     usage: Option<&WorkspaceUsageItem>,
+    quota: Option<&AccountQuotaResult>,
 ) {
     print!(
         "{}",
-        render_status_for_stdout(result, include_resources, usage)
+        render_status_for_stdout(result, include_resources, usage, quota)
     );
 }
 
@@ -444,8 +463,16 @@ pub(super) fn render_status_for_stdout(
     result: &WorkspaceStatusResult,
     include_resources: bool,
     usage: Option<&WorkspaceUsageItem>,
+    quota: Option<&AccountQuotaResult>,
 ) -> String {
-    render_status(result, None, include_resources, usage, Palette::stdout())
+    render_status(
+        result,
+        None,
+        include_resources,
+        usage,
+        quota,
+        Palette::stdout(),
+    )
 }
 
 pub(super) fn render_follow_status(
@@ -453,12 +480,14 @@ pub(super) fn render_follow_status(
     spinner: &str,
     include_resources: bool,
     usage: Option<&WorkspaceUsageItem>,
+    quota: Option<&AccountQuotaResult>,
 ) -> String {
     render_status(
         result,
         Some(spinner),
         include_resources,
         usage,
+        quota,
         Palette::stdout(),
     )
 }
@@ -543,6 +572,7 @@ fn render_status(
     marker_override: Option<&str>,
     include_resources: bool,
     usage: Option<&WorkspaceUsageItem>,
+    quota: Option<&AccountQuotaResult>,
     palette: Palette,
 ) -> String {
     let workspace = &result.workspace;
@@ -582,6 +612,10 @@ fn render_status(
             palette.paint(Tone::RedBold, "✗"),
             palette.paint(Tone::Red, "Use coco jump to respond."),
         ));
+    }
+    if let Some(quota) = quota {
+        output.push('\n');
+        output.push_str(&quota::render_account_quota(quota, palette));
     }
     output
 }
@@ -866,7 +900,7 @@ mod tests {
             next_sequence: 0,
         };
 
-        let rendered = render_status(&result, None, false, None, Palette::plain());
+        let rendered = render_status(&result, None, false, None, None, Palette::plain());
         assert!(rendered.starts_with("● feat/login  Working · Checking tests\n"));
     }
 

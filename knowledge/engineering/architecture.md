@@ -104,6 +104,10 @@ status: draft
   active-send output correlation and concurrency guard are generation-local.
   The operation ledger retains only dispatch/idempotency facts that Codex
   cannot reconstruct; no Codex conversation text is persisted by CoCo.
+- Account quota is a global native projection read through the shared control
+  App Server. It is cached only briefly in memory, appears once beside scoped
+  workspace status when requested, and never becomes repository or workspace
+  state. See [Account-wide Codex quota projection](account-quota.md).
 - The native-first overhaul preserves the current command names, repository
   scoping, versioned JSON meanings, stable error codes, prepared-workspace
   behavior, `jump` detach semantics, and idempotency until a separately

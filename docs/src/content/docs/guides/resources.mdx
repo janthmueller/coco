@@ -1,6 +1,6 @@
 ---
 title: Monitor usage and set limits
-description: Watch CPU, memory, and model usage, then set limits for a workspace.
+description: Watch CPU, memory, model usage, and account quota, then set workspace limits.
 ---
 
 See what your agents consume as you run them in parallel. On supported Linux
@@ -47,6 +47,28 @@ across repository and workspace groups.
 A dash means the value is unavailable. A cost dash does not mean the work was
 free. After a coordinator restart, saved token values are marked
 `last seen` until Codex reports an update.
+
+## Check your Codex quota
+
+```bash
+coco status -q
+coco status -afq
+```
+
+`-q` adds the remaining limits for your active Codex account, such as the
+five-hour and weekly windows. The quota applies across your conversations, so
+CoCo prints it once rather than beside every workspace. `-f` keeps it updated,
+and `-a` can show all workspaces in the same view.
+
+Account quota and workspace token usage answer different questions. Combine
+`-q` with `-u` when you want both:
+
+```bash
+coco status fix/login -fqu
+```
+
+If the current Codex login cannot provide account limits, status remains
+available and shows the quota as unavailable.
 
 ## Set workspace limits
 

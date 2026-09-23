@@ -70,6 +70,9 @@ token usage.
 | Codex OpenTelemetry | Per-turn token metrics, response span attributes, and route-dependent cost telemetry | Useful for external dashboards and fleet observability | Requires an exporter/collector and creates a second asynchronous path; attribution and availability vary by metric/version | External integration, not CoCo state authority |
 | `account/usage/read` without a thread | Account summary and daily token activity | Useful account overview | Cannot attribute usage to a CoCo workspace | Out of scope for workspace accounting |
 
+Account-wide remaining rate-limit windows are a separate native contract and
+status projection. See [Account-wide Codex quota projection](account-quota.md).
+
 The installed schema gives both `total` and `last` these counters:
 
 - `inputTokens`;

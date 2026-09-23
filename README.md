@@ -11,7 +11,7 @@ and jump back into any conversation.
 - **Move quickly.** Find work across repositories and return to it with
   `coco jump`.
 - **Stay informed.** Follow agent activity, requests for input, token usage,
-  and available cost estimates.
+  remaining account quota, and available cost estimates.
 - **Connect your tools.** Agents publish structured signals; hooks run your
   programs in response.
 - **Stay in control.** Add guards before workspace close or deletion, and
@@ -63,7 +63,7 @@ update another tool. Add a
 [guard](https://janthmueller.github.io/coco/guides/guards/) when closing or
 deleting work should require your own checks.
 
-Watch [resource and token usage](https://janthmueller.github.io/coco/guides/resources/)
+Watch [resource use, tokens, and account quota](https://janthmueller.github.io/coco/guides/resources/)
 as you run more agents, and set workspace limits to control their use of your
 machine.
 

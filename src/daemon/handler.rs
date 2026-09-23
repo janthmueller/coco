@@ -10,14 +10,15 @@ use crate::codex::CodexError;
 use crate::coordinator::{Coordinator, CoordinatorError, WorkerError};
 use crate::daemon::execution::{ContainmentError, WorkspaceExecutionError};
 use crate::protocol::{
-    AuditRecordParams, DaemonMethod, DecisionGetParams, DecisionRespondParams, EventListParams,
-    HealthParams, HealthResult, HookDeliveryListParams, HookListParams, HookReloadParams,
-    ModelListParams, RepositoryRemoveParams, RepositoryResolveParams, TurnResultParams,
-    TurnStartParams, WorkspaceAttachAdoptParams, WorkspaceAttachParams,
-    WorkspaceAttachReleaseParams, WorkspaceAttachRenewParams, WorkspaceCloseParams,
-    WorkspaceCreateParams, WorkspaceDeleteParams, WorkspaceDiffParams, WorkspaceGetParams,
-    WorkspaceLimitsGetParams, WorkspaceLimitsResetParams, WorkspaceLimitsSetParams,
-    WorkspaceListParams, WorkspaceReopenParams, WorkspaceUsageGetParams, WorkspaceUsageListParams,
+    AccountQuotaGetParams, AuditRecordParams, DaemonMethod, DecisionGetParams,
+    DecisionRespondParams, EventListParams, HealthParams, HealthResult, HookDeliveryListParams,
+    HookListParams, HookReloadParams, ModelListParams, RepositoryRemoveParams,
+    RepositoryResolveParams, TurnResultParams, TurnStartParams, WorkspaceAttachAdoptParams,
+    WorkspaceAttachParams, WorkspaceAttachReleaseParams, WorkspaceAttachRenewParams,
+    WorkspaceCloseParams, WorkspaceCreateParams, WorkspaceDeleteParams, WorkspaceDiffParams,
+    WorkspaceGetParams, WorkspaceLimitsGetParams, WorkspaceLimitsResetParams,
+    WorkspaceLimitsSetParams, WorkspaceListParams, WorkspaceReopenParams, WorkspaceUsageGetParams,
+    WorkspaceUsageListParams,
 };
 use crate::rpc::{RpcErrorPayload, RpcHandler};
 
@@ -41,16 +42,9 @@ impl RpcHandler for DaemonHandler {
             )
         })?;
         match method {
-            DaemonMethod::Health => {
-                decode::<HealthParams>(params)?;
-                encode(HealthResult {
-                    status: "ok".to_owned(),
-                })
-            }
-            DaemonMethod::ModelList => {
-                decode::<ModelListParams>(params)?;
-                execute(self.coordinator.list_models().await)
-            }
+            method @ (DaemonMethod::Health
+            | DaemonMethod::ModelList
+            | DaemonMethod::AccountQuotaGet) => self.handle_global_read(method, params).await,
             DaemonMethod::RepositoryRegister => {
                 execute(self.coordinator.register_repository(decode(params)?).await)
             }
@@ -138,6 +132,31 @@ impl RpcHandler for DaemonHandler {
 }
 
 impl DaemonHandler {
+    async fn handle_global_read(
+        &self,
+        method: DaemonMethod,
+        params: Value,
+    ) -> Result<Value, RpcErrorPayload> {
+        match method {
+            DaemonMethod::Health => {
+                decode::<HealthParams>(params)?;
+                encode(HealthResult {
+                    status: "ok".to_owned(),
+                })
+            }
+            DaemonMethod::ModelList => {
+                decode::<ModelListParams>(params)?;
+                execute(self.coordinator.list_models().await)
+            }
+            DaemonMethod::AccountQuotaGet => execute(
+                self.coordinator
+                    .get_account_quota(decode::<AccountQuotaGetParams>(params)?)
+                    .await,
+            ),
+            _ => unreachable!("non-global method routed to global reads"),
+        }
+    }
+
     async fn handle_workspace(
         &self,
         method: DaemonMethod,

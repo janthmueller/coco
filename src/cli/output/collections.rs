@@ -4,9 +4,12 @@ use std::io::{self, IsTerminal};
 use crossterm::terminal;
 
 use crate::domain::CodexModel;
-use crate::protocol::{RepositorySummary, WorkspaceListItem, WorkspaceUsageItem};
+use crate::protocol::{
+    AccountQuotaResult, RepositorySummary, WorkspaceListItem, WorkspaceUsageItem,
+};
 
 use super::super::style::{Palette, Tone};
+use super::quota::render_account_quota;
 use super::usage::usage_cells;
 use super::{phase_presentation, safe_line};
 
@@ -43,6 +46,7 @@ pub(in crate::cli) fn print_workspace_status_list(
     include_repository: bool,
     include_resources: bool,
     usage: Option<&[WorkspaceUsageItem]>,
+    quota: Option<&AccountQuotaResult>,
     tree: bool,
 ) {
     print!(
@@ -52,6 +56,7 @@ pub(in crate::cli) fn print_workspace_status_list(
             include_repository,
             include_resources,
             usage,
+            quota,
             tree,
         )
     );
@@ -62,11 +67,12 @@ pub(in crate::cli) fn render_workspace_status_list_for_stdout(
     include_repository: bool,
     include_resources: bool,
     usage: Option<&[WorkspaceUsageItem]>,
+    quota: Option<&AccountQuotaResult>,
     tree: bool,
 ) -> String {
     let width = stdout_width();
     let palette = Palette::stdout();
-    if tree {
+    let mut output = if tree {
         render_workspace_tree(
             workspaces,
             include_repository,
@@ -84,7 +90,12 @@ pub(in crate::cli) fn render_workspace_status_list_for_stdout(
             width,
             palette,
         )
+    };
+    if let Some(quota) = quota {
+        output.push('\n');
+        output.push_str(&render_account_quota(quota, palette));
     }
+    output
 }
 
 pub(in crate::cli) fn print_repository_list(repositories: &[RepositorySummary]) {
