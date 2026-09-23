@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.1.0-alpha.8 (2026-09-23)
+
+### Features
+
+- **status**: Show account quota
+  ([`d7a1a0b`](https://github.com/janthmueller/coco/commit/d7a1a0b1c682455a190de2da4fd22cea69a3067d))
+
+
 ## v0.1.0-alpha.7 (2026-09-22)
 
 ### Bug Fixes
