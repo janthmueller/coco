@@ -206,6 +206,7 @@ src/
     tests.rs
 
   mcp.rs                         # keep until production code grows materially
+  capability.rs                  # neutral local capability-token construction
   profile.rs
   paths.rs
   daemon.rs

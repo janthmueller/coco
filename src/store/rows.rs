@@ -120,6 +120,8 @@ fn map_thread_status(row: &Row<'_>) -> rusqlite::Result<Option<ThreadRuntimeSnap
         })?;
     Ok(Some(ThreadRuntimeSnapshot {
         status,
+        model: None,
+        reasoning_effort: None,
         runtime_generation: row.get(9)?,
         observed_at_ms: row.get(10)?,
         is_fresh: row.get(11)?,

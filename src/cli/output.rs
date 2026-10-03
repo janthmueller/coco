@@ -24,7 +24,7 @@ pub(super) use collections::{
     render_workspace_status_list_for_stdout,
 };
 
-const PUBLIC_SCHEMA_VERSION: u64 = 13;
+const PUBLIC_SCHEMA_VERSION: u64 = 14;
 
 pub(super) fn phase_label(phase: &str) -> &'static str {
     match phase {
@@ -582,6 +582,13 @@ fn render_status(
         state.push_str(&palette.paint(Tone::Primary, safe_line(&activity.label)));
     }
     let mut output = format!("{state}\n");
+    if let Some(model) = workspace_model_label(workspace) {
+        output.push_str("  ");
+        output.push_str(&palette.paint(Tone::Dim, "Model"));
+        output.push(' ');
+        output.push_str(&palette.paint(Tone::Primary, safe_line(&model)));
+        output.push('\n');
+    }
     if let Some(detail) = workspace_location(workspace) {
         output.push_str("  ");
         output.push_str(&palette.paint(Tone::Dim, detail));
@@ -618,6 +625,23 @@ fn render_status(
         output.push_str(&quota::render_account_quota(quota, palette));
     }
     output
+}
+
+pub(super) fn workspace_model_label(workspace: &Workspace) -> Option<String> {
+    let runtime = workspace.thread_runtime.as_ref()?;
+    let model = runtime.model.as_deref()?.trim();
+    if model.is_empty() {
+        return None;
+    }
+    let effort = runtime
+        .reasoning_effort
+        .as_deref()
+        .map(str::trim)
+        .filter(|effort| !effort.is_empty());
+    Some(match effort {
+        Some(effort) => format!("{model} · {effort}"),
+        None => model.to_owned(),
+    })
 }
 
 fn render_runtime_resources(resources: &WorkspaceRuntimeResources, palette: Palette) -> String {
@@ -681,7 +705,7 @@ fn render_decision_hints(decisions: &[Decision], palette: Palette) -> String {
                 output.push_str(&format!(
                     "  {} {} {} {}\n",
                     palette.paint(Tone::CyanBold, "→"),
-                    decision_kind_label(decision.kind),
+                    decision_kind_label(decision),
                     palette.paint(Tone::Dim, "·"),
                     palette.paint(Tone::Cyan, format!("coco decide {}", decision.id)),
                 ));
@@ -729,8 +753,14 @@ pub(super) fn render_workspace_state_line(
     output
 }
 
-fn decision_kind_label(kind: DecisionKind) -> &'static str {
-    match kind {
+fn decision_kind_label(decision: &Decision) -> &'static str {
+    if matches!(
+        &decision.prompt,
+        crate::domain::DecisionPrompt::Approval(prompt) if prompt.terminal_input.is_some()
+    ) {
+        return "Terminal input approval";
+    }
+    match decision.kind {
         DecisionKind::CommandApproval => "Command approval",
         DecisionKind::FileChangeApproval => "File-change approval",
         DecisionKind::UserInput => "Question from Codex",
@@ -836,6 +866,27 @@ mod tests {
     }
 
     #[test]
+    fn terminal_input_approvals_have_a_distinct_status_label() {
+        let decision: Decision = serde_json::from_value(json!({
+            "id": "decision-1",
+            "workspaceId": "workspace-1",
+            "kind": "command_approval",
+            "state": "pending",
+            "prompt": {
+                "type": "approval",
+                "title": "Codex wants to send input to a terminal",
+                "terminalInput": "yes\n",
+                "changes": [],
+                "options": []
+            },
+            "receivedAtMs": 1
+        }))
+        .unwrap();
+
+        assert_eq!(decision_kind_label(&decision), "Terminal input approval");
+    }
+
+    #[test]
     fn omitted_source_changes_warning_is_concise_and_safe() {
         assert_eq!(
             render_source_changes_omitted_warning("/repo\n\u{1b}[31m", Palette::plain()),
@@ -862,7 +913,16 @@ mod tests {
                 },
                 lifecycle: WorkspaceLifecycle::Ready,
                 availability: WorkspaceAvailability::Open,
-                thread_runtime: None,
+                thread_runtime: Some(crate::domain::ThreadRuntimeSnapshot {
+                    status: crate::domain::CodexThreadStatus::Active {
+                        active_flags: Vec::new(),
+                    },
+                    model: Some("gpt-5.6-sol".to_owned()),
+                    reasoning_effort: Some("max".to_owned()),
+                    runtime_generation: "runtime-1".to_owned(),
+                    observed_at_ms: 1,
+                    is_fresh: true,
+                }),
                 phase: WorkspacePhase::Active,
                 wait_reasons: Vec::new(),
                 worktree_mode: WorktreeMode::NewBranch,
@@ -902,6 +962,17 @@ mod tests {
 
         let rendered = render_status(&result, None, false, None, None, Palette::plain());
         assert!(rendered.starts_with("● feat/login  Working · Checking tests\n"));
+        assert!(rendered.contains("  Model gpt-5.6-sol · max\n"));
+
+        let colored = render_status(&result, None, false, None, None, Palette::colored());
+        assert!(colored.contains("gpt-5.6-sol · max"));
+        assert!(colored.contains("\u{1b}["));
+
+        let mut prepared = result;
+        prepared.workspace.thread_runtime = None;
+        prepared.workspace.phase = WorkspacePhase::Prepared;
+        let rendered = render_status(&prepared, None, false, None, None, Palette::plain());
+        assert!(!rendered.contains("  Model "));
     }
 
     #[test]

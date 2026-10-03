@@ -108,10 +108,11 @@ version must prove that two threads in one App Server can use disjoint MCP
 server/tool selections and that the selections behave correctly across resume
 and fork.
 
-As of 2026-09-09, the model-free test in `tests/real_codex_compat/mcp.rs`
-proves separate repository-scoped instances of the real CoCo MCP process on
-Codex 0.154.0, native start/fork/resume, and restoration through CoCo's named
-execution profiles. It also verifies native `_meta.threadId` attribution for
+The model-free test in `tests/real_codex_compat/mcp.rs`, most recently rerun
+against Codex 0.159.3 on 2026-10-01, proves separate repository-scoped
+instances of the real CoCo MCP process across native start/fork/resume and
+restoration through CoCo's named execution profiles. It also verifies native
+`_meta.threadId` attribution for
 [agent signals](signals.md), including a CoCo context fork. This is evidence for
 the small control-MCP signal entry, not implementation or exhaustive proof of
 the future external-server/tool catalog, credential rotation, or gateway.

@@ -78,6 +78,8 @@ pub(crate) struct NativeThread {
     pub(crate) cwd: PathBuf,
     pub(crate) name: Option<String>,
     pub(crate) status: CodexThreadStatus,
+    pub(crate) model: Option<String>,
+    pub(crate) reasoning_effort: Option<String>,
     pub(crate) forked_from_id: Option<String>,
 }
 

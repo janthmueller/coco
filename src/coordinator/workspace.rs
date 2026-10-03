@@ -1126,13 +1126,28 @@ impl Coordinator {
                 return self.project_current_runtime_turn(workspace);
             }
         };
-        self.project_native_thread_runtime(workspace, native.status)
+        self.project_native_thread_runtime_with_settings(
+            workspace,
+            native.status,
+            native.model,
+            native.reasoning_effort,
+        )
     }
 
     pub(super) fn project_native_thread_runtime(
         &self,
+        workspace: Workspace,
+        status: crate::domain::CodexThreadStatus,
+    ) -> Workspace {
+        self.project_native_thread_runtime_with_settings(workspace, status, None, None)
+    }
+
+    fn project_native_thread_runtime_with_settings(
+        &self,
         mut workspace: Workspace,
         status: crate::domain::CodexThreadStatus,
+        model: Option<String>,
+        reasoning_effort: Option<String>,
     ) -> Workspace {
         let status = status.canonicalized();
         let runtime = self.runtime_turn_for_workspace(&workspace);
@@ -1150,6 +1165,8 @@ impl Coordinator {
         }
         workspace.thread_runtime = Some(ThreadRuntimeSnapshot {
             status,
+            model,
+            reasoning_effort,
             runtime_generation: self.runtime_generation.clone(),
             observed_at_ms: Utc::now().timestamp_millis(),
             is_fresh: true,

@@ -268,6 +268,8 @@ impl FakeWorker {
             cwd: workspace.worktree_path.clone().unwrap(),
             name: Some(workspace.name.clone()),
             status,
+            model: None,
+            reasoning_effort: None,
             forked_from_id: workspace.parent_thread_id.clone(),
         });
         self.materialized_threads.lock().unwrap().insert(thread_id);
@@ -280,6 +282,15 @@ impl FakeWorker {
             .get_mut(thread_id)
             .expect("fake native thread was not registered")
             .status = status;
+    }
+
+    fn set_native_settings(&self, thread_id: &str, model: &str, reasoning_effort: &str) {
+        let mut threads = self.native_threads.lock().unwrap();
+        let thread = threads
+            .get_mut(thread_id)
+            .expect("fake native thread was not registered");
+        thread.model = Some(model.to_owned());
+        thread.reasoning_effort = Some(reasoning_effort.to_owned());
     }
 
     fn fail_thread_read(&self, thread_id: &str) {
@@ -665,6 +676,8 @@ impl WorkerRuntime for FakeWorker {
             cwd: cwd.to_owned(),
             name: Some(name.to_owned()),
             status: CodexThreadStatus::Idle,
+            model: None,
+            reasoning_effort: None,
             forked_from_id: None,
         });
         Ok(StartedThread {
@@ -717,6 +730,8 @@ impl WorkerRuntime for FakeWorker {
             cwd: resumed_cwd.clone(),
             name: None,
             status: resumed_status.clone(),
+            model: None,
+            reasoning_effort: None,
             forked_from_id: None,
         });
         self.materialized_threads
@@ -763,6 +778,8 @@ impl WorkerRuntime for FakeWorker {
             cwd: cwd.to_owned(),
             name: Some(name.to_owned()),
             status: CodexThreadStatus::Idle,
+            model: None,
+            reasoning_effort: None,
             forked_from_id: Some(source_thread_id.to_owned()),
         });
         self.materialized_threads.lock().unwrap().insert(id.clone());

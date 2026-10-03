@@ -145,6 +145,10 @@ struct ThreadReadWire {
     name: Option<String>,
     status: CodexThreadStatus,
     #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    reasoning_effort: Option<String>,
+    #[serde(default)]
     forked_from_id: Option<String>,
 }
 
@@ -898,6 +902,8 @@ fn decode_thread_wire(thread: ThreadReadWire) -> Result<NativeThread, WorkerErro
         cwd: thread.cwd,
         name: thread.name,
         status: thread.status.canonicalized(),
+        model: thread.model,
+        reasoning_effort: thread.reasoning_effort,
         forked_from_id: thread.forked_from_id,
     })
 }
@@ -949,6 +955,8 @@ mod tests {
                     "type": "active",
                     "activeFlags": ["waitingOnUserInput", "waitingOnApproval", "waitingOnApproval"]
                 },
+                "model": "gpt-5.6-sol",
+                "reasoningEffort": "max",
                 "forkedFromId": "thread-parent",
                 "turns": [
                     {
@@ -974,6 +982,8 @@ mod tests {
         assert_eq!(thread.cwd, PathBuf::from("/worktrees/fix-login"));
         assert_eq!(thread.name.as_deref(), Some("fix/login"));
         assert_eq!(thread.forked_from_id.as_deref(), Some("thread-parent"));
+        assert_eq!(thread.model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(thread.reasoning_effort.as_deref(), Some("max"));
         assert_eq!(
             thread.status,
             CodexThreadStatus::Active {
@@ -997,6 +1007,8 @@ mod tests {
         });
         let thread = decode_thread_read_response(response).unwrap();
         assert_eq!(thread.status, CodexThreadStatus::Idle);
+        assert_eq!(thread.model, None);
+        assert_eq!(thread.reasoning_effort, None);
     }
 
     #[test]

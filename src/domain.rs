@@ -167,6 +167,14 @@ impl CodexThreadStatus {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadRuntimeSnapshot {
     pub status: CodexThreadStatus,
+    /// Current configured model reported by Codex, or the latest value Codex
+    /// persisted while the thread is unloaded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Current configured reasoning effort reported by Codex, or the latest
+    /// value Codex persisted while the thread is unloaded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
     pub runtime_generation: String,
     pub observed_at_ms: i64,
     pub is_fresh: bool,
@@ -561,6 +569,8 @@ pub struct DecisionApprovalPrompt {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_input: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub network_host: Option<String>,
@@ -833,6 +843,8 @@ mod tests {
                     "waitingOnApproval".to_owned(),
                 ],
             },
+            model: Some("gpt-test".to_owned()),
+            reasoning_effort: Some("high".to_owned()),
             runtime_generation: "runtime-1".to_owned(),
             observed_at_ms: 7,
             is_fresh: true,

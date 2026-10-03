@@ -46,7 +46,7 @@ effect. An operator may separately configure a
   tool and no permission inferred from a payload or prompt.
 - `signals.emit` takes name, version, payload, and a required idempotency key.
   Sender workspace/thread, record ID, sequence, and time are not tool arguments.
-  Codex 0.154.0 attaches `_meta.threadId` to both model MCP calls and
+  Codex 0.159.3 attaches `_meta.threadId` to both model MCP calls and
   native `mcpServer/tool/call`; CoCo resolves that ID to an existing bound
   workspace and verifies repository and availability. Missing/unbound/cross-repo
   origin fails closed. No exact native turn ID is inferred from current status.
@@ -131,18 +131,18 @@ replaying the signal list does not enqueue another hook delivery.
 The combined process scenario covers two repositories with identical names,
 real CLI and MCP clients, opted-in continuation, decisions, exact remote attach,
 restart, and operation retry. Its worker is deliberately fake. A separate
-model-free test against installed `codex-cli 0.154.0` proves independent MCP
+model-free test against installed `codex-cli 0.159.3` proves independent MCP
 configuration under native start/fork/resume and calls the real CoCo MCP process.
 It verifies native metadata overriding a supplied incorrect thread claim,
 actual accepted emissions, scoped reads, original-record retry after restart,
 named-profile restoration through CoCo, rejection of an unbound native fork,
 and correct sender identity for a separate CoCo context fork. Process coverage
 also proves that a newly accepted signal and its matching hook delivery commit
-once across an idempotent signal retry. A separate real-process 0.154.0 probe
+once across an idempotent signal retry. A separate real-process 0.159.3 probe
 verifies the native Codex hook boundary through App Server. These tests do not
 prove model behavior, a real external integration, or a public-release gate.
 
-Source audit: matching local upstream tag `rust-v0.153.4`,
+Source audit: matching local upstream tag `rust-v0.159.3`,
 `core/src/mcp_tool_call.rs::with_mcp_tool_call_ids_meta` and
 `app-server/src/request_processors/mcp_processor.rs::with_mcp_tool_call_thread_id_meta`.
 The [official App Server documentation](https://learn.chatgpt.com/docs/app-server)

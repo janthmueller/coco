@@ -1,7 +1,7 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::{Context, Result, bail, ensure};
 use tokio::process::Command;
@@ -12,7 +12,6 @@ use super::{COMPATIBILITY_TIMEOUT, FORK_WORKSPACE_NAME, POLL_INTERVAL, TestPaths
 const SESSION: &str = "coco-real-tui";
 const EXIT_MARKER: &str = "__COCO_REAL_TUI_EXIT__=";
 const INHERITED_HISTORY_MARKER: &str = "coco-native-history";
-const TRUST_PROMPT: &str = "Do you trust the contents of this directory?";
 
 pub(super) async fn verify_inherited_context_resume(
     paths: &TestPaths,
@@ -42,7 +41,6 @@ async fn start_jump(server: &TmuxServer, command: &str) -> Result<()> {
 
 async fn wait_for_inherited_history(server: &TmuxServer, label: &str) -> Result<()> {
     let deadline = Instant::now() + COMPATIBILITY_TIMEOUT;
-    let mut trust_attempted_at = None;
     let screen = loop {
         let screen = server.capture().await?;
         if let Some(status) = exit_status(&screen) {
@@ -53,16 +51,6 @@ async fn wait_for_inherited_history(server: &TmuxServer, label: &str) -> Result<
         }
         if screen.contains(INHERITED_HISTORY_MARKER) {
             break screen;
-        }
-        if screen.contains(TRUST_PROMPT)
-            && trust_attempted_at
-                .is_none_or(|attempted: Instant| attempted.elapsed() >= Duration::from_millis(500))
-        {
-            let visible = server.capture_visible().await?;
-            if visible.contains(TRUST_PROMPT) {
-                server.send_keys(&["Enter"]).await?;
-                trust_attempted_at = Some(Instant::now());
-            }
         }
         if Instant::now() >= deadline {
             bail!(
@@ -113,6 +101,21 @@ pub(super) fn install_dummy_auth(paths: &TestPaths) -> Result<()> {
         r#"{"OPENAI_API_KEY":"sk-coco-compat-test","tokens":null,"last_refresh":null}"#,
     )?;
     fs::set_permissions(auth, fs::Permissions::from_mode(0o600))?;
+    Ok(())
+}
+
+pub(super) fn trust_projects(paths: &TestPaths, projects: &[&Path]) -> Result<()> {
+    let mut config = String::new();
+    for project in projects {
+        let project = project
+            .canonicalize()
+            .with_context(|| format!("could not canonicalize {}", project.display()))?;
+        let project_key = serde_json::to_string(&project)?;
+        config.push_str(&format!(
+            "[projects.{project_key}]\ntrust_level = \"trusted\"\n"
+        ));
+    }
+    fs::write(paths.codex_home.join("config.toml"), config)?;
     Ok(())
 }
 
@@ -196,11 +199,6 @@ impl TmuxServer {
         let output = self
             .run(["capture-pane", "-p", "-t", SESSION, "-S", "-"])
             .await?;
-        String::from_utf8(output.stdout).context("tmux captured non-UTF-8 terminal output")
-    }
-
-    async fn capture_visible(&self) -> Result<String> {
-        let output = self.run(["capture-pane", "-p", "-t", SESSION]).await?;
         String::from_utf8(output.stdout).context("tmux captured non-UTF-8 terminal output")
     }
 

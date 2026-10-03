@@ -15,6 +15,7 @@ use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tracing::{debug, warn};
 
+use crate::capability::new_capability_token;
 use crate::codex::{CodexClient, CodexError};
 use crate::coordinator::WorkerExecutionEnvironment;
 use crate::domain::runtime::{
@@ -71,7 +72,7 @@ pub(super) enum WorkspaceExecutionError {
     #[error("`codex exec-server` exited before publishing an endpoint: {stderr}")]
     EarlyExit { stderr: String },
     #[error(
-        "the Codex App Server could not register the workspace executor; the tested codex-cli 0.154.0 environment API is required: {source}"
+        "the Codex App Server could not register the workspace executor; a compatible environment API is required: {source}"
     )]
     Registration {
         #[source]
@@ -203,14 +204,7 @@ impl WorkspaceExecutors {
         if let Err(source) = self
             .inner
             .client
-            .request(
-                "environment/add",
-                json!({
-                    "environmentId": environment.environment_id,
-                    "execServerUrl": runtime.endpoint,
-                    "connectTimeoutMs": EXEC_SERVER_CONNECT_TIMEOUT_MS,
-                }),
-            )
+            .request("environment/add", runtime.registration_params())
             .await
         {
             if let Err(error) = runtime.shutdown().await {
@@ -406,6 +400,7 @@ struct ManagedExecServer {
     process_id: u32,
     cwd: PathBuf,
     endpoint: String,
+    authentication: ExecServerAuthentication,
     environment: WorkerExecutionEnvironment,
     containment: ActiveContainment,
     stderr_tail: Arc<Mutex<ByteTail>>,
@@ -424,10 +419,9 @@ impl ManagedExecServer {
         containment: PendingContainment,
         policy: WorkspaceResourcePolicySnapshot,
     ) -> Result<Self, WorkspaceExecutionError> {
-        let mut command = containment.command(
-            codex_binary,
-            &["exec-server", "--listen", "ws://127.0.0.1:0"],
-        );
+        let authentication = ExecServerAuthentication::generate();
+        let mut command =
+            containment.command(codex_binary, &authentication.exec_server_arguments());
         command
             .current_dir(cwd)
             .stdin(std::process::Stdio::null())
@@ -500,6 +494,7 @@ impl ManagedExecServer {
             process_id,
             cwd: cwd.to_owned(),
             endpoint,
+            authentication,
             environment,
             containment: active_containment,
             stderr_tail,
@@ -508,6 +503,11 @@ impl ManagedExecServer {
             cgroup_cpu_counters: None,
             applied_policy: policy,
         })
+    }
+
+    fn registration_params(&self) -> serde_json::Value {
+        self.authentication
+            .registration_params(&self.environment.environment_id, &self.endpoint)
     }
 
     async fn apply_policy(
@@ -654,6 +654,46 @@ impl ManagedExecServer {
             return Err(WorkspaceExecutionError::Shutdown(error));
         }
         Ok(())
+    }
+}
+
+struct ExecServerAuthentication {
+    bearer_token: String,
+    token_sha256: String,
+}
+
+impl ExecServerAuthentication {
+    fn generate() -> Self {
+        Self::from_bearer_token(new_capability_token())
+    }
+
+    fn from_bearer_token(bearer_token: String) -> Self {
+        let token_sha256 = hex::encode(Sha256::digest(bearer_token.as_bytes()));
+        Self {
+            bearer_token,
+            token_sha256,
+        }
+    }
+
+    fn exec_server_arguments(&self) -> [&str; 7] {
+        [
+            "exec-server",
+            "--listen",
+            "ws://127.0.0.1:0",
+            "--ws-auth",
+            "capability-token",
+            "--ws-token-sha256",
+            &self.token_sha256,
+        ]
+    }
+
+    fn registration_params(&self, environment_id: &str, endpoint: &str) -> serde_json::Value {
+        json!({
+            "environmentId": environment_id,
+            "execServerUrl": endpoint,
+            "authBearerToken": self.bearer_token,
+            "connectTimeoutMs": EXEC_SERVER_CONNECT_TIMEOUT_MS,
+        })
     }
 }
 
@@ -866,6 +906,41 @@ mod tests {
         assert_eq!(first, environment_id("workspace/private-name"));
         assert_ne!(first, environment_id("workspace/other"));
         assert!(!first.contains("private-name"));
+    }
+
+    #[test]
+    fn exec_server_auth_keeps_the_raw_token_out_of_child_arguments() {
+        let raw_token = "raw-workspace-capability";
+        let authentication = ExecServerAuthentication::from_bearer_token(raw_token.to_owned());
+        let expected_digest = hex::encode(Sha256::digest(raw_token.as_bytes()));
+
+        let arguments = authentication.exec_server_arguments();
+        assert_eq!(
+            arguments,
+            [
+                "exec-server",
+                "--listen",
+                "ws://127.0.0.1:0",
+                "--ws-auth",
+                "capability-token",
+                "--ws-token-sha256",
+                expected_digest.as_str(),
+            ]
+        );
+        assert!(!arguments.contains(&raw_token));
+
+        let registration =
+            authentication.registration_params("coco-environment", "ws://127.0.0.1:43123");
+        assert_eq!(
+            registration,
+            json!({
+                "environmentId": "coco-environment",
+                "execServerUrl": "ws://127.0.0.1:43123",
+                "authBearerToken": raw_token,
+                "connectTimeoutMs": EXEC_SERVER_CONNECT_TIMEOUT_MS,
+            })
+        );
+        assert!(!registration.to_string().contains(&expected_digest));
     }
 
     #[test]

@@ -22,12 +22,14 @@ use tokio_tungstenite::{WebSocketStream, client_async};
 
 const COMPATIBILITY_TIMEOUT: Duration = Duration::from_secs(60);
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
-const SUPPORTED_CODEX_VERSION: &str = "codex-cli 0.154.0";
 const OPT_IN_ENV: &str = "COCO_RUN_REAL_CODEX_COMPAT";
 const CODEX_BINARY_ENV: &str = "COCO_REAL_CODEX_BINARY";
 const WORKSPACE_NAME: &str = "real-codex-compat";
 const FORK_WORKSPACE_NAME: &str = "real-codex-context-fork";
 const HISTORY_COMMAND: &str = "sleep 1; printf coco-native-history";
+
+#[path = "support/codex_compat.rs"]
+mod codex_compat;
 
 #[path = "real_codex_compat/mcp.rs"]
 mod mcp;
@@ -357,7 +359,7 @@ impl RealAppServer {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires COCO_RUN_REAL_CODEX_COMPAT=1 and the pinned local Codex executable"]
+#[ignore = "requires COCO_RUN_REAL_CODEX_COMPAT=1 and the selected local Codex executable"]
 async fn installed_codex_runs_native_session_hooks_through_app_server() -> Result<()> {
     require_explicit_opt_in()?;
     let codex_binary = env::var_os(CODEX_BINARY_ENV)
@@ -463,9 +465,9 @@ fn shell_word(path: &Path) -> String {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires COCO_RUN_REAL_CODEX_COMPAT=1, the pinned local Codex executable, and tmux"]
-async fn installed_codex_matches_the_pinned_preparation_adoption_and_resume_contract() -> Result<()>
-{
+#[ignore = "requires COCO_RUN_REAL_CODEX_COMPAT=1, the selected local Codex executable, and tmux"]
+async fn installed_codex_matches_the_selected_preparation_adoption_and_resume_contract()
+-> Result<()> {
     require_explicit_opt_in()?;
     let codex_binary = env::var_os(CODEX_BINARY_ENV)
         .map(PathBuf::from)
@@ -530,8 +532,9 @@ async fn verify_codex_version(codex_binary: &Path, paths: &TestPaths) -> Result<
     let output = run_codex_command(command, "read the Codex version").await?;
     let actual = String::from_utf8(output.stdout)?.trim().to_owned();
     ensure!(
-        actual == SUPPORTED_CODEX_VERSION,
-        "unsupported Codex executable: expected {SUPPORTED_CODEX_VERSION:?}, received {actual:?}"
+        actual == codex_compat::SELECTED_CODEX_VERSION,
+        "unsupported Codex executable: expected {:?}, received {actual:?}",
+        codex_compat::SELECTED_CODEX_VERSION
     );
     Ok(())
 }
@@ -766,7 +769,7 @@ async fn run_daemon_lifecycle(
                 "--base",
                 "HEAD",
                 "--model",
-                &model,
+                &model.model,
             ],
         )
         .await
@@ -774,9 +777,15 @@ async fn run_daemon_lifecycle(
         let prepared = workspace_status(paths, codex_binary, repository).await?;
         assert_prepared_workspace(&prepared)?;
         resources::configure_before_runtime_start(paths, codex_binary, repository).await?;
-        materialize_workspace_through_remote_action(paths, codex_binary, repository, &model)
-            .await
-            .with_context(|| format!("cocod log:\n{}", read_log(&log)))?;
+        materialize_workspace_through_remote_action(
+            paths,
+            codex_binary,
+            repository,
+            &model.model,
+            &model.reasoning_effort,
+        )
+        .await
+        .with_context(|| format!("cocod log:\n{}", read_log(&log)))?;
         resources::update_running_policy(paths, codex_binary, repository).await?;
     }
     let status = workspace_status(paths, codex_binary, repository)
@@ -844,6 +853,12 @@ async fn verify_context_fork_activation(
     let prepared =
         workspace_status_for(paths, codex_binary, repository, FORK_WORKSPACE_NAME).await?;
     assert_prepared_workspace(&prepared)?;
+    let child_worktree = prepared
+        .pointer("/workspace/worktreePath")
+        .and_then(Value::as_str)
+        .map(Path::new)
+        .context("prepared context child had no worktree path")?;
+    tui::trust_projects(paths, &[repository, child_worktree])?;
     ensure!(
         prepared.pointer("/workspace/contextMode") == Some(&json!("fork")),
         "context child did not remain a prepared fork: {prepared}"
@@ -931,12 +946,20 @@ async fn materialize_workspace_through_remote_action(
     codex_binary: &Path,
     repository: &Path,
     model: &str,
+    reasoning_effort: &str,
 ) -> Result<()> {
     let empty_lease = begin_fresh_attach(paths, repository).await?;
     verify_workspace_resources(paths, codex_binary, repository).await?;
     let mut empty_remote = RemoteAppServer::connect_with_capabilities(paths, true).await?;
     verify_workspace_environment(&mut empty_remote, &empty_lease).await?;
-    let empty_thread = start_remote_thread(&mut empty_remote, &empty_lease, model, true).await?;
+    let empty_thread = start_remote_thread(
+        &mut empty_remote,
+        &empty_lease,
+        model,
+        reasoning_effort,
+        true,
+    )
+    .await?;
     let pending = adopt_remote_thread(paths, &empty_lease, &empty_thread).await?;
     ensure!(
         pending["state"] == "pending",
@@ -952,8 +975,14 @@ async fn materialize_workspace_through_remote_action(
     // Keep the model-free shell materialization on Codex's local environment.
     // `thread/shellCommand` is intentionally host-local upstream; ordinary
     // model tool calls use the workspace environment selected on turn/start.
-    let active_thread =
-        start_remote_thread(&mut active_remote, &active_lease, model, false).await?;
+    let active_thread = start_remote_thread(
+        &mut active_remote,
+        &active_lease,
+        model,
+        reasoning_effort,
+        false,
+    )
+    .await?;
     active_remote
         .request(
             "thread/shellCommand",
@@ -1027,12 +1056,13 @@ async fn start_remote_thread(
     remote: &mut RemoteAppServer,
     lease: &AttachLease,
     model: &str,
+    reasoning_effort: &str,
     select_workspace_environment: bool,
 ) -> Result<String> {
     let cwd = &lease.cwd;
     let mut params = json!({
         "cwd": cwd,
-        "config": {},
+        "config": {"model_reasoning_effort": reasoning_effort},
         "ephemeral": false,
         "model": model,
     });
@@ -1047,6 +1077,10 @@ async fn start_remote_thread(
     ensure!(
         result["model"].as_str() == Some(model),
         "remote thread/start did not make the requested model effective: {result}"
+    );
+    ensure!(
+        result["reasoningEffort"].as_str() == Some(reasoning_effort),
+        "remote thread/start did not make the requested reasoning effort effective: {result}"
     );
     if select_workspace_environment {
         ensure!(
@@ -1296,9 +1330,14 @@ async fn daemon_request(paths: &TestPaths, method: &str, params: Value) -> Resul
         .with_context(|| format!("daemon method {method} returned no result"))
 }
 
-fn select_default_model(response: &Value) -> Result<String> {
+struct SelectedModel {
+    model: String,
+    reasoning_effort: String,
+}
+
+fn select_default_model(response: &Value) -> Result<SelectedModel> {
     ensure!(
-        response["schemaVersion"] == 13,
+        response["schemaVersion"] == 14,
         "coco model list returned an unexpected schema version: {response}"
     );
     let models = response["models"]
@@ -1309,11 +1348,20 @@ fn select_default_model(response: &Value) -> Result<String> {
         .find(|model| model["isDefault"] == true)
         .or_else(|| models.first())
         .context("the installed Codex executable advertised no visible models")?;
-    selected["model"]
+    let model = selected["model"]
         .as_str()
         .filter(|model| !model.trim().is_empty())
         .map(ToOwned::to_owned)
-        .context("the selected catalog entry did not contain a usable model value")
+        .context("the selected catalog entry did not contain a usable model value")?;
+    let reasoning_effort = selected["defaultReasoningEffort"]
+        .as_str()
+        .filter(|effort| !effort.trim().is_empty())
+        .map(ToOwned::to_owned)
+        .context("the selected catalog entry did not contain a usable default reasoning effort")?;
+    Ok(SelectedModel {
+        model,
+        reasoning_effort,
+    })
 }
 
 fn spawn_daemon(paths: &TestPaths, codex_binary: &Path, log: &Path) -> Result<Child> {
@@ -1503,7 +1551,18 @@ fn assert_same_persisted_thread(first: &Value, passive: &Value, loaded: &Value) 
                 .is_some_and(|model| !model.is_empty()),
             "workspace did not retain its explicit model override: {status}"
         );
+        ensure!(
+            status["workspace"]["threadRuntime"]["model"]
+                == status["workspace"]["profile"]["modelOverride"],
+            "status did not project Codex's current configured model: {status}"
+        );
     }
+    ensure!(
+        first["workspace"]["threadRuntime"]["reasoningEffort"]
+            .as_str()
+            .is_some_and(|effort| !effort.is_empty()),
+        "initial native status did not project the explicitly configured reasoning effort: {first}"
+    );
     ensure!(
         first["workspace"]["codexThreadId"] == passive["workspace"]["codexThreadId"]
             && passive["workspace"]["codexThreadId"] == loaded["workspace"]["codexThreadId"],

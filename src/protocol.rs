@@ -1984,6 +1984,8 @@ mod tests {
             "availability": "open",
             "threadRuntime": {
                 "status": {"type": "idle"},
+                "model": "gpt-5.6-sol",
+                "reasoningEffort": "max",
                 "runtimeGeneration": "runtime-1",
                 "observedAtMs": 2,
                 "isFresh": true,

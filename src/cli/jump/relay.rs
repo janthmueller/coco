@@ -17,8 +17,8 @@ use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::{Message, http};
 use tokio_tungstenite::{WebSocketStream, accept_hdr_async_with_config, client_async_with_config};
-use uuid::Uuid;
 
+use crate::capability::new_capability_token;
 use crate::protocol::{
     WorkspaceAttachAdoptParams, WorkspaceAttachAdoptResult, WorkspaceAttachRenewParams,
     WorkspaceExecutionEnvironment,
@@ -846,10 +846,6 @@ fn message_json(message: &Message) -> Option<Value> {
         Message::Binary(bytes) => serde_json::from_slice(bytes).ok(),
         Message::Ping(_) | Message::Pong(_) | Message::Close(_) | Message::Frame(_) => None,
     }
-}
-
-fn new_capability_token() -> String {
-    format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
 }
 
 struct RequireAuthorization(String);

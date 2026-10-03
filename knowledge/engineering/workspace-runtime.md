@@ -54,10 +54,11 @@ or charged to its selected cgroup are attributed to that workspace.
 The executor listens on an ephemeral loopback WebSocket port. Its URL remains
 in daemon memory and is registered with the App Server under a stable opaque
 environment ID derived from the CoCo workspace ID. The public workspace name
-is not embedded in that identifier. The current upstream local exec-server
-listener has no CoCo capability-token handshake; the unpublished ephemeral
-endpoint and single-local-user deployment assumption reduce exposure but do
-not make it a multi-user security boundary.
+is not embedded in that identifier. CoCo generates a distinct high-entropy
+bearer token for each executor, starts Codex with only its SHA-256 digest, and
+passes the raw token only through the in-memory `environment/add` request. The
+App Server supplies it on initial and replacement executor connections. CoCo
+does not persist either the endpoint or token.
 
 ## Lifecycle
 
@@ -82,7 +83,7 @@ not make it a multi-user security boundary.
 
 The process-tree fallback uses Tokio's kill-on-drop behavior. The cgroup-v2
 backend instead stops the complete systemd scope on ordinary shutdown. A hard,
-uncatchable daemon death can leave a scope running because upstream 0.154.0
+uncatchable daemon death can leave a scope running because upstream 0.159.3
 does not permit `--exit-on-stdin-close` with the local listener CoCo needs. The
 next daemon generation removes only stale scopes in its own opaque instance
 namespace before starting its App Server. Until that restart, the scope may
@@ -91,7 +92,7 @@ descendant is gone.
 
 ## Environment routing
 
-Codex 0.154.0 exposes environment selection only on `thread/start` and
+Codex 0.159.3 exposes environment selection only on `thread/start` and
 `turn/start`:
 
 - a fresh thread is started with exactly its workspace environment;
@@ -440,15 +441,17 @@ remain separate internally.
 
 ## Compatibility evidence
 
-The selected baseline is exactly `codex-cli 0.154.0`. The opt-in real-process
+The selected baseline is exactly `codex-cli 0.159.3`. The opt-in real-process
 suite proves environment registration and readiness, fresh thread selection,
 distinct executor PIDs for two simultaneously active workspaces, on-demand
 resource reporting, close-time cleanup, daemon-shutdown cleanup, and the
-existing thread/restart lifecycle. Fake process tests use
+existing thread/restart lifecycle. It also proves that the App Server can
+connect to CoCo's bearer-authenticated workspace executors. Fake process tests use
 `COCO_WORKSPACE_EXECUTION=shared` because their intentionally narrow fake App
 Server does not implement the experimental environment protocol.
 
 Compatibility errors must preserve the workspace and return an actionable
-fallback instead of marking an unconfirmed turn dispatch. A different Codex
-version is unsupported until this same behavioral suite passes; a schema file
-or presence of an `exec-server` subcommand alone is insufficient evidence.
+fallback instead of marking an unconfirmed turn dispatch. Another Codex
+version is not a tested target until this same behavioral suite passes; a
+schema file or presence of an `exec-server` subcommand alone is insufficient
+evidence.

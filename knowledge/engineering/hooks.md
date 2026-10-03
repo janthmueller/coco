@@ -29,7 +29,7 @@ The first CoCo hook and guard target is a trusted local command. HTTP delivery,
 MCP-tool targets, model wakeup, workspace chaining, ticket semantics, and a
 complete copy of App Server notifications remain outside this contract.
 
-The selected `codex-cli 0.154.0` was checked both in a matching source clone and
+The selected `codex-cli 0.159.3` was checked both in a matching source clone and
 through an ignored real-process compatibility test. Codex reads native hooks
 from its own `hooks.json`; an App Server thread executes a pending
 `SessionStart` hook when its first ordinary turn starts. Merely calling

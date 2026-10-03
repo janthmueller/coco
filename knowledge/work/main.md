@@ -5,7 +5,7 @@ description: Tracks repository bootstrap, the Rust baseline, and early CoCo arch
 tags: [work, branch, bootstrap, rust, mcp, architecture]
 status: active
 branch: main
-updated: 2026-09-21
+updated: 2026-10-03
 ---
 
 # main — repository foundation
@@ -17,6 +17,22 @@ architectural baseline for CoCo.
 
 ## Active work
 
+- [x] Advance CoCo's selected Codex compatibility baseline to 0.159.3.
+  - [x] Protect every per-workspace Exec Server with a distinct in-memory
+    bearer token through native Codex capability-token support.
+  - [x] Preserve legacy command approvals while presenting native
+    `writeStdin` requests as terminal-input approvals and leaving unknown
+    future action kinds unanswered.
+  - [x] Update current public/canonical compatibility claims and pass the full
+    unit, process, lint, documentation, and real-Codex gates.
+- [x] Audit installed `codex-cli 0.159.3` against CoCo's selected 0.157.1
+  contracts before proposing any compatibility implementation.
+  - [x] Compare official release notes, stable and experimental App Server
+    schemas, CLI/Exec Server help, and the matching upstream source tags.
+  - [x] Run the unchanged model-free real-Codex suite against 0.159.3 through
+    a temporary version-gate wrapper.
+  - [x] Separate immediately reusable native capabilities from TUI-only,
+    experimental, and still-insufficient changes.
 - [x] Finish the bounded native-activity slice behind a real multi-TUI safety
   proof.
   - [x] Extend the opt-in installed-Codex compatibility contract so two real
@@ -5422,3 +5438,715 @@ Verification:
   `/coco` GitHub Pages base path.
 - `CARGO_BUILD_JOBS=1 nix flake check . --no-write-lock-file --max-jobs 1`
   passes on the current system. `git diff --check` is clean.
+
+## Deferred context-fork activation review — 2026-09-24
+
+Active scope: explain why a workspace created with `--context` can later fail
+its first `jump` when the source workspace has started another turn, and assess
+whether the behavior is native Codex necessity or CoCo lifecycle policy. No
+behavior change is authorized in this review.
+
+Findings:
+
+- `workspace.create` creates the Git worktree and persists a fork recipe, but
+  deliberately leaves the destination without a Codex thread. Its visible
+  phase is `prepared`; no conversation history has been copied yet.
+- The first activating `send` or `jump` rereads the recorded source, requires
+  the exact thread/cwd binding to remain valid and the source to be `idle` or
+  `notLoaded`, then calls native `thread/fork` and binds the returned child.
+  Once this succeeds, later child jumps no longer depend on the parent's state.
+- Consequently, an idle source at `create` time is only validation, not a
+  snapshot. If the source starts a turn before the child's first activation,
+  activation fails with `context source thread must be idle or not loaded`.
+  If it completes another turn before activation, the eventual fork also sees
+  newer source history than existed when `create` returned.
+- The rejection is CoCo policy, not the literal Codex 0.154.0 API error. CoCo
+  fails before `thread/fork`. Upstream can fork stored history with an
+  interrupted snapshot and also exposes explicit turn boundaries, but adopting
+  either behavior requires a deliberate contract for partial versus completed
+  context.
+- The public context guide says the history is copied by `create` without
+  disclosing delayed materialization. That wording reasonably suggests a
+  frozen, independent child and does not explain the observed dependency.
+
+Current workaround:
+
+- Materialize the child while the source is still idle with
+  `coco create <child> -c <source> -j`, an initial `-s`, or one immediate
+  `coco jump <child>`. After the native child is bound, the source may continue
+  working independently.
+
+Unresolved design decision:
+
+- Prefer capturing inherited context as part of successful `create -c`, or
+  persist an exact completed-turn boundary that a later lazy fork can honor.
+  Merely dropping the idle guard would make the captured context timing and
+  partial-turn semantics less predictable, so it is not the recommended fix.
+
+Feasibility follow-up:
+
+- Lazy binding was introduced for a real native reason: an empty fresh
+  `thread/start` is not reliably durable before its first accepted turn. CoCo
+  therefore must not bind a fresh workspace to a thread merely because start
+  returned an ID; first `send` or correlated TUI materialization remains the
+  correct fresh-context boundary.
+- Persistent native forks differ. Codex 0.154.0 explicitly materializes a
+  fork's inherited rollout immediately, and `deferGoalContinuation: true`
+  prevents the inherited goal from starting a turn or model request. An eager
+  fork for `create -c` is therefore technically viable without making fresh
+  creation eager.
+- It is not a one-line move. Current `fork_thread` also starts/registers the
+  destination exec server even though `thread/fork` cannot consume that
+  environment; eager capture should split native conversation creation from
+  execution-runtime preparation so a context-only create remains lightweight.
+- `--compact-context` must receive explicit semantics. Compacting during
+  create performs additional native work; deferring it after an eager fork
+  requires a durable bound-but-pending-compaction state and recovery path.
+  Reusing the existing immediate fork-plus-compaction transaction is simpler,
+  but intentionally changes what an explicitly compacting create does.
+- The change also affects create idempotency/crash reconciliation, hook timing,
+  prepared-versus-idle output, profile validation, context-parent deletion
+  guards, and the real-Codex contract that currently asserts every create is
+  unbound. These need coordinated tests and documentation rather than a local
+  bypass of the activation check.
+
+## Codex 0.157.1 compatibility and opportunity review — 2026-09-26
+
+Active scope: compare CoCo's selected 0.154.0 baseline with the newly released
+Codex 0.157.1, prove the current product against the installed binary, identify
+required compatibility maintenance, and separate useful upstream additions
+from functionality CoCo should continue to own. This is a review only; no
+product or public-documentation change is authorized yet.
+
+Baseline correction:
+
+- `codex-cli 0.154.0` is the exact version named by the two current opt-in test
+  constants and public installation/status text. CoCo has no runtime maximum-
+  version gate. Its App Server adapter decodes the narrow fields it owns and
+  ignores additive response fields, so the literal pin describes what was
+  last proven, not the highest version the product can run.
+- The installed binary is now `codex-cli 0.157.1`. Stable releases between the
+  previous and current endpoints are 0.155.0/0.155.1, 0.156.0/0.156.1, and
+  0.157.0/0.157.1.
+
+Compatibility findings:
+
+- The App Server operations CoCo depends on retain their request shapes:
+  `thread/start`, `thread/read`, `thread/resume`, `thread/fork`,
+  `thread/compact/start`, turn operations, model discovery, account rate
+  limits, environment registration/status, and the thread/item notification
+  stream. `ThreadStatus` remains exactly `notLoaded`, `idle`, `systemError`, or
+  `active` with active flags. The `thread/fork` parameters CoCo uses, including
+  `excludeTurns` and experimental `deferGoalContinuation`, are unchanged.
+- `environment/add`, `environment/info`, and `environment/status` are unchanged,
+  and the `codex exec-server --listen ws://127.0.0.1:0` interface still exists.
+  The 0.157 source mainly moved CLI startup into its own module and hardened
+  transport recovery and request bounds.
+- Protocol changes relevant to CoCo are additive: new model/access metadata,
+  disabled-plugin and collaboration-mode response fields, item timestamps,
+  stored thread attachments, and account gateway routing/authentication. Serde
+  ignores those extra fields in CoCo's deliberately narrow wire projections.
+  The removed deprecated `thread/rollback` method is not used by CoCo.
+- The inline image representation was refactored but retains the existing
+  JSON `url` shape; CoCo currently sends text input only. Rate-limit windows
+  and buckets used by `status --quota` did not change. New models flow through
+  the existing dynamic `model/list` projection without a model-name update.
+- The upstream fork/resume performance work does not add environment selection
+  to `thread/fork` or `thread/resume`, so it does not remove CoCo's deferred
+  eager-context design question or its first-turn environment boundary.
+
+Real-process proof:
+
+- Because the checked-in test rejects any version string other than 0.154.0
+  before exercising behavior, a temporary untracked wrapper reported that
+  expected string while dispatching every real command to the installed Nix
+  0.157.1 binary. CoCo itself never observes or branches on that spoofed value.
+- The real hooks contract and the full start/fork/resume MCP-isolation contract
+  pass unchanged against 0.157.1. The lifecycle/TUI contract initially stopped
+  only at Codex's renamed folder-consent copy: the harness recognizes the old
+  `Do you trust...` prompt while 0.157.1 renders `Trust this folder?`.
+- Temporarily recognizing the new wording makes the complete lifecycle test
+  pass, including prepared fresh creation, remote adoption, distinct
+  per-workspace exec servers, restart/read recovery, native context fork,
+  inherited-history rendering in two simultaneous TUI clients, resource
+  policy behavior, retirement, and cleanup. The temporary test edit and
+  version wrapper are not repository changes.
+- Local Codex project discovery resolves linked worktrees to the main checkout
+  for trust. The remote-TUI path used by `coco jump` intentionally asks the
+  App Server for remote project trust and matches the exact reported `cwd`
+  because it cannot independently infer authoritative remote roots. Trusting
+  only the main checkout therefore does not suppress consent for a CoCo
+  worktree on this path; accepting the prompt persists that exact remote
+  worktree decision. The compatibility test uses an isolated empty Codex home
+  and must seed both its source repository and exact test worktree instead of
+  interacting with English prompt text.
+
+Nix packaging issue 162:
+
+- Codex 0.157 enables automatic local App Server daemon startup for eligible
+  interactive launches. The referenced `codex-cli-nix` package contains the
+  CLI and code-mode host but not the complete package manifest/assets from
+  which Codex seeds its separately managed daemon, producing `this CLI has no
+  complete local package` for an ordinary direct TUI launch.
+- `--no-daemon` is a valid workaround for a direct Codex session. It must not
+  be added to `coco jump`: Codex 0.157 explicitly rejects combining
+  `--no-daemon` with `--remote`, and CoCo already supplies an explicit remote
+  App Server endpoint. Source inspection and the passing real TUI contract
+  confirm that this path bypasses automatic daemon startup. Direct
+  `codex app-server` and `codex exec-server` subcommands also work in the Nix
+  package, so the packaging issue does not block CoCo.
+
+Recommended compatibility slice:
+
+1. Advance the selected exact proof baseline to 0.157.1 in one place and make
+   both opt-in suites consume it; retain the older 0.147 model-consuming proof
+   as historical evidence unless it is deliberately rerun and replaced.
+2. Make the TUI proof independent of prompt copy by pre-seeding trust for its
+   test-owned repository and exact remote worktree. Do not accept known prompt
+   strings: that would keep the behavioral gate coupled to UI copy.
+3. Replace runtime diagnostics that tell users to install exactly 0.154.0 with
+   capability-oriented wording, while public docs say the current repository
+   is tested with 0.157.1. Then run the complete model-free real contract,
+   ordinary Rust gates, and static docs build before changing the published
+   compatibility claim.
+4. Do not add `--no-daemon` to CoCo. Track the third-party Nix packaging issue
+   separately from CoCo compatibility.
+
+Upstream opportunities, not immediate requirements:
+
+- Codex's managed App Server daemon can recover saved threads and active goals
+  across daemon restarts. A future architecture spike should assess using it
+  as CoCo's inner shared App Server while retaining `cocod` for named
+  workspaces, repository scope, relays, signals/hooks/guards, and resource
+  containment. The incomplete Nix package and CoCo's capability endpoint make
+  an immediate switch premature.
+- Native worktrees are now enabled by default, but remain CLI/TUI orchestration
+  rather than a stable App Server worktree API. They do not cover CoCo's
+  multi-repository registry, independent code/context selection, dirty carry,
+  resource policy, or integration plane, so CoCo should continue to own its Git
+  workspace lifecycle rather than shelling out to native worktree mode.
+- Native `/usage` now provides richer account analytics. CoCo should keep its
+  concise workspace usage and global quota projection rather than duplicate
+  that dashboard; `jump` remains the path to deeper native UI details.
+- Remote TUI sessions now support `/import`, and a locked conversation can be
+  forked with `f`. These work automatically through CoCo's remote TUI, but the
+  resulting auxiliary Codex thread is intentionally not rebound to the named
+  CoCo workspace. Treat them as native escape hatches until an explicit import
+  or workspace-registration contract is designed.
+- Stored thread attachments that survive non-ephemeral forks may inform the
+  later handoff/context design. They do not replace separate Git-base and
+  conversation-context selection.
+- CoCo already consumes reasoning-summary and compaction item events for live
+  activity. Codex's newer TUI activity presentation introduces no new thread
+  state and requires no status-model change.
+
+Verification:
+
+- `codex --version` reports `codex-cli 0.157.1`; App Server and Exec Server help
+  retain the required commands and listen options.
+- Generated the installed 0.157.1 App Server JSON Schema bundle in an untracked
+  temporary directory and compared the relevant types with the 0.154.0 source
+  tag and CoCo's request/decoder inventory.
+- `COCO_RUN_REAL_CODEX_COMPAT=1` real tests against the installed 0.157.1
+  executable: hooks pass; MCP start/fork/resume isolation passes; the complete
+  lifecycle/TUI test passes after temporarily matching the new trust prompt.
+  The first sandboxed attempt was disregarded because local loopback binds were
+  denied by the execution sandbox, not by Codex.
+- Repository status after reverting the temporary prompt match contains only
+  this branch working-document update and the pre-existing deferred
+  context-fork review; no product file was changed.
+
+Unresolved follow-up:
+
+- The small 0.157.1 compatibility-baseline slice is implemented below.
+  Separately decide later whether native daemon recovery deserves an
+  architecture spike. That decision does not change the deferred eager
+  context-fork choice.
+
+## Codex 0.157.1 baseline implementation — 2026-09-26
+
+Implemented scope:
+
+- Added one shared integration-test constant for the selected exact Codex
+  version and advanced both the model-free compatibility suite and optional
+  authenticated product proof to `codex-cli 0.157.1`.
+- Removed prompt-text recognition from the TUI contract. The test now writes
+  trust only for its own temporary source repository and exact CoCo worktree;
+  the real remote TUI must proceed without any synthetic keypress before its
+  inherited history counts as compatible.
+- Replaced runtime diagnostics prescribing 0.154.0 with capability-oriented
+  guidance: update Codex when `exec-server` or its workspace environment API
+  is missing, or deliberately select shared execution as the fallback.
+- Advanced the public tested-version statement and the affected internal
+  compatibility decisions to 0.157.1. Historical observations and the
+  separate model-consuming 0.147.0 proof remain labeled with their actual
+  versions.
+- Kept `coco jump` unchanged: it continues to use its explicit authenticated
+  remote endpoint and does not add the incompatible `--no-daemon` workaround.
+
+Meaningful verification finding:
+
+- Seeding only the main repository initially reproduced the new `Folder
+  access` screen. Source inspection confirmed this was not a timing failure:
+  connected remote sessions deliberately use the exact remote `cwd` for trust
+  lookup, unlike local linked-worktree discovery. Seeding the exact temporary
+  worktree made the lifecycle proof pass without reading or answering the
+  screen. This is the stable test contract.
+
+Verification:
+
+- `cargo test --locked`: 390 passed, 6 ignored; process integration tests pass.
+- `cargo clippy --locked --all-targets --all-features -- -D warnings`: pass.
+- `cargo machete`: no unused direct dependencies.
+- `cargo deny check`: advisories, bans, licenses, and sources pass; configured
+  duplicate-version warnings remain informational.
+- `cargo publish --locked --dry-run --allow-dirty`: package verification pass;
+  upload aborted as intended.
+- `nix flake check`: all checks pass on x86_64 Linux.
+- `pnpm --dir docs run check`: zero diagnostics.
+- Static docs build with the GitHub Pages `/coco` base path: 17 pages and 62
+  files verified, including Pagefind and the public-only boundary.
+- Final combined opt-in real-Codex suite against the installed 0.157.1 binary:
+  all three contracts pass in one run, covering native hooks, MCP
+  start/fork/resume isolation, and the complete preparation/adoption/restart/
+  context-fork/multi-TUI lifecycle.
+
+Remaining follow-up:
+
+- Native Codex daemon recovery remains a separate architecture spike, not a
+  prerequisite for this compatibility update. The eager context-fork design
+  also remains a separate product decision.
+
+## Codex 0.157.1 post-implementation review — 2026-09-26
+
+Review scope:
+
+- Audited the complete release diff for the selected-version source, runtime
+  compatibility diagnostics, real App/Exec Server and TUI contracts, public
+  version claims, internal canonical knowledge, Nix-specific behavior, and
+  the pending release-rebase state.
+- Rechecked the relevant error variants and their actual construction sites
+  instead of treating passing tests as sufficient evidence.
+
+Actionable finding:
+
+- The capability-oriented runtime messages currently over-classify two broad
+  failures. `Spawn(NotFound)` means that the launched program itself is
+  unavailable, which can be `codex` or the systemd launcher; a missing
+  `exec-server` subcommand instead launches Codex and exits early.
+  `Registration` wraps every `environment/add` failure, including connection,
+  I/O, protocol, message-size, and unrelated RPC errors. Only an explicit
+  missing-method or incompatible-parameter RPC response is evidence that the
+  required environment API is absent. Before committing, keep specific update
+  guidance for those explicit incompatibility responses and return a generic,
+  private-detail-safe runtime-start diagnosis for the other variants. Add
+  regression coverage for both branches.
+
+Residual evidence boundaries:
+
+- The combined opt-in model-free suite proves the selected 0.157.1 hook, MCP,
+  environment, thread, context-fork, retirement, restart, and remote-TUI
+  contracts. It is ignored in ordinary CI and therefore remains a deliberate
+  release-time/manual compatibility gate.
+- The authenticated model-consuming product proof was version-aligned but not
+  rerun for this review. Account quota and optional per-thread cost shapes were
+  source/schema reviewed and retain deterministic fake-process coverage; this
+  change does not claim a fresh authenticated 0.157.1 billing-route proof.
+
+Review conclusion:
+
+- No lifecycle, trust-seeding, MCP isolation, public-documentation boundary,
+  Nix workaround, secret-handling, or generated-artifact defect was found.
+- The branch is behind `origin/main` only by the semantic-release metadata
+  commit for alpha.8. The new shared test-version source is untracked and must
+  be staged explicitly after rebasing; a tracked-files-only commit would omit
+  it and break a clean checkout.
+- No product correction was made during this review; the diagnostic
+  classification above remains the sole pre-commit code finding.
+
+## Codex runtime diagnostic correction — 2026-09-26
+
+Implemented:
+
+- Restricted the missing/incompatible workspace-runtime API guidance to
+  `environment/add` RPC failures with `-32601` or `-32602`.
+- Routed closed transports, unrelated RPC failures, and all other registration
+  failures through the neutral runtime-start diagnosis without exposing
+  upstream details or incorrectly prescribing a Codex update.
+- Reworded `Spawn(NotFound)` to identify an unavailable process executable or
+  launcher. It no longer claims that an absent executable proves the
+  `exec-server` subcommand is missing.
+- Added regression tests for both explicit API incompatibility codes, a closed
+  transport, an unrelated RPC failure, and a missing launcher. All messages
+  remain bounded to safe public details.
+
+Verification:
+
+- `cargo test --locked`: 392 library tests passed, 6 manual tests ignored; all
+  5 process integration tests passed.
+- `cargo clippy --locked --all-targets --all-features -- -D warnings`: pass.
+- `COCO_RUN_REAL_CODEX_COMPAT=1 cargo test --locked --test real_codex_compat --
+  --ignored --nocapture`: all 3 model-free Codex 0.157.1 contracts passed.
+- `cargo fmt --all -- --check` and `git diff --check`: pass.
+
+## Codex 0.159.3 compatibility audit — 2026-10-01
+
+Scope:
+
+- Compared the locally installed `codex-cli 0.159.3` with CoCo's selected
+  0.157.1 baseline without changing product code, public documentation, or the
+  selected compatibility constant.
+- Read the official 0.158.0 through 0.159.3 release notes, compared generated
+  stable and experimental App Server schemas, compared CLI and Exec Server
+  help, and inspected the exact upstream source tags and relevant commits.
+
+Verified compatibility:
+
+- A temporary untracked wrapper preserved CoCo's exact 0.157.1 version gate
+  while executing the installed 0.159.3 binary. All three unchanged real
+  contracts passed: native session hooks, MCP start/fork/resume isolation, and
+  the full preparation/adoption/restart/context-fork/multi-TUI lifecycle.
+- No stable or experimental request/notification schema file consumed by CoCo
+  was removed. Relevant wire changes are additive: executor bearer auth, two
+  additional native error codes, an account-plan enum value, single-server MCP
+  discovery, and item-anchored history pagination.
+- A bare fresh remote thread still does not satisfy CoCo's adoption proof.
+  The 0.159 blank-session work retains live TUI state in memory when switching
+  tasks; it explicitly acknowledges that untouched threads have no rollout.
+  Archiving can now force persistence before a first turn, but archive/unarchive
+  would be an indirect side effect rather than a clean thread-creation
+  primitive. Keep Git-only `prepared` workspaces and deferred binding.
+
+Relevant native changes:
+
+- 0.158 adds opt-in bearer authentication to a direct Exec Server WebSocket
+  listener and `environment/add.authBearerToken` for App Server connections and
+  reconnects. CoCo can close its documented unauthenticated loopback-executor
+  gap by generating one runtime token in memory, passing only its SHA-256 digest
+  to `codex exec-server`, and registering the raw token with the shared App
+  Server. This is the highest-value immediate reuse candidate.
+- New local threads default to paginated history. CoCo already uses bounded,
+  metadata-only `thread/read`, so the current path remains correct and new
+  threads benefit automatically. 0.159 additionally lets
+  `thread/items/list` start after a specific item; the bounded turns/items APIs
+  and `turn/steer` themselves already existed in 0.157.1.
+- Terminal input approval is now stable and enabled by default. It reuses
+  `item/commandExecution/requestApproval` with `kind: "writeStdin"`, so CoCo's
+  existing decision transport can answer it. The current human projection
+  ignores `kind` and can misleadingly title it as running a command; add an
+  explicit projection and compatibility test when advancing the baseline.
+- `instant_interrupt` can make `turn/steer` preempt model output or long code
+  mode calls, but it remains under development and disabled by default. Do not
+  silently change `coco send` semantics around it. Revisit active-turn steering
+  as a separately designed CLI contract.
+- GPT-6.1 Sol becomes the bundled default. CoCo's model discovery and status
+  projection are native and string-based, so no model catalog or enum change is
+  needed.
+- The compact, borderless session header is presentation only. The resume/fork
+  choice named `session directory` already existed in 0.157.1 and means the
+  latest cwd stored in that Codex session versus the caller's current cwd. It
+  does not provide a new workspace or worktree abstraction for CoCo.
+- Native TUI reconnect handling is more resilient and continues to work through
+  CoCo's authenticated relay. It does not replace the relay's environment
+  routing, capability boundary, or attach-lease/adoption responsibilities.
+
+Verification:
+
+- Generated and compared 0.157.1 and 0.159.3 stable and experimental App
+  Server schemas in temporary directories.
+- Compared `codex`, `codex app-server`, `codex exec-server`, and feature-list
+  output for both installed Nix-store binaries.
+- `COCO_RUN_REAL_CODEX_COMPAT=1 COCO_REAL_CODEX_BINARY=<temporary 0.159.3
+  wrapper> cargo test --locked --test real_codex_compat -- --ignored
+  --nocapture`: 3 passed.
+
+Pending plan decision:
+
+- Advance the selected baseline to 0.159.3 with the full existing compatibility
+  gate, add authenticated per-workspace Exec Servers, and correct the
+  `writeStdin` decision presentation. Keep item-anchored history and active-turn
+  steering as separate follow-ups unless the user chooses to pull either into
+  the same slice.
+
+## Codex 0.159.3 baseline implementation — 2026-10-01
+
+Scope and decisions:
+
+- Advanced the single exact real-process compatibility constant from
+  `codex-cli 0.157.1` to `codex-cli 0.159.3`; no runtime version parser or
+  generated-schema dependency was added.
+- Reused Codex's native Exec Server bearer authentication. Every lazily
+  started workspace executor now receives a fresh capability token. Only its
+  SHA-256 digest is placed in the child-process arguments, while the raw token
+  remains in daemon memory and is sent to the shared App Server through
+  `environment/add.authBearerToken`. Endpoint and token remain generation
+  local and are not written to SQLite or runtime files.
+- Consolidated capability-token generation so the shared App Server,
+  workspace executors, and TUI relay use the same high-entropy construction.
+- Preserved the existing public decision kind and native response mapping for
+  terminal input because Codex uses the same approval request/response
+  contract. Presentation now distinguishes `kind: "writeStdin"` from a
+  command; omitted and `command` remain backward compatible. Explicit null,
+  unknown, or malformed future action kinds fail closed and remain with Codex.
+- Kept item-anchored history reads and experimental instant interruption out
+  of this slice. Neither is required for compatibility, and active-turn
+  steering needs its own user-facing command semantics.
+
+Verification:
+
+- `cargo test --locked`: 397 library tests passed, 6 manual tests ignored; all
+  5 process integration tests passed.
+- `cargo clippy --locked --all-targets --all-features -- -D warnings`: pass.
+- `COCO_RUN_REAL_CODEX_COMPAT=1 cargo test --locked --test real_codex_compat --
+  --ignored --nocapture`: all 3 model-free contracts passed directly against
+  installed `codex-cli 0.159.3`, including authenticated workspace executor
+  registration within the full restart/resume lifecycle.
+- `pnpm --dir docs run check`: 0 errors, warnings, or hints.
+- Static GitHub Pages build with `/coco` base path: 17 pages and 62 files
+  exported; Pagefind, routing, and the public-only boundary verified.
+- `cargo fmt --all -- --check` and `git diff --check`: pass.
+
+## Resource column order — 2026-10-01
+
+Scope and decision:
+
+- Keep the established status hierarchy and change only the resource trio from
+  `MEMORY PROCS CPU` to `MEMORY CPU PROCS`.
+- Memory and CPU are the primary consumption metrics; process count remains
+  adjacent but follows them as supporting detail. Repository, workspace,
+  state, model, usage, and branch positions remain unchanged.
+
+Implementation and verification:
+
+- Reordered both cells and headers, preserving their existing width caps and
+  values. Added an exact table-shape regression test so headers cannot drift
+  away from their data cells.
+- Updated only the user reference sentences and canonical status contract that
+  enumerate these metrics.
+- All 24 focused output tests pass, all-target/all-feature Clippy is clean, and
+  the docs check plus static 17-page export pass with the public-only boundary.
+
+Outcome:
+
+- The sole code finding from the post-implementation review is resolved. The
+  compatibility slice is ready for the pending semantic-release rebase and a
+  clean-checkout commit that includes `tests/support/codex_compat.rs`.
+
+## Native model projection in status — 2026-10-01
+
+Active scope:
+
+- Show the effective Codex model and reasoning effort in targeted and
+  collection `coco status` output. Do not take on the user's separate second
+  request in this slice.
+- Preserve the pending Codex 0.157.1 compatibility changes already present on
+  `main`; the branch is still one semantic-release commit behind `origin/main`.
+
+Findings:
+
+- Official App Server documentation defines `model/list` as catalog discovery
+  and exposes effective `model` plus `reasoningEffort` on thread start/resume
+  settings. The generated schema from the selected `codex-cli 0.157.1` goes
+  further: `thread/read` returns optional `Thread.model` and
+  `Thread.reasoningEffort`, described as the current configured values while
+  loaded and the latest persisted values while unloaded.
+- `thread/settings/updated` also reports complete native settings, but status
+  already performs a non-loading `thread/read` on every one-shot or follow
+  poll. Consuming that read avoids another persisted mirror and observes model
+  switches made by the native TUI.
+- CoCo already retains the initially resolved start/resume settings in the
+  profile snapshot. Those values are useful provenance but are not sufficient
+  for an active status view because another native client may change them.
+- The real 0.157.1 lifecycle confirms that `model` survives loaded,
+  `notLoaded`, and resumed reads. An explicitly configured
+  `reasoningEffort` is present on the initial loaded read but can be absent
+  after unload/resume. CoCo must therefore keep it optional instead of filling
+  the gap from the catalog or creation profile.
+
+Decision and checklist:
+
+- [x] Extend the bounded native-thread adapter and transient runtime projection
+  with optional model and reasoning effort from `thread/read`; do not add a
+  database migration or infer defaults from the requested profile.
+- [x] Add a compact `MODEL` column to human status collections and one labeled
+  model detail to targeted status. Keep ordinary `coco list` unchanged.
+- [x] Return the same optional native values in existing JSON status objects,
+  render unavailable values honestly, and keep follow output naturally live
+  through its existing polling path.
+- [x] Cover wire decoding, projections, plain/colored output, prepared or
+  unavailable states, and the real selected-Codex contract.
+- [x] Update only the public command documentation needed to explain the new
+  status field, then run the proportional Rust, docs, and real-Codex gates.
+
+Implemented behavior:
+
+- The bounded `thread/read` adapter now carries optional native `model` and
+  `reasoningEffort` into the transient `threadRuntime` projection. No database
+  migration, catalog fallback, profile inference, or event mirror was added.
+- Collection status has a `MODEL` column and renders `—` when no native model
+  exists. Targeted status adds a `Model` line only when available. Both include
+  effort as `model · effort`; ordinary human `list` remains unchanged.
+- One-shot, follow, tree, JSON, and control-MCP status all reuse the same
+  projection. The public CLI JSON envelope advances from schema 13 to 14 for
+  the additive `threadRuntime.model` and `threadRuntime.reasoningEffort`
+  fields.
+
+Verification:
+
+- `cargo clippy --locked --all-targets --all-features -- -D warnings`: pass.
+- `cargo test --locked`: 394 library tests passed, 6 manual tests ignored; all
+  5 process integration tests passed. The first sandboxed attempt produced six
+  expected local-socket/terminal `EPERM` failures; the unrestricted rerun was
+  clean.
+- The selected real Codex 0.157.1 lifecycle contract passes with explicit
+  model and reasoning effort, proving initial native projection, unload,
+  restart, resume, and the optional-effort boundary. The final combined opt-in
+  run passes all three real contracts, including hooks and MCP isolation.
+- `pnpm --dir docs run check`: zero errors, warnings, or hints.
+- The production static docs export builds and verifies 62 files, 17 pages,
+  Pagefind, `/coco` routing, and the public-only boundary.
+- `cargo fmt --all -- --check` and `git diff --check`: pass.
+
+## Codex 0.159.3 post-implementation review — 2026-10-01
+
+Review scope:
+
+- Re-read the complete local change set as a release-oriented compatibility
+  review, then compared the selected contracts with the exact upstream
+  `rust-v0.159.3` implementation rather than relying only on generated schema.
+- Audited authenticated workspace executors, terminal-input approvals, module
+  boundaries, ordinary-CI coverage, packaging, dependency policy, and public
+  documentation consistency. This pass records findings only; it does not
+  silently change the reviewed product behavior.
+
+Findings to resolve before calling the slice complete:
+
+- [x] Complete the `writeStdin` projection. Upstream sends the terminal input
+  through the existing command-approval request as a synthetic command vector.
+  CoCo selects the correct title but still stores and renders that value as
+  `Command:` and labels the pending item `Command approval`. The new test omits
+  the real `command` and `cwd` fields, so it does not catch the misleading
+  presentation.
+- [x] Restore the documented CLI boundary. Deduplicating capability-token
+  generation made `cli/jump/relay.rs` import `crate::codex`, contradicting the
+  achieved Phase 1 rule that CLI must not depend on the Codex adapter. Move
+  this neutral local-auth primitive to a neutral crate-private module instead.
+- [x] Add an ordinary deterministic test for workspace-executor auth
+  construction: the child receives only the token digest, while
+  `environment/add` receives the raw bearer token. The ignored live suite
+  proves the success path against installed Codex, but standard CI does not
+  guard this security-sensitive wiring.
+- [x] Treat explicit `kind: null` as malformed. The 0.159.3 schema permits an
+  omitted kind for backward compatibility but does not make it nullable;
+  accepting null as `command` weakens the recorded fail-closed rule.
+
+Confirmed design properties:
+
+- The executor-auth design matches upstream exactly: Codex accepts the SHA-256
+  token digest on `exec-server`, while App Server's `authBearerToken` becomes
+  the Bearer header for initial and reconnecting environment connections.
+- The raw token is not placed in child arguments or logs and is not persisted
+  in CoCo storage. The selected real-Codex lifecycle, hooks, and MCP contracts
+  all pass against `codex-cli 0.159.3`.
+- No adaptation is required for the other reviewed 0.159.3 additions, including
+  model metadata, pagination, and optional response fields.
+
+Release hygiene and verification:
+
+- `tests/support/codex_compat.rs` is an untracked but required source file and
+  must be included in the eventual commit; omitting it breaks the real-Codex
+  integration target in a clean checkout.
+- The branch remains one semantic-release commit behind `origin/main`; no
+  rebase, commit, or push belongs to this review-only pass.
+- `nix flake check .`, `nix run .#deps`, and `nix run .#policy` pass. The flake
+  check reports only the expected unsupported-system omissions and policy
+  reports only the already-known duplicate dependency warnings.
+- `nix run .#package -- --allow-dirty` passes: 146 files, about 1.7 MiB, compile
+  verification successful, and the expected dry-run upload abort. The plain
+  package command refused only because this review intentionally uses a dirty
+  alpha.7 worktree.
+
+Conclusion:
+
+- The native 0.159.3 auth migration is sound, and no broad redesign was
+  needed. The four review findings are resolved. Terminal input is parsed from
+  Codex's bounded synthetic command vector into its own presentation field;
+  status and `decide` no longer call it a command. A neutral crate-private
+  capability module now serves CLI, App Server, and executor composition
+  without crossing the documented CLI-to-Codex boundary. Executor launch and
+  registration share a tested auth builder, and explicit null action kinds
+  fail closed.
+- Post-fix verification passes `cargo test --locked` with 400 library tests
+  passing, 6 ignored, and all 5 process tests passing; strict all-target
+  Clippy; and all 3 installed-Codex 0.159.3 compatibility contracts.
+- `pnpm --dir docs run check` reports zero diagnostics, and the production
+  static build verifies 62 files, 17 pages, Pagefind, `/coco` routing, and the
+  public-only boundary. `nix flake check .` passes on x86_64 Linux; dependency
+  use is clean; advisory, license, source, and ban policy passes with only the
+  known duplicate-version warnings; and the 147-file crates.io dry run builds
+  successfully before its expected upload abort.
+
+## Jump startup latency review — 2026-10-01
+
+Scope:
+
+- Trace a bound `coco jump` from CLI selection through `workspace.attach`, the
+  session relay, native Codex TUI bootstrap, resume, and transcript hydration.
+  Review only; no runtime behavior was changed.
+
+Findings:
+
+- The two perceived waits are real and belong to two different clients. Before
+  spawning the visible TUI, cocod validates the binding, starts and verifies a
+  cold workspace executor, and ensures its own App Server subscription with
+  `thread/resume(excludeTurns: true)`. The TUI then connects as another client,
+  performs its own metadata/config/account/model/hooks bootstrap, issues its
+  own `thread/resume`, and hydrates transcript history for display.
+- The daemon resume is required by the current design so CoCo can continue to
+  observe native state and server requests independently of the TUI. The TUI
+  resume is required for that client's subscription and transcript. The two
+  resumes are therefore not accidental duplicate function calls, although
+  forcing both to complete serially before the user can interact is a latency
+  concern worth revisiting.
+- CoCo's own `thread/start` request omits Codex 0.159.3's `historyMode`. Upstream
+  defaults omission to `legacy`; the native TUI detects that mode and requests
+  a full-history resume. For an already-running legacy thread, App Server reads
+  the persisted history again before answering that second resume. These are
+  verified code-path facts, but it is not yet verified that the user's observed
+  latency came from this path or that the affected thread was legacy. Treat
+  duplicate history I/O as a plausible hypothesis until phase timings and the
+  actual thread history mode are observed together.
+- `excludeTurns: true` keeps cocod's response small but does not make a cold
+  legacy resume metadata-only: App Server still reconstructs the live model
+  history. In paginated mode it can instead load the latest model context from
+  the thread store, while the TUI fetches a bounded initial transcript window.
+- The repeated `prepare_workspace_execution` call after daemon resume is not a
+  meaningful duplicate startup. The first call creates/registers the executor;
+  the second returns the cached live environment.
+- What appears after the TUI frame as “loading context” is primarily native TUI
+  bootstrap and transcript hydration, not a second model request. No model turn
+  is started by `jump` itself.
+
+Recommended next design slice:
+
+- First add phase timings around binding read, executor readiness, daemon
+  resume, relay readiness, child spawn, and native TUI startup so cold/warm and
+  legacy/paginated cases can be compared directly.
+- If measurements identify legacy history as material, evaluate making new
+  CoCo-owned native threads explicitly paginated, with selected-version
+  compatibility coverage. Fresh threads created by the 0.159.3 native TUI
+  already request paginated history; CoCo's direct start path is the gap. Do
+  not change this contract merely from source inspection.
+- Treat migration of existing legacy rollouts separately. Upstream has an
+  experimental background migration feature, disabled by default; CoCo should
+  not silently rewrite old or multi-gigabyte histories without a dedicated
+  safety and recovery review.
+- Only after those changes measure whether cocod's pre-TUI subscription should
+  be deferred or overlapped. Removing it outright would weaken detached state,
+  request, and decision observation and is not justified by this review.
+
+Deferred decision:
+
+- No history-mode or jump-flow change is planned in the current slice. Revisit
+  only with a measured slow case that records cold/warm runtime state, native
+  history mode, rollout size, and the duration of both attach phases.

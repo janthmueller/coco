@@ -68,7 +68,7 @@ peer-response routing remain separate, unimplemented capabilities.
 - At the specification baseline on 2026-09-05, the repository had no commit
   and no implementation files; it contained the handoff and documentation
   foundation only.
-- The locally installed `codex-cli 0.154.0` is the selected compatibility
+- The locally installed `codex-cli 0.159.3` is the selected compatibility
   baseline. Its model-free real-process test passes preparation, exact native
   materialization/adoption, inherited-context fork, history reads, daemon
   restart, and exact resume.
@@ -770,7 +770,7 @@ ID must not create duplicate artifacts.
   `thread/read`; do not resume a thread merely to list it. An unbound ready
   workspace projects `prepared`; a missing or invalid existing binding projects
   unavailable instead of falling back to stored status.
-- `--json` emits one schema-version-13 JSON document and no decorative stdout
+- `--json` emits one schema-version-14 JSON document and no decorative stdout
   text. Every row includes a compact repository identity.
 
 ### `coco status`
@@ -792,11 +792,12 @@ ID must not create duplicate artifacts.
   active/transitional, ready, prepared/unloaded, then closed phases. Explicit
   sort and tree views are mutually exclusive.
 - With an explicit reference, return exactly one workspace. The human view
-  shows its current state, branch/worktree location, reported error, and any
-  actionable decision. JSON returns the complete projection below. Resolve a
-  name only in the selected/current repository by default or across all
-  repositories with `--global`/`-g`. `--global` without a reference and
-  `--all-repos` with a reference are invalid.
+  shows its current state, current native model and reasoning effort when
+  available, branch/worktree location, reported error, and any actionable
+  decision. JSON returns the complete projection below. Resolve a name only in
+  the selected/current repository by default or across all repositories with
+  `--global`/`-g`. `--global` without a reference and `--all-repos` with a
+  reference are invalid.
 - The detailed projection includes immutable CoCo/Git binding, context
   mode, non-secret profile summary, Codex thread and active/latest turn IDs,
   runtime phase and wait reasons, Git facets, timestamps, last error, and a
@@ -819,9 +820,13 @@ ID must not create duplicate artifacts.
   piped stdout they append only initial state and later changes without terminal
   control sequences. Neither form reads, persists, or prints conversation
   messages. Ctrl-C detaches only the display and does not cancel a turn.
+- Human collection status includes a `MODEL` column containing Codex's current
+  configured model and, when reported, reasoning effort separated by ` · `.
+  Prepared or unavailable entries render `—`; ordinary `list` remains compact
+  and omits this column. The targeted view uses one `Model` detail line.
 - Human status omits executor implementation details and resource sampling by
-  default. `--resources`/`-r` adds only memory, process count, and CPU when
-  available; a collection uses dedicated `MEMORY`, `PROCS`, and `CPU` columns.
+  default. `--resources`/`-r` adds only memory, CPU, and process count when
+  available; a collection uses dedicated `MEMORY`, `CPU`, and `PROCS` columns.
   Detailed human output labels fallback resident memory as RSS and cgroup
   memory as memory rather than conflating them. `--follow`/`-f` composes with
   it, including clustered `-fr`/`-afr`. JSON status always requests the
@@ -1013,14 +1018,15 @@ ID must not create duplicate artifacts.
   shell path with the default remote executor. Review or compaction immediately
   after a newly loaded resume may also use Codex's local default until the next
   ordinary turn selects the workspace executor; CoCo must not hide this native
-  0.154.0 limitation.
+  0.159.3 limitation.
 
 ### `coco decide`
 
 - Resolve one globally unique opaque decision ID without repository scope.
-- Support native command-execution approval, file-change approval, and
-  structured `requestUserInput` requests. Unknown server-request families
-  remain observational and cannot be answered through this command.
+- Support native command-execution and terminal-input approval, file-change
+  approval, and structured `requestUserInput` requests. Unknown request
+  families and action kinds remain observational and cannot be answered
+  through this command.
 - Print bounded, redacted request details and the exact native options in their
   supplied order, then use the shared cursor/direct-number picker. Questions
   accept a listed label or free text only when their native shape allows it.
@@ -1171,15 +1177,18 @@ autonomous delegation policy remain later work.
 The public workspace projection contains CoCo's provisioning/binding
 `lifecycle`, a native `threadRuntime` projection, a derived `phase`, zero or
 more `waitReasons`, an optional transient `activity`, and a separate Git
-projection. `threadRuntime.status`
-retains Codex's native status, `runtimeGeneration`, `observedAtMs`, and
-`isFresh`. Schema v11 retains old schema-v6 snapshots only as migration data and can mark
-them stale on process loss; thread start, resume, and notifications never
-write a new snapshot. An unbound ready workspace projects `prepared` without a
-native read. Bound ready-workspace reads obtain a fresh projection directly
-from stable `thread/read` without loading the thread; until that succeeds they
-report unavailable and never serve an old SQLite value as current. Physical
-removal of the compatibility columns is a later schema-only checkpoint.
+projection. `threadRuntime` retains Codex's native `status`, current configured
+`model`, optional `reasoningEffort`, `runtimeGeneration`, `observedAtMs`, and
+`isFresh`. Model settings come from the same current `thread/read` response as
+status; they are not inferred from the creation profile or persisted as a
+parallel current-state authority. Schema v11 retains old schema-v6 snapshots
+only as migration data and can mark them stale on process loss; thread start,
+resume, and notifications never write a new snapshot. An unbound ready
+workspace projects `prepared` without a native read. Bound ready-workspace
+reads obtain a fresh projection directly from stable `thread/read` without
+loading the thread; until that succeeds they report unavailable and never
+serve an old SQLite value as current. Physical removal of the compatibility
+columns is a later schema-only checkpoint.
 
 ### Runtime phases
 
@@ -1419,7 +1428,7 @@ The following are intentionally outside v0:
 - Fake App Server process tests exercise Git-only preparation, atomic first
   send, native fork/compaction, event correlation, one-use fresh-TUI relay,
   exact adoption, detach, and completion/failure. A separate opt-in real Codex
-  compatibility test consumes no model turn: it checks 0.154.0, registers and
+  compatibility test consumes no model turn: it checks 0.159.3, registers and
   probes workspace environments, proves an empty remote candidate remains
   unbound, materializes one exact local-shell candidate solely for the history
   contract, then verifies history and two simultaneous native TUI resumes of
@@ -1541,10 +1550,10 @@ The following are intentionally outside v0:
   into an unconditional writable root.
 - The daemon socket, SQLite file, App Server endpoint descriptor, and
   capability token are user-only. The shared App Server port is authenticated
-  and bound to IPv4 loopback. Workspace exec servers also bind ephemeral
-  loopback ports whose URLs are not published, but upstream local mode has no
-  equivalent CoCo token; v0 therefore remains a single-local-user tool rather
-  than a multi-user security boundary.
+  and bound to IPv4 loopback. Every workspace exec server also has its own
+  high-entropy bearer token, binds an ephemeral loopback port, and exposes
+  neither value outside daemon/App Server memory. CoCo remains a
+  single-local-user tool rather than a multi-user security boundary.
 
 ### Native-first migration and release proof
 
@@ -1557,7 +1566,7 @@ The following are intentionally outside v0:
   read failure, restart, final-output selection, and binding mismatches before
   any table or existing record is removed. The initial direct read cutover is
   acceptable without a prolonged shadow-only checkpoint because the original
-  0.147.0 proof and current 0.154.0 real-process gate prove non-loading reads,
+  0.147.0 proof and current 0.159.3 real-process gate prove non-loading reads,
   restart persistence, exact ID/`cwd`, and optional history hydration. Eager recovery
   status/failure writes stop with that obsolete startup path. The later live-
   event reduction also stops user-message, native status/plan/diff/error,
@@ -1612,7 +1621,7 @@ approval model. CoCo neither supplies a separate Git database nor adds a
 custom commit proxy. A later app-side commit action may be useful UI
 convenience, but it is not part of the isolation contract.
 
-Codex 0.154.0 is now the selected and proven compatibility baseline;
+Codex 0.159.3 is now the selected and proven compatibility baseline;
 maintaining a broader range is optional rather than an alpha blocker. The
 two-repository, multi-client product proof now passes locally, so it no longer
 blocks continued public-alpha development. Publishing a particular revision,

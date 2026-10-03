@@ -91,6 +91,142 @@ async fn normalizes_codex_events_and_allows_an_idempotent_follow_up_turn() {
     ));
 }
 
+#[tokio::test]
+async fn presents_terminal_input_approvals_without_calling_them_commands() {
+    let fixture = Fixture::new(FakeWorker::default());
+    fixture.register().await;
+    let workspace = fixture
+        .coordinator
+        .create_workspace(fixture.create_params())
+        .await
+        .unwrap()
+        .workspace;
+    fixture
+        .coordinator
+        .start_turn(TurnStartParams {
+            scope: RepositoryScope::repository(fixture.source.clone()),
+            workspace: workspace.id.clone(),
+            message: "Start an interactive terminal".to_owned(),
+            operation_id: "terminal-input-turn".to_owned(),
+        })
+        .await
+        .unwrap();
+
+    fixture
+        .coordinator
+        .record_codex_event(CodexEvent::ServerRequest {
+            id: json!(23),
+            method: "item/commandExecution/requestApproval".to_owned(),
+            params: json!({
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "terminal-1",
+                "approvalId": "terminal-input-approval",
+                "kind": "writeStdin",
+                "reason": "Send the selected response",
+                "command": "write_stdin --session-id 4821 'yes\n'",
+                "cwd": fixture.source,
+                "environmentId": "coco-test-environment",
+                "startedAtMs": 42,
+                "availableDecisions": ["accept", "decline"]
+            }),
+        })
+        .unwrap();
+
+    let status = fixture
+        .coordinator
+        .get_workspace(WorkspaceGetParams {
+            scope: RepositoryScope::repository(fixture.source.clone()),
+            workspace: workspace.id.clone(),
+            include_resources: false,
+        })
+        .await
+        .unwrap();
+    let decision = status.open_decisions.first().unwrap();
+    let DecisionPrompt::Approval(prompt) = &decision.prompt else {
+        panic!("terminal input was not projected as an approval")
+    };
+    assert_eq!(prompt.title, "Codex wants to send input to a terminal");
+    assert_eq!(prompt.terminal_input.as_deref(), Some("yes\n"));
+    assert_eq!(prompt.command, None);
+
+    fixture
+        .coordinator
+        .respond_decision(DecisionRespondParams {
+            decision_id: decision.id.clone(),
+            submission: DecisionSubmission::Choice { choice: 1 },
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        fixture.worker.calls().last(),
+        Some(WorkerCall::Response { id, result })
+            if id == &json!(23) && result == &json!({"decision": "accept"})
+    ));
+}
+
+#[tokio::test]
+async fn leaves_unknown_null_or_malformed_command_approvals_to_codex() {
+    let fixture = Fixture::new(FakeWorker::default());
+    fixture.register().await;
+    let workspace = fixture
+        .coordinator
+        .create_workspace(fixture.create_params())
+        .await
+        .unwrap()
+        .workspace;
+    fixture
+        .coordinator
+        .start_turn(TurnStartParams {
+            scope: RepositoryScope::repository(fixture.source.clone()),
+            workspace: workspace.id.clone(),
+            message: "Start work".to_owned(),
+            operation_id: "unknown-approval-turn".to_owned(),
+        })
+        .await
+        .unwrap();
+
+    for (id, item_id, kind) in [
+        (24, "future-action", json!("futureAction")),
+        (25, "null-action", Value::Null),
+    ] {
+        fixture
+            .coordinator
+            .record_codex_event(CodexEvent::ServerRequest {
+                id: json!(id),
+                method: "item/commandExecution/requestApproval".to_owned(),
+                params: json!({
+                    "threadId": "thread-1",
+                    "turnId": "turn-1",
+                    "itemId": item_id,
+                    "kind": kind
+                }),
+            })
+            .unwrap();
+    }
+    fixture
+        .coordinator
+        .record_codex_event(CodexEvent::ServerRequest {
+            id: json!(26),
+            method: "item/commandExecution/requestApproval".to_owned(),
+            params: json!({
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "malformed-terminal-input",
+                "kind": "writeStdin",
+                "command": "echo not-a-terminal-input"
+            }),
+        })
+        .unwrap();
+
+    assert!(
+        fixture
+            .coordinator
+            .open_decisions_for_workspace(&workspace.id)
+            .is_empty()
+    );
+}
+
 fn assert_initial_turn_pending(fixture: &Fixture) {
     assert_eq!(
         fixture

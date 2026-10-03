@@ -271,6 +271,7 @@ fn pending_command_decision(workspace: &Workspace, turn: &Turn) -> NewDecision {
             title: "Run a command".to_owned(),
             reason: Some("test".to_owned()),
             command: Some("git status".to_owned()),
+            terminal_input: None,
             cwd: Some(PathBuf::from("/tmp/worktree")),
             network_host: None,
             network_protocol: None,

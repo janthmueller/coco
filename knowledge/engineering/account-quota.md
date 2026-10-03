@@ -22,7 +22,7 @@ workspace.
 
 ## Native contract
 
-The selected Codex 0.154.0 App Server returns:
+The original Codex 0.157.1 account-quota assessment returned:
 
 - `ordinaryUsageAllowed`, the authoritative optional permission for ordinary
   included usage;
@@ -118,6 +118,6 @@ separate retention, permission, or policy decision.
 Primary upstream references are the official
 [App Server documentation](https://developers.openai.com/codex/app-server),
 the selected release's
-[account protocol](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/app-server-protocol/src/protocol/v2/account.rs),
+[account protocol](https://github.com/openai/codex/blob/rust-v0.157.1/codex-rs/app-server-protocol/src/protocol/v2/account.rs),
 and its
-[rate-limit display shaping](https://github.com/openai/codex/blob/rust-v0.154.0/codex-rs/tui/src/status/rate_limits.rs).
+[rate-limit display shaping](https://github.com/openai/codex/blob/rust-v0.157.1/codex-rs/tui/src/status/rate_limits.rs).

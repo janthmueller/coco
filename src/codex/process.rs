@@ -7,11 +7,12 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::{Child, ChildStderr, Command};
 use tokio::sync::{Mutex, mpsc, watch};
 
+use crate::capability::new_capability_token;
 use crate::protocol::AppServerEndpoint;
 
 use super::websocket::{
-    bridge_jsonl_websocket, connect_app_server, new_capability_token, prepare_shared_runtime,
-    remove_runtime_file, reserve_loopback_address, write_private_file,
+    bridge_jsonl_websocket, connect_app_server, prepare_shared_runtime, remove_runtime_file,
+    reserve_loopback_address, write_private_file,
 };
 use super::{
     CodexClient, CodexClientOptions, CodexError, CodexEvent, Inner, STDERR_TAIL_BYTES,

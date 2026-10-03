@@ -69,7 +69,7 @@ machine.
 
 ## Project status
 
-CoCo is alpha software for Linux and macOS, tested with Codex 0.154.0.
+CoCo is alpha software for Linux and macOS, tested with Codex 0.159.3.
 Resource measurements and limits are Linux features; limits require a
 compatible systemd user session.
 

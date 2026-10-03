@@ -11,7 +11,7 @@ use crate::protocol::{
 use super::super::style::{Palette, Tone};
 use super::quota::render_account_quota;
 use super::usage::usage_cells;
-use super::{phase_presentation, safe_line};
+use super::{phase_presentation, safe_line, workspace_model_label};
 
 const MAX_TABLE_WIDTH: usize = 160;
 
@@ -35,6 +35,7 @@ pub(in crate::cli) fn render_workspace_list_for_stdout(
         workspaces,
         include_repository,
         include_resources,
+        false,
         None,
         stdout_width(),
         Palette::stdout(),
@@ -77,6 +78,7 @@ pub(in crate::cli) fn render_workspace_status_list_for_stdout(
             workspaces,
             include_repository,
             include_resources,
+            true,
             usage,
             width,
             palette,
@@ -86,6 +88,7 @@ pub(in crate::cli) fn render_workspace_status_list_for_stdout(
             workspaces,
             include_repository,
             include_resources,
+            true,
             usage,
             width,
             palette,
@@ -116,6 +119,7 @@ fn render_workspace_list(
     workspaces: &[WorkspaceListItem],
     include_repository: bool,
     include_resources: bool,
+    include_model: bool,
     usage: Option<&[WorkspaceUsageItem]>,
     width: usize,
     palette: Palette,
@@ -134,6 +138,7 @@ fn render_workspace_list(
                 Cell::new(item.workspace.name.clone(), Tone::Primary),
                 include_repository,
                 include_resources,
+                include_model,
                 usage_by_workspace.as_ref(),
             )
         })
@@ -141,6 +146,7 @@ fn render_workspace_list(
     let (headers, caps) = workspace_table_shape(
         include_repository,
         include_resources,
+        include_model,
         include_usage,
         include_activity,
         false,
@@ -152,6 +158,7 @@ fn render_workspace_tree(
     workspaces: &[WorkspaceListItem],
     include_repository: bool,
     include_resources: bool,
+    include_model: bool,
     usage: Option<&[WorkspaceUsageItem]>,
     width: usize,
     palette: Palette,
@@ -165,6 +172,7 @@ fn render_workspace_tree(
     let (headers, caps) = workspace_table_shape(
         false,
         include_resources,
+        include_model,
         include_usage,
         include_activity,
         true,
@@ -188,6 +196,7 @@ fn render_workspace_tree(
                 &mut Vec::new(),
                 &mut rows,
                 include_resources,
+                include_model,
                 usage_by_workspace.as_ref(),
                 headers.len(),
             );
@@ -203,6 +212,7 @@ fn render_workspace_tree(
         &mut Vec::new(),
         &mut rows,
         include_resources,
+        include_model,
         usage_by_workspace.as_ref(),
         headers.len(),
     );
@@ -225,11 +235,13 @@ fn workspace_row(
     workspace_cell: Cell,
     include_repository: bool,
     include_resources: bool,
+    include_model: bool,
     usage_by_workspace: Option<&UsageIndex<'_>>,
 ) -> Vec<Cell> {
     let include_usage = usage_by_workspace.is_some();
     let mut cells = Vec::with_capacity(
         3 + usize::from(include_repository)
+            + usize::from(include_model)
             + 3 * usize::from(include_resources)
             + 3 * usize::from(include_usage),
     );
@@ -241,11 +253,18 @@ fn workspace_row(
     }
     cells.push(workspace_cell);
     cells.push(workspace_state_cell(item));
+    if include_model {
+        let (model, tone) = workspace_model_label(&item.workspace).map_or_else(
+            || ("—".to_owned(), Tone::Dim),
+            |model| (model, Tone::Primary),
+        );
+        cells.push(Cell::new(model, tone));
+    }
     if include_resources {
         let (rss, processes, cpu) = resource_cells(item.runtime_resources.as_ref());
         cells.push(Cell::new(rss, Tone::Dim));
-        cells.push(Cell::new(processes, Tone::Dim));
         cells.push(Cell::new(cpu, Tone::Dim));
+        cells.push(Cell::new(processes, Tone::Dim));
     }
     if include_usage {
         let usage =
@@ -268,12 +287,14 @@ fn workspace_row(
 fn workspace_table_shape(
     include_repository: bool,
     include_resources: bool,
+    include_model: bool,
     include_usage: bool,
     include_activity: bool,
     tree: bool,
 ) -> (Vec<&'static str>, Vec<usize>) {
     let mut headers = Vec::with_capacity(
         3 + usize::from(include_repository)
+            + usize::from(include_model)
             + 3 * usize::from(include_resources)
             + 3 * usize::from(include_usage),
     );
@@ -287,9 +308,13 @@ fn workspace_table_shape(
         if tree { 64 } else { 32 },
         if include_activity { 48 } else { 18 },
     ]);
+    if include_model {
+        headers.push("MODEL");
+        caps.push(32);
+    }
     if include_resources {
-        headers.extend(["MEMORY", "PROCS", "CPU"]);
-        caps.extend([14, 8, 10]);
+        headers.extend(["MEMORY", "CPU", "PROCS"]);
+        caps.extend([14, 10, 8]);
     }
     if include_usage {
         headers.extend(["TOKENS", "CONTEXT", "COST"]);
@@ -361,6 +386,7 @@ fn append_tree_rows(
     ancestor_is_last: &mut Vec<bool>,
     rows: &mut Vec<Vec<Cell>>,
     include_resources: bool,
+    include_model: bool,
     usage_by_workspace: Option<&UsageIndex<'_>>,
     column_count: usize,
 ) {
@@ -386,6 +412,7 @@ fn append_tree_rows(
                 workspace_cell,
                 false,
                 include_resources,
+                include_model,
                 usage_by_workspace,
             ));
         } else {
@@ -397,6 +424,7 @@ fn append_tree_rows(
             ancestor_is_last,
             rows,
             include_resources,
+            include_model,
             usage_by_workspace,
             column_count,
         );
@@ -805,6 +833,7 @@ mod tests {
             &[workspace],
             false,
             false,
+            true,
             None,
             usize::MAX,
             Palette::plain(),
@@ -812,6 +841,57 @@ mod tests {
         assert!(rendered.contains("STATE"));
         assert!(!rendered.contains("ACTIVITY"));
         assert!(rendered.contains("● Working · Checking tests"));
+    }
+
+    #[test]
+    fn status_shows_native_model_and_effort_without_expanding_plain_list() {
+        let mut workspace = workspace_item("repo", "project", "feat/login", WorkspacePhase::Idle);
+        workspace.workspace.thread_runtime = Some(crate::domain::ThreadRuntimeSnapshot {
+            status: crate::domain::CodexThreadStatus::Idle,
+            model: Some("gpt-5.6-sol".to_owned()),
+            reasoning_effort: Some("max".to_owned()),
+            runtime_generation: "runtime-1".to_owned(),
+            observed_at_ms: 1,
+            is_fresh: true,
+        });
+
+        let prepared = workspace_item("repo", "project", "feat/prepared", WorkspacePhase::Prepared);
+        let status = render_workspace_list(
+            &[workspace.clone(), prepared],
+            false,
+            false,
+            true,
+            None,
+            usize::MAX,
+            Palette::plain(),
+        );
+        assert!(status.contains("MODEL"));
+        assert!(status.contains("gpt-5.6-sol · max"));
+        assert!(status.contains('—'));
+
+        let colored = render_workspace_list(
+            std::slice::from_ref(&workspace),
+            false,
+            false,
+            true,
+            None,
+            usize::MAX,
+            Palette::colored(),
+        );
+        assert!(colored.contains("gpt-5.6-sol · max"));
+        assert!(colored.contains("\u{1b}["));
+
+        let list = render_workspace_list(
+            &[workspace],
+            false,
+            false,
+            false,
+            None,
+            usize::MAX,
+            Palette::plain(),
+        );
+        assert!(!list.contains("MODEL"));
+        assert!(!list.contains("gpt-5.6-sol"));
     }
 
     #[test]
@@ -843,6 +923,7 @@ mod tests {
             &workspaces,
             false,
             false,
+            true,
             None,
             usize::MAX,
             Palette::plain(),
@@ -874,7 +955,8 @@ mod tests {
             workspace_item("repo", "project", "backend/worker", WorkspacePhase::Idle),
         ];
         let palette = Palette::colored();
-        let rendered = render_workspace_tree(&workspaces, false, false, None, usize::MAX, palette);
+        let rendered =
+            render_workspace_tree(&workspaces, false, false, true, None, usize::MAX, palette);
         let expected = format!(
             "{}{}",
             palette.paint(Tone::Dim, "└─ "),
@@ -893,7 +975,8 @@ mod tests {
             workspace_item("alpha", "alpha", "frontend/w2", WorkspacePhase::Idle),
             workspace_item("beta", "beta", "backend/api", WorkspacePhase::Active),
         ];
-        let rendered = render_workspace_tree(&workspaces, true, false, None, 64, Palette::plain());
+        let rendered =
+            render_workspace_tree(&workspaces, true, false, true, None, 64, Palette::plain());
 
         assert!(rendered.starts_with("/repos/alpha\nWORKSPACE"));
         assert!(rendered.contains("└─ frontend/w2"));
@@ -933,5 +1016,23 @@ mod tests {
             resource_cells(None),
             ("—".to_owned(), "—".to_owned(), "—".to_owned())
         );
+    }
+
+    #[test]
+    fn status_columns_keep_primary_fields_before_ordered_resource_metrics() {
+        let (headers, caps) = workspace_table_shape(false, true, true, false, false, false);
+        assert_eq!(
+            headers,
+            vec![
+                "WORKSPACE",
+                "STATE",
+                "MODEL",
+                "MEMORY",
+                "CPU",
+                "PROCS",
+                "BRANCH"
+            ]
+        );
+        assert_eq!(caps, vec![32, 18, 32, 14, 10, 8, 48]);
     }
 }

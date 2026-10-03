@@ -116,14 +116,6 @@ pub(super) async fn remove_runtime_file(path: &Path) {
     }
 }
 
-pub(super) fn new_capability_token() -> String {
-    format!(
-        "{}{}",
-        uuid::Uuid::new_v4().simple(),
-        uuid::Uuid::new_v4().simple()
-    )
-}
-
 pub(super) async fn reserve_loopback_address() -> Result<SocketAddr, CodexError> {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
         .await

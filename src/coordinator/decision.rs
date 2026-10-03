@@ -477,15 +477,32 @@ fn validate_answers(
 }
 
 fn project_command_approval(params: &Value) -> Option<ProjectedDecision> {
+    let (title, terminal_input) = match params.get("kind") {
+        None => ("Codex wants to run a command", None),
+        Some(Value::String(kind)) if kind == "command" => ("Codex wants to run a command", None),
+        Some(Value::String(kind)) if kind == "writeStdin" => (
+            "Codex wants to send input to a terminal",
+            Some(project_terminal_input(params)?),
+        ),
+        _ => {
+            warn!("ignoring command approval with an unknown action kind");
+            return None;
+        }
+    };
     let (options, native_options) = project_command_options(params.get("availableDecisions"))?;
     let additional_permissions = project_additional_permissions(params)?;
     let (network_host, network_protocol) = project_network_context(params)?;
+    let command = terminal_input
+        .is_none()
+        .then(|| bounded_optional_string(params.get("command"), MAX_PRESENTATION_STRING_BYTES))
+        .flatten();
     Some(ProjectedDecision {
         kind: DecisionKind::CommandApproval,
         prompt: DecisionPrompt::Approval(Box::new(DecisionApprovalPrompt {
-            title: "Codex wants to run a command".to_owned(),
+            title: title.to_owned(),
             reason: bounded_optional_string(params.get("reason"), MAX_REASON_BYTES),
-            command: bounded_optional_string(params.get("command"), MAX_PRESENTATION_STRING_BYTES),
+            command,
+            terminal_input,
             cwd: bounded_optional_string(params.get("cwd"), MAX_PRESENTATION_STRING_BYTES)
                 .map(PathBuf::from),
             network_host,
@@ -497,6 +514,33 @@ fn project_command_approval(params: &Value) -> Option<ProjectedDecision> {
         })),
         native_options,
     })
+}
+
+fn project_terminal_input(params: &Value) -> Option<String> {
+    let Some(command) = params
+        .get("command")
+        .and_then(|value| bounded_required_string(value, MAX_PRESENTATION_STRING_BYTES))
+    else {
+        warn!("ignoring terminal-input approval without a bounded command presentation");
+        return None;
+    };
+    let Some(arguments) = shlex::split(&command) else {
+        warn!("ignoring terminal-input approval with an invalid command presentation");
+        return None;
+    };
+    match arguments.as_slice() {
+        [tool, session_flag, session_id, input]
+            if tool == "write_stdin"
+                && session_flag == "--session-id"
+                && !session_id.is_empty() =>
+        {
+            Some(input.clone())
+        }
+        _ => {
+            warn!("ignoring terminal-input approval with an unknown command presentation");
+            None
+        }
+    }
 }
 
 fn project_file_change_approval(
@@ -514,6 +558,7 @@ fn project_file_change_approval(
             title: "Codex wants to change files".to_owned(),
             reason: bounded_optional_string(params.get("reason"), MAX_REASON_BYTES),
             command: None,
+            terminal_input: None,
             cwd: None,
             network_host: None,
             network_protocol: None,

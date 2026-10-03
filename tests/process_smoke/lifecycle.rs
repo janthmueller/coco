@@ -67,7 +67,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     super::hooks::verify_loaded(&paths, &repository).await?;
 
     let models = cli_json(&run_cli(&paths, &repository, &["model", "list", "--json"]).await?)?;
-    assert_eq!(models["schemaVersion"], 13);
+    assert_eq!(models["schemaVersion"], 14);
     assert_eq!(models["models"].as_array().map(Vec::len), Some(2));
     assert_eq!(models["models"][0]["model"], DEFAULT_MODEL);
     assert_eq!(models["models"][0]["isDefault"], true);
@@ -86,7 +86,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
 
     run_cli(&paths, &repository, &["repo", "add", "."]).await?;
     let repositories = cli_json(&run_cli(&paths, &repository, &["repo", "ls", "--json"]).await?)?;
-    assert_eq!(repositories["schemaVersion"], 13);
+    assert_eq!(repositories["schemaVersion"], 14);
     assert_eq!(
         repositories["repositories"].as_array().map(Vec::len),
         Some(1)
@@ -183,7 +183,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     fs::remove_file(repository.join("local-only.txt"))?;
 
     let listed = cli_json(&run_cli(&paths, &repository, &["list", "--json"]).await?)?;
-    assert_eq!(listed["schemaVersion"], 13);
+    assert_eq!(listed["schemaVersion"], 14);
     let workspaces = listed["workspaces"]
         .as_array()
         .context("coco list did not return a workspaces array")?;
@@ -203,6 +203,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
             && human_workspaces.contains("STATE")
             && human_workspaces.contains("BRANCH")
             && human_workspaces.contains(WORKSPACE_NAME)
+            && !human_workspaces.contains("MODEL")
             && !human_workspaces.contains(
                 workspace["id"]
                     .as_str()
@@ -216,6 +217,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     ensure!(
         tree_overview.contains("└─ feat/process-smoke")
             && tree_overview.contains("STATE")
+            && tree_overview.contains("MODEL")
             && tree_overview.contains("BRANCH"),
         "workspace tree did not compact its unique path and preserve status columns: {tree_overview}"
     );
@@ -225,7 +227,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         "state-sorted status omitted the workspace"
     );
     let status_overview = cli_json(&run_cli(&paths, &repository, &["status", "--json"]).await?)?;
-    assert_eq!(status_overview["schemaVersion"], 13);
+    assert_eq!(status_overview["schemaVersion"], 14);
     assert_eq!(
         status_overview["workspaces"].as_array().map(Vec::len),
         Some(1)
@@ -419,7 +421,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         )
         .await?,
     )?;
-    assert_eq!(usage["schemaVersion"], 13);
+    assert_eq!(usage["schemaVersion"], 14);
     assert_eq!(usage["workspace"]["name"], WORKSPACE_NAME);
     assert_eq!(
         usage.pointer("/usage/tokens/total/totalTokens"),
@@ -459,7 +461,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         )
         .await?,
     )?;
-    assert_eq!(quota["schemaVersion"], 13);
+    assert_eq!(quota["schemaVersion"], 14);
     assert_eq!(quota["workspace"]["name"], WORKSPACE_NAME);
     assert_eq!(
         quota.pointer("/accountQuota/ordinaryUsageAllowed"),

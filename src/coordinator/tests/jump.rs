@@ -43,6 +43,8 @@ async fn adopts_only_the_exact_materialized_thread_from_a_fresh_jump() {
         cwd: worktree.clone(),
         name: None,
         status: CodexThreadStatus::Idle,
+        model: None,
+        reasoning_effort: None,
         forked_from_id: None,
     });
     let params = WorkspaceAttachAdoptParams {
@@ -73,6 +75,8 @@ async fn adopts_only_the_exact_materialized_thread_from_a_fresh_jump() {
         cwd: worktree,
         name: None,
         status: CodexThreadStatus::Idle,
+        model: None,
+        reasoning_effort: None,
         forked_from_id: None,
     });
     let WorkspaceAttachAdoptResult::Bound { workspace } = fixture
@@ -141,6 +145,8 @@ async fn slow_adoption_cannot_expire_its_own_valid_lease() {
         cwd: prepared.worktree_path.clone().unwrap(),
         name: None,
         status: CodexThreadStatus::Idle,
+        model: None,
+        reasoning_effort: None,
         forked_from_id: None,
     });
     let params = WorkspaceAttachAdoptParams {
@@ -207,6 +213,8 @@ async fn releasing_a_slow_adoption_does_not_cancel_its_durable_binding() {
         cwd: prepared.worktree_path.clone().unwrap(),
         name: None,
         status: CodexThreadStatus::Idle,
+        model: None,
+        reasoning_effort: None,
         forked_from_id: None,
     });
 

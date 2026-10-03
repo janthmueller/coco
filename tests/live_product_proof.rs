@@ -6,6 +6,8 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, ensure};
 use serde_json::{Value, json};
 
+#[path = "support/codex_compat.rs"]
+mod codex_compat;
 #[path = "support/mcp_client.rs"]
 mod mcp_client;
 #[path = "live_product_proof/support.rs"]

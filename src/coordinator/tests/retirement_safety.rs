@@ -152,6 +152,8 @@ async fn close_preserves_worktree_used_by_an_active_child_agent() {
         status: CodexThreadStatus::Active {
             active_flags: Vec::new(),
         },
+        model: None,
+        reasoning_effort: None,
         forked_from_id: Some(parent_id.to_owned()),
     });
 
@@ -224,6 +226,8 @@ fn remember_child(
         cwd,
         name: None,
         status,
+        model: None,
+        reasoning_effort: None,
         forked_from_id: Some(parent_id.to_owned()),
     });
 }

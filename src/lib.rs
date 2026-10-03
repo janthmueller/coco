@@ -1,3 +1,4 @@
+mod capability;
 mod cli;
 mod codex;
 mod coordinator;

@@ -339,14 +339,21 @@ fn public_workspace_execution_error(error: &WorkspaceExecutionError) -> String {
         WorkspaceExecutionError::Spawn(source)
             if source.kind() == std::io::ErrorKind::NotFound =>
         {
-            "The installed Codex does not provide `codex exec-server`; use codex-cli 0.154.0 or set COCO_WORKSPACE_EXECUTION=shared before starting cocod"
+            "CoCo could not start the workspace runtime process; check that the configured Codex executable and `systemd-run` (when enabled) are available to cocod"
                 .to_owned()
         }
-        WorkspaceExecutionError::Registration { .. } => {
-            "The installed Codex cannot register workspace runtimes; use codex-cli 0.154.0 or set COCO_WORKSPACE_EXECUTION=shared before starting cocod"
+        WorkspaceExecutionError::Registration {
+            source:
+                CodexError::Rpc {
+                    code: -32601 | -32602,
+                    ..
+                },
+        } => {
+            "The installed Codex does not provide the workspace runtime API CoCo needs; update Codex or set COCO_WORKSPACE_EXECUTION=shared before starting cocod"
                 .to_owned()
         }
-        WorkspaceExecutionError::Connection { .. }
+        WorkspaceExecutionError::Registration { .. }
+        | WorkspaceExecutionError::Connection { .. }
         | WorkspaceExecutionError::EarlyExit { .. }
         | WorkspaceExecutionError::StartupTimeout => {
             "The Codex workspace runtime could not start; check the cocod log or set COCO_WORKSPACE_EXECUTION=shared before restarting cocod"
@@ -444,22 +451,73 @@ mod tests {
     }
 
     #[test]
-    fn workspace_runtime_compatibility_errors_offer_a_safe_fallback() {
-        let payload = map_coordinator_error(CoordinatorError::Worker(WorkerError::runtime(
-            WorkspaceExecutionError::Registration {
-                source: CodexError::Rpc {
-                    code: -32601,
-                    message: "private upstream detail".to_owned(),
-                    data: Some(json!({"secret": true})),
+    fn workspace_runtime_api_incompatibility_offers_a_safe_fallback() {
+        for code in [-32601, -32602] {
+            let payload = map_coordinator_error(CoordinatorError::Worker(WorkerError::runtime(
+                WorkspaceExecutionError::Registration {
+                    source: CodexError::Rpc {
+                        code,
+                        message: "private upstream detail".to_owned(),
+                        data: Some(json!({"secret": true})),
+                    },
                 },
+            )));
+
+            assert_eq!(
+                payload.message,
+                "The installed Codex does not provide the workspace runtime API CoCo needs; update Codex or set COCO_WORKSPACE_EXECUTION=shared before starting cocod"
+            );
+            assert!(!payload.message.contains("private upstream detail"));
+        }
+    }
+
+    #[test]
+    fn other_workspace_runtime_registration_failures_do_not_claim_api_incompatibility() {
+        let failures = [
+            CodexError::Closed {
+                reason: "private disconnect reason".to_owned(),
+                stderr: "private stderr".to_owned(),
             },
+            CodexError::Rpc {
+                code: -32000,
+                message: "private upstream failure".to_owned(),
+                data: Some(json!({"secret": true})),
+            },
+        ];
+
+        for source in failures {
+            let payload = map_coordinator_error(CoordinatorError::Worker(WorkerError::runtime(
+                WorkspaceExecutionError::Registration { source },
+            )));
+
+            assert_eq!(
+                payload.message,
+                "The Codex workspace runtime could not start; check the cocod log or set COCO_WORKSPACE_EXECUTION=shared before restarting cocod"
+            );
+            assert!(!payload.message.contains("private"));
+            assert!(!payload.message.contains("update Codex"));
+        }
+    }
+
+    #[test]
+    fn missing_workspace_runtime_launcher_reports_executable_availability() {
+        let payload = map_coordinator_error(CoordinatorError::Worker(WorkerError::runtime(
+            WorkspaceExecutionError::Spawn(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "private executable path",
+            )),
         )));
 
         assert_eq!(
             payload.message,
-            "The installed Codex cannot register workspace runtimes; use codex-cli 0.154.0 or set COCO_WORKSPACE_EXECUTION=shared before starting cocod"
+            "CoCo could not start the workspace runtime process; check that the configured Codex executable and `systemd-run` (when enabled) are available to cocod"
         );
-        assert!(!payload.message.contains("private upstream detail"));
+        assert!(!payload.message.contains("private executable path"));
+        assert!(
+            !payload
+                .message
+                .contains("does not provide `codex exec-server`")
+        );
     }
 
     #[test]

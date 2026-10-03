@@ -136,6 +136,8 @@ async fn forks_context_from_an_exact_native_thread_id_without_a_coco_workspace()
         cwd: native_cwd.clone(),
         name: Some("external".to_owned()),
         status: CodexThreadStatus::NotLoaded,
+        model: None,
+        reasoning_effort: None,
         forked_from_id: None,
     });
     let mut params = fixture.create_params();
@@ -204,6 +206,8 @@ async fn explicit_context_prefixes_disambiguate_a_workspace_shaped_thread_id() {
         cwd: native_cwd.clone(),
         name: Some("external".to_owned()),
         status: CodexThreadStatus::NotLoaded,
+        model: None,
+        reasoning_effort: None,
         forked_from_id: None,
     });
     let mut params = fixture.create_params();

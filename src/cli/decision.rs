@@ -99,6 +99,9 @@ fn prompt_approval<W: Write>(
     if let Some(command) = &prompt.command {
         writeln!(output, "Command:\n  {command}")?;
     }
+    if let Some(input) = &prompt.terminal_input {
+        writeln!(output, "Input: {input:?}")?;
+    }
     if let Some(cwd) = &prompt.cwd {
         writeln!(output, "Directory: {}", cwd.display())?;
     }
@@ -265,6 +268,33 @@ mod tests {
 
         assert_eq!(submission, DecisionSubmission::Choice { choice: 2 });
         assert!(interaction.seen_choices.is_empty());
+    }
+
+    #[test]
+    fn presents_terminal_input_without_exposing_the_synthetic_command() {
+        let mut result = approval_fixture();
+        let DecisionPrompt::Approval(prompt) = &mut result.decision.prompt else {
+            unreachable!()
+        };
+        prompt.title = "Codex wants to send input to a terminal".to_owned();
+        prompt.command = None;
+        prompt.terminal_input = Some("yes\n".to_owned());
+        let mut interaction = ScriptedInteraction::default();
+        let mut output = Vec::new();
+
+        let submission = prompt_submission(
+            &result,
+            &mut output,
+            Some(1),
+            &mut interaction,
+            &mut unexpected_secret,
+        )
+        .unwrap();
+
+        assert_eq!(submission, DecisionSubmission::Choice { choice: 1 });
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("Input: \"yes\\n\""));
+        assert!(!output.contains("Command:"));
     }
 
     #[test]
@@ -511,6 +541,7 @@ mod tests {
                     title: "Run command".to_owned(),
                     reason: Some("test".to_owned()),
                     command: Some("git status".to_owned()),
+                    terminal_input: None,
                     cwd: Some(PathBuf::from("/repo")),
                     network_host: None,
                     network_protocol: None,

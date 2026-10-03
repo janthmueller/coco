@@ -87,6 +87,55 @@ async fn workspace_resources_are_observed_only_when_requested() {
 }
 
 #[tokio::test]
+async fn status_projects_current_native_model_settings_without_persisting_them() {
+    let fixture = Fixture::new(FakeWorker::default());
+    fixture.register().await;
+    let workspace = fixture
+        .create_and_materialize(fixture.create_params())
+        .await;
+    fixture
+        .worker
+        .set_native_settings("thread-1", "gpt-5.6-sol", "max");
+
+    let shown = fixture
+        .coordinator
+        .get_workspace(WorkspaceGetParams {
+            scope: RepositoryScope::repository(fixture.source.clone()),
+            workspace: workspace.id.clone(),
+            include_resources: false,
+        })
+        .await
+        .unwrap();
+    let runtime = shown.workspace.thread_runtime.as_ref().unwrap();
+    assert_eq!(runtime.model.as_deref(), Some("gpt-5.6-sol"));
+    assert_eq!(runtime.reasoning_effort.as_deref(), Some("max"));
+
+    fixture
+        .worker
+        .set_native_settings("thread-1", "gpt-5.6-luna", "high");
+    let listed = fixture
+        .coordinator
+        .list_workspaces(WorkspaceListParams {
+            scope: RepositoryScope::repository(fixture.source.clone()),
+            phases: None,
+            include_resources: false,
+            include_activity: false,
+        })
+        .await
+        .unwrap();
+    let runtime = listed[0].workspace.thread_runtime.as_ref().unwrap();
+    assert_eq!(runtime.model.as_deref(), Some("gpt-5.6-luna"));
+    assert_eq!(runtime.reasoning_effort.as_deref(), Some("high"));
+
+    let persisted = fixture
+        .store
+        .workspace_by_id(&workspace.id)
+        .unwrap()
+        .unwrap();
+    assert!(persisted.thread_runtime.is_none());
+}
+
+#[tokio::test]
 async fn prepares_a_workspace_without_starting_a_native_thread_and_replays_operation_ids() {
     let fixture = Fixture::new(FakeWorker::default());
     let repository = fixture.register().await;

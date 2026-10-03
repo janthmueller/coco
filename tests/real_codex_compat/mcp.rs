@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires COCO_RUN_REAL_CODEX_COMPAT=1 and the pinned local Codex executable"]
+#[ignore = "requires COCO_RUN_REAL_CODEX_COMPAT=1 and the selected local Codex executable"]
 async fn installed_codex_keeps_mcp_scopes_separate_on_start_fork_and_resume() -> Result<()> {
     require_explicit_opt_in()?;
     let binary = env::var_os(CODEX_BINARY_ENV)

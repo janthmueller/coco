@@ -8,6 +8,42 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-10-03
+
+- **Codex 0.159.3 compatibility hardening**: Completed terminal-input approval
+  projection from Codex's bounded synthetic `write_stdin` presentation, while
+  explicit null and unknown action kinds now fail closed. Moved shared local
+  token generation behind a neutral crate-private module so CLI remains
+  independent of the Codex adapter, and added deterministic coverage proving
+  workspace executor arguments receive only the token digest while
+  `environment/add` receives the raw in-memory token.
+
+## 2026-10-01
+
+- **Codex 0.159.3 compatibility baseline**: Advanced the exact model-free
+  process gate to 0.159.3 after preparation/adoption/resume, MCP, and native
+  hook contracts all passed. Workspace exec servers now use distinct
+  in-memory bearer tokens through Codex's native capability-token support,
+  and terminal-input approvals retain the native `writeStdin` distinction in
+  CoCo's decision presentation.
+- **Native model status**: Added Codex's current configured model and optional
+  reasoning effort to targeted and collection status, including follow and
+  schema-version-14 JSON. The projection comes from each non-loading native
+  `thread/read`, so TUI model changes appear on the next poll without a stored
+  CoCo mirror; ordinary `list` remains compact.
+
+## 2026-09-26
+
+- **Codex 0.157.1 compatibility baseline**: Advanced the selected exact proof
+  target from 0.154.0 after all three model-free real-process contracts passed
+  against the installed 0.157.1 executable. Centralized the opt-in test
+  version, made linked-worktree TUI trust independent of prompt wording, and
+  changed runtime compatibility diagnostics to describe required capabilities
+  instead of prescribing one Codex version. The `codex-cli-nix` automatic
+  daemon packaging failure affects ordinary local TUI startup; CoCo's explicit
+  remote TUI and direct App/Exec Server paths bypass it, so CoCo must not add
+  the mutually exclusive `--no-daemon` flag.
+
 ## 2026-09-23
 
 - **Account-wide Codex quota status**: Added the opt-in
