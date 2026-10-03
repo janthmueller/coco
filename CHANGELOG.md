@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.1.0-alpha.9 (2026-10-03)
+
+### Features
+
+- Support Codex 0.159.3
+  ([`a75a89a`](https://github.com/janthmueller/coco/commit/a75a89a2c02fb245bb83864f876b5a3f8be1e08c))
+
+
 ## v0.1.0-alpha.8 (2026-09-23)
 
 ### Features
