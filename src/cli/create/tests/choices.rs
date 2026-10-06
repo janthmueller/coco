@@ -49,12 +49,12 @@ async fn preset_code_bases_never_offer_or_normalize_to_an_existing_branch() {
             .seen_choices
             .iter()
             .zip(&interaction.titles)
-            .find_map(|(choices, title)| (title == "Git worktree").then_some(choices))
+            .find_map(|(choices, title)| (title == "Worktree").then_some(choices))
             .unwrap();
         assert!(
             worktree_choices
                 .iter()
-                .all(|choice| choice.label != "Existing local branch")
+                .all(|choice| choice.label != "Existing branch")
         );
         let confirmation = final_create_choice(&interaction);
         assert_eq!(confirmation, &Choice::new("Create", None));
@@ -303,6 +303,22 @@ async fn walkthrough_selects_a_named_profile_and_native_model() {
     server_task.await.unwrap().unwrap();
 }
 
+#[test]
+fn model_choices_do_not_repeat_identical_names_and_selectors() {
+    let matching = model("gpt-default", true);
+    assert_eq!(
+        model_choice(&matching),
+        Choice::new("gpt-default", None).with_default_marker()
+    );
+
+    let mut distinct = model("gpt-default", true);
+    distinct.display_name = "GPT Default".to_owned();
+    assert_eq!(
+        model_choice(&distinct),
+        Choice::new("GPT Default", Some("gpt-default".to_owned())).with_default_marker()
+    );
+}
+
 #[tokio::test]
 async fn an_empty_model_catalog_returns_to_the_inherit_choice() {
     let _rpc_test_guard = RPC_TEST_LOCK.lock().await;
@@ -322,15 +338,13 @@ async fn an_empty_model_catalog_returns_to_the_inherit_choice() {
     assert!(args.model.is_none());
     assert_eq!(
         interaction.notices,
-        [
-            "Codex did not report any selectable models. Inherit the configured model or try again later."
-        ]
+        ["No selectable Codex models found. Use the configured model or try again later."]
     );
     assert_eq!(
         interaction
             .titles
             .iter()
-            .filter(|title| title.as_str() == "Codex model")
+            .filter(|title| title.as_str() == "Model")
             .count(),
         2
     );

@@ -20,7 +20,9 @@ CoCo uses the same release control pattern as Wuf, adapted to one Rust package:
    of `main`.
 4. Python Semantic Release stamps `Cargo.toml`, synchronizes the root package
    entry in `Cargo.lock`, updates `CHANGELOG.md`, creates a release commit, and
-   tags an alpha version.
+   tags the selected release channel. The currently implemented workflow
+   selects alpha unconditionally; the approved transition below is not yet
+   implemented.
 5. A GitHub Release is created from that tag.
 6. Linux and macOS runners build and smoke-test `coco`, `cocod`, and
    `coco-mcp`, then attach one archive and SHA-256 checksum per platform.
@@ -53,10 +55,9 @@ launchd agents, and the eventual Windows equivalent enable supervision.
 
 ## Publication guard
 
-The repository remains private during the current product-boundary review, and
-GitHub Pages is disabled. Do not make the repository or documentation public,
-and do not publish the crate, without a new explicit user decision. Static
-site and package dry runs remain valid pre-publication checks.
+The repository, GitHub Pages site, release archives, and alpha crate are
+public. Repository visibility and package publication remain operationally
+sensitive changes even though the initial publication decision is complete.
 
 Automatic releases after a successful push are disabled unless the repository
 variable `COCO_RELEASE_ENABLED` is exactly `true`. This permits the pipeline to
@@ -72,10 +73,10 @@ the remote branch immediately before versioning. Branch protection must either
 permit the repository token to push the generated release commit and tag or
 provide the narrowly scoped `GH_PAT` secret used by the existing Wuf pattern.
 
-Do not enable automatic publication until the public repository identity,
-license, supported Codex version statement, and installation documentation are
-ready for the first alpha. Enabling the repository variable is an operational
-release decision, not an ordinary code change.
+Changing `COCO_RELEASE_ENABLED`, release channels, or registry credentials is
+an operational release decision, not an ordinary code change. Until the
+approved explicit-channel transition is implemented, enabling the variable
+continues to publish alpha releases after qualifying tested pushes.
 
 ## Version and changelog policy
 
@@ -92,10 +93,32 @@ token even though the `main` branch configuration itself remains stable-ready.
 Moving to stable releases therefore requires an explicit workflow decision,
 not a branch rename or an accidental commit type.
 
-Before the first published tag, the source tree uses `0.1.0-alpha.0` as an
-explicit unreleased baseline. Local and flake-built executables therefore do
-not present themselves as stable; the first Semantic Release advances that
-baseline to `0.1.0-alpha.1`.
+During the current channel, release commits stamp `0.1.0-alpha.N`; local and
+flake-built executables report that exact source version. Semantic Release
+advances the prerelease number from qualifying commits until the explicit
+stable-channel transition is implemented.
+
+The approved post-alpha direction is to promote the tested `0.1` line to a
+suffix-free `0.1.0`, not to claim `1.0.0`. A final `0.1.0-alpha.N` may be used
+as a bounded release candidate, but alpha numbering must not substitute for
+ordinary `0.x` evolution indefinitely. After promotion, compatible fixes use
+`0.1.x`; meaningful feature or breaking changes before 1.0 advance the minor
+line (`0.2.0`, `0.3.0`, and so on). A future minor may have explicit
+`0.2.0-alpha.N` previews when external testing is useful, but every minor does
+not require an alpha train or a beta phase.
+
+Stable package publication is deliberate rather than an automatic consequence
+of every qualifying commit. Ordinary pushes run verification and documentation
+delivery. The release workflow must expose an explicit preview-versus-stable
+choice: preview publication carries the `alpha` suffix and prerelease channel,
+while stable publication is suffix-free and becomes the normal GitHub/crates.io
+release. The current workflow still forces `alpha`; changing that automation
+and completing one explicit release checklist are prerequisites for `0.1.0`.
+
+`1.0.0` is reserved for an intentional compatibility promise covering at least
+the CLI, control MCP surface, configuration, persisted-state migrations, and
+workspace recovery behavior. A suffix-free `0.x` release communicates a usable
+normal release without making that broader promise.
 
 Commit subjects follow Conventional Commits. `feat` causes a feature bump,
 `fix` causes a patch bump, and an explicit breaking-change marker causes the
@@ -128,6 +151,7 @@ the registry artifact. CI runs `cargo publish --dry-run --locked` before a
 revision can release; the tagged release job reads its credential only from
 the `CARGO_REGISTRY_TOKEN` GitHub secret.
 
-Source installation stays authoritative until the first registry version and
-archives have actually been produced and the public guide has been updated
-from those observed artifacts.
+Until a suffix-free version exists on crates.io, Cargo installation examples
+must name an exact alpha version because a bare install does not select a
+prerelease. After the first stable `0.x` publication, verify the registry and
+archives before changing the public guide to the unversioned install form.

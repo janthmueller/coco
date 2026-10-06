@@ -11,11 +11,16 @@ use terminal::PickerTerminal;
 pub(in crate::cli) mod terminal;
 
 const MAX_VISIBLE_ROWS: usize = 9;
+const DETAIL_PREFIX: &str = "  · ";
+const DEFAULT_DETAIL: &str = "  · default";
+const DEFAULT_SUFFIX: &str = " · default";
+const MIN_LABEL_WITH_DEFAULT: usize = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Choice {
     pub(super) label: String,
     pub(super) detail: Option<String>,
+    pub(super) is_default: bool,
 }
 
 impl Choice {
@@ -23,7 +28,13 @@ impl Choice {
         Self {
             label: label.into(),
             detail,
+            is_default: false,
         }
+    }
+
+    pub(super) fn with_default_marker(mut self) -> Self {
+        self.is_default = true;
+        self
     }
 }
 
@@ -150,7 +161,7 @@ fn run_picker_with_review(
 ) -> Result<usize> {
     let mut terminal = PickerTerminal::enter(io::stderr().lock())
         .context("could not enter terminal selection mode")?;
-    let mut state = PickerState::new();
+    let mut state = PickerState::from_choices(choices);
     let palette = Palette::stderr();
     let outcome = loop {
         let (columns, rows) = size().unwrap_or((100, 24));
@@ -235,6 +246,16 @@ impl PickerState {
         Self {
             selected: 0,
             visible_rows: MAX_VISIBLE_ROWS,
+        }
+    }
+
+    fn from_choices(choices: &[Choice]) -> Self {
+        Self {
+            selected: choices
+                .iter()
+                .position(|choice| choice.is_default)
+                .unwrap_or(0),
+            ..Self::new()
         }
     }
 
@@ -360,25 +381,53 @@ fn picker_row(
     let prefix = truncate_line(&format!("{marker} {:>2}  ", index + 1), width);
     let available = width.saturating_sub(prefix.width());
     let label = single_line(&choice.label);
-    let label = truncate_line(&label, available);
+    let default_width = DEFAULT_DETAIL.width();
+    let label_width =
+        if choice.is_default && available >= default_width.saturating_add(MIN_LABEL_WITH_DEFAULT) {
+            available - default_width
+        } else {
+            available
+        };
+    let label = truncate_line(&label, label_width);
     let remaining = available.saturating_sub(label.width());
+    let detail = picker_detail(choice, remaining);
+    let primary = if selected {
+        palette.paint(Tone::CyanBold, format!("{prefix}{label}"))
+    } else {
+        format!("{}{}", palette.paint(Tone::Dim, prefix), label,)
+    };
+    format!("{primary}{}", palette.paint(Tone::Dim, detail))
+}
+
+fn picker_detail(choice: &Choice, width: usize) -> String {
     let detail = choice
         .detail
         .as_deref()
         .map(single_line)
-        .filter(|detail| !detail.is_empty())
-        .filter(|_| remaining > 3)
-        .map(|detail| format!("  {}", truncate_line(&detail, remaining - 2)))
-        .unwrap_or_default();
-    if selected {
-        palette.paint(Tone::CyanBold, format!("{prefix}{label}{detail}"))
-    } else {
-        format!(
-            "{}{}{}",
-            palette.paint(Tone::Dim, prefix),
-            label,
-            palette.paint(Tone::Dim, detail),
-        )
+        .filter(|detail| !detail.is_empty());
+
+    if choice.is_default {
+        if width < DEFAULT_DETAIL.width() {
+            return String::new();
+        }
+        if let Some(detail) = detail {
+            let structural_width = DETAIL_PREFIX.width() + DEFAULT_SUFFIX.width();
+            if width > structural_width {
+                return format!(
+                    "{DETAIL_PREFIX}{}{DEFAULT_SUFFIX}",
+                    truncate_line(&detail, width - structural_width)
+                );
+            }
+        }
+        return DEFAULT_DETAIL.to_owned();
+    }
+
+    match detail {
+        Some(detail) if width > DETAIL_PREFIX.width() => format!(
+            "{DETAIL_PREFIX}{}",
+            truncate_line(&detail, width - DETAIL_PREFIX.width())
+        ),
+        _ => String::new(),
     }
 }
 

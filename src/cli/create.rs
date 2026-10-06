@@ -117,18 +117,18 @@ impl CreateWalkthrough<'_> {
             .expect("the walkthrough resolves the workspace name first");
         let default_branch = format!("coco/{name}");
         let mut choices = vec![
-            Choice::new("New branch", Some(format!("{default_branch} · default"))),
-            Choice::new("New branch with another name", None),
+            Choice::new("New branch", Some(default_branch)).with_default_marker(),
+            Choice::new("Custom branch", None),
         ];
         let mut actions = vec![WorktreeChoice::DefaultBranch, WorktreeChoice::NamedBranch];
         if !has_explicit_code_base(&self.args) {
-            choices.push(Choice::new("Existing local branch", None));
+            choices.push(Choice::new("Existing branch", None));
             actions.push(WorktreeChoice::ExistingBranch);
         }
         choices.push(Choice::new("Detached HEAD", None));
         actions.push(WorktreeChoice::Detached);
 
-        let selected = self.interaction.select("Git worktree", &choices)?;
+        let selected = self.interaction.select("Worktree", &choices)?;
         match actions[selected] {
             WorktreeChoice::DefaultBranch => {}
             WorktreeChoice::NamedBranch => {
@@ -152,25 +152,22 @@ impl CreateWalkthrough<'_> {
         }
         loop {
             let choices = [
-                Choice::new("Current HEAD", Some("default".to_owned())),
-                Choice::new("Existing workspace", None),
+                Choice::new("Current HEAD", None).with_default_marker(),
+                Choice::new("Workspace", None),
                 Choice::new("Git revision", Some("branch, tag, or commit".to_owned())),
             ];
-            match self.interaction.select("Code starting point", &choices)? {
+            match self.interaction.select("Code", &choices)? {
                 0 => return Ok(()),
                 1 => {
                     let mut workspaces = self.list_workspaces(None).await?;
                     workspaces.retain(|item| item.workspace.worktree_path.is_some());
                     if workspaces.is_empty() {
                         self.interaction
-                            .notice("No workspaces with committed code are available here.")?;
+                            .notice("No workspace with reusable code found.")?;
                         continue;
                     }
-                    let selected = select_workspace(
-                        self.interaction,
-                        "Choose a workspace for its committed code",
-                        &workspaces,
-                    )?;
+                    let selected =
+                        select_workspace(self.interaction, "Code from workspace", &workspaces)?;
                     self.args.base_workspace = Some(selected.id);
                     self.selected_code_workspace = Some(selected.name);
                     return Ok(());
@@ -194,17 +191,14 @@ impl CreateWalkthrough<'_> {
             return Ok(());
         }
         let choices = [
+            Choice::new("Don't copy", None).with_default_marker(),
             Choice::new(
-                "Leave local changes in the source",
-                Some("default · warns when dirty".to_owned()),
+                "Copy tracked",
+                Some("fails if non-ignored untracked files exist".to_owned()),
             ),
-            Choice::new("Carry tracked changes", None),
-            Choice::new("Carry tracked and untracked changes", None),
+            Choice::new("Copy tracked + untracked", None),
         ];
-        match self
-            .interaction
-            .select("Local changes, if present", &choices)?
-        {
+        match self.interaction.select("Git changes", &choices)? {
             0 => {}
             1 => self.args.carry_changes = true,
             2 => self.args.dirty = true,
@@ -234,20 +228,27 @@ impl CreateWalkthrough<'_> {
         let mut choices = Vec::with_capacity(4);
         let mut actions = Vec::with_capacity(4);
         if !compact_was_requested {
-            choices.push(Choice::new("Fresh context", Some("default".to_owned())));
+            choices.push(Choice::new("Fresh", None).with_default_marker());
             actions.push(ContextChoice::Fresh);
         }
         if let Some(current) = current {
             choices.push(Choice::new("Current workspace", Some(current.name.clone())));
             actions.push(ContextChoice::Current(current));
         }
-        choices.push(Choice::new("Existing workspace", None));
+        choices.push(Choice::new(
+            if has_current {
+                "Another workspace"
+            } else {
+                "Workspace"
+            },
+            None,
+        ));
         actions.push(ContextChoice::Existing);
-        choices.push(Choice::new("Codex thread ID", None));
+        choices.push(Choice::new("Thread ID", None));
         actions.push(ContextChoice::Thread);
 
         loop {
-            let selected = self.interaction.select("Conversation context", &choices)?;
+            let selected = self.interaction.select("Context", &choices)?;
             match &actions[selected] {
                 ContextChoice::Fresh => return Ok(()),
                 ContextChoice::Current(current) => {
@@ -269,15 +270,12 @@ impl CreateWalkthrough<'_> {
                     if workspaces.is_empty() {
                         let qualifier = if has_current { "other " } else { "" };
                         self.interaction.notice(&format!(
-                            "No {qualifier}Ready or Unloaded workspace with reusable context is available here."
+                            "No {qualifier}workspace with reusable context found."
                         ))?;
                         continue;
                     }
-                    let selected = select_workspace(
-                        self.interaction,
-                        "Choose a workspace for its conversation",
-                        &workspaces,
-                    )?;
+                    let selected =
+                        select_workspace(self.interaction, "Context from workspace", &workspaces)?;
                     self.args.context = Some(format!("workspace:{}", selected.id));
                     self.selected_context_source = Some(format!("workspace {}", selected.name));
                     break;
@@ -297,11 +295,11 @@ impl CreateWalkthrough<'_> {
         }
         if !compact_was_requested {
             let copy_choices = [
-                Choice::new("Full context", Some("default".to_owned())),
+                Choice::new("Full context", None).with_default_marker(),
                 Choice::new("Compact context", None),
             ];
             self.args.compact_context =
-                self.interaction.select("Context copy", &copy_choices)? == 1;
+                self.interaction.select("Context size", &copy_choices)? == 1;
         }
         Ok(())
     }
@@ -311,13 +309,10 @@ impl CreateWalkthrough<'_> {
             return Ok(());
         }
         let choices = [
-            Choice::new(
-                "Default Codex configuration",
-                Some("default · inherit config.toml".to_owned()),
-            ),
-            Choice::new("Named Codex profile", None),
+            Choice::new("Use Codex config", None).with_default_marker(),
+            Choice::new("Choose profile", None),
         ];
-        if self.interaction.select("Codex profile", &choices)? == 1 {
+        if self.interaction.select("Profile", &choices)? == 1 {
             self.args.profile = Some(self.interaction.text("Profile name")?);
         }
         Ok(())
@@ -329,23 +324,21 @@ impl CreateWalkthrough<'_> {
         }
         loop {
             let choices = [
-                Choice::new("Inherit model", Some("default".to_owned())),
+                Choice::new("Use configured model", None).with_default_marker(),
                 Choice::new("Choose model", None),
             ];
-            if self.interaction.select("Codex model", &choices)? == 0 {
+            if self.interaction.select("Model", &choices)? == 0 {
                 return Ok(());
             }
             let models: Vec<CodexModel> = self.client.request(ModelListParams {}).await?;
             if models.is_empty() {
                 self.interaction.notice(
-                    "Codex did not report any selectable models. Inherit the configured model or try again later.",
+                    "No selectable Codex models found. Use the configured model or try again later.",
                 )?;
                 continue;
             }
             let model_choices = models.iter().map(model_choice).collect::<Vec<_>>();
-            let selected = self
-                .interaction
-                .select("Choose a Codex model", &model_choices)?;
+            let selected = self.interaction.select("Choose model", &model_choices)?;
             self.args.model = Some(models[selected].model.clone());
             return Ok(());
         }
@@ -356,12 +349,12 @@ impl CreateWalkthrough<'_> {
             return Ok(());
         }
         let choices = [
-            Choice::new("Prepare only", Some("default".to_owned())),
-            Choice::new("Send a message", None),
-            Choice::new("Open the Codex terminal UI", None),
-            Choice::new("Send a message, then open the UI", None),
+            Choice::new("Return to shell", None).with_default_marker(),
+            Choice::new("Send message", None),
+            Choice::new("Open Codex", None),
+            Choice::new("Send, then open Codex", None),
         ];
-        match self.interaction.select("After creation", &choices)? {
+        match self.interaction.select("After create", &choices)? {
             0 => {}
             1 => self.args.send = Some(self.interaction.text("Message")?),
             2 => self.args.jump = true,
@@ -383,7 +376,7 @@ impl CreateWalkthrough<'_> {
         let choices = [Choice::new("Create", None), Choice::new("Cancel", None)];
         if self
             .interaction
-            .select_with_review("Ready to create", &fields, &choices)?
+            .select_with_review("Create workspace", &fields, &choices)?
             == 0
         {
             Ok(())
@@ -521,12 +514,13 @@ fn workspace_choice(item: &WorkspaceListItem) -> Choice {
 }
 
 fn model_choice(model: &CodexModel) -> Choice {
-    let detail = if model.is_default {
-        format!("{} · default", model.model)
+    let detail = (model.display_name != model.model).then(|| model.model.clone());
+    let choice = Choice::new(model.display_name.clone(), detail);
+    if model.is_default {
+        choice.with_default_marker()
     } else {
-        model.model.clone()
-    };
-    Choice::new(model.display_name.clone(), Some(detail))
+        choice
+    }
 }
 
 fn context_reference_label(reference: &str) -> String {
@@ -591,29 +585,29 @@ fn create_review_fields(
         "fresh".to_owned()
     };
     let changes = if args.dirty || args.carry_untracked {
-        "tracked + untracked"
+        "copy tracked + untracked"
     } else if args.carry_changes {
-        "tracked"
+        "copy tracked"
     } else {
-        "leave in source"
+        "don't copy"
     };
-    let profile = args.profile.as_deref().unwrap_or("default");
-    let model = args.model.as_deref().unwrap_or("inherit");
+    let profile = args.profile.as_deref().unwrap_or("Codex config");
+    let model = args.model.as_deref().unwrap_or("configured model");
     let action = match (args.send.is_some(), args.jump) {
-        (false, false) => "prepare",
-        (true, false) => "send",
-        (false, true) => "jump",
-        (true, true) => "send + jump",
+        (false, false) => "return to shell",
+        (true, false) => "send message",
+        (false, true) => "open Codex",
+        (true, true) => "send, then open Codex",
     };
     vec![
         ReviewField::new("Workspace", name),
         ReviewField::new("Worktree", binding),
         ReviewField::new("Code", code),
         ReviewField::new("Context", context),
-        ReviewField::new("Changes", changes),
+        ReviewField::new("Git changes", changes),
         ReviewField::new("Profile", profile),
         ReviewField::new("Model", model),
-        ReviewField::new("Action", action),
+        ReviewField::new("After create", action),
     ]
 }
 

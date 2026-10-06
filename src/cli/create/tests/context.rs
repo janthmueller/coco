@@ -25,7 +25,7 @@ async fn context_workspace_picker_requests_only_eligible_sources_and_stores_the_
         interaction
             .titles
             .iter()
-            .any(|title| title == "Choose a workspace for its conversation")
+            .any(|title| title == "Context from workspace")
     );
     let params = seen_params.lock().unwrap().last().cloned().unwrap();
     assert_eq!(
@@ -84,9 +84,9 @@ async fn current_workspace_context_is_offered_for_nested_worktree_paths_and_stor
         .seen_choices
         .iter()
         .zip(&interaction.titles)
-        .find_map(|(choices, title)| (title == "Conversation context").then_some(choices))
+        .find_map(|(choices, title)| (title == "Context").then_some(choices))
         .unwrap();
-    assert_eq!(context_choices[0].label, "Fresh context");
+    assert_eq!(context_choices[0].label, "Fresh");
     assert_eq!(context_choices[1].label, "Current workspace");
     assert!(
         context_choices[1]
@@ -235,9 +235,7 @@ async fn existing_workspace_picker_excludes_the_detected_current_workspace() {
         .seen_choices
         .iter()
         .zip(&interaction.titles)
-        .find_map(|(choices, title)| {
-            (title == "Choose a workspace for its conversation").then_some(choices)
-        })
+        .find_map(|(choices, title)| (title == "Context from workspace").then_some(choices))
         .unwrap();
     assert_eq!(workspace_choices.len(), 1);
     assert_eq!(workspace_choices[0].label, "feat/other");
@@ -276,7 +274,7 @@ async fn active_current_workspace_is_not_offered_as_reusable_context() {
         .seen_choices
         .iter()
         .zip(&interaction.titles)
-        .find_map(|(choices, title)| (title == "Conversation context").then_some(choices))
+        .find_map(|(choices, title)| (title == "Context").then_some(choices))
         .unwrap();
     assert!(
         context_choices

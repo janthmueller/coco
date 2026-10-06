@@ -157,7 +157,7 @@ def check_confirmations(terminal: Terminal) -> None:
 
 
 def check_follow(terminal: Terminal) -> None:
-    terminal.start_test("cli::status::tests::interactive_follow_terminal_probe")
+    terminal.start_test("cli::follow::tests::interactive_follow_terminal_probe")
     terminal.wait("follow-result=ok")
     terminal.wait("test result: ok.")
     screen = terminal.screen()

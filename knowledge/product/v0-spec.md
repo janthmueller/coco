@@ -591,9 +591,15 @@ one-key selection for options 1 through 9, and Escape, `q`, or Ctrl-C to cancel.
 It is also the single option-selection implementation for `decide`. The
 picker keeps only its title and choices on screen: successful selection and a
 single available choice do not add redundant confirmation lines.
-Only the selected row starts with `›` and uses cyan/bold styling; inactive rows
-reserve the same marker column as blank space so labels remain aligned. The
-marker alone identifies selection with color disabled, without changing labels.
+Only the selected row starts with `›`; its marker, number, and primary label
+use cyan/bold styling. Inactive rows reserve the same marker column as blank
+space so labels remain aligned. Secondary detail stays dim on every row,
+including the selected row, and is introduced by one consistent `·` separator.
+Defaults are structured choice metadata rendered last as dim `· default`, never
+separator text assembled independently by callers. When a row must be
+shortened, secondary detail is truncated before a default marker; on a frame
+too narrow to retain both, the primary label remains authoritative. The marker
+alone identifies selection with color disabled, without changing labels.
 The terminal's hardware cursor stays hidden during selection. The visible window
 fits the terminal height, reserves space for its title, and scrolls correctly
 at the bottom margin. Page Up/Down use that visible window's size.
@@ -685,23 +691,28 @@ supplied invalid path fails directly instead of silently falling back.
 
 In a human terminal, omitting the name starts a linear walkthrough;
 `--interactive`/`-i` starts the same walkthrough with an optional supplied name
-and flags as presets. Every unresolved selection begins on its documented
-default so Enter advances without changing it. The walkthrough covers Git
-binding, code base, applicable local-state carry, conversation context,
-profile, model, and the post-create action. Context defaults to fresh. When
+and flags as presets. Every unresolved selection with a product default begins
+on and marks that default so Enter advances without changing it. A required
+source choice and the final `Create`/`Cancel` decision deliberately claim no
+semantic default; the cursor alone shows what Enter would select. The
+walkthrough covers Git binding, code base, applicable Git-change carry,
+conversation context, profile, model, and the post-create action. Context
+defaults to fresh. When
 the selected path belongs to an idle or unloaded workspace, the guide offers
 that current workspace directly, records its stable ID at selection time, and
 omits it from the generic workspace picker. It may otherwise select an eligible
 same-repository workspace by name/number or accept an exact native thread ID,
-then choose full or compact history. A preset code base removes the incompatible
-existing-branch choice; final normalization independently rejects that invalid
-combination. A preset `.` context is resolved to its stable workspace ID before
-the first prompt, and an invalid local-change preset fails before the guide
-starts. If a lazily opened workspace picker has no entries, including because a
-valid Git repository has not yet been enrolled, the guide explains that fact
-and returns to the current decision instead of aborting. An empty native model
-catalog likewise returns to the inherit-model choice. The last picker presents
-a bounded, multi-line review of the workspace, worktree, code, context, local
+then choose full or compact history. If `-C` preselects compaction without a
+source, fresh context is unavailable and the required source picker has no
+semantic default. A preset code base removes the incompatible existing-branch
+choice; final normalization independently rejects that invalid combination. A
+preset `.` context is resolved to its stable workspace ID before the first
+prompt, and an invalid local-change preset fails before the guide starts. If a
+lazily opened workspace picker has no entries, including because a valid Git
+repository has not yet been enrolled, the guide explains that fact and returns
+to the current decision instead of aborting. An empty native model catalog
+likewise returns to the inherit-model choice. The last picker presents a
+bounded, multi-line review of the workspace, worktree, code, context, Git
 changes, profile, model, and post-create action above `Create` and `Cancel`.
 Each field occupies its own terminal row so an ordinary terminal does not hide
 later values behind truncation. The CLI performs only read-only discovery
@@ -729,7 +740,9 @@ guide is cancelled.
 4. **Local state.** The default creates from the selected committed base even
    when the invoking checkout is dirty. The CLI warns and leaves its tracked
    and ordinary untracked changes there. `--carry-changes` instead preserves
-   staged and unstaged tracked changes with separate binary patches.
+   staged and unstaged tracked changes with separate binary patches; ordinary
+   non-ignored untracked files block that mode, and the walkthrough states this
+   before selection.
    `--carry-untracked` also copies ordinary non-ignored untracked files and
    requires tracked carry. `--dirty`/`-d` is the CLI shorthand for both. It is
    independent from detached mode, so `-dD` combines dirty-state carry with

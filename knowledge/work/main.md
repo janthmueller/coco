@@ -17,6 +17,16 @@ architectural baseline for CoCo.
 
 ## Active work
 
+- [ ] Implement the approved release-channel transition after this CLI slice:
+  make normal publication deliberate, support explicit alpha versus stable
+  releases, optionally bake one final `0.1.0-alpha.N`, and promote the tested
+  line to `0.1.0` without claiming `1.0` compatibility.
+- [x] Make interactive CLI choices faster to scan and visually consistent.
+  - [x] Represent defaults structurally instead of embedding `default` and
+    separators in arbitrary detail strings.
+  - [x] Keep secondary choice details dim even while their row is selected.
+  - [x] Shorten the create walkthrough without losing the distinctions needed
+    to choose safely, then cover plain/color rendering and walkthrough choices.
 - [x] Advance CoCo's compatibility baseline from 0.157.1 to 0.159.3.
   - [x] Protect every per-workspace Exec Server with a distinct in-memory
     bearer token through native Codex capability-token support.
@@ -6905,3 +6915,82 @@ Verification evidence:
 Unresolved follow-up:
 
 - None from this audit. The combined branch remains intentionally uncommitted.
+
+### Interactive CLI readability pass — 2026-10-06
+
+Scope:
+
+- Audit the shared picker and guided creation flow for long labels,
+  inconsistent `default` separators, and secondary text that competes with the
+  selected action. Preserve command behavior and the established terminal
+  interaction model.
+
+Findings and decisions:
+
+- A default was previously untyped display text inside `Choice::detail`.
+  Callers independently produced `default`, `<detail> · default`, or
+  `default · <detail>`, and the selected-row renderer made the entire string
+  cyan/bold. This caused both the inconsistent separator and the missing visual
+  hierarchy reported by the user.
+- `Choice` now carries a structural default marker. The common renderer adds
+  one dim `·` boundary before secondary detail, appends `· default` last, and
+  keeps all detail dim even when the marker, number, and primary label are the
+  selected cyan/bold region. Plain and `NO_COLOR` output retain the separators
+  as the non-color distinction. A follow-up review found that a long detail
+  could still consume the marker; the renderer now reserves a complete default
+  marker when the frame can retain a meaningful label and truncates optional
+  detail first.
+- The creation guide now uses compact step titles (`Worktree`, `Code`, `Git
+  changes`, `Context`, `Profile`, `Model`, and `After create`) and shorter
+  choices without removing a distinct worktree, code, change, context,
+  profile, model, or post-create outcome. Empty-inventory notices no longer
+  expose internal phase names.
+- The final creation review uses the same user vocabulary as its choices:
+  `Git changes` describes only tracked/untracked carry, inherited configuration
+  is `Codex config`/`configured model`, and `After create` says `return to
+  shell`, `send message`, or `open Codex` instead of exposing `none`, `inherit`,
+  or the internal `jump` command name. This leaves the independently applied
+  `.worktreeinclude` convention outside the Git-change choice.
+- The tracked-only choice now states its material prerequisite: ordinary
+  non-ignored untracked files make that operation fail. A preset compact mode
+  without a context source deliberately marks no arbitrary source as the
+  semantic default; the selected-row cursor still shows what Enter chooses.
+  The product contract distinguishes such required decisions and the final
+  confirmation from selections that have an actual product default.
+- A follow-up review made structured defaults behavioral as well as visual:
+  the picker initially selects the first marked default instead of always
+  selecting row one, while choices without a semantic default still begin on
+  their first row. This keeps a native Codex default model authoritative even
+  when it is not the first reported model. Model choices also omit a redundant
+  detail when display name and exact selector are identical.
+- Other shared selectors now lead with their action (`Open workspace`, `Send
+  to workspace`, `Delete workspace`, and similar) instead of repeating
+  `Choose a workspace to ...`. Repository and workspace metadata continue to
+  be available as dim detail.
+- The real-terminal harness referenced the follow probe's old module path.
+  Correcting it restored coverage of picker, confirmation, and follow frames;
+  this was test-harness drift rather than a product regression.
+- The accepted release direction is recorded in
+  `knowledge/engineering/release.md`: move deliberately to suffix-free
+  `0.1.0`, keep optional alpha previews for later minors, and reserve `1.0.0`
+  for an explicit compatibility promise. The workflow still forces alpha, so
+  implementing the channel choice remains separate follow-up work. The same
+  document now describes the active `0.1.0-alpha.N` channel instead of retaining
+  the obsolete pre-publication `alpha.0` bootstrap paragraph.
+
+Verification:
+
+- `cargo test --locked`: 432 library tests and all 5 process-smoke tests pass;
+  10 explicit live, platform, model-consuming, or interactive tests remain
+  ignored.
+- `cargo clippy --locked --all-targets --all-features -- -D warnings` passes.
+- `python3 tests/terminal_smoke.py
+  target/debug/deps/coco-249e428dac8e4c5d` passes in an isolated tmux server,
+  covering bottom-margin drawing, navigation, resize, color, cancellation,
+  cursor restore, line confirmation, and follow-frame replacement.
+- `cargo fmt --all -- --check` and `git diff --check` pass.
+
+Unresolved follow-up:
+
+- Implement and verify the approved explicit alpha/stable release-channel
+  workflow before promoting the tested line to `0.1.0`.

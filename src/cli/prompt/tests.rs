@@ -124,10 +124,10 @@ fn review_picker_keeps_each_creation_value_on_its_own_visible_row() {
             "Context",
             "thread 0199-native-thread-with-a-visible-identifier · compact",
         ),
-        ReviewField::new("Changes", "tracked + untracked"),
+        ReviewField::new("Git changes", "copy tracked + untracked"),
         ReviewField::new("Profile", "development"),
         ReviewField::new("Model", "gpt-5.6"),
-        ReviewField::new("Action", "send + jump"),
+        ReviewField::new("After create", "send, then open Codex"),
     ];
     let choices = [Choice::new("Create", None), Choice::new("Cancel", None)];
     let lines = picker_lines_with_review(
@@ -141,14 +141,14 @@ fn review_picker_keeps_each_creation_value_on_its_own_visible_row() {
 
     assert_eq!(lines.len(), 12);
     assert_eq!(lines[0], "Ready to create (1/2)");
-    assert_eq!(lines[1], "  Workspace  review/api");
-    assert_eq!(lines[2], "  Worktree   branch coco/review/api");
-    assert_eq!(lines[3], "  Code       main");
+    assert_eq!(lines[1], "  Workspace     review/api");
+    assert_eq!(lines[2], "  Worktree      branch coco/review/api");
+    assert_eq!(lines[3], "  Code          main");
     assert_eq!(
         lines[4],
-        "  Context    thread 0199-native-thread-with-a-visible-identifier · compact"
+        "  Context       thread 0199-native-thread-with-a-visible-identifier · compact"
     );
-    assert_eq!(lines[8], "  Action     send + jump");
+    assert_eq!(lines[8], "  After create  send, then open Codex");
     assert_eq!(lines[9], "");
     assert_eq!(lines[10], "›  1  Create");
     assert_eq!(lines[11], "   2  Cancel");
@@ -207,7 +207,10 @@ fn only_the_selected_row_has_a_marker_and_labels_stay_aligned() {
         assert_eq!(rows.iter().filter(|row| row.starts_with('›')).count(), 1);
         for (index, row) in rows.iter().enumerate() {
             let marker = if index == selected { '›' } else { ' ' };
-            assert_eq!(row, &format!("{marker} {:>2}  workspace  Ready", index + 1));
+            assert_eq!(
+                row,
+                &format!("{marker} {:>2}  workspace  · Ready", index + 1)
+            );
             let label_start = row.find("workspace").unwrap();
             assert_eq!(row[..label_start].width(), 6);
         }
@@ -227,18 +230,92 @@ fn a_single_choice_still_has_an_explicit_picker_view() {
 
     assert_eq!(
         lines,
-        ["Choose a workspace to open (1/1)", "›  1  test/1  Prepared"]
+        [
+            "Choose a workspace to open (1/1)",
+            "›  1  test/1  · Prepared"
+        ]
     );
 }
 
 #[test]
-fn picker_colors_only_when_the_palette_allows_it() {
+fn picker_highlights_only_the_selected_label_and_keeps_detail_dim() {
     let choice = Choice::new("fix/oauth", Some("Working".to_owned()));
     let plain = picker_row(0, &choice, true, 80, Palette::plain());
     let colored = picker_row(0, &choice, true, 80, Palette::colored());
 
-    assert_eq!(plain, "›  1  fix/oauth  Working");
-    assert_eq!(colored, Palette::colored().paint(Tone::CyanBold, &plain));
+    assert_eq!(plain, "›  1  fix/oauth  · Working");
+    assert_eq!(
+        colored,
+        format!(
+            "{}{}",
+            Palette::colored().paint(Tone::CyanBold, "›  1  fix/oauth"),
+            Palette::colored().paint(Tone::Dim, "  · Working")
+        )
+    );
+}
+
+#[test]
+fn default_marker_is_structured_consistent_and_dim() {
+    let with_detail =
+        Choice::new("New branch", Some("coco/feat/login".to_owned())).with_default_marker();
+    let without_detail = Choice::new("Fresh", None).with_default_marker();
+
+    assert_eq!(
+        picker_row(0, &with_detail, true, 80, Palette::plain()),
+        "›  1  New branch  · coco/feat/login · default"
+    );
+    assert_eq!(
+        picker_row(0, &without_detail, true, 80, Palette::plain()),
+        "›  1  Fresh  · default"
+    );
+    let colored = picker_row(0, &without_detail, true, 80, Palette::colored());
+    assert_eq!(
+        colored,
+        format!(
+            "{}{}",
+            Palette::colored().paint(Tone::CyanBold, "›  1  Fresh"),
+            Palette::colored().paint(Tone::Dim, "  · default")
+        )
+    );
+}
+
+#[test]
+fn default_marker_survives_a_long_truncated_detail() {
+    let choice = Choice::new(
+        "New branch",
+        Some(format!("coco/{}", "nested-workspace-name/".repeat(4))),
+    )
+    .with_default_marker();
+
+    let row = picker_row(0, &choice, true, 79, Palette::plain());
+
+    assert!(row.ends_with(" · default"));
+    assert!(row.contains('…'));
+    assert!(row.width() <= 79);
+}
+
+#[test]
+fn picker_starts_on_the_structural_default_even_when_it_is_not_first() {
+    let choices = [
+        Choice::new("First", None),
+        Choice::new("Configured default", None).with_default_marker(),
+        Choice::new("Last", None),
+    ];
+
+    let state = PickerState::from_choices(&choices);
+    let lines = picker_lines("Select", &choices, &state, 80, Palette::plain());
+
+    assert_eq!(state.selected, 1);
+    assert_eq!(lines[0], "Select (2/3)");
+    assert!(lines[1].starts_with("   1  First"));
+    assert!(lines[2].starts_with("›  2  Configured default"));
+}
+
+#[test]
+fn picker_without_a_structural_default_still_starts_first() {
+    let choices = [Choice::new("First", None), Choice::new("Second", None)];
+
+    assert_eq!(PickerState::from_choices(&choices).selected, 0);
 }
 
 #[test]

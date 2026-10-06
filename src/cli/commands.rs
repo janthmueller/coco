@@ -176,7 +176,7 @@ async fn run_limits_scoped(
                 has_scope_path,
                 global,
                 &args,
-                "inspect",
+                "Inspect workspace limits",
                 interaction,
             )
             .await?;
@@ -200,7 +200,7 @@ async fn run_limits_scoped(
                 has_scope_path,
                 global,
                 &target_args,
-                "configure",
+                "Configure workspace limits",
                 interaction,
             )
             .await?;
@@ -221,7 +221,7 @@ async fn run_limits_scoped(
                 has_scope_path,
                 global,
                 &args,
-                "reset",
+                "Reset workspace limits",
                 interaction,
             )
             .await?;
@@ -242,7 +242,7 @@ async fn resolve_limits_target(
     has_scope_path: bool,
     global: bool,
     args: &LimitsTargetArgs,
-    action: &str,
+    title: &str,
     interaction: &mut dyn Interaction,
 ) -> Result<ResolvedWorkspaceTarget> {
     resolve_workspace_input_with_phases(
@@ -253,7 +253,7 @@ async fn resolve_limits_target(
             args.workspace.clone(),
             global,
         ),
-        &format!("Choose a workspace to {action} limits"),
+        title,
         Some(
             [
                 "prepared",
@@ -742,7 +742,7 @@ async fn choose_repository(
         .iter()
         .map(repository_choice)
         .collect::<Vec<_>>();
-    let selected = interaction.select("Choose a repository", &choices)?;
+    let selected = interaction.select("Repository", &choices)?;
     Ok(repositories[selected].root_path.clone())
 }
 
@@ -1181,9 +1181,7 @@ async fn run_close(
     args: CloseArgs,
     interaction: &mut dyn Interaction,
 ) -> Result<()> {
-    let target =
-        resolve_workspace_input(paths, selection, "Choose a workspace to close", interaction)
-            .await?;
+    let target = resolve_workspace_input(paths, selection, "Close workspace", interaction).await?;
     let client = RpcClient::new(paths.socket_path.clone());
     let mut discard_changes = args.discard_changes;
     let mut preview = client
@@ -1256,7 +1254,7 @@ async fn run_reopen(
     let target = resolve_workspace_input_with_phases(
         paths,
         selection,
-        "Choose a workspace to reopen",
+        "Reopen workspace",
         Some(vec!["closed".to_owned()]),
         interaction,
     )
@@ -1280,7 +1278,7 @@ async fn run_delete(
     let target = resolve_workspace_input_with_phases(
         paths,
         selection,
-        "Choose a workspace to delete",
+        "Delete workspace",
         Some(
             [
                 "prepared",
@@ -1372,13 +1370,8 @@ async fn run_send(
     wait: bool,
     interaction: &mut dyn Interaction,
 ) -> Result<()> {
-    let mut target = resolve_workspace_input(
-        paths,
-        selection,
-        "Choose a workspace to send to",
-        interaction,
-    )
-    .await?;
+    let mut target =
+        resolve_workspace_input(paths, selection, "Send to workspace", interaction).await?;
     if message.is_none() && !target.verified {
         let result = RpcClient::new(paths.socket_path.clone())
             .request(WorkspaceGetParams {
@@ -1467,9 +1460,7 @@ async fn run_jump(
     selection: WorkspaceSelection,
     interaction: &mut dyn Interaction,
 ) -> Result<()> {
-    let target =
-        resolve_workspace_input(paths, selection, "Choose a workspace to open", interaction)
-            .await?;
+    let target = resolve_workspace_input(paths, selection, "Open workspace", interaction).await?;
     jump_to_workspace(paths, target.scope, target.workspace).await
 }
 
@@ -1542,12 +1533,7 @@ async fn run_diff(
     selection: WorkspaceSelection,
     interaction: &mut dyn Interaction,
 ) -> Result<()> {
-    let target = resolve_workspace_input(
-        paths,
-        selection,
-        "Choose a workspace to inspect",
-        interaction,
-    )
-    .await?;
+    let target =
+        resolve_workspace_input(paths, selection, "Inspect workspace", interaction).await?;
     show_diff(paths, target.scope, target.workspace).await
 }

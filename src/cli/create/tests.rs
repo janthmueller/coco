@@ -44,16 +44,17 @@ async fn defaults_prepare_a_fresh_workspace_without_contacting_discovery() {
     assert_eq!(
         interaction.titles,
         [
-            "Git worktree",
-            "Code starting point",
-            "Local changes, if present",
-            "Conversation context",
-            "Codex profile",
-            "Codex model",
-            "After creation",
-            "Ready to create",
+            "Worktree",
+            "Code",
+            "Git changes",
+            "Context",
+            "Profile",
+            "Model",
+            "After create",
+            "Create workspace",
         ]
     );
+    assert_default_walkthrough_copy(&interaction);
     interaction.assert_consumed();
 
     let (params, message, jump) =
@@ -97,7 +98,10 @@ async fn native_thread_context_can_be_compacted_before_send_and_jump() {
         final_review_value(&interaction, "Context"),
         "thread 0199-native-thread · compact"
     );
-    assert_eq!(final_review_value(&interaction, "Action"), "send + jump");
+    assert_eq!(
+        final_review_value(&interaction, "After create"),
+        "send, then open Codex"
+    );
     interaction.assert_consumed();
 
     let (params, message, jump) =
@@ -149,7 +153,7 @@ async fn explicit_flags_seed_the_walkthrough_and_skip_resolved_steps() {
     .await
     .unwrap();
 
-    assert_eq!(interaction.titles, ["Ready to create"]);
+    assert_eq!(interaction.titles, ["Create workspace"]);
     let confirmation = final_create_choice(&interaction);
     assert_eq!(confirmation, &Choice::new("Create", None));
     assert_eq!(final_review_value(&interaction, "Workspace"), "review/api");
@@ -163,12 +167,15 @@ async fn explicit_flags_seed_the_walkthrough_and_skip_resolved_steps() {
         "thread 0199-native-thread · compact"
     );
     assert_eq!(
-        final_review_value(&interaction, "Changes"),
-        "tracked + untracked"
+        final_review_value(&interaction, "Git changes"),
+        "copy tracked + untracked"
     );
     assert_eq!(final_review_value(&interaction, "Profile"), "dev");
     assert_eq!(final_review_value(&interaction, "Model"), "gpt-explicit");
-    assert_eq!(final_review_value(&interaction, "Action"), "send + jump");
+    assert_eq!(
+        final_review_value(&interaction, "After create"),
+        "send, then open Codex"
+    );
     interaction.assert_consumed();
     assert_eq!(args.base.as_deref(), Some("main"));
     assert_eq!(args.context.as_deref(), Some("thread:0199-native-thread"));
@@ -197,11 +204,13 @@ async fn an_explicit_compaction_flag_requires_a_source_and_stays_enabled() {
 
     assert_eq!(args.context.as_deref(), Some("thread:0199-native-thread"));
     assert!(args.compact_context);
+    let context_choices = choices_for_title(&interaction, "Context");
+    assert!(context_choices.iter().all(|choice| !choice.is_default));
     assert!(
         !interaction
             .titles
             .iter()
-            .any(|title| title == "Context copy")
+            .any(|title| title == "Context size")
     );
 }
 
@@ -229,15 +238,15 @@ async fn empty_workspace_choices_explain_the_problem_and_return_to_the_walkthrou
     assert_eq!(
         interaction.notices,
         [
-            "No workspaces with committed code are available here.",
-            "No Ready or Unloaded workspace with reusable context is available here.",
+            "No workspace with reusable code found.",
+            "No workspace with reusable context found.",
         ]
     );
     assert_eq!(
         interaction
             .titles
             .iter()
-            .filter(|title| title.as_str() == "Code starting point")
+            .filter(|title| title.as_str() == "Code")
             .count(),
         2
     );
@@ -245,7 +254,7 @@ async fn empty_workspace_choices_explain_the_problem_and_return_to_the_walkthrou
         interaction
             .titles
             .iter()
-            .filter(|title| title.as_str() == "Conversation context")
+            .filter(|title| title.as_str() == "Context")
             .count(),
         2
     );
@@ -277,8 +286,8 @@ async fn unregistered_repository_choices_are_treated_as_empty_inventory() {
     assert_eq!(
         interaction.notices,
         [
-            "No workspaces with committed code are available here.",
-            "No Ready or Unloaded workspace with reusable context is available here.",
+            "No workspace with reusable code found.",
+            "No workspace with reusable context found.",
         ]
     );
     interaction.assert_consumed();
@@ -329,18 +338,89 @@ fn final_create_choice(interaction: &ScriptedInteraction) -> &Choice {
     let index = interaction
         .titles
         .iter()
-        .rposition(|title| title == "Ready to create")
+        .rposition(|title| title == "Create workspace")
         .expect("the walkthrough did not reach its final confirmation");
     interaction.seen_choices[index]
         .first()
         .expect("the final confirmation did not contain its create choice")
 }
 
+fn choices_for_title<'a>(interaction: &'a ScriptedInteraction, title: &str) -> &'a [Choice] {
+    let index = interaction
+        .titles
+        .iter()
+        .position(|candidate| candidate == title)
+        .unwrap_or_else(|| panic!("the walkthrough did not contain {title}"));
+    &interaction.seen_choices[index]
+}
+
+fn assert_default_walkthrough_copy(interaction: &ScriptedInteraction) {
+    let git_choices = choices_for_title(interaction, "Git changes");
+    assert_eq!(
+        git_choices
+            .iter()
+            .map(|choice| choice.label.as_str())
+            .collect::<Vec<_>>(),
+        ["Don't copy", "Copy tracked", "Copy tracked + untracked"]
+    );
+    assert_eq!(
+        git_choices[1].detail.as_deref(),
+        Some("fails if non-ignored untracked files exist")
+    );
+    assert_eq!(
+        choices_for_title(interaction, "Profile")
+            .iter()
+            .map(|choice| choice.label.as_str())
+            .collect::<Vec<_>>(),
+        ["Use Codex config", "Choose profile"]
+    );
+    assert_eq!(
+        choices_for_title(interaction, "After create")
+            .iter()
+            .map(|choice| choice.label.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "Return to shell",
+            "Send message",
+            "Open Codex",
+            "Send, then open Codex",
+        ]
+    );
+    for (title, choices) in interaction.titles.iter().zip(&interaction.seen_choices) {
+        let default_count = choices.iter().filter(|choice| choice.is_default).count();
+        if title == "Create workspace" {
+            assert_eq!(default_count, 0);
+        } else {
+            assert!(
+                choices[0].is_default,
+                "{title} did not start on its default"
+            );
+            assert_eq!(default_count, 1, "{title} had an ambiguous default");
+        }
+        assert!(
+            choices.iter().all(|choice| {
+                choice
+                    .detail
+                    .as_deref()
+                    .is_none_or(|detail| !detail.contains("default"))
+            }),
+            "{title} embedded the default marker in display text"
+        );
+    }
+    assert_eq!(final_review_value(interaction, "Git changes"), "don't copy");
+    assert_eq!(final_review_value(interaction, "Profile"), "Codex config");
+    assert_eq!(final_review_value(interaction, "Model"), "configured model");
+    assert_eq!(
+        final_review_value(interaction, "After create"),
+        "return to shell"
+    );
+}
+
 fn final_review_fields(interaction: &ScriptedInteraction) -> &[ReviewField] {
     let index = interaction
         .titles
         .iter()
-        .rposition(|title| title == "Ready to create")
+        .rposition(|title| title == "Create workspace")
         .expect("the walkthrough did not reach its final confirmation");
     &interaction.seen_review_fields[index]
 }
@@ -529,7 +609,7 @@ impl Interaction for ScriptedInteraction {
     }
 
     fn confirm(&mut self, _title: &str) -> Result<bool> {
-        panic!("the create walkthrough uses a defaultable final picker")
+        panic!("the create walkthrough uses a picker for its final confirmation")
     }
 
     fn text(&mut self, _label: &str) -> Result<String> {
