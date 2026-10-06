@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.1.0-alpha.10 (2026-10-06)
+
+### Features
+
+- **cli**: Add guided workspace creation
+  ([`02bb94c`](https://github.com/janthmueller/coco/commit/02bb94cef02a03eb3d321450382293966786a4c8))
+
+
 ## v0.1.0-alpha.9 (2026-10-03)
 
 ### Features
