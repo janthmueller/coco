@@ -83,7 +83,7 @@ does not persist either the endpoint or token.
 
 The process-tree fallback uses Tokio's kill-on-drop behavior. The cgroup-v2
 backend instead stops the complete systemd scope on ordinary shutdown. A hard,
-uncatchable daemon death can leave a scope running because upstream 0.159.3
+uncatchable daemon death can leave a scope running because upstream 0.160.1
 does not permit `--exit-on-stdin-close` with the local listener CoCo needs. The
 next daemon generation removes only stale scopes in its own opaque instance
 namespace before starting its App Server. Until that restart, the scope may
@@ -92,7 +92,7 @@ descendant is gone.
 
 ## Environment routing
 
-Codex 0.159.3 exposes environment selection only on `thread/start` and
+Codex 0.160.1 exposes environment selection only on `thread/start` and
 `turn/start`:
 
 - a fresh thread is started with exactly its workspace environment;
@@ -441,7 +441,7 @@ remain separate internally.
 
 ## Compatibility evidence
 
-The selected baseline is exactly `codex-cli 0.159.3`. The opt-in real-process
+The selected baseline is exactly `codex-cli 0.160.1`. The opt-in real-process
 suite proves environment registration and readiness, fresh thread selection,
 distinct executor PIDs for two simultaneously active workspaces, on-demand
 resource reporting, close-time cleanup, daemon-shutdown cleanup, and the

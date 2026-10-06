@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use tokio::sync::watch;
 
 use super::*;
+use crate::cli::prompt::ReviewField;
 use crate::protocol::{WorkspaceDeleteResult, WorkspaceRetirementPlan, WorkspaceThreadDisposition};
 use crate::rpc::{RpcErrorPayload, RpcHandler, RpcServer};
 
@@ -49,6 +50,15 @@ impl Interaction for ConfirmOnce {
         panic!("yes/no confirmation must not open the picker")
     }
 
+    fn select_with_review(
+        &mut self,
+        _title: &str,
+        _fields: &[ReviewField],
+        _choices: &[Choice],
+    ) -> Result<usize> {
+        panic!("yes/no confirmation must not open the review picker")
+    }
+
     fn confirm(&mut self, title: &str) -> Result<bool> {
         self.questions.push(title.to_owned());
         Ok(self.answer)
@@ -56,6 +66,10 @@ impl Interaction for ConfirmOnce {
 
     fn text(&mut self, _label: &str) -> Result<String> {
         panic!("unexpected text prompt")
+    }
+
+    fn notice(&mut self, _message: &str) -> Result<()> {
+        panic!("unexpected walkthrough notice")
     }
 }
 

@@ -15,7 +15,7 @@ status: draft
 - The repository now has an early Rust implementation for domain state, Git,
   SQLite, local RPC, the Codex App Server client, profiles, CLI parsing, the
   daemon coordinator, executable binaries, and CoCo's control MCP adapter.
-- `codex-cli 0.159.3` is installed in the development environment and is the
+- The official `codex-cli 0.160.1` release binary is the
   selected compatibility baseline. A model-free real-process test exercises
   the exact stable App Server methods and fields CoCo consumes.
 - The same compatibility suite now exercises the experimental environment
@@ -53,7 +53,7 @@ status: draft
   that an empty remote TUI launch remains unbound, a native action creates a
   non-empty rollout, the exact resulting thread can then be adopted, and the
   same binding survives both daemon and App Server restart. No synthetic turn
-  or unreleased `codex --worktree` behavior is used. The selected 0.159.3 gate
+  or unreleased `codex --worktree` behavior is used. The selected 0.160.1 gate
   reconfirms the same contract.
 - The same real-process boundary proves exact native archive, unarchive, and
   delete behavior used by workspace retirement. Exact lookup uses
@@ -1166,7 +1166,7 @@ additive upstream definitions must not block the real-process test. Concrete
 request/response behavior is authoritative; removed methods, rejected params,
 or missing/changed consumed fields fail the compatibility test.
 
-The selected released build is Codex 0.159.3. Its real process behavior proves
+The selected released build is Codex 0.160.1. Its real process behavior proves
 native non-subscribing thread reads, history hydration, exact resume after an
 App Server restart, and the remote attachment path CoCo consumes. A
 documentation page, an upstream merge, or byte-for-byte equality of an
@@ -1186,7 +1186,7 @@ particular, CoCo does not send the separate
 `runtimeWorkspaceRoots`. Do not adopt experimental pagination merely to mirror
 native history.
 
-The environment topology and its incomplete 0.159.3 request coverage are
+The environment topology and its incomplete 0.160.1 request coverage are
 normative in [Per-workspace Codex execution runtime](workspace-runtime.md).
 `thread/start` and `turn/start` accept environment selections; `thread/resume`,
 `thread/fork`, `thread/compact/start`, `review/start`, and host-local
@@ -1194,7 +1194,7 @@ normative in [Per-workspace Codex execution runtime](workspace-runtime.md).
 adapter must preserve those distinctions rather than claiming every action is
 already isolated.
 
-The verified 0.159.3 runtime uses this minimal sequence:
+The verified 0.160.1 runtime uses this minimal sequence:
 
 1. Generate a high-entropy capability token in a user-only runtime file.
 2. Reserve an IPv4-loopback port and spawn `codex app-server --listen
@@ -1227,7 +1227,7 @@ The verified 0.159.3 runtime uses this minimal sequence:
 8. On the first activation of inherited context, revalidate the recorded source
    thread and call native `thread/fork` with the independently selected
    destination `cwd`; optional compaction completes before the first message.
-   Because 0.159.3 cannot select an environment on fork or compact, the first
+   Because 0.160.1 cannot select an environment on fork or compact, the first
    ordinary child turn performs the exact destination selection.
 9. On later `send`, read and validate the bound thread, resume it only when the
    current daemon connection lacks a subscription, and issue `turn/start` with
@@ -1292,7 +1292,7 @@ it does not substitute a candidate or cancel a durable binding that has
 already passed native validation. Retrying the exact now-bound thread is
 idempotent.
 
-Codex 0.159.3 implements interactive `!command` through host-local
+Codex 0.160.1 implements interactive `!command` through host-local
 `thread/shellCommand`, which rejects a remote-only selected environment. It is
 therefore not a valid materialization or shell path for the default workspace
 runtime even though the relay still observes the method defensively. Normal
@@ -1861,7 +1861,7 @@ status, or waive the separate migration and supervision work below.
 The following still need confirmation; decision-response closure no longer
 blocks a safe complete v0:
 
-1. Whether a compatibility range broader than the proven Codex 0.159.3
+1. Whether a compatibility range broader than the proven Codex 0.160.1
    baseline is worth maintaining; it is optional follow-up evidence.
 2. When the selected Windows named-pipe local-IPC backend and Windows CI become
    release requirements; the cross-platform transport shape itself is settled.

@@ -49,6 +49,7 @@ pub(super) async fn run(cli: Cli) -> Result<()> {
 }
 
 async fn run_with_interaction(cli: Cli, interaction: &mut dyn Interaction) -> Result<()> {
+    validate_interaction_mode(&cli)?;
     let paths = CocoPaths::from_env()?;
     let cwd = std::env::current_dir().context("could not determine current directory")?;
     let all_repos = cli.requests_all_repositories();
@@ -140,6 +141,21 @@ async fn run_with_interaction(cli: Cli, interaction: &mut dyn Interaction) -> Re
             decide(&paths, decision, choice, interaction).await
         }
     }
+}
+
+pub(super) fn validate_interaction_mode(cli: &Cli) -> Result<()> {
+    if cli.no_input
+        && matches!(
+            &cli.command,
+            Command::Create(CreateArgs {
+                interactive: true,
+                ..
+            })
+        )
+    {
+        bail!("--interactive cannot be used with --no-input");
+    }
+    Ok(())
 }
 
 async fn run_limits_scoped(
@@ -525,6 +541,8 @@ async fn run_create(
     }
     if args.name.is_none() {
         require_interactive(interaction, "workspace name")?;
+    } else if args.interactive {
+        require_interactive(interaction, "interactive workspace creation")?;
     }
     let repository_path =
         resolve_creation_repository(paths, repository_path, has_explicit_path, interaction).await?;
@@ -891,12 +909,17 @@ async fn create_workspace(
     mut args: CreateArgs,
     interaction: &mut dyn Interaction,
 ) -> Result<()> {
-    args.name = Some(resolve_text_input(
-        args.name.take(),
-        "workspace name",
-        "Workspace name",
-        interaction,
-    )?);
+    if super::create::walkthrough_requested(&args) {
+        args = super::create::walkthrough(paths, cwd.clone(), args, interaction).await?;
+    } else {
+        args.name = Some(resolve_text_input(
+            args.name.take(),
+            "workspace name",
+            "Workspace name",
+            interaction,
+        )?);
+        args = super::create::resolve_current_context(paths, &cwd, args).await?;
+    }
     let (mut params, initial_message, should_jump) =
         normalize_create_args(cwd, args, Uuid::new_v4().to_string())?;
     let name = params.name.clone();
@@ -958,8 +981,14 @@ pub(super) fn normalize_create_args(
     args: CreateArgs,
     operation_id: String,
 ) -> Result<(WorkspaceCreateParams, Option<String>, bool)> {
+    super::create::validate_local_change_flags(
+        args.carry_changes,
+        args.carry_untracked,
+        args.dirty,
+    )?;
     let CreateArgs {
         name,
+        interactive: _,
         base,
         base_workspace,
         context,
@@ -977,6 +1006,9 @@ pub(super) fn normalize_create_args(
         jump: should_jump,
     } = args;
     let name = name.context("workspace name must be resolved before creation")?;
+    if checkout.is_some() && (base.is_some() || base_workspace.is_some() || fork_from.is_some()) {
+        bail!("--checkout cannot be combined with --base, --base-workspace, or --fork-from");
+    }
     let (base, context) = if let Some(source) = fork_from {
         (
             WorkspaceBaseRequest::Workspace {
@@ -1013,9 +1045,6 @@ pub(super) fn normalize_create_args(
     } else {
         WorkspaceWorktreeRequest::NewBranch { branch, base }
     };
-    if carry_untracked && !carry_changes && !dirty {
-        bail!("--carry-untracked requires --carry-changes or --dirty");
-    }
     let changes = if dirty || carry_untracked {
         WorkspaceChangesRequest::CarryTrackedAndUntracked
     } else if carry_changes {
@@ -1030,7 +1059,7 @@ pub(super) fn normalize_create_args(
             context,
             worktree,
             changes,
-            profile,
+            profile: profile.unwrap_or_else(|| super::args::DEFAULT_PROFILE_NAME.to_owned()),
             model,
             operation_id,
         },

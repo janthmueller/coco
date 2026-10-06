@@ -8,6 +8,28 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-10-06
+
+- **Codex 0.160.1 compatibility baseline**: Advanced the selected exact
+  real-process target from 0.159.3 after the official release binary passed all
+  existing model-free App Server, exec-server, TUI, MCP, hook, adoption,
+  context, resource, containment, retirement, and restart contracts. Stable
+  and experimental generated schemas plus the consumed command surfaces are
+  unchanged; no runtime adapter change was required.
+- **Guided workspace creation**: Plain `coco create` now walks a terminal user
+  through the independent Git, code, context, configuration, and start choices,
+  with Enter-safe defaults and a final non-mutating review boundary. Named
+  creation remains immediate unless `--interactive`/`-i` is supplied; existing
+  flags seed and skip resolved steps. Conversation context can be selected from
+  an eligible same-repository workspace or entered as an exact native thread
+  ID without coupling it to the selected code base.
+- **Current-workspace context selector**: `coco create <name> -c .` now copies
+  context from the open workspace whose managed worktree contains the selected
+  path, while the Git base remains independently selected. Guided creation
+  offers the same eligible workspace directly and keeps fresh context as the
+  default; the CLI normalizes the selector to a stable workspace ID before the
+  existing creation contract.
+
 ## 2026-10-03
 
 - **Codex 0.159.3 compatibility hardening**: Completed terminal-input approval

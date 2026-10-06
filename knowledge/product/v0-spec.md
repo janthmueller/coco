@@ -68,7 +68,7 @@ peer-response routing remain separate, unimplemented capabilities.
 - At the specification baseline on 2026-09-05, the repository had no commit
   and no implementation files; it contained the handoff and documentation
   foundation only.
-- The locally installed `codex-cli 0.159.3` is the selected compatibility
+- The official `codex-cli 0.160.1` release binary is the selected compatibility
   baseline. Its model-free real-process test passes preparation, exact native
   materialization/adoption, inherited-context fork, history reads, daemon
   restart, and exact resume.
@@ -223,8 +223,9 @@ peer-response routing remain separate, unimplemented capabilities.
   created workspace or accepted turn.
 - `coco create` selects code, conversation context, Git binding, and optional
   local changes independently. `--base-workspace` selects committed code;
-  `--context`/`-c` selects native Codex history by workspace reference or
-  exact thread ID. A context source must be idle or unloaded. Optional
+  `--context`/`-c` selects native Codex history by workspace reference, exact
+  thread ID, or `.` for the workspace that owns the selected path. A context
+  source must be idle or unloaded. Optional
   `--compact-context`/`-C` applies only to the child and completes before
   `--send` or `--jump` runs.
 - `coco model list`/`coco model ls` exposes the visible catalog reported by the daemon-owned Codex
@@ -443,9 +444,12 @@ The first context-transfer delivery implements `fork` only. Conversation
 context is independent from code selection: `--context`/`-c` first resolves a
 workspace in the destination repository and otherwise treats the reference as
 an exact readable native Codex `thread.id`, which may originate elsewhere.
-`workspace:` and `thread:` prefixes force the rare ambiguous case. The source
-thread must be idle or unloaded. CoCo always creates a child; it never adopts
-or moves the source thread. An explicit compact modifier runs
+`.` is a CLI-only selector for the open workspace whose managed worktree
+contains the selected repository path; the CLI normalizes it to
+`workspace:<stable-id>` before creation. `workspace:` and `thread:` prefixes
+force the rare ambiguous case. The source thread must be idle or unloaded.
+CoCo always creates a child; it never adopts or moves the source thread. An
+explicit compact modifier runs
 `thread/compact/start` on the new child, never on the source, and must finish
 before an initial message can be sent. Compaction is recorded as fork
 provenance rather than a fourth context mode and is never enabled
@@ -495,8 +499,9 @@ coco repo (remove | rm) [path]
 coco repo (list | ls) [--json]
 coco model (list | ls) [--json]
 coco [<repository-path>] create [<name>]
+  [-i|--interactive]
   [--base <ref> | --base-workspace <workspace>]
-  [-c|--context <workspace-or-thread>] [-C|--compact-context]
+  [-c|--context <workspace-or-thread|.>] [-C|--compact-context]
   [--branch <branch> | --checkout <branch> | --detached]
   [--carry-changes [--carry-untracked] | --dirty]
   [--profile <name>] [--model <model>] [--send <message>] [--jump]
@@ -570,10 +575,14 @@ without exposing command arguments. `hook history`/`hook deliveries` return
 the newest 1–100 post-event delivery summaries without event payloads; they do
 not include synchronous guard checks and are not a manual replay API.
 
-Human terminal commands share one interactive input contract. `create` may
-prompt for a missing name and, when implicit `.` is not inside a Git
-repository, offer the registered repositories. A valid unregistered Git scope
-continues directly to daemon-owned enrollment. `send`, `jump`, and `diff` may
+Human terminal commands share one interactive input contract. Plain
+`coco create` runs a conditional creation walkthrough; a named create remains
+the deterministic fast path unless `--interactive`/`-i` is present. Existing
+flags seed the walkthrough and skip the choices they already resolve. When
+implicit `.` is not inside a Git repository, interactive creation first offers
+the registered repositories. A valid unregistered Git scope continues
+directly to daemon-owned enrollment. `--interactive` is incompatible with
+`--no-input`. `send`, `jump`, and `diff` may
 select an omitted workspace from the local scope or the daemon-wide `--global`
 scope; `send` then prompts for an omitted message. Targetless `status` is
 always a non-interactive collection view. The picker uses
@@ -674,16 +683,44 @@ the caller omitted the leading path and `.` is not inside a Git repository,
 the interactive layer may instead choose from `repository.list`; an explicitly
 supplied invalid path fails directly instead of silently falling back.
 
+In a human terminal, omitting the name starts a linear walkthrough;
+`--interactive`/`-i` starts the same walkthrough with an optional supplied name
+and flags as presets. Every unresolved selection begins on its documented
+default so Enter advances without changing it. The walkthrough covers Git
+binding, code base, applicable local-state carry, conversation context,
+profile, model, and the post-create action. Context defaults to fresh. When
+the selected path belongs to an idle or unloaded workspace, the guide offers
+that current workspace directly, records its stable ID at selection time, and
+omits it from the generic workspace picker. It may otherwise select an eligible
+same-repository workspace by name/number or accept an exact native thread ID,
+then choose full or compact history. A preset code base removes the incompatible
+existing-branch choice; final normalization independently rejects that invalid
+combination. A preset `.` context is resolved to its stable workspace ID before
+the first prompt, and an invalid local-change preset fails before the guide
+starts. If a lazily opened workspace picker has no entries, including because a
+valid Git repository has not yet been enrolled, the guide explains that fact
+and returns to the current decision instead of aborting. An empty native model
+catalog likewise returns to the inherit-model choice. The last picker presents
+a bounded, multi-line review of the workspace, worktree, code, context, local
+changes, profile, model, and post-create action above `Create` and `Cancel`.
+Each field occupies its own terminal row so an ordinary terminal does not hide
+later values behind truncation. The CLI performs only read-only discovery
+before that final selection and does not submit `workspace.create` when the
+guide is cancelled.
+
 1. **Code base.** `--base <revision>` resolves a commit and defaults to the
    invoking checkout's `HEAD`. `--base-workspace <workspace>` instead uses
    that same-repository workspace's committed `HEAD`.
 2. **Conversation context.** No context option starts a fresh thread.
    `--context`/`-c` resolves a same-repository workspace first and otherwise
-   calls native `thread/fork` from that exact thread ID. Prefixes may force
-   either interpretation. A direct native reference means exact `thread.id`,
-   not the root `thread.sessionId`. `--compact-context`/`-C` is valid only
-   with a source and compacts only the child; `-Cc <reference>` combines both
-   short options in value-safe order.
+   calls native `thread/fork` from that exact thread ID. `-c .` explicitly
+   selects the workspace that owns the selected checkout, including from a
+   nested directory; it fails rather than guessing or falling back to fresh
+   context when no such workspace exists. Prefixes may force either ordinary
+   interpretation. A direct native reference means exact `thread.id`, not the
+   root `thread.sessionId`. `--compact-context`/`-C` is valid only with a
+   source and compacts only the child; `-Cc <reference>` combines both short
+   options in value-safe order.
 3. **Git binding.** The default allocates `coco/<workspace>`.
    `--branch <branch>` allocates another new branch, `--checkout <branch>`
    uses an existing local branch that Git reports as free, and `--detached`/
@@ -1018,7 +1055,7 @@ ID must not create duplicate artifacts.
   shell path with the default remote executor. Review or compaction immediately
   after a newly loaded resume may also use Codex's local default until the next
   ordinary turn selects the workspace executor; CoCo must not hide this native
-  0.159.3 limitation.
+  0.160.1 limitation.
 
 ### `coco decide`
 
@@ -1428,7 +1465,7 @@ The following are intentionally outside v0:
 - Fake App Server process tests exercise Git-only preparation, atomic first
   send, native fork/compaction, event correlation, one-use fresh-TUI relay,
   exact adoption, detach, and completion/failure. A separate opt-in real Codex
-  compatibility test consumes no model turn: it checks 0.159.3, registers and
+  compatibility test consumes no model turn: it checks 0.160.1, registers and
   probes workspace environments, proves an empty remote candidate remains
   unbound, materializes one exact local-shell candidate solely for the history
   contract, then verifies history and two simultaneous native TUI resumes of
@@ -1566,7 +1603,7 @@ The following are intentionally outside v0:
   read failure, restart, final-output selection, and binding mismatches before
   any table or existing record is removed. The initial direct read cutover is
   acceptable without a prolonged shadow-only checkpoint because the original
-  0.147.0 proof and current 0.159.3 real-process gate prove non-loading reads,
+  0.147.0 proof and current 0.160.1 real-process gate prove non-loading reads,
   restart persistence, exact ID/`cwd`, and optional history hydration. Eager recovery
   status/failure writes stop with that obsolete startup path. The later live-
   event reduction also stops user-message, native status/plan/diff/error,
@@ -1621,7 +1658,7 @@ approval model. CoCo neither supplies a separate Git database nor adds a
 custom commit proxy. A later app-side commit action may be useful UI
 convenience, but it is not part of the isolation contract.
 
-Codex 0.159.3 is now the selected and proven compatibility baseline;
+Codex 0.160.1 is now the selected and proven compatibility baseline;
 maintaining a broader range is optional rather than an alpha blocker. The
 two-repository, multi-client product proof now passes locally, so it no longer
 blocks continued public-alpha development. Publishing a particular revision,

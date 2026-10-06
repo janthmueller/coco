@@ -225,6 +225,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::cli::prompt::ReviewField;
     use crate::domain::{
         ContextMode, Decision, DecisionApprovalPrompt, DecisionKind, DecisionOption,
         DecisionQuestion, ProfileSnapshot, Workspace, WorkspaceLifecycle, WorkspacePhase,
@@ -504,8 +505,21 @@ mod tests {
                 .context("test did not provide a selection")
         }
 
+        fn select_with_review(
+            &mut self,
+            _title: &str,
+            _fields: &[ReviewField],
+            _choices: &[Choice],
+        ) -> Result<usize> {
+            panic!("native decisions must not open a review selector")
+        }
+
         fn text(&mut self, _label: &str) -> Result<String> {
             self.texts.pop_front().context("test did not provide text")
+        }
+
+        fn notice(&mut self, _message: &str) -> Result<()> {
+            panic!("native decisions must not emit walkthrough notices")
         }
     }
 
@@ -524,8 +538,21 @@ mod tests {
             panic!("non-interactive decisions must not open a selector")
         }
 
+        fn select_with_review(
+            &mut self,
+            _title: &str,
+            _fields: &[ReviewField],
+            _choices: &[Choice],
+        ) -> Result<usize> {
+            panic!("non-interactive decisions must not open a review selector")
+        }
+
         fn text(&mut self, _label: &str) -> Result<String> {
             panic!("non-interactive decisions must not request text")
+        }
+
+        fn notice(&mut self, _message: &str) -> Result<()> {
+            panic!("non-interactive decisions must not emit walkthrough notices")
         }
     }
 

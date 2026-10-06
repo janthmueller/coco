@@ -4,6 +4,8 @@ use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 
 use crate::domain::runtime::MAX_CPU_MILLICORES;
 
+pub(super) const DEFAULT_PROFILE_NAME: &str = "default";
+
 #[derive(Debug, Parser)]
 #[command(
     name = "coco",
@@ -468,15 +470,18 @@ pub(super) enum ModelCommand {
 
 #[derive(Debug, Args)]
 pub(super) struct CreateArgs {
-    /// Workspace name, such as fix/login. Omit it to enter one interactively.
+    /// Workspace name, such as fix/login. Omit it to start guided creation.
     pub(super) name: Option<String>,
+    /// Walk through workspace creation interactively, using flags as preset values.
+    #[arg(long, short = 'i')]
+    pub(super) interactive: bool,
     /// Git revision from which to prepare a new branch or detached worktree.
     #[arg(long, value_name = "REVISION", conflicts_with_all = ["base_workspace", "checkout"])]
     pub(super) base: Option<String>,
     /// Use the committed HEAD of another workspace as the Git base.
     #[arg(long, value_name = "WORKSPACE", conflicts_with_all = ["base", "checkout"])]
     pub(super) base_workspace: Option<String>,
-    /// Fork Codex history from a workspace reference or native thread ID.
+    /// Fork history from a workspace, thread ID, or `.` for the workspace containing the selected path.
     #[arg(
         long,
         short = 'c',
@@ -525,8 +530,8 @@ pub(super) struct CreateArgs {
     #[arg(long, short = 'd')]
     pub(super) dirty: bool,
     /// Layer `$CODEX_HOME/<PROFILE>.config.toml` onto the thread configuration.
-    #[arg(long, default_value = "default")]
-    pub(super) profile: String,
+    #[arg(long)]
+    pub(super) profile: Option<String>,
     /// Override the profile or default model for this workspace's Codex thread.
     #[arg(long, short = 'm', value_name = "MODEL", value_parser = non_empty_model)]
     pub(super) model: Option<String>,

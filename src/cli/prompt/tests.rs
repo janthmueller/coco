@@ -115,6 +115,81 @@ fn picker_keeps_only_the_title_and_choices() {
 }
 
 #[test]
+fn review_picker_keeps_each_creation_value_on_its_own_visible_row() {
+    let fields = vec![
+        ReviewField::new("Workspace", "review/api"),
+        ReviewField::new("Worktree", "branch coco/review/api"),
+        ReviewField::new("Code", "main"),
+        ReviewField::new(
+            "Context",
+            "thread 0199-native-thread-with-a-visible-identifier · compact",
+        ),
+        ReviewField::new("Changes", "tracked + untracked"),
+        ReviewField::new("Profile", "development"),
+        ReviewField::new("Model", "gpt-5.6"),
+        ReviewField::new("Action", "send + jump"),
+    ];
+    let choices = [Choice::new("Create", None), Choice::new("Cancel", None)];
+    let lines = picker_lines_with_review(
+        "Ready to create",
+        &fields,
+        &choices,
+        &PickerState::new(),
+        80,
+        Palette::plain(),
+    );
+
+    assert_eq!(lines.len(), 12);
+    assert_eq!(lines[0], "Ready to create (1/2)");
+    assert_eq!(lines[1], "  Workspace  review/api");
+    assert_eq!(lines[2], "  Worktree   branch coco/review/api");
+    assert_eq!(lines[3], "  Code       main");
+    assert_eq!(
+        lines[4],
+        "  Context    thread 0199-native-thread-with-a-visible-identifier · compact"
+    );
+    assert_eq!(lines[8], "  Action     send + jump");
+    assert_eq!(lines[9], "");
+    assert_eq!(lines[10], "›  1  Create");
+    assert_eq!(lines[11], "   2  Cancel");
+    assert!(lines.iter().all(|line| line.width() <= 80));
+}
+
+#[test]
+fn review_picker_sanitizes_and_bounds_every_row_in_a_narrow_terminal() {
+    let fields = vec![
+        ReviewField::new("Workspace\nname", "review/api\twith detail"),
+        ReviewField::new("Context", "thread 0199-very-long-native-thread-identifier"),
+    ];
+    let choices = [Choice::new("Create", None), Choice::new("Cancel", None)];
+    let lines = picker_lines_with_review(
+        "Ready\nto create",
+        &fields,
+        &choices,
+        &PickerState::new(),
+        24,
+        Palette::plain(),
+    );
+
+    assert_eq!(lines.len(), 6);
+    assert!(lines.iter().all(|line| line.width() <= 24));
+    assert!(lines.iter().all(|line| !line.chars().any(char::is_control)));
+    assert!(lines[1].starts_with("  Workspace name  "));
+    assert!(lines[2].starts_with("  Context         "));
+    assert_eq!(lines[3], "");
+    assert_eq!(lines[4], "›  1  Create");
+    assert_eq!(lines[5], "   2  Cancel");
+}
+
+#[test]
+fn review_layout_reserves_its_fields_and_keeps_one_choice_visible() {
+    let layout = PickerLayout::with_review(80, 12, 8).unwrap();
+    assert_eq!(layout.width, 79);
+    assert_eq!(layout.visible_rows, 1);
+    assert!(PickerLayout::with_review(80, 11, 8).is_err());
+}
+
+#[test]
 fn only_the_selected_row_has_a_marker_and_labels_stay_aligned() {
     let choices = vec![Choice::new("workspace", Some("Ready".to_owned())); 3];
     for selected in 0..choices.len() {

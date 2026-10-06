@@ -79,8 +79,9 @@ short alias.
 When standard input and the terminal display are connected to a terminal, you
 may omit some values:
 
-- `create` asks for a missing workspace name and lets you choose a registered
-  repository when the current directory is not inside a Git repository;
+- `create` runs a guided setup when its name is omitted or `-i` is present,
+  and lets you choose a registered repository when the current directory is
+  not inside a Git repository;
 - `send`, `jump`, `diff`, `close`, and `limits` let you choose a missing
   workspace;
 - `reopen` offers closed workspaces; `delete` offers open and closed workspaces;
@@ -109,8 +110,9 @@ not repository-scoped.
 
 ```text
 coco [REPOSITORY_PATH] create [NAME]
+  [-i, --interactive]
   [--base <GIT_REF> | --base-workspace <WORKSPACE>]
-  [-c, --context <WORKSPACE_OR_THREAD>]
+  [-c, --context <CONTEXT>]
   [-C, --compact-context]
   [--branch <BRANCH> | --checkout <BRANCH> | --detached/-D]
   [--carry-changes [--carry-untracked] | --dirty/-d]
@@ -120,8 +122,15 @@ coco [REPOSITORY_PATH] create [NAME]
   [-j, --jump]
 ```
 
-Omit `NAME` in a terminal to enter it interactively. `--base` defaults to
-`HEAD`. Names are 1–63 bytes and contain lowercase ASCII
+Omit `NAME` in a terminal to start the creation walkthrough. A named command
+uses the defaults immediately unless `--interactive`/`-i` is present. Existing
+flags prefill and skip those decisions, and Enter accepts the highlighted
+default at each remaining step. The walkthrough offers the current workspace
+when its conversation is reusable, another Ready or Unloaded workspace, or an
+exact Codex thread ID. It does not create anything until you accept the final
+summary. `--interactive` cannot be combined with `--no-input`.
+
+`--base` defaults to `HEAD`. Names are 1–63 bytes and contain lowercase ASCII
 letters, numbers, and hyphens, with optional single slashes between
 components, such as `fix/login`. Each component begins and ends with a letter
 or number. A dirty source checkout is allowed: CoCo warns and leaves its local
@@ -136,9 +145,10 @@ before creation.
 `--context`/`-c` independently forks conversation history from a workspace in
 the selected repository or an exact native Codex thread ID. Workspace matches
 take precedence; `workspace:` and `thread:` prefixes explicitly choose a kind.
-Without this option, the context is fresh. `--compact-context`/`-C` requires a
-context source and affects only the new fork. `-Cc <reference>` is the compact
-form of both options together.
+Use `-c .` inside a CoCo worktree to select that current workspace, including
+from one of its subdirectories. Without this option, the context is fresh.
+`--compact-context`/`-C` requires a context source and affects only the new
+fork. `-Cc <reference>` is the compact form of both options together.
 
 The default creates `coco/<NAME>`. `--branch` chooses another new branch,
 `--checkout` selects an existing local branch, and `--detached` creates no

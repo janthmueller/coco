@@ -109,7 +109,7 @@ server/tool selections and that the selections behave correctly across resume
 and fork.
 
 The model-free test in `tests/real_codex_compat/mcp.rs`, most recently rerun
-against Codex 0.159.3 on 2026-10-01, proves separate repository-scoped
+against Codex 0.160.1 on 2026-10-06, proves separate repository-scoped
 instances of the real CoCo MCP process across native start/fork/resume and
 restoration through CoCo's named execution profiles. It also verifies native
 `_meta.threadId` attribution for

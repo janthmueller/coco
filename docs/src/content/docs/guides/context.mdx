@@ -6,6 +6,9 @@ description: Start from the code you need and optionally reuse an existing agent
 Choose a workspace's code and conversation independently. For example, use
 clean code from `main` while keeping the findings from an investigation.
 
+Run `coco create <name> -i` to choose these settings in a walkthrough. The
+examples below show the equivalent direct flags.
+
 ## Choose the code
 
 ```bash
@@ -30,6 +33,17 @@ New workspaces start with a fresh conversation by default. Use
 ```bash
 coco create review/login --base main --context investigate/login
 ```
+
+When you are already inside a CoCo workspace, `.` selects that workspace's
+conversation:
+
+```bash
+coco create review/login -c .
+```
+
+This still starts the code from your current `HEAD`; only the conversation is
+copied. The walkthrough offers the current workspace by name when it can be
+used as a context source.
 
 You can supply an existing Codex thread ID instead:
 

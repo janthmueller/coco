@@ -27,11 +27,33 @@ impl Choice {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct ReviewField {
+    pub(super) label: String,
+    pub(super) value: String,
+}
+
+impl ReviewField {
+    pub(super) fn new(label: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            value: value.into(),
+        }
+    }
+}
+
 pub(super) trait Interaction {
     fn is_interactive(&self) -> bool;
     fn select(&mut self, title: &str, choices: &[Choice]) -> Result<usize>;
+    fn select_with_review(
+        &mut self,
+        title: &str,
+        fields: &[ReviewField],
+        choices: &[Choice],
+    ) -> Result<usize>;
     fn confirm(&mut self, title: &str) -> Result<bool>;
     fn text(&mut self, label: &str) -> Result<String>;
+    fn notice(&mut self, message: &str) -> Result<()>;
 }
 
 pub(super) struct TerminalInteraction {
@@ -58,6 +80,21 @@ impl Interaction for TerminalInteraction {
         match choices {
             [] => bail!("{title} has no available choices"),
             _ => run_picker(title, choices),
+        }
+    }
+
+    fn select_with_review(
+        &mut self,
+        title: &str,
+        fields: &[ReviewField],
+        choices: &[Choice],
+    ) -> Result<usize> {
+        if !self.interactive {
+            bail!("interactive selection is unavailable");
+        }
+        match choices {
+            [] => bail!("{title} has no available choices"),
+            _ => run_picker_with_review(title, fields, choices),
         }
     }
 
@@ -92,18 +129,42 @@ impl Interaction for TerminalInteraction {
             Palette::stderr(),
         )
     }
+
+    fn notice(&mut self, message: &str) -> Result<()> {
+        if !self.interactive {
+            bail!("interactive output is unavailable");
+        }
+        eprintln!("{}", Palette::stderr().paint(Tone::YellowBold, message));
+        Ok(())
+    }
 }
 
 fn run_picker(title: &str, choices: &[Choice]) -> Result<usize> {
+    run_picker_with_review(title, &[], choices)
+}
+
+fn run_picker_with_review(
+    title: &str,
+    fields: &[ReviewField],
+    choices: &[Choice],
+) -> Result<usize> {
     let mut terminal = PickerTerminal::enter(io::stderr().lock())
         .context("could not enter terminal selection mode")?;
     let mut state = PickerState::new();
     let palette = Palette::stderr();
     let outcome = loop {
         let (columns, rows) = size().unwrap_or((100, 24));
-        let layout = PickerLayout::new(columns, rows)?;
+        let layout = if fields.is_empty() {
+            PickerLayout::new(columns, rows)?
+        } else {
+            PickerLayout::with_review(columns, rows, fields.len())?
+        };
         state.visible_rows = layout.visible_rows;
-        let lines = picker_lines(title, choices, &state, layout.width, palette);
+        let lines = if fields.is_empty() {
+            picker_lines(title, choices, &state, layout.width, palette)
+        } else {
+            picker_lines_with_review(title, fields, choices, &state, layout.width, palette)
+        };
         terminal.draw(&lines, rows)?;
         match event::read().context("could not read terminal input")? {
             Event::Key(key) if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
@@ -134,13 +195,23 @@ struct PickerLayout {
 
 impl PickerLayout {
     fn new(columns: u16, rows: u16) -> Result<Self> {
-        if columns < 12 || rows < 3 {
+        Self::with_review(columns, rows, 0)
+    }
+
+    fn with_review(columns: u16, rows: u16, field_count: usize) -> Result<Self> {
+        let separator_rows = usize::from(field_count > 0);
+        // Keep one row for the title, one below the frame for the terminal
+        // cursor, and a blank separator before choices in review pickers.
+        let reserved_rows = 2usize
+            .saturating_add(field_count)
+            .saturating_add(separator_rows);
+        let visible_rows = usize::from(rows).saturating_sub(reserved_rows);
+        if columns < 12 || visible_rows == 0 {
             bail!("terminal is too small for selection; enlarge it and retry");
         }
         Ok(Self {
             width: usize::from(columns - 1),
-            // Reserve one row for the title and one for the cursor below it.
-            visible_rows: usize::from(rows - 2).min(MAX_VISIBLE_ROWS),
+            visible_rows: visible_rows.min(MAX_VISIBLE_ROWS),
         })
     }
 }
@@ -218,9 +289,21 @@ fn picker_lines(
     width: usize,
     palette: Palette,
 ) -> Vec<String> {
+    picker_lines_with_review(title, &[], choices, state, width, palette)
+}
+
+fn picker_lines_with_review(
+    title: &str,
+    fields: &[ReviewField],
+    choices: &[Choice],
+    state: &PickerState,
+    width: usize,
+    palette: Palette,
+) -> Vec<String> {
     let start = visible_start(state.selected, choices.len(), state.visible_rows);
     let end = (start + state.visible_rows).min(choices.len());
-    let mut lines = Vec::with_capacity(end - start + 1);
+    let separator_rows = usize::from(!fields.is_empty());
+    let mut lines = Vec::with_capacity(end - start + 1 + fields.len() + separator_rows);
     let title = truncate_line(
         &format!(
             "{} ({}/{})",
@@ -231,6 +314,19 @@ fn picker_lines(
         width,
     );
     lines.push(palette.paint(Tone::Bold, title));
+    if !fields.is_empty() {
+        let label_width = fields
+            .iter()
+            .map(|field| single_line(&field.label).width())
+            .max()
+            .unwrap_or_default();
+        lines.extend(
+            fields
+                .iter()
+                .map(|field| review_row(field, label_width, width, palette)),
+        );
+        lines.push(String::new());
+    }
     for (index, choice) in choices.iter().enumerate().take(end).skip(start) {
         lines.push(picker_row(
             index,
@@ -241,6 +337,16 @@ fn picker_lines(
         ));
     }
     lines
+}
+
+fn review_row(field: &ReviewField, label_width: usize, width: usize, palette: Palette) -> String {
+    let label = single_line(&field.label);
+    let value = single_line(&field.value);
+    let padding = " ".repeat(label_width.saturating_sub(label.width()));
+    let prefix = truncate_line(&format!("  {label}{padding}  "), width);
+    let available = width.saturating_sub(prefix.width());
+    let value = truncate_line(&value, available);
+    format!("{}{}", palette.paint(Tone::Dim, prefix), value)
 }
 
 fn picker_row(

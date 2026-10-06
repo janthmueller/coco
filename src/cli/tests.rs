@@ -26,6 +26,7 @@ fn create_help_describes_the_codex_named_profile_file() {
     assert!(help.contains("$CODEX_HOME/<PROFILE>.config.toml"));
     assert!(!help.contains("[profiles.<PROFILE>]"));
     for option in [
+        "--interactive",
         "--base-workspace",
         "--context",
         "--compact-context",
@@ -40,6 +41,7 @@ fn create_help_describes_the_codex_named_profile_file() {
     }
     assert!(help.contains("-c, --context"));
     assert!(help.contains("-C, --compact-context"));
+    assert!(help.contains("-i, --interactive"));
     assert!(!help.contains("--fork-from"));
 }
 
@@ -134,6 +136,24 @@ fn parses_workspace_creation_with_an_optional_profile() {
         prompted.command,
         Command::Create(super::args::CreateArgs { name: None, .. })
     ));
+
+    let guided = Cli::try_parse_from(["coco", "create", "auth", "-i"]).unwrap();
+    assert!(matches!(
+        guided.command,
+        Command::Create(super::args::CreateArgs {
+            name: Some(name),
+            interactive: true,
+            ..
+        }) if name == "auth"
+    ));
+    let no_input =
+        Cli::try_parse_from(["coco", "--no-input", "create", "auth", "--interactive"]).unwrap();
+    assert_eq!(
+        super::commands::validate_interaction_mode(&no_input)
+            .unwrap_err()
+            .to_string(),
+        "--interactive cannot be used with --no-input"
+    );
 
     let configured = Cli::try_parse_from([
         "coco",

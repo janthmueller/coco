@@ -49,6 +49,9 @@ coco status -a
 coco jump fix/login
 ```
 
+Run `coco create` for a guided setup, or add `-i` after a named create to walk
+through its code, context, model, and start choices interactively.
+
 Each agent works in a separate Git checkout, called a worktree. The start
 commands return while work continues. Use `jump` to read the conversation,
 answer questions, or continue in the Codex terminal UI. Leaving that UI keeps
@@ -69,7 +72,7 @@ machine.
 
 ## Project status
 
-CoCo is alpha software for Linux and macOS, tested with Codex 0.159.3.
+CoCo is alpha software for Linux and macOS, tested with Codex 0.160.1.
 Resource measurements and limits are Linux features; limits require a
 compatible systemd user session.
 

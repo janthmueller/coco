@@ -12,6 +12,19 @@ you to return to.
 Inside a Git repository with at least one commit:
 
 ```bash
+coco create
+```
+
+The walkthrough lets you choose the name, code and conversation starting
+points, profile, model, and what to do after creation. Press Enter to keep the
+highlighted default. Existing workspaces appear when you choose one as the
+conversation source. When you run it inside a reusable CoCo workspace, that
+current workspace is offered directly. You can also enter an exact Codex
+thread ID.
+
+For a faster direct command, provide the name and instruction:
+
+```bash
 coco create fix/login -s "Fix the login redirect and run its tests"
 coco create review/cache -s "Review the cache for correctness issues"
 ```
@@ -21,6 +34,9 @@ coco create review/cache -s "Review the cache for correctness issues"
 ```bash
 coco create investigate/search -s "Investigate slow searches" -j
 ```
+
+Use `coco create fix/login -i` when you already know the name but still want
+the walkthrough. Any other flags you provide prefill and skip those decisions.
 
 To prepare a workspace before giving it an instruction, use
 `coco create fix/login`. Its status is `Prepared` until work begins.

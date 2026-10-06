@@ -5,7 +5,7 @@ description: Tracks repository bootstrap, the Rust baseline, and early CoCo arch
 tags: [work, branch, bootstrap, rust, mcp, architecture]
 status: active
 branch: main
-updated: 2026-10-03
+updated: 2026-10-06
 ---
 
 # main — repository foundation
@@ -17,7 +17,7 @@ architectural baseline for CoCo.
 
 ## Active work
 
-- [x] Advance CoCo's selected Codex compatibility baseline to 0.159.3.
+- [x] Advance CoCo's compatibility baseline from 0.157.1 to 0.159.3.
   - [x] Protect every per-workspace Exec Server with a distinct in-memory
     bearer token through native Codex capability-token support.
   - [x] Preserve legacy command approvals while presenting native
@@ -25,6 +25,9 @@ architectural baseline for CoCo.
     future action kinds unanswered.
   - [x] Update current public/canonical compatibility claims and pass the full
     unit, process, lint, documentation, and real-Codex gates.
+- [x] Advance the selected Codex compatibility baseline from 0.159.3 to
+  0.160.1 after the unchanged real-process contract passed against the official
+  release binary.
 - [x] Audit installed `codex-cli 0.159.3` against CoCo's selected 0.157.1
   contracts before proposing any compatibility implementation.
   - [x] Compare official release notes, stable and experimental App Server
@@ -6150,3 +6153,755 @@ Deferred decision:
 - No history-mode or jump-flow change is planned in the current slice. Revisit
   only with a measured slow case that records cold/warm runtime state, native
   history mode, rollout size, and the duration of both attach phases.
+
+## Guided workspace creation UX review — 2026-10-06
+
+Scope:
+
+- Review and implement a more discoverable interactive `create` flow after
+  comparing the actual behavior of `create`, `send`, and destructive workspace
+  commands. Preserve the existing daemon protocol and deterministic direct
+  command behavior.
+
+Findings:
+
+- `send` and `delete` interactively resolve omitted inputs that are necessary
+  to perform their action. `create` resolves only an omitted repository and
+  workspace name; every other omitted value immediately selects a default:
+  current `HEAD`, fresh context, a new `coco/<name>` branch, no carried local
+  changes, the default profile/model, and neither send nor jump. The resulting
+  workspace is prepared and has no native Codex thread until `send` or `jump`.
+- Prompting for every omitted option on every `coco create <name>` would make
+  the common quick path tedious and would make an otherwise complete command
+  behave differently merely because it owns a terminal. Omission must retain
+  its current deterministic meaning outside an explicit guided flow.
+- The existing picker, repository/workspace inventory, and model catalog are
+  sufficient for most of a guided flow. Git refs, source dirty-state details,
+  and named profile discovery do not yet have reusable typed discovery APIs;
+  an initial flow can accept ref/profile text, while richer pickers should be
+  backed by the daemon rather than by Git or Codex-home reads in the CLI.
+
+Chosen interaction model:
+
+- Make plain `coco create` a guided creation flow. Preserve
+  `coco create <name> [flags]` as the current fast, non-prompting default path,
+  and add `--interactive`/`-i` so a known name or partial flag set can seed the
+  same guide. `--interactive` must conflict with `--no-input`.
+- Use a short, linear walkthrough rather than one editable summary menu. Each
+  step preselects a documented default, so Enter advances without requiring
+  extra input. Existing picker controls remain available: arrows or `j`/`k`,
+  direct number selection, Enter to accept, and cancellation without mutation.
+- Keep the walkthrough conditional. Ask about local changes only when they are
+  relevant, and let a defaults path skip profile/model customization. Flags
+  supplied before entering the guide seed the corresponding answers and skip
+  already-resolved steps.
+- Keep code base and conversation context visibly independent. Context offers
+  fresh as the default, an eligible existing workspace selected by name/number,
+  or an exact native Codex thread ID entered after choosing that option. A
+  copied context then offers full as the default or compact. The post-create
+  action offers prepare only as the default, send, jump, or send then jump.
+  Existing flags remain the direct and automation-safe representation of the
+  same choices.
+- End with a compact summary and explicit creation confirmation. Do not mutate
+  the repository or call `workspace.create` before that confirmation.
+  Cancellation therefore leaves no partial workspace. Final normalization and
+  coordinator validation remain the single authority for conflicting or
+  invalid combinations.
+
+Suggested first implementation slice:
+
+- Implement the guided walkthrough over the existing typed requests and shared
+  picker, including workspace/context and model selection, free-text Git ref
+  and named-profile entry, post-create message input, cancellation, and
+  deterministic `--no-input` behavior.
+- Cover direct-mode non-regression, flags seeding guided state, no mutation
+  before final acceptance, cancellation, fresh/workspace/thread context,
+  compact context, all worktree modes, local-change policies, profile/model,
+  and prepare/send/jump combinations. Consider a later daemon-owned creation
+  discovery endpoint only when branch and dirty-state-aware pickers are worth
+  the added protocol surface.
+
+Implementation checkpoint:
+
+- [x] Add `create --interactive`/`-i`, reject it with `--no-input`, and keep
+  named creation without `-i` deterministic and immediate.
+- [x] Implement the conditional linear walkthrough in a focused CLI child
+  module, using existing typed daemon requests and the shared picker.
+- [x] Offer eligible same-repository workspaces and exact native thread IDs as
+  context sources, with fresh and full-copy defaults.
+- [x] Cover code base, Git binding, local-state carry, Codex configuration,
+  and post-create actions without mutating anything before final acceptance.
+- [x] Add focused unit/CLI tests, update the normative command and interaction
+  contracts, then update only the affected public command guidance.
+- [x] Run formatting, focused tests, the full Rust gates, and documentation
+  validation sequentially; record exact results here before handoff.
+
+Implementation outcome:
+
+- `coco create` now enters the complete guide when both terminal streams are
+  interactive. `coco create <name>` retains immediate defaults, while
+  `coco create <name> -i` forces the same guide with the name and any other
+  supplied flags treated as resolved presets. Runtime validation rejects the
+  deliberate `--interactive --no-input` contradiction before path or daemon
+  access; unnamed non-interactive creation retains its previous actionable
+  missing-name error.
+- The guide asks for worktree binding before code base so selecting an existing
+  branch cannot create an invalid independent-base combination. Local-state
+  carry is offered only for the invoking `HEAD`, matching the coordinator's
+  existing carry invariant. Profile names and Git refs remain explicit text;
+  model discovery is lazy and uses `model.list` only after the user asks to
+  choose a model.
+- Conversation context defaults to fresh. The workspace path requests only
+  `idle` and `not_loaded` same-repository sources, presents their human names,
+  and sends the selected stable workspace ID with an explicit `workspace:`
+  prefix. The alternative text path stores an explicit `thread:` reference.
+  Full copy remains the default; an already supplied `-C` requires choosing a
+  source and is never silently cleared.
+- The final selector defaults to `Create workspace`, summarizes human-facing
+  choices without exposing picker-resolved opaque IDs, and is the first point
+  after which `workspace.create` may be sent. Discovery before it is read-only.
+  Cancellation and picker interruption return without repository mutation.
+- The implementation lives in `cli/create.rs` with focused child tests. No
+  daemon method, coordinator use case, storage schema, or native Codex contract
+  changed. Durable behavior is recorded in `product/v0-spec.md` and the
+  knowledge log; README and the workspace/context/CLI pages contain only the
+  user actions needed to discover and use the walkthrough.
+
+Verification:
+
+- `cargo fmt --all -- --check` passes.
+- `cargo clippy --locked --all-targets --all-features -- -D warnings` passes.
+- `cargo test --locked --all-targets --all-features --no-fail-fast` passes:
+  407 library tests passed and 6 opt-in tests were ignored; all 5 process-smoke
+  tests passed; live-model and real-Codex opt-in tests remained intentionally
+  ignored.
+- Focused guided-create coverage passes, including defaults without discovery,
+  explicit native-thread compaction, flag seeding, cancellation, and an RPC
+  contract test proving the eligible workspace phase filter and stable-ID
+  selection.
+- `pnpm --dir docs run check` passes with zero diagnostics.
+- The GitHub Pages build passes with 17 pages and 62 verified static files.
+- `nix flake check .` passes all 144 evaluated checks after the new module files
+  were added to the Git index so the local Git flake includes them.
+- Manual non-interactive probes preserve the missing-name diagnostic and
+  return `--interactive cannot be used with --no-input` for the explicit
+  contradiction.
+
+Unresolved follow-up:
+
+- Named profile discovery, branch/ref discovery, and source dirty-state
+  preflight still lack typed daemon-owned discovery. The current text inputs
+  and conditional carry choices are intentional; add richer pickers only with
+  a coherent read-only protocol rather than shelling out from the CLI.
+
+### Current-workspace context shortcut — 2026-10-06
+
+Scope:
+
+- Add an explicit fast path for copying conversation context from the CoCo
+  workspace that owns the selected checkout, without coupling that choice to
+  the current Git `HEAD` or changing fresh context as the default.
+- Expose the same choice in guided creation and keep `.` unavailable as a
+  workspace name.
+
+Decisions:
+
+- `coco create <name> -c .` means “copy context from the open workspace whose
+  worktree contains the selected repository path.” A leading repository path
+  therefore works consistently with running the command inside that worktree,
+  including from a nested directory.
+- `.` is a CLI context selector, normalized to an explicit stable workspace ID
+  before `workspace.create`; it is not a new daemon-level reference syntax.
+- Fresh context remains the omission/default behavior. The guide offers the
+  detected current workspace immediately after Fresh context only when it is
+  an eligible idle or unloaded source, and excludes it from the subsequent
+  generic existing-workspace picker.
+- A missing current workspace is an actionable error. CoCo must not silently
+  fall back to a fresh context or infer an arbitrary workspace merely because
+  it belongs to the same repository.
+- The existing central workspace-name grammar already rejects `.` and has an
+  explicit regression case. Preserve that single validation authority rather
+  than adding a CLI-only name rule.
+
+Implementation checklist:
+
+- [x] Resolve `-c .` against the selected path and normalize it to
+  `workspace:<stable-id>` before creation.
+- [x] Add the conditional Current workspace choice to the walkthrough and
+  preserve a human-readable final summary.
+- [x] Cover nested paths, absent/current-ineligible workspaces, generic-picker
+  de-duplication, direct-mode normalization, and the existing `.` name guard.
+- [x] Update canonical/public command guidance and run the complete sequential
+  verification gates before handoff.
+
+Implementation findings:
+
+- CoCo-created open worktrees are rooted below the configured
+  `CocoPaths.worktrees_dir`; the CLI uses that as a cheap candidate check so a
+  normal source-repository walkthrough retains its previous no-discovery
+  defaults path. A candidate managed path is then matched component-wise
+  against daemon-owned workspace worktree paths, after canonicalization where
+  possible. Nested directories resolve to the deepest containing worktree.
+- Direct `-c .` lists open same-repository workspaces, resolves the containing
+  worktree to a stable ID, and fails before `workspace.create` when the path is
+  not a managed open workspace. Final coordinator validation remains
+  authoritative for a source that becomes active or otherwise unusable after
+  the read-only lookup.
+- The guided context step queries only `idle` and `not_loaded` sources when it
+  is invoked from a managed-worktree candidate. It places an eligible current
+  workspace after Fresh context, removes it from the generic picker, and keeps
+  Fresh selected by default. The explicit `-C` path continues to require a
+  source rather than reintroducing Fresh context.
+- Focused coverage now proves nested-path lookup, stable-ID normalization into
+  the existing context request, human summary text, eligible phase filtering,
+  omission of an active current workspace, generic-picker de-duplication, and
+  an RPC-free actionable error outside managed worktrees. The pre-existing Git
+  validator test continues to reject `.` as a workspace name.
+
+Verification:
+
+- `cargo fmt --all -- --check` passes.
+- `cargo clippy --locked --all-targets --all-features -- -D warnings` passes.
+- `cargo test --locked --all-targets --all-features --no-fail-fast` passes:
+  411 library tests passed and 6 opt-in tests were ignored; all 5 process-smoke
+  tests passed; live-product and real-Codex tests remained intentionally
+  ignored because this slice does not change a native Codex contract.
+- All 11 focused guided-create tests pass, including the four new current-path
+  selector, eligibility, de-duplication, and failure cases.
+- `pnpm --dir docs run check` passes with zero diagnostics. The GitHub Pages
+  build passes with 17 pages and 62 verified static files.
+- `nix flake check .` passes all evaluated checks; its only warning is the
+  expected list of systems not evaluated from this host.
+- A manual `coco create --help` probe exposes `.` only as the documented
+  context selector. Workspace-name validation remains centrally covered by
+  `validates_workspace_names_with_safe_slash_components`.
+
+## Codex 0.160 upstream compatibility audit — 2026-10-06
+
+Scope:
+
+- Compare CoCo's selected and proven `codex-cli 0.159.3` baseline with the
+  subsequently released 0.160 line using official release notes, exact
+  upstream tags, generated App Server schemas, and CoCo's consumed contracts.
+- Classify findings as required compatibility work, native functionality CoCo
+  can reuse, or interesting upstream behavior that should not yet change the
+  product. Do not change product code or advance the selected baseline during
+  this audit.
+
+Release finding:
+
+- The official changelog currently lists exactly two later stable releases:
+  `0.160.0` on 2026-10-01 and `0.160.1` on 2026-10-05. Later 0.161 and 0.162
+  tags are prereleases and are deliberately outside this stable-baseline
+  review. The latter stable release is a focused Windows remote-stdio MCP
+  environment backport.
+- The official upstream clone was refreshed and the immutable
+  `rust-v0.159.3` and `rust-v0.160.1` tags were compared directly. There is no
+  diff anywhere below `codex-rs/app-server-protocol/schema/json` or its Rust
+  source. Stable and experimental JSON schemas generated independently by the
+  installed 0.159.3 binary and official published 0.160.1 Linux binary are
+  byte-identical. Root, resume, fork, App Server, and exec-server command help
+  are also identical.
+- Therefore 0.160.1 introduces no changed App Server method, field,
+  notification, capability negotiation, remote transport option, or executor
+  CLI surface that requires a CoCo adapter or relay change.
+
+Relevant upstream behavior:
+
+- Native subagents now retain a workspace environment even when it is still
+  starting and receive the original preparation result. This directly repairs
+  an upstream edge case in CoCo's per-workspace exec-server topology and is
+  inherited automatically; CoCo should not reproduce it.
+- The native TUI now distinguishes unsent from uncertain input and resumes
+  only the former after reconnect. This complements CoCo's reconnectable
+  `jump` relay and improves its user-visible behavior without weakening the
+  relay's own attachment lease, request-generation, or delivery boundaries.
+- Provider-default, reasoning-summary, verbosity, resume/fork-history, and
+  authoritative explicit-model-catalog fixes benefit `coco jump` and
+  `coco model list` through the native client/server. CoCo already treats
+  `model/list` and the resumed thread as authoritative, so no local model or
+  provider mapping should be added.
+- Compaction usage-limit notifications and original error details were added
+  to Codex's internal lifecycle-extension API. They improve native Codex hooks
+  but do not add an App Server event or expand CoCo's deliberately separate
+  signal/workspace hook vocabulary.
+- Incremental App Server running-turn accounting is an internal graceful-
+  restart performance fix, not an exposed status primitive. Codex's SQLite
+  stall, initialization-error, and background-reclamation fixes likewise
+  concern its own stores rather than CoCo's SQLite authority.
+- Projectless sessions and opt-in Guardian conversation-history/handoff
+  context are not replacements for CoCo workspaces or its deferred general
+  handoff design. The former deliberately lacks CoCo's Git-worktree binding;
+  the latter is specific to Guardian review context.
+- 0.160.1's remote stdio MCP fix matters only to a future Unix-controller to
+  Windows-executor topology. Current CoCo supports Linux/macOS and does not
+  need a compatibility shim, but the fix removes one future worker-MCP hazard.
+
+Compatibility result:
+
+- The official `codex-cli 0.160.1` x86_64 Linux release binary was verified
+  directly, then exercised through CoCo's unchanged ignored real-process
+  suite. A temporary wrapper masked only the suite's intentional exact
+  `0.159.3` version assertion; all App Server, TUI, exec-server, MCP, hook,
+  adoption, context-fork, resource, containment, retirement, restart, and
+  native read behavior used the published 0.160.1 binary.
+- All three top-level real-process contracts passed in 30.04 seconds: native
+  session hooks, isolated MCP/profile behavior across start/fork/resume, and
+  the complete preparation/adoption/restart/resume contract.
+- No product-code change is required. The clean follow-up, if selected, is a
+  small compatibility-baseline update from 0.159.3 to 0.160.1, corresponding
+  canonical wording updates, and an ordinary rerun without the temporary
+  version wrapper. Public docs need no release-feature rewrite.
+
+Audit checklist:
+
+- [x] Refresh the official upstream clone and compare `rust-v0.159.3` through
+  `rust-v0.160.1`, including stable and experimental generated schemas.
+- [x] Map changed methods, fields, notifications, CLI/remote behavior, and
+  exec-server/environment behavior to exact CoCo consumers and tests.
+- [x] Run the unchanged model-free real-Codex compatibility suite against an
+  exact 0.160.1 executable when available or build/probe it without model use.
+- [x] Record concrete recommendations and unresolved risks; do not implement
+  or update public compatibility claims until the user chooses a follow-up.
+
+### Codex 0.160.1 baseline implementation — 2026-10-06
+
+Scope:
+
+- Advance CoCo's single selected compatibility target from 0.159.3 to the
+  already audited 0.160.1 stable release without adding a runtime version
+  restriction or changing any native adapter behavior.
+
+Implementation:
+
+- Updated the shared exact-version constant used by both the model-free
+  compatibility suite and the explicitly opted-in live product proof.
+- Promoted 0.160.1 into the current architecture, runtime, MCP, hook, signal,
+  and product contracts. Historical log and work entries for earlier baselines
+  remain intact.
+- Updated only the public tested-version statements and the still-applicable
+  `!command` compatibility note. No new upstream capability is presented as a
+  CoCo feature.
+
+Verification:
+
+- `cargo fmt --all -- --check` and `git diff --check` pass.
+- `cargo test --locked --all-targets --all-features --no-fail-fast` passes:
+  411 library tests and all 5 process-smoke tests passed; 10 explicitly opted-in
+  or interactive tests remained ignored.
+- The complete ignored real-Codex suite passes directly against the official
+  0.160.1 release binary without a version wrapper: 3 passed in 29.99 seconds.
+- `pnpm --dir docs run check` passes with zero diagnostics. The static GitHub
+  Pages build passes with 17 pages and 62 verified files.
+
+### Combined pre-commit review — 2026-10-06
+
+Scope:
+
+- Review the complete diff from `origin/main`, covering guided creation, the
+  current-workspace context selector, the Codex 0.160.1 baseline promotion,
+  tests, public documentation, and canonical knowledge. Do not change product
+  behavior during the review.
+
+Findings:
+
+- The walkthrough can introduce an argument combination that Clap would reject
+  on the direct path. When `--base`, `--base-workspace`, or the compatibility
+  `--fork-from` option is supplied before `-i`, the Git-worktree step still
+  offers an existing branch. Selecting it sets `checkout`; normalization then
+  constructs `ExistingBranch` and silently drops the already selected code
+  base. The final summary still describes that base, so the confirmed preview
+  and created workspace disagree. This is a release-blocking correctness issue
+  for the guided path and needs a regression test around every affected base
+  form.
+- Guided Current workspace selection records `.` and re-resolves path ownership
+  only after the final confirmation, while the generic workspace choice stores
+  its stable ID immediately. A concurrent close/delete and replacement at the
+  same managed path can therefore change the context source after the user saw
+  its name in the final summary. Preserve the initially selected stable ID and
+  leave late coordinator validation responsible for state changes.
+- The focused tests cover defaults, direct flag seeding, context variants, and
+  cancellation, but do not exercise the walkthrough branches for custom or
+  existing branches, detached mode, interactive code-base selection, local
+  change choices, named profiles, or native model selection. The working note
+  previously claimed complete coverage of those choices. The missing
+  preset-base/existing-branch case is exactly where the semantic defect above
+  escaped, so the coverage claim must be narrowed or the branch matrix added.
+- The walkthrough always advertises Existing workspace for code and context,
+  even when the selected repository has no eligible entries. Choosing it aborts
+  the whole walkthrough instead of keeping the user in the current decision.
+  This is safe but remains a lower-priority usability edge for the guided flow.
+
+Verified during review:
+
+- Context-source state is revalidated by the coordinator before persistence or
+  worktree creation; an active `-c .` source cannot leave a partial workspace.
+- `cargo fmt --all -- --check` passes.
+- `cargo clippy --locked --all-targets --all-features -- -D warnings` passes.
+- `cargo test --locked --all-targets --all-features --no-fail-fast` passes with
+  411 library tests and 5 process tests; 10 opt-in/manual/live tests are ignored.
+- `pnpm --dir docs run check` passes with zero diagnostics.
+- The static Pages build passes with 17 pages and 62 verified files.
+- `git diff --check origin/main` passes.
+
+Unresolved follow-up:
+
+- Fix and regression-test the two identity/argument-consistency findings before
+  committing this slice. Decide separately whether empty inventory choices
+  should be hidden, disabled, or return to the preceding walkthrough step.
+
+### Combined-review fixes — 2026-10-06
+
+Scope:
+
+- Resolve every finding from the combined pre-commit review without changing
+  the direct, non-interactive create defaults or expanding the public docs.
+
+Decisions and implementation:
+
+- A guided create no longer offers `Existing local branch` when `--base`,
+  `--base-workspace`, or the hidden compatibility `--fork-from` already fixes
+  an independent code base. Final argument normalization also rejects any such
+  combination, so a later caller cannot silently discard a confirmed base.
+- Selecting `Current workspace` for conversation context now records the
+  stable workspace ID immediately. Final normalization no longer resolves `.`
+  a second time after confirmation; coordinator-side state validation remains
+  authoritative if that source changes meanwhile.
+- Empty code-base or context workspace inventories produce a concise notice
+  and return to the same decision. They no longer abort the entire walkthrough.
+- The walkthrough regression matrix now covers every worktree mode, all three
+  preset-base forms, workspace code bases, both carry policies, current and
+  named context sources, profile/model selection, and each post-create action.
+  Context-heavy and choice-heavy cases live in separate test modules instead
+  of continuing to grow the shared fixture file.
+- Added a reusable interaction notice primitive. It is persistent terminal
+  output after the temporary picker frame is restored and has no non-interactive
+  fallback.
+- Promoted the lasting guided-create behavior into the product specification.
+  No public documentation change is needed because these are consistency and
+  recovery details beneath the already documented workflow.
+
+Verification:
+
+- `cargo fmt --all -- --check` passes.
+- `cargo clippy --locked --all-targets --all-features -- -D warnings` passes.
+- The focused guided-create suite passes all 19 tests.
+- `cargo test --locked --all-targets --all-features --no-fail-fast` passes:
+  419 library tests and all 5 process-smoke tests passed; 10 explicitly opted-in
+  or interactive tests remained ignored.
+- The previously completed docs check and static 17-page/62-file Pages build
+  remain green for the same product changes. The final `nix flake check .`
+  after the test-module split passes; only the expected incompatible-system
+  omission for non-host platforms is reported.
+
+Unresolved follow-up:
+
+- None from the combined review. The working tree remains intentionally
+  uncommitted until the user requests a checkpoint.
+
+### Post-fix review — 2026-10-06
+
+Scope:
+
+- Re-review the complete combined diff from `origin/main` after the guided
+  creation consistency fixes. This pass is diagnostic only and does not alter
+  product behavior.
+
+Confirmed:
+
+- Preset code bases can no longer be replaced by an existing-branch choice,
+  and final normalization retains the independent defense.
+- A Current workspace choice stores its stable ID before confirmation.
+- The new choice/context test modules cover the intended branch matrix and the
+  full Rust, lint, docs, static-build, and Nix evidence remains applicable.
+- No data-loss, security, native-protocol, or Codex 0.160.1 compatibility
+  regression was found.
+
+Remaining findings:
+
+- Workspace discovery in the guide forwards `REPOSITORY_NOT_REGISTERED` as a
+  fatal error. Creation intentionally permits a valid unregistered Git
+  checkout and enrolls it only at `workspace.create`, so choosing Existing
+  workspace for code or context there aborts instead of taking the new empty-
+  inventory notice-and-retry path. The empty-inventory test uses a synthetic
+  successful empty list and does not cover the real coordinator response.
+- CLI-known preset validation still occurs after the final confirmation.
+  `--carry-untracked` without `--carry-changes`/`--dirty` skips the local-change
+  step, is summarized as tracked plus untracked, and only then fails in
+  normalization. Likewise, a preset `--context .` outside a managed worktree
+  completes the guide before its path check fails. Validate or resolve these
+  presets before presenting the final review boundary.
+- Choosing a model when native `model/list` returns an empty catalog aborts the
+  walkthrough. Since an empty catalog is already a supported list result, the
+  guide should issue a notice and return to Inherit model rather than require a
+  complete restart.
+- The top Active work summary still calls 0.159.3 the selected baseline even
+  though the current canonical sections and public docs correctly select
+  0.160.1. Reword that old item as a historical transition or add the current
+  completed baseline entry when applying the review fixes.
+
+Verification:
+
+- Inspected every changed production, test, public-doc, and canonical-doc file
+  in the combined diff and rendered current `coco create --help`.
+- `git diff --check origin/main` remains clean. The previous final gates are
+  unchanged because this review added only this working-note entry.
+
+### Post-fix review corrections — 2026-10-06
+
+Scope:
+
+- Resolve every remaining finding from the post-fix review while preserving
+  direct-create behavior and the coordinator's authoritative validation.
+
+Implementation and decisions:
+
+- Guided workspace discovery now treats the coordinator's exact
+  `REPOSITORY_NOT_REGISTERED` response as an empty same-repository inventory.
+  Other local RPC failures still propagate. This preserves deferred enrollment
+  while allowing the user to return from an impossible lazy choice.
+- A preset `--context .` is resolved to a stable workspace ID and display name
+  before the first walkthrough prompt. Invalid paths therefore fail before any
+  choices are collected, while the final summary still names the selected
+  workspace. Direct creation uses the same resolver immediately before request
+  normalization.
+- The local-change flag invariant is shared by guided preflight and final
+  normalization. `--carry-untracked` without its required parent option now
+  fails before the walkthrough rather than after confirmation.
+- An empty native model catalog emits a bounded notice and returns to the
+  Inherit/Choose decision; transient RPC failures continue to abort normally.
+- Clarified the historical 0.159.3 checklist item and added the completed
+  0.160.1 transition to the Active work summary.
+- Promoted these durable interaction rules into the product specification.
+  Public documentation already describes only valid user paths and needs no
+  additional edge-case detail.
+
+Verification:
+
+- All 24 focused guided-create tests pass, including new exact remote-error,
+  preflight-ordering, stable `.` preset, and empty-model-catalog regressions.
+- `cargo fmt --all -- --check` and
+  `cargo clippy --locked --all-targets --all-features -- -D warnings` pass.
+- `cargo test --locked --all-targets --all-features --no-fail-fast` passes:
+  424 library tests and all 5 process-smoke tests passed; 10 explicitly opted-in
+  or interactive tests remained ignored.
+- `pnpm --dir docs run check` passes with zero diagnostics. The static Pages
+  build passes with 17 pages and 62 verified files.
+- `nix flake check .` passes; only the expected incompatible-system omission
+  for non-host platforms is reported.
+
+Unresolved follow-up:
+
+- None from either review pass. The combined working tree remains intentionally
+  uncommitted until the user requests a checkpoint.
+
+### Final post-correction review — 2026-10-06
+
+Scope:
+
+- Perform one more adversarial review of the complete combined diff after the
+  prior corrections, without changing product behavior.
+
+Remaining finding:
+
+- The final guided confirmation does not always identify the values it asks the
+  user to approve. A context chosen through a workspace picker is named, but a
+  preset `--context` or `--fork-from` falls back to only `full context` or
+  `compact context`; an interactively entered native thread is described only
+  as `Codex thread`. The workspace name itself is also absent whenever a custom,
+  existing, or detached Git binding no longer embeds it in the branch label.
+  This is a bounded confirmation-UX defect rather than a state-safety issue,
+  but it weakens the purpose of the final non-mutating review boundary. The
+  preset-seeding test asserts the normalized arguments but not this summary.
+
+Confirmed:
+
+- Dynamic context eligibility remains coordinator-authoritative and is checked
+  before workspace persistence or worktree creation; a state change after a
+  picker read therefore fails safely rather than using an invalid source.
+- No additional data-loss, security, native-protocol, or Codex 0.160.1
+  compatibility regression was found.
+- `git diff --check origin/main` remains clean. The preceding full Rust, docs,
+  static Pages, real-Codex, and Nix gates remain the latest execution evidence;
+  this diagnostic pass changed only the branch work record.
+
+Unresolved follow-up:
+
+- Make the final guided summary identify the workspace and conversation source,
+  then add assertions for preset workspace/thread context and non-default Git
+  bindings before committing this slice.
+
+### Final confirmation correction — 2026-10-06
+
+Scope:
+
+- Resolve the sole finding from the final post-correction review without
+  changing direct creation or the normalized coordinator request.
+
+Implementation and decisions:
+
+- The final default action is now `Create <workspace>` so the confirmed
+  workspace identity remains visible for default, custom, existing-branch, and
+  detached worktrees without lengthening the secondary summary.
+- Every copied-context summary now names its source. Guided workspace choices
+  retain their human name, native thread choices use `thread <id>`, explicit
+  `workspace:`/`thread:` references receive the same readable projection, and
+  the compatibility `--fork-from` source is no longer reduced to only `full
+  context` or `compact context`.
+- Removed the obsolete `.` summary branch: guided and direct current-workspace
+  selectors are already normalized to a stable workspace ID before this final
+  UI boundary.
+- Added confirmation assertions for interactive and preset native threads,
+  `--fork-from`, and custom, existing-branch, and detached Git bindings.
+- Updated the canonical product contract for the named final action and its
+  explicit conversation-source summary. No public documentation expansion is
+  needed for this bounded presentation correction.
+
+Verification:
+
+- All 24 focused guided-create tests pass. The first sandboxed attempt could
+  not bind the tests' local Unix sockets and was repeated outside that
+  restriction; all fixtures then passed.
+- `cargo fmt --all -- --check` and
+  `cargo clippy --locked --all-targets --all-features -- -D warnings` pass.
+- `cargo test --locked --all-targets --all-features --no-fail-fast` passes:
+  424 library tests and all 5 process-smoke tests passed; 10 explicitly opted-in
+  or interactive tests remained ignored.
+- `git diff --check origin/main` passes.
+
+Unresolved follow-up:
+
+- None from the three review passes. The combined working tree remains
+  intentionally uncommitted until the user requests a checkpoint.
+
+### Rendered-confirmation review — 2026-10-06
+
+Scope:
+
+- Re-review the corrected final confirmation at the actual terminal-rendering
+  boundary rather than only its in-memory choice values. Do not change product
+  behavior during this pass.
+
+Remaining finding:
+
+- The final confirmation still cannot reliably show the inputs it claims to
+  summarize. `create_summary` joins every field into one choice-detail line,
+  while the shared picker deliberately truncates every row to the terminal
+  width. In a normal 80-column terminal, the representative explicit-preset
+  summary is 149 characters and has roughly 54 detail columns available after
+  the picker prefix and `Create review/api` label; its visible text ends at
+  `compact context from t`, before the native thread identity, changes,
+  profile, model, and action. The new regression tests inspect the raw `Choice`
+  detail rather than `picker_row`, so they pass even though the operator cannot
+  review those values. This is a bounded UX/safety finding, not a request-
+  normalization defect.
+
+Confirmed:
+
+- The final label and underlying context-source data now agree with the
+  normalized creation request for every reachable CLI path.
+- Picker sanitization and width bounding remain correct; the defect is using a
+  single bounded row for a structured review, not terminal wrapping or control
+  injection.
+- No additional state, data-loss, security, or Codex compatibility finding was
+  identified. `git diff --check origin/main` remains clean, and the full gates
+  from the immediately preceding correction remain current.
+
+Unresolved follow-up:
+
+- Replace the one-line detail with a bounded structured final review that keeps
+  each important field visible before the Create/Cancel decision, and test the
+  rendered result at narrow and ordinary terminal widths.
+
+### Structured creation review — 2026-10-06
+
+Scope:
+
+- Replace the lossy one-line guided-create summary with the structured review
+  approved after the rendered-confirmation finding.
+
+Implementation and decisions:
+
+- Added a review-aware picker frame that renders labeled values above the
+  ordinary numbered choices. Normal pickers continue through their existing
+  compact title-and-choice renderer.
+- The final creation review now gives Workspace, Worktree, Code, Context,
+  Changes, Profile, Model, and Action their own bounded terminal rows, followed
+  by `Create` and `Cancel`. Labels align by displayed Unicode width, and both
+  labels and values retain the shared single-line sanitization and truncation
+  guarantees.
+- Review layout accounts for the extra rows and refuses a terminal too short
+  to show the review plus at least one selectable action. On a constrained but
+  valid terminal, the choice viewport continues to follow the selected action.
+- Context rows use readable typed sources such as `workspace feat/current` and
+  `thread <id>`; compact copies append `· compact`. The review also makes
+  defaults explicit as `leave in source`, `default`, and `inherit` rather than
+  silently omitting them.
+- Extended the interaction boundary explicitly instead of overloading choice
+  detail text, so tests and future callers cannot accidentally mistake
+  structured review data for a single renderable line.
+- Updated the canonical product contract. This remains an interactive CLI
+  presentation detail and does not warrant expanding the public docs.
+
+Verification:
+
+- All 16 automated prompt tests pass; the two manual PTY probes remain ignored.
+  New coverage checks ordinary-width field visibility, narrow-width bounding
+  and sanitization, action placement, and minimum-height accounting.
+- All 24 focused guided-create tests pass, including Unix-socket fixtures run
+  outside the restricted sandbox. Assertions now inspect structured review
+  fields rather than unrendered choice details.
+- `cargo fmt --all -- --check` and Clippy with all targets/features and warnings
+  denied pass.
+- The complete Rust suite passes: 427 library tests and all 5 process-smoke
+  tests passed; 10 explicitly opted-in or interactive tests remained ignored.
+- `git diff --check origin/main` passes.
+
+Unresolved follow-up:
+
+- None in the structured review itself. The combined branch remains
+  intentionally uncommitted until the user asks for a checkpoint.
+
+### Structured-review follow-up audit — 2026-10-06
+
+Scope:
+
+- Re-review the complete uncommitted slice from `origin/main`, with particular
+  attention to the new structured confirmation, argument normalization,
+  terminal-frame behavior, guided-create edge cases, and the 0.160.1 baseline.
+  This pass is diagnostic only.
+
+Review result:
+
+- No new correctness, data-loss, terminal-safety, or compatibility finding was
+  identified.
+- The eight displayed review values agree with the normalized request across
+  default/custom branches, existing-branch checkout, detached mode,
+  revision/workspace code bases, fresh/workspace/native-thread context, local
+  change policies, profile/model inheritance, and all post-create actions.
+- Review values remain non-authoritative display projections: stable workspace
+  IDs are retained for requests, while human workspace names are shown. The
+  coordinator still revalidates dynamic source eligibility before mutation.
+- The review layout's accounting is exact: title, eight fields, separator,
+  choice viewport, and one terminal cursor row never exceed the reported
+  height. At least one action remains visible on the smallest accepted frame,
+  and navigation moves the one-row viewport between `Create` and `Cancel`.
+- Each untrusted value passes through the existing single-line sanitizer and
+  Unicode-width truncation before styling. Ordinary pickers still use their
+  original compact rendering path.
+- Public documentation accurately describes the guided path without exposing
+  implementation details. Canonical documentation now matches the rendered
+  multi-line review and the exact 0.160.1 compatibility target.
+
+Verification evidence:
+
+- The immediately preceding complete suite remains current for the unchanged
+  product tree: 427 library tests and all 5 process-smoke tests passed; 10
+  explicitly opted-in or interactive tests remained ignored.
+- Formatting and all-target/all-feature Clippy with warnings denied passed
+  after the structured picker change.
+- `git diff --check origin/main` passes after this review note.
+
+Unresolved follow-up:
+
+- None from this audit. The combined branch remains intentionally uncommitted.
