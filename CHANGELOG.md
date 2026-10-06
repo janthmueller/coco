@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.1.0-alpha.11 (2026-10-06)
+
+### Features
+
+- **cli**: Refine interactive creation flow
+  ([`4e44014`](https://github.com/janthmueller/coco/commit/4e4401423d8e776a886f7939b1490f7acfc7d07d))
+
+
 ## v0.1.0-alpha.10 (2026-10-06)
 
 ### Features
