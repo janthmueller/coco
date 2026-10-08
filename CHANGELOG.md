@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.1.0-alpha.12 (2026-10-08)
+
+### Features
+
+- Add doctor and harden workspace runtime coordination
+  ([`1f5a48e`](https://github.com/janthmueller/coco/commit/1f5a48ee295c950a144bae7c4fbd4eddd694834e))
+
+
 ## v0.1.0-alpha.11 (2026-10-06)
 
 ### Features
