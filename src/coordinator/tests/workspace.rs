@@ -390,17 +390,18 @@ async fn passive_native_idle_preserves_the_local_mutation_guard() {
             actual: WorkspacePhase::Active,
         })
     ));
-    assert!(matches!(
-        fixture
-            .coordinator
-            .create_workspace(fixture.fork_params(&workspace, "blocked-fork", false))
-            .await,
-        Err(CoordinatorError::InvalidWorkspaceState {
-            expected: "an idle or unloaded source workspace",
-            actual: WorkspacePhase::Active,
-        })
-    ));
     assert_eq!(fixture.worker.calls().len(), calls_before_mutations);
+    let child = fixture
+        .coordinator
+        .create_workspace(fixture.fork_params(&workspace, "blocked-fork", false))
+        .await
+        .unwrap()
+        .workspace;
+    assert_eq!(child.codex_thread_id.as_deref(), Some("fork-thread-1"));
+    assert!(
+        matches!(fixture.worker.calls().last(), Some(WorkerCall::Fork { last_turn_id, .. })
+        if last_turn_id.as_deref() == Some("thread-1-completed"))
+    );
 }
 
 #[tokio::test]

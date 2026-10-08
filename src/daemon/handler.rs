@@ -322,6 +322,9 @@ fn public_coordinator_message(source: &CoordinatorError) -> String {
 }
 
 fn public_worker_error(error: &WorkerError) -> String {
+    if matches!(error, WorkerError::ContextBoundaryUnsupported) {
+        return error.to_string();
+    }
     if let WorkerError::ResourcePolicyUnsupported { fields } = error {
         return format!(
             "The selected workspace execution backend cannot enforce: {}",
@@ -415,6 +418,16 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn unsupported_context_boundary_explains_the_source_repair() {
+        let payload = map_coordinator_error(CoordinatorError::Worker(
+            WorkerError::ContextBoundaryUnsupported,
+        ));
+        assert_eq!(payload.code, "CONTEXT_SOURCE_UNSUPPORTED");
+        assert!(payload.message.contains("Finish a new turn in the source"));
+        assert_eq!(payload.data, None);
+    }
 
     #[test]
     fn exposes_only_the_bounded_codex_rpc_message() {

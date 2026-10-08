@@ -49,6 +49,9 @@ mod retirement;
 #[path = "real_codex_compat/tui.rs"]
 mod tui;
 
+#[path = "real_codex_compat/context_capture.rs"]
+mod context_capture;
+
 struct TestPaths {
     home: PathBuf,
     codex_home: PathBuf,
@@ -863,7 +866,13 @@ async fn verify_context_fork_activation(
     .await?;
     let prepared =
         workspace_status_for(paths, codex_binary, repository, FORK_WORKSPACE_NAME).await?;
-    assert_prepared_workspace(&prepared)?;
+    ensure!(
+        prepared
+            .pointer("/workspace/codexThreadId")
+            .and_then(Value::as_str)
+            .is_some(),
+        "context was not captured during create: {prepared}"
+    );
     let child_worktree = prepared
         .pointer("/workspace/worktreePath")
         .and_then(Value::as_str)
@@ -872,7 +881,7 @@ async fn verify_context_fork_activation(
     tui::trust_projects(paths, &[repository, child_worktree])?;
     ensure!(
         prepared.pointer("/workspace/contextMode") == Some(&json!("fork")),
-        "context child did not remain a prepared fork: {prepared}"
+        "context child did not retain its fork provenance: {prepared}"
     );
 
     let attached = daemon_request(

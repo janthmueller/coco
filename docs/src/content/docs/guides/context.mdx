@@ -51,8 +51,12 @@ You can supply an existing Codex thread ID instead:
 coco create review/login --base main --context <codex-thread-id>
 ```
 
-The source conversation must be idle or unloaded. Its history is copied into
-a new conversation, leaving the source available.
+CoCo copies the conversation during creation, through its latest finished
+turn. The source can keep working: its running turn and any later work stay
+out of the copy. You can open or send to the new workspace independently.
+
+The source needs at least one finished turn. If it has just started, let its
+first turn finish before copying it.
 
 To reuse both the committed code and conversation of a workspace:
 

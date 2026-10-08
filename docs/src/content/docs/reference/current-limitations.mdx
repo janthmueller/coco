@@ -144,6 +144,19 @@ coco send fix/login "The original message" --operation-id <id> --wait
 Use the exact original message and workspace. See
 [Workspace commands](../cli/#workspace-commands) for retry behavior.
 
+## Context copying failed during creation
+
+Check `coco status <workspace>` before creating again. If a failed workspace
+exists, its files remain available, but CoCo will not copy the source again
+automatically. Keep any files you need, then delete the failed workspace before
+retrying creation.
+
+If the source has no finished turn yet, let its first turn finish and retry.
+
+If CoCo reports that an older conversation has no usable fork boundary,
+finish a new turn in that source with your current Codex version, then retry.
+That new turn lets CoCo copy the earlier conversation too.
+
 ## Close or delete is blocked
 
 Finish active work, answer pending requests, close the attached Codex UI,

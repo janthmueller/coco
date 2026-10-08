@@ -8140,3 +8140,423 @@ Documentation verification and delivery:
   No production Rust, workflow code, credentials, or runtime services changed.
   Checkpoint/push the follow-up, verify hosted Pages delivery, and retain the
   already successful immutable `v0.1.0` publication as the release proof.
+
+Final handoff:
+
+- Documentation checkpoint `8f93ec8` is committed/pushed. Hosted Documentation
+  run `37827278946` passed, including Pages delivery; the public installation
+  guide is live. The first normal release and documentation scope is complete.
+- The additional Rust run `37827279373` for this documentation-only follow-up
+  is still running; it does not block or invalidate the already verified and
+  published `v0.1.0`. Check its eventual result separately if requested.
+- Automatic alpha remains confirmed off. No installed runtime or active
+  workspace was changed. These final verification notes are local bookkeeping;
+  no additional commit or push was made after the user requested status.
+
+### Next-step recap after 0.1.0 — 2026-10-08
+
+- User asks for the previously agreed next-step order. Baseline responsiveness,
+  transport safety, doctor, and first regular publication are complete.
+- Next is inherited-context capture for `create -c`: first review/design the
+  native capture boundary so later activation no longer unexpectedly depends
+  on source activity/history. Do not select an implementation without that review.
+- Then generic client presence with optional tmux projection/navigation,
+  optional isolated development stacks, and hardened opt-in background services.
+  Handoff/annotations/worker MCP selection remain later; idle retirement stays
+  low priority. No implementation, commit, push, or publication is authorized
+  by this recap request.
+
+### Inherited-context capture design review — 2026-10-08
+
+Scope and evidence:
+
+- User asks how to implement the next context-capture slice and explicitly
+  requires checking the selected Codex version. This is a design review, not
+  product implementation or publication authorization.
+- The current shell resolves `codex-cli 0.159.3`. CoCo's selected compatibility
+  baseline remains `0.160.1`; the previously downloaded official release binary
+  reports that version. Reviewed upstream source at the exact local Git tag
+  `rust-v0.160.1` (`d27764b82f7118f674371e6d6e76271d9d606edb`), not upstream main.
+  No installed package, running daemon, or user workspace was changed.
+- The official App Server documentation describes persistent native forks and
+  inclusive `lastTurnId` boundaries. The exact release's `ThreadForkParams`,
+  `thread_fork_inner`, and fork tests confirm these contracts. Persistent forks
+  materialize their own history before returning without requiring a new user
+  turn; an in-progress boundary is invalid. Omitting the cutoff while the source
+  is active can produce a fork with an interruption marker rather than a clean
+  completed-turn boundary.
+- CoCo currently records only context-source provenance during create. Both
+  creation and first activation enforce source idleness; the native child is
+  forked at first send/jump. Therefore subsequent source work blocks activation
+  and subsequent source history can change the inherited context. This is a
+  CoCo capture-timing choice, not a native requirement to delay persistent forks.
+- The existing real-process test verifies a prepared context recipe followed by
+  an idle native fork and TUI resume. It does not prove the proposed eager
+  capture/restart behavior or creation from an actively working source. Upstream
+  tests were inspected, not executed; no new compatibility success is claimed.
+
+Proposal pending user agreement:
+
+- Make successful `create -c` capture and bind its own persistent native child
+  during creation, with destination cwd/profile/model and existing goal-deferral
+  protection. Keep fresh creation lazy; do not fabricate a prompt or copy native
+  history in CoCo. Later jump/send validates only the captured child, not source
+  availability/activity. Code starting points remain independent.
+- Preserve child-only compaction before first activation, but record its pending
+  state durably and distinguish capture from compaction/activation. Merely
+  capturing context must not imply sending work or starting a workspace executor.
+  The existing fork adapter currently starts an executor and would need this
+  separation; native fork/compact still lack an environment-selection field.
+- First establish eager capture for idle/unloaded sources. Native `lastTurnId`
+  also permits a completed-prefix design for active sources; treat that as a
+  separately verified extension, with explicit handling when no terminal turn
+  exists and no silent fallback to a partial-turn fork.
+- Creation intent, exact native binding, and recovery must account for fork
+  failures and unconfirmed responses. Do not blindly repeat a possibly accepted
+  fork, silently recapture from a changed source, or promise atomicity across Git,
+  Codex, and SQLite. Existing deferred recipes need explicit compatibility rules;
+  they cannot be retrospectively described as create-time snapshots.
+- Verification before implementation handoff: create from idle source, start new
+  source work, successfully send/jump into child; ensure later source messages do
+  not enter child history; verify persistence through daemon restart before a
+  child turn, child-only compaction, source deletion dependencies, interrupted
+  creation/replay, and preservation of fresh lazy creation. Extend the isolated
+  model-free 0.160.1 compatibility test as well as coordinator/worker tests.
+
+Next action: discuss/approve the proposed capture semantics, then implement a
+bounded slice and update canonical/public behavior documentation with the tested
+result. Only this branch record was updated during the review; no product code,
+public documentation, commit, push, or release was changed.
+
+User design feedback:
+
+- User likes the eager-capture proposal and specifically values native
+  `lastTurnId` as a way to create while the source is still working. Include
+  completed-prefix creation in the desired design rather than treating source
+  idleness as the permanent product restriction.
+- Proposed UX: reuse `create -c`; for an active source, freeze the last completed
+  turn boundary, exclude the unfinished turn, and leave source work running.
+  No available completed boundary should produce a clear error, not an implicit
+  partial fork. Later source completion must not extend the captured child.
+- Recorded this candidate behavior in the canonical follow-up item. The latest
+  question asks for clarification, not implementation; product code, public docs,
+  runtime processes, Git history, and remote state remain untouched.
+
+### Authorized eager context capture implementation — 2026-10-08
+
+User-approved scope:
+
+- Implement create-time persistent native forks, including a completed-turn
+  `lastTurnId` cutoff for working sources, using the selected Codex 0.160.1.
+- Preserve independent Git/context inputs, lazy fresh creation, child-only
+  compaction, exact native IDs, resource routing, and recovery safety.
+- Extend unit/process coverage and the isolated real-Codex compatibility gate
+  to exercise the actual source-working/fork/restart/child-resume behavior.
+- Update implemented internal contracts, CLI guidance, and affected public
+  documentation. No commit, push, workflow dispatch, or release in this slice.
+
+Plan:
+
+1. Review narrow native turn-pagination/cutoff semantics and existing binding,
+   creation replay, compaction, deletion-dependency, and walkthrough paths.
+2. Add bounded completed-boundary discovery and native cutoff forwarding; make
+   create capture/bind its child without starting an executor or model turn.
+3. Persist pending compaction/uncertain capture state and retain compatible
+   handling for old deferred recipes without silently recapturing failed forks.
+4. Update source selection and dependency behavior; add focused regression tests
+   and a real 0.160.1 scenario against the local deterministic test provider.
+5. Run resource-intensive gates sequentially, review the complete diff, and
+   record exact verification plus any unresolved limits before handoff.
+
+Implementation progress and verification:
+
+- New inherited context is captured and bound during create with a terminal
+  native `lastTurnId`; fresh workspaces remain prepared and lazy. Capture does
+  not start a workspace executor or an inference turn. Native turn pagination
+  requests omit conversation items and are bounded; this does not promise that
+  Codex's legacy rollout reader avoids scanning its history internally.
+- Context descriptor v4 records capture timing, exact cutoff, and pending
+  child-only compaction. Compaction runs on first activation, with its marker
+  cleared atomically on completion. Older deferred recipes retain their prior
+  activation behavior; unconfirmed new captures fail closed instead of being
+  repeated against a changing source. No database-schema migration is needed.
+- Initial unit verification passed: 497 tests, six deliberately ignored.
+  Focused wire/replay safety coverage was added afterward; final results follow.
+- The new opt-in real-Codex test passes against the actual official 0.160.1
+  binary, without a version-masking wrapper. It creates from a working source,
+  verifies the completed prefix before and after later source work, restarts
+  CoCo before a child turn, opens two actual Codex TUIs on the captured child,
+  and sends work successfully while the source remains active. Capture and
+  jump make no inference call; the final send uses one deterministic loopback
+  provider response, with isolated dummy authentication and temporary data.
+- The sandbox initially rejected local network setup. The same isolated live
+  test passed with approved loopback/process access. No installed daemon,
+  existing workspace, account, or model service was modified.
+
+Final review and handoff:
+
+- Reviewed source cutoff races, exact binding/profile/cwd, replay after close,
+  dependency protection, old deferred recipes, pending compaction, and
+  failure/cleanup behavior. New captures never enter the old lazy fork path;
+  fork failure retains diagnosable artifacts instead of retrying. A cosmetic
+  native naming error cannot lose an acknowledged fork; the process test
+  deliberately rejects the child name and still proves successful binding.
+- The existing `workspace.created` hook keeps its documented Git-ready commit
+  point and transactional outbox; it is not expanded into a new native event.
+  Repository serialization still prevents a hook-triggered mutation from
+  overtaking the in-progress create. No hook policy/configuration changed.
+- Public context guidance and CLI help now describe immediate independent
+  copying, working sources, the finished-turn prerequisite, child-only
+  compaction, and actionable failure recovery. Canonical product/architecture
+  knowledge records the implemented contract and legacy distinction.
+- `cargo test --all-targets --offline -- --test-threads=4` passes: 505 library
+  tests plus six process tests; six manual library probes, one authenticated
+  model-access proof, and four opt-in native tests are deliberately skipped
+  by this normal gate. The four native tests were then all run explicitly
+  against official Codex 0.160.1 and passed, including TUI, hooks, and MCP.
+- The new capture live test was additionally tightened and rerun successfully:
+  the actual local provider input contains inherited source history but no
+  later/unfinished source turn. Counting accepted provider requests before
+  response avoids a test-observation race. No paid inference was performed.
+- Format check, all-target/all-feature Clippy with warnings denied, and unused
+  dependency checks pass. Offline cargo-deny passes advisories/bans/licenses/
+  sources with only the unchanged dependency-duplication warnings; Cargo's
+  existing advisory cache required approved lock-file access.
+- Astro check passes with zero errors/warnings/hints. The static `/coco` build
+  passes its export gate: 62 files, 17 pages, Pagefind search, local links,
+  and the public-only boundary. The package-manager cache needed approved
+  access; no source/dependency workaround or publication was performed.
+- Final whitespace/diff review passes. The implementation is complete locally;
+  no commit, staging, push, release, workflow dispatch, installed package,
+  production daemon, or existing user workspace was changed.
+
+Known retained boundaries: earlier deferred recipes cannot acquire a historical
+create-time snapshot retroactively; they keep their previous source dependency.
+Native legacy history I/O can still be expensive despite bounded metadata
+transport. Compact-before-activation remains subject to the already documented
+native environment-selection limitation; this slice does not invent a model
+turn to hide it. The authenticated paid-model proof was not run.
+
+### Independent full-diff review — 2026-10-08
+
+- User requests another complete review with particular attention to edge cases.
+  Scope is inspection and safe isolated diagnostic verification; do not fix,
+  commit, push, or publish without subsequent direction.
+- Review cutoff correctness, creation dispatch/replay crash windows, exact
+  identity and profile routing, dependency/deletion races, deferred compaction,
+  old descriptors, interactive source selection, and the strength of regression
+  and real-native test assertions. Report concrete defects and test gaps rather
+  than treating the previous green gates as proof of every failure path.
+
+Review results (supersede the earlier unconditional local-completion assessment):
+
+- **P2 — unfinished capture can remain prepared after restart.** Git completion
+  commits `provisioning -> ready` before a separate `ready -> starting` capture
+  intent. A crash between those commits leaves a v4 create-time capture without
+  a native binding in `ready/prepared`. Startup reconciliation selects only
+  `provisioning` and `starting`, so it never records that interrupted creation
+  as failed. Replay and activation then reject the missing confirmed capture;
+  the displayed prepared state is misleading and the workspace is stranded.
+  Reproduced by reopening exactly that durable state in an isolated Store test:
+  expected `failed`, observed `ready`. Keep the full inherited-context creation
+  visibly unfinished until binding, or reconcile that exact incomplete v4 state;
+  do not change ordinary fresh prepared workspaces or older deferred recipes.
+- **P2 — old synthetic native turn IDs are not usable fork anchors.** Exact
+  0.160.1 upstream truncation explicitly requires a persisted `TurnStarted`
+  boundary. Its legacy projection can nevertheless expose `completed` turns
+  with generated IDs. A real-Codex probe using the upstream minimal legacy
+  rollout shape returns a completed `rollout-2`; new CoCo boundary selection
+  accepts it, then native fork rejects it after worktree provisioning, leaving
+  a failed child and retained Git artifacts. This is not a general failure of
+  legacy history or old CoCo descriptors. The unsupported old-history case
+  needs a focused regression and actionable handling/documentation rather than
+  a silent no-cutoff fallback. A completed turn recorded by current Codex can
+  provide a canonical boundary; ordinary terminal status alone is insufficient.
+- **Coverage gaps.** The persistent live test has only one completed source
+  turn. An isolated strengthened variant now proves the latest of two completed
+  turns is captured, includes both in the real local provider input, excludes
+  later source work, and survives restart plus two TUIs and send. That variant
+  should become permanent. The worker cursor/parser tests do not exercise the
+  actual multi-page request loop or its page-cap termination; the fake fork
+  rejection occurs before child creation rather than after an accepted native
+  side effect with a lost response. Add explicit accepted-but-unconfirmed fork
+  and interrupted-in-flight compaction/restart tests before treating recovery
+  coverage as complete. Existing legacy activation/dependency, failed
+  compaction, no-finished-turn, unknown-status, and exact-child regressions were
+  inspected and remain relevant.
+
+Verification and scope:
+
+- Diagnostic-only copies are under `/tmp/coco-review-capture.XGCVOb`; no
+  product source or persistent test was changed during this review. The Store
+  crash probe intentionally fails and confirms the finding. The two-finished-
+  turn native variant passes (4.99 seconds), as does the native synthetic-turn
+  characterization (0.27 seconds), using the actual official 0.160.1 binary,
+  isolated dummy authentication, temporary repositories, and no external model
+  service. The strengthened test initially lacked its explicit native event
+  subscription; adding `thread/resume` to the scratch harness resolved that
+  observation timeout. This was not a CoCo product change.
+- Scratch and original manifests shared a Cargo target cache. A first default
+  gate reused the scratch test binary and therefore ran the deliberate failing
+  probe. Freshly recompiling the original source with `CARGO_INCREMENTAL=0`
+  separates that diagnostic from the actual repository suite. Default-cache
+  test fingerprints were subsequently invalidated narrowly and the original
+  default test artifacts rebuilt; no source content was touched for cache
+  invalidation.
+- The original all-target gate passes again: 505 library tests and six process
+  tests; six manual library probes, the authenticated model proof, and four
+  opt-in native tests remain intentionally ignored by that gate. Local socket
+  restrictions initially caused permission-only failures; approved execution
+  passes without code or test workarounds. Format and whitespace checks pass.
+- No fix, staging, commit, push, release, workflow dispatch, installed daemon,
+  real account, or existing user workspace was changed. The work document is
+  the only tracked file updated by this review. Address the two findings and
+  promote the strengthened tests in the next explicitly authorized fix slice.
+
+### Capture review fixes — 2026-10-08
+
+- User authorizes fixing both findings and closing the identified test gaps.
+  Keep changes local; no staging, commit, push, or publication is requested.
+- Keep inherited creation unfinished across Git provisioning and native capture
+  until its exact child binding is committed. Also reconcile the precise v4
+  unbound-ready state from the previous local implementation without changing
+  fresh prepared workspaces, confirmed captures, or older deferred recipes.
+- Reject known synthetic legacy turn boundaries before Git provisioning and
+  translate the native canonical-boundary rejection into actionable advice.
+  Never silently fall back to a different cutoff or include unfinished history.
+- Exercise the real bounded pagination loop, accepted-but-unconfirmed forks,
+  and restart during child compaction. Promote the live test's two completed
+  source turns and add a real legacy-source repair-and-retry scenario.
+- Run focused tests followed by sequential full gates and the exact official
+  Codex 0.160.1 live tests using isolated temporary data and the deterministic
+  local provider. Review the final diff and record verified results here.
+
+Implementation progress:
+
+- Git completion for inherited context commits `provisioning -> starting`;
+  capture dispatch no longer passes through an unbound-ready state. Restart
+  additionally fails the precise old v4 ready/fork/unbound descriptor closed.
+  A reopened Store regression proves fresh, legacy-deferred, and confirmed
+  ready bindings are preserved and reconciliation is idempotent.
+- The Codex adapter rejects synthetic `rollout-<digits>` boundaries and maps
+  only the cutoff-specific native canonical-anchor invalid-request rejection
+  to `CONTEXT_SOURCE_UNSUPPORTED`. Its fixed advice cannot expose native error
+  data, thread IDs, or stderr. Ordinary transport/native failures keep their
+  existing classification; no source/history fallback was added.
+- Modular tests cover actual multi-page request parameters/cursor advancement,
+  the exact page cap, non-retrying errors, accepted forks with lost replies or
+  pre-binding crashes, and restart during in-flight child compaction. The
+  live proof now creates two completed source turns; a separate opt-in legacy
+  fixture verifies early rejection and completing a new turn before retry.
+- Initial focused verification passes: all 64 context-related library tests,
+  including the new recovery, adapter, handler, and Store regressions. Full
+  gates and native fixture verification remain in progress.
+
+- Full normal gate passes: 518 library tests and all six process tests; the
+  six manual probes, one authenticated external-model proof, and five opt-in
+  native tests are intentionally ignored by that gate. Strict all-target/
+  all-feature Clippy passes. The strengthened two-turn native capture proof
+  and the existing native preparation/TUI, hook, and MCP scenarios all pass.
+- The new legacy live test initially expected host-shell text in projected
+  conversation items. Native legacy history presents that completed turn with
+  empty items; the fork still retains the old user message and exact new
+  canonical boundary. Corrected the test to compare every source/child native
+  item and terminal status while allowing synthetic legacy ID renumbering,
+  rather than weakening the cutoff or assuming non-contractual shell text.
+  No product fallback was added for this harness correction.
+
+Final verification and handoff:
+
+- Both review findings are addressed. Incomplete inherited capture cannot
+  enter the new prepared/lazy-start path; restart fails unfinished work closed
+  while retaining artifacts and any exact confirmed child binding. Legacy
+  synthetic anchors receive actionable repair advice without recapture or an
+  implicit change to the requested history boundary.
+- All five opt-in native tests pass together against the actual official
+  Codex 0.160.1 binary (37.71 seconds). The legacy regression proves rejection
+  before workspace/Git artifacts, a new canonical source turn, successful
+  retry without an executor, preservation of all native source items/statuses,
+  and the exact new cutoff. The strengthened capture regression proves the
+  latest of two completed turns, exclusion of later source work, restart,
+  two native TUIs, and a successful child send while its source works.
+- The complete normal all-target gate passes: 518 library and six process
+  tests. Thirteen library regressions were added by this fix slice. Manual
+  interactive probes and the authenticated external-model proof remain
+  intentionally unrun; all five otherwise ignored native tests were executed
+  explicitly. Live inference uses only the deterministic loopback provider
+  with dummy authentication, never the user's account or a paid service.
+- Final format check and all-target/all-feature Clippy with warnings denied
+  pass. Cargo-machete finds no unused dependencies. Offline cargo-deny passes
+  advisories/bans/licenses/sources with unchanged duplicate-version warnings;
+  dependency manifests and the lockfile are unchanged.
+- Astro check reports zero errors, warnings, or hints. The `/coco` static
+  build/export gate verifies 62 files, 17 pages, Pagefind, local routing, and
+  the public-only boundary. Public changes remain limited to context behavior
+  and actionable troubleshooting; durable decisions live in architecture/spec.
+- Reviewed the fix delta, including newly modular test/helper files, lifecycle
+  and binding transactions, restart selection, exact native error mapping,
+  pagination bounds, and source/child assertions. Whitespace checks pass; no
+  further blocker was found in this scope.
+- No staging, commit, push, release, workflow dispatch, installed package,
+  production daemon, real account, or existing workspace was changed. Changes
+  remain local on `main`; no additional architecture/feature work is started.
+
+Retained boundaries: unknown legacy IDs can be detected only by the native
+fork rejection and then retain the ordinary diagnosable failed artifacts.
+There is no heuristic native-child adoption after a lost response. Older
+deferred recipes keep their prior activation behavior; native legacy history
+I/O and the existing compact environment-selection limitation remain outside
+this fix slice.
+
+### Post-fix independent review — 2026-10-08
+
+- User requests another review of the complete local slice. Inspect tracked
+  and untracked code/tests/docs; do not implement further fixes, stage, commit,
+  push, publish, or operate on existing user workspaces.
+- Re-evaluate native cutoff and fork semantics against exact Codex 0.160.1,
+  creation/replay/recovery transactions, compaction timing, dependency and
+  retirement races, profile/identity checks, interactive selection, and test
+  assertions. Verify suspected defects in isolated diagnostic data if needed;
+  distinguish reproducible bugs from known boundaries and optional follow-up.
+- Only this mandatory branch record may be updated during the review. Record
+  evidence, verification, and the next action before handoff.
+
+Review result and verification:
+
+- No new blocking correctness finding in the tracked or newly added slice.
+  Rechecked the inclusive native cutoff, immediate child binding, operation
+  replay, unfinished-capture reconciliation, child-only compaction, retirement
+  dependencies, configuration validation, and the actual live-test assertions.
+  Checked the official App Server documentation and exact `rust-v0.160.1`
+  implementation, including deferred native goal continuation.
+- Re-ran the complete library gate: 518 passed, zero failed, six intentionally
+  ignored manual/external probes. Re-ran both context-specific opt-in native
+  tests together against the official 0.160.1 executable: two passed in 5.41
+  seconds. They prove two completed source turns, exclusion of unfinished and
+  subsequent source work, restart and native-TUI/child-send independence while
+  the source works, and legacy-boundary rejection followed by source repair.
+  The send proof uses the isolated loopback provider, not external inference.
+- Format and whitespace checks pass. The prior full process, lint, dependency,
+  documentation, and five-scenario native gates remain applicable because this
+  review changed no product, test, or public documentation files; those gates
+  were not all repeated in this review turn.
+- Retained limitations are intentional: a source requires a usable terminal
+  boundary; unsupported legacy anchors need a new source turn; an unconfirmed
+  fork is not automatically adopted or repeated. Older deferred recipes and
+  native legacy I/O/compact environment constraints remain unchanged.
+- Handoff: the local slice has no identified remaining blocker from this
+  review. Only this working record changed; no staging, commit, push, release,
+  package installation, or existing user-runtime modification was performed.
+
+### Context-capture checkpoint — 2026-10-08
+
+- User authorizes committing and pushing the reviewed context-capture slice on
+  `main`. Scope includes implementation, regression/live tests, affected public
+  guides, and canonical knowledge. No further feature or manual publication
+  action is included.
+- The final review's 518 library tests and two exact-0.160.1 context live tests
+  passed; the prior full process, lint, dependency, and static-doc gates remain
+  applicable. Check whitespace and staged scope before the checkpoint, fetch
+  `origin`, and use a normal fast-forward push without rewriting remote history.
+- Next work is not started here. The remaining user-approved candidates are
+  recorded in the canonical product follow-up order.

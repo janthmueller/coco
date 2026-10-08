@@ -30,7 +30,17 @@ async fn context_workspace_picker_requests_only_eligible_sources_and_stores_the_
     let params = seen_params.lock().unwrap().last().cloned().unwrap();
     assert_eq!(
         params.phases,
-        Some(vec!["idle".to_owned(), "not_loaded".to_owned()])
+        Some(
+            [
+                "idle",
+                "not_loaded",
+                "active",
+                "waiting_for_approval",
+                "waiting_for_input"
+            ]
+            .map(ToOwned::to_owned)
+            .to_vec()
+        )
     );
     assert_eq!(
         params.scope,
@@ -117,10 +127,7 @@ async fn current_workspace_context_is_offered_for_nested_worktree_paths_and_stor
     {
         let requests = seen_params.lock().unwrap();
         assert_eq!(requests.len(), 1);
-        assert_eq!(
-            requests[0].phases,
-            Some(vec!["idle".to_owned(), "not_loaded".to_owned()])
-        );
+        assert_eq!(requests[0].phases, Some(reusable_context_phases()));
     }
 
     shutdown_tx.send(true).unwrap();
@@ -246,7 +253,7 @@ async fn existing_workspace_picker_excludes_the_detected_current_workspace() {
 }
 
 #[tokio::test]
-async fn active_current_workspace_is_not_offered_as_reusable_context() {
+async fn active_current_workspace_is_offered_as_reusable_context() {
     let _rpc_test_guard = RPC_TEST_LOCK.lock().await;
     let temporary = tempdir().unwrap();
     let paths = test_paths_at(temporary.path().to_path_buf());
@@ -279,7 +286,7 @@ async fn active_current_workspace_is_not_offered_as_reusable_context() {
     assert!(
         context_choices
             .iter()
-            .all(|choice| choice.label != "Current workspace")
+            .any(|choice| choice.label == "Current workspace")
     );
     interaction.assert_consumed();
 

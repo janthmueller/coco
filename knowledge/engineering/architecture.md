@@ -668,9 +668,11 @@ Codex thread rather than creating a workspace with derived context.
 
 - `fresh` creates a new thread only when the first `send` or fresh `jump`
   activates the prepared workspace.
-- `fork` calls native `thread/fork` on first activation with either a selected workspace's exact
+- `fork` calls native persistent `thread/fork` during creation with either a selected workspace's exact
   thread or a directly supplied native `thread.id`, plus the new canonical
-  `cwd` and configuration. CoCo records exact parent/source provenance.
+  `cwd` and configuration. A terminal `lastTurnId` freezes the copied prefix
+  while leaving any running source turn untouched. CoCo binds the returned
+  child immediately and records exact parent/source/cutoff provenance.
   Every CoCo-started turn on a fork also supplies an application
   `additionalContext` entry containing the destination worktree, optional
   branch, base SHA, and source relation so inherited history cannot make the
@@ -687,10 +689,39 @@ The implemented context slice is independent from Git-base selection.
 `--context`/`-c` resolves a bound workspace in the destination repository
 first, then falls back to an exact readable native thread ID; `workspace:` and
 `thread:` prefixes force an interpretation. The daemon retains distinct typed
-resolution paths after this public input is normalized. Both accept only
-native `idle` or `notLoaded` and always fork a child into the new canonical
+resolution paths after this public input is normalized. Both require a terminal
+native turn and always fork a child into the new canonical
 `cwd`; neither adopts, moves, or mutates the source. `--base-workspace`
 separately resolves committed code in the destination repository.
+
+Boundary discovery uses `thread/turns/list` in descending order with
+`itemsView: notLoaded`, at most four pages of 50 turns. It accepts completed,
+interrupted, and failed native boundaries, skips in-progress turns, and fails
+closed on malformed/unknown responses or non-advancing cursors. A source with
+no terminal boundary is rejected before worktree creation. This bounds the
+CoCo response/work, not native legacy-rollout parsing; Codex may still scan a
+large legacy file internally.
+
+Legacy projected turns can have synthetic `rollout-<index>` IDs even with a
+terminal status. Exact Codex 0.160.1 requires a persisted canonical
+`TurnStarted` anchor for `lastTurnId`. Reject its known synthetic namespace
+before provisioning; translate the same native invalid-request rejection as a
+backstop for other unidentifiable synthetic IDs. Advise a new completed source
+turn with current Codex, which supplies an anchor while retaining old history.
+Do not substitute an older cutoff or omit `lastTurnId` silently.
+
+The v4 descriptor stores `captureTiming: create`, `lastTurnId`, and
+`compactionPending` for inherited context. Git completion commits directly
+from `provisioning` to `starting`, never exposing an unbound inherited child as
+`ready`. A durable dispatch-intent event precedes native fork dispatch. Startup
+also recognizes the exact v4 create-time, unbound `ready` state left by the
+earlier local implementation and fails it closed. An unconfirmed result becomes
+failed without a blind retry; exact native binding proves confirmed capture.
+An acknowledged fork survives a cosmetic thread-name failure. Operation replay
+returns the same binding, even after close, and never re-reads the source.
+Legacy recipes without create-time capture remain lazily materialized with
+their old idle/unloaded source checks; new incomplete captures cannot take
+that path. No database migration or private history-copy format is introduced.
 
 A caller may explicitly request compaction; on first activation CoCo calls
 `thread/compact/start` only on the returned child thread and waits for its
@@ -698,7 +729,10 @@ terminal compaction lifecycle before accepting an initial turn or opening the
 child TUI. Compaction is a modifier stored in the fork descriptor, not a new
 `ContextMode`, and must not be selected heuristically. A failed compact step
 preserves the worktree and bound child for diagnosis and marks the CoCo
-lifecycle failed.
+lifecycle failed. Pending compaction survives restart and is cleared together
+with its terminal event and ready lifecycle in one Store transaction. Restart
+fails an interrupted compaction closed rather than repeating an uncertain
+model operation.
 
 The future handoff design must define redaction and byte limits, immutable
 hashes and provenance, regeneration/idempotency behavior, reference freshness,
@@ -898,9 +932,11 @@ lifecycle:
 | From | Trigger | To | Durable event/effect |
 | --- | --- | --- | --- |
 | absent | accepted `workspace.create` | `provisioning` | `workspace.created` |
-| `provisioning` | worktree verified | `ready` | `worktree.created`; native thread remains unbound |
+| `provisioning` | fresh worktree verified | `ready` | `worktree.created`; native thread remains unbound |
+| `provisioning` | inherited worktree verified | `starting` | `worktree.created`; context capture remains unfinished |
+| `starting` | create-time native fork confirmed | `ready` | bind exact child; retain optional pending compaction |
 | `ready` without a thread | first accepted fresh turn or verified TUI materialization | `ready` | bind exact thread and emit `agent.started` |
-| `ready` without a thread | native context fork requiring compaction | `starting` | bind exact child and start compaction |
+| `ready` | pending compaction or legacy compact fork activation | `starting` | preserve/bind exact child and start compaction |
 | `starting` | child compaction accepted | `ready` | `context.compacted` |
 | `provisioning` or `starting` | unrecoverable saga error | `failed` | `agent.failed` with retained artifacts |
 
@@ -1228,9 +1264,12 @@ The verified 0.160.1 runtime uses this minimal sequence:
    and accept the operation. A rejected or unconfirmed dispatch never triggers
    an automatic retry; if Codex already materialized the rollout, preserve the
    exact validated binding for diagnosis and later resume.
-8. On the first activation of inherited context, revalidate the recorded source
-   thread and call native `thread/fork` with the independently selected
-   destination `cwd`; optional compaction completes before the first message.
+8. During inherited-context creation, read the source's latest terminal
+   boundary and call persistent native `thread/fork` with its exact `lastTurnId`
+   and independently selected destination `cwd`. Bind the child before returning
+   without starting a workspace executor. First activation validates/resumes
+   only that child; optional compaction completes before the first message/TUI.
+   Older deferred recipes still revalidate/fork their recorded idle source.
    Because 0.160.1 cannot select an environment on fork or compact, the first
    ordinary child turn performs the exact destination selection.
 9. On later `send`, read and validate the bound thread, resume it only when the
@@ -1325,9 +1364,10 @@ has not yet subscribed to that thread. Resume reparses the named profile and
 verifies its name, source path, and parsed-configuration hash, supplies the
 stored canonical worktree and explicit model override, and accepts only a
 matching returned thread ID and `cwd`. `default` remains the empty overlay.
-The first activation of inherited context calls `thread/fork` directly for a
-validated idle or unloaded source; the returned child establishes its own
-subscription. Successful start, fork, adoption, or resume records that
+Inherited-context creation calls `thread/fork` for a validated terminal source
+boundary; the returned child establishes its own subscription immediately.
+First activation resumes only that child when needed; legacy deferred recipes
+retain their idle-source fork path. Successful start, fork, adoption, or resume records that
 child/workspace subscription only in the current daemon generation; a globally
 loaded status alone does not prove this connection receives notifications or
 server requests. Fork and resume set `excludeTurns: true`: Codex still copies
@@ -1502,7 +1542,7 @@ again from their owners where supported rather than made replayable by CoCo.
 
 ## Creation sequence and compensation
 
-Current schema-v11 creation sequence:
+Current creation sequence (persistent state plus context descriptor v4):
 
 ```text
 CLI             cocod              SQLite             Git          App Server
@@ -1511,17 +1551,23 @@ CLI             cocod              SQLite             Git          App Server
  |               | resolve base/context + snapshot selected local state      |
  |               | create intent --->| workspace+event      |                |
  |               |---------------- worktree add/apply ----->|                |
- |               | bind worktree --->| ready; thread null |                |
- |<--------------| prepared result     |                 |                |
+ |               | bind worktree --->| fresh: ready / fork: starting        |
+ |               | [context source] capture intent --->|                |
+ |               |---------------- thread/fork(lastTurnId) ------------->|
+ |               |<---------------- exact child ID ----------------------|
+ |               | bind child ------>| ready; exact ID  |                |
+ |<--------------| result (fresh: prepared; inherited: bound)            |
 ```
 
 The diagram's arrows are schematic. Creation normalizes the code base, native
 context source, worktree mode, and local-state request while holding the
-repository lock, but performs no native thread mutation. A later first
-activation takes the same lock. Fresh `send` starts a candidate thread,
+repository lock. Fresh creation performs no native thread mutation; inherited
+creation persistently forks at its validated cutoff and binds the child. A
+later first activation takes the same lock. Fresh `send` starts a candidate thread,
 persists the turn intent before `turn/start`, then atomically binds the exact
-thread and accepted turn response. Inherited context materializes through
-`thread/fork`; fresh `jump` uses the leased correlation path described above.
+thread and accepted turn response. Captured inherited context activates its
+own thread; old deferred recipes still materialize through `thread/fork`.
+Fresh `jump` uses the leased correlation path described above.
 The native-first sequence commits only CoCo-owned provisioning/operation
 evidence and verified bindings; inserting a normalized event at every arrow is
 not a target requirement.
@@ -1529,8 +1575,8 @@ not a target requirement.
 Compensation is stateful, not destructive:
 
 - before a worktree exists, mark the workspace failed with stage/error;
-- after worktree creation, preserve the ready Git binding and leave the
-  workspace prepared if deferred thread start or fork fails;
+- after worktree creation, preserve the Git binding; unconfirmed eager capture
+  fails closed, while deferred fresh start/legacy fork may leave it prepared;
 - after an ambiguous first-turn dispatch, mark the operation uncertain and
   preserve the exact thread binding only when Codex already exposes a
   validated durable rollout;
@@ -1543,8 +1589,9 @@ Compensation is stateful, not destructive:
 Current daemon startup order after the native read cutover:
 
 1. Acquire a user-scoped singleton lock.
-2. Secure and open SQLite; run migrations, reconcile unfinished preparation
-   without changing a bound workspace's lifecycle, and mark every unconfirmed
+2. Secure and open SQLite; run migrations, fail unfinished preparation/capture
+   and in-flight compaction closed while preserving exact native bindings,
+   leave confirmed `ready` workspaces ready, and mark every unconfirmed
    `dispatching` operation `uncertain`. Legacy status, turn, and decision rows
    are migration data and are not loaded into the new generation.
 3. Start/initialize a new authenticated loopback App Server generation,
@@ -1563,7 +1610,8 @@ selected binding without loading its thread; after restart an unloaded thread
 therefore truthfully projects `not_loaded`. `send` and `workspace.attach`
 activate only their selected workspace with the verified
 profile/worktree/model inputs described above. Native context creation reads
-and forks its exact source independently. One activation failure does not
+and forks its exact source during create; later activation uses only the
+captured child. Older deferred recipes retain their lazy source path. One activation failure does not
 prevent daemon startup or passive inspection of another workspace. Recovery
 never translates absence of evidence into completion, starts a replacement
 thread, retries an uncertain operation, or rewrites mirrored history to

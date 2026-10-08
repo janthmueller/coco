@@ -10,6 +10,21 @@ status: stable
 
 ## 2026-10-08
 
+- **Capture review corrections**: Inherited Git completion now stays unfinished
+  until exact native binding, with restart handling for the prior stranded v4
+  ready/unbound state. Known legacy synthetic fork anchors fail before Git
+  provisioning; native canonical-anchor rejection gives source-repair advice,
+  never a silent history fallback. Added bounded request-loop and uncertain
+  fork/compaction recovery regressions; strengthened native proof covers two
+  completed source turns and a legacy conversation repaired by a new turn.
+- **Create-time inherited context**: `create -c` now captures and binds its own
+  persistent native fork through the latest terminal `lastTurnId`, including
+  while the source works. Later activation does not recapture or depend on
+  source activity. Fresh creation stays lazy; capture starts no executor or
+  inference turn. Versioned descriptors retain the cutoff, fail-closed capture
+  intent, and restart-safe pending child compaction; old deferred recipes keep
+  their compatibility path. Added coordinator/wire/process regressions and a
+  real 0.160.1 source-working/fork/restart/TUI/send proof using a local provider.
 - **First regular release and policy**: Published suffix-free `0.1.0` through
   the guarded CI pipeline after exact-tip Rust/native platform checks and a
   successful stable rehearsal. Confirmed the normal GitHub release, unyanked

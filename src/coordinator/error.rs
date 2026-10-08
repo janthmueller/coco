@@ -155,6 +155,7 @@ impl CoordinatorError {
             Self::Store(_) => "INTERNAL",
             Self::Profile(ProfileError::NotFound { .. }) => "PROFILE_NOT_FOUND",
             Self::Profile(_) => "INVALID_PROFILE",
+            Self::Worker(WorkerError::ContextBoundaryUnsupported) => "CONTEXT_SOURCE_UNSUPPORTED",
             Self::Worker(_) => "CODEX_ERROR",
         }
     }

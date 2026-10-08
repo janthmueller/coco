@@ -27,9 +27,9 @@ async fn forks_committed_code_and_codex_history_from_an_idle_workspace() {
         .await
         .unwrap();
     let prepared = created.workspace;
-    assert_eq!(prepared.phase, WorkspacePhase::Prepared);
-    assert!(prepared.codex_thread_id.is_none());
-    assert!(prepared.parent_thread_id.is_none());
+    assert_eq!(prepared.phase, WorkspacePhase::Idle);
+    assert_eq!(prepared.codex_thread_id.as_deref(), Some("fork-thread-1"));
+    assert_eq!(prepared.parent_thread_id, source.codex_thread_id);
     let workspace = fixture.attach(&prepared).await;
     let target_worktree = workspace.worktree_path.as_deref().unwrap();
 
@@ -61,21 +61,16 @@ async fn forks_committed_code_and_codex_history_from_an_idle_workspace() {
         fs::read_to_string(target_worktree.join("source-commit.txt")).unwrap(),
         "from source\n"
     );
-    assert!(matches!(
-        fixture.worker.calls().as_slice(),
-        [
-            WorkerCall::Thread { .. },
-            WorkerCall::Read { thread_id },
-            WorkerCall::Read { thread_id: validation_thread_id },
-            WorkerCall::Fork { source_thread_id, cwd, config, .. },
-            WorkerCall::Read { thread_id: child_thread_id },
-        ] if thread_id == "thread-1"
-            && validation_thread_id == "thread-1"
-            && source_thread_id == "thread-1"
-            && child_thread_id == "fork-thread-1"
-            && cwd == target_worktree
-            && config == &json!({})
-    ));
+    let mutations = fixture
+        .worker
+        .calls()
+        .into_iter()
+        .filter(|call| !matches!(call, WorkerCall::Read { .. }))
+        .collect::<Vec<_>>();
+    assert!(matches!(mutations.as_slice(), [WorkerCall::Thread { .. },
+        WorkerCall::Fork { source_thread_id, cwd, config, last_turn_id, .. }]
+        if source_thread_id == "thread-1" && cwd == target_worktree && config == &json!({})
+            && last_turn_id.as_deref() == Some("thread-1-completed")));
     let replay = fixture
         .coordinator
         .create_workspace(fork_params)
@@ -90,7 +85,7 @@ async fn forks_committed_code_and_codex_history_from_an_idle_workspace() {
 }
 
 #[tokio::test]
-async fn ignores_uncommitted_context_files_but_rejects_an_active_context_source() {
+async fn ignores_uncommitted_context_files_and_accepts_an_active_context_source() {
     let dirty_fixture = Fixture::new(FakeWorker::default());
     let repository = dirty_fixture.register().await;
     let source = dirty_fixture
@@ -135,17 +130,17 @@ async fn ignores_uncommitted_context_files_but_rejects_an_active_context_source(
         })
         .await
         .unwrap();
-    assert!(matches!(
-        active_fixture
-            .coordinator
-            .create_workspace(active_fixture.fork_params(&source, "active-child", false))
-            .await,
-        Err(CoordinatorError::InvalidWorkspaceState {
-            expected: "an idle or unloaded source workspace",
-            actual: WorkspacePhase::Active,
-        })
-    ));
-    assert_eq!(active_fixture.worker.calls().len(), 2);
+    let child = active_fixture
+        .coordinator
+        .create_workspace(active_fixture.fork_params(&source, "active-child", false))
+        .await
+        .unwrap()
+        .workspace;
+    assert_eq!(child.codex_thread_id.as_deref(), Some("fork-thread-1"));
+    assert!(
+        matches!(active_fixture.worker.calls().last(), Some(WorkerCall::Fork { last_turn_id, .. })
+        if last_turn_id.as_deref() == Some("thread-1-completed"))
+    );
 }
 
 #[tokio::test]
@@ -177,27 +172,29 @@ async fn compacts_only_the_child_before_it_accepts_a_message() {
     assert_eq!(workspace.lifecycle, WorkspaceLifecycle::Ready);
     assert_eq!(workspace.phase, WorkspacePhase::Idle);
     assert_eq!(workspace.context["resolved"]["context"]["compact"], true);
-    assert!(matches!(
-        fixture.worker.calls().as_slice(),
-        [
-            WorkerCall::Thread { .. },
-            WorkerCall::Read { .. },
-            WorkerCall::Read { .. },
-            WorkerCall::Fork { .. },
-            WorkerCall::Compact { thread_id },
-            WorkerCall::Read { thread_id: hydrated_thread_id },
-            WorkerCall::Read { thread_id: attached_thread_id },
-        ] if thread_id == "fork-thread-1"
-            && hydrated_thread_id == "fork-thread-1"
-            && attached_thread_id == "fork-thread-1"
-    ));
+    let mutations = fixture
+        .worker
+        .calls()
+        .into_iter()
+        .filter(|call| !matches!(call, WorkerCall::Read { .. }))
+        .collect::<Vec<_>>();
+    assert!(
+        matches!(mutations.as_slice(), [WorkerCall::Thread { .. }, WorkerCall::Fork { .. },
+        WorkerCall::Compact { thread_id }] if thread_id == "fork-thread-1")
+    );
+    assert_eq!(
+        workspace.context["resolved"]["context"]["compactionPending"],
+        false
+    );
     let events = fixture.store.events_after(Some(&workspace.id), 0).unwrap();
     assert_eq!(
         events.iter().map(|event| event.kind).collect::<Vec<_>>(),
         [
             EventKind::WorkspaceCreated,
             EventKind::WorktreeCreated,
+            EventKind::ControlCallStarted,
             EventKind::AgentStarted,
+            EventKind::ControlCallStarted,
             EventKind::ContextCompacted,
         ]
     );
@@ -267,7 +264,7 @@ async fn complete_fake_compaction(fixture: &Fixture, thread_id: &str) {
     }
 }
 
-async fn wait_for_compaction_request(fixture: &Fixture) {
+pub(super) async fn wait_for_compaction_request(fixture: &Fixture) {
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
             if fixture
@@ -733,7 +730,7 @@ async fn fork_after_restart_reads_the_source_without_resuming_it() {
         .await
         .unwrap()
         .workspace;
-    assert!(prepared.parent_thread_id.is_none());
+    assert_eq!(prepared.parent_thread_id.as_deref(), Some("thread-1"));
     let child = coordinator
         .materialize_workspace_thread(prepared)
         .await
@@ -745,10 +742,8 @@ async fn fork_after_restart_reads_the_source_without_resuming_it() {
         worker.calls().as_slice(),
         [
             WorkerCall::Read { thread_id: initial_thread_id },
-            WorkerCall::Read { thread_id: validation_thread_id },
             WorkerCall::Fork { source_thread_id, .. },
         ] if initial_thread_id == "thread-1"
-            && validation_thread_id == "thread-1"
             && source_thread_id == "thread-1"
     ));
 }

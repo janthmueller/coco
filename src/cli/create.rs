@@ -452,7 +452,15 @@ pub(super) fn validate_local_change_flags(
 }
 
 fn reusable_context_phases() -> Vec<String> {
-    vec!["idle".to_owned(), "not_loaded".to_owned()]
+    [
+        "idle",
+        "not_loaded",
+        "active",
+        "waiting_for_approval",
+        "waiting_for_input",
+    ]
+    .map(ToOwned::to_owned)
+    .to_vec()
 }
 
 async fn list_repository_workspaces(

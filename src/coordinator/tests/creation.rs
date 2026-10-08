@@ -51,7 +51,7 @@ async fn selects_the_git_base_independently_from_workspace_context() {
 
     let worktree = created.worktree_path.as_deref().unwrap();
     assert_eq!(created.base_sha.as_deref(), Some(main_head.as_str()));
-    assert!(created.parent_thread_id.is_none());
+    assert_eq!(created.parent_thread_id, source.codex_thread_id);
     assert_eq!(git_output(worktree, &["rev-parse", "HEAD"]), main_head);
     assert!(!worktree.join("context-only.txt").exists());
     assert_eq!(
@@ -157,7 +157,10 @@ async fn forks_context_from_an_exact_native_thread_id_without_a_coco_workspace()
         .unwrap()
         .workspace;
 
-    assert!(created.parent_thread_id.is_none());
+    assert_eq!(
+        created.parent_thread_id.as_deref(),
+        Some("native-thread-id")
+    );
     assert_eq!(
         created.context["resolved"]["context"]["source"],
         json!({
@@ -168,7 +171,8 @@ async fn forks_context_from_an_exact_native_thread_id_without_a_coco_workspace()
     );
     assert!(matches!(
         fixture.worker.calls().as_slice(),
-        [WorkerCall::Read { thread_id }] if thread_id == "native-thread-id"
+        [WorkerCall::Read { thread_id }, WorkerCall::Fork { last_turn_id, .. }]
+            if thread_id == "native-thread-id" && last_turn_id.as_deref() == Some("native-thread-id-completed")
     ));
     let materialized = fixture
         .coordinator
@@ -183,10 +187,8 @@ async fn forks_context_from_an_exact_native_thread_id_without_a_coco_workspace()
         fixture.worker.calls().as_slice(),
         [
             WorkerCall::Read { thread_id: first },
-            WorkerCall::Read { thread_id: second },
             WorkerCall::Fork { source_thread_id, .. },
         ] if first == "native-thread-id"
-            && second == "native-thread-id"
             && source_thread_id == "native-thread-id"
     ));
 }

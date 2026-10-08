@@ -1,11 +1,13 @@
 use std::collections::hash_map::Entry;
 use std::time::Duration;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 
 use super::{Coordinator, CoordinatorError};
+use crate::domain::{CodexThreadStatus, EventKind, EventSource, Workspace, WorkspaceLifecycle};
+use crate::store::EventDraft;
 
 const COMPACTION_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
@@ -16,6 +18,50 @@ pub(super) struct PendingCompaction {
 }
 
 impl Coordinator {
+    pub(super) async fn finish_captured_context_preparation(
+        &self,
+        workspace: Workspace,
+    ) -> Result<Workspace, CoordinatorError> {
+        if workspace
+            .context
+            .pointer("/resolved/context/compactionPending")
+            != Some(&json!(true))
+        {
+            return Ok(workspace);
+        }
+        if workspace.active_turn_id.is_some()
+            || !matches!(
+                workspace
+                    .thread_runtime
+                    .as_ref()
+                    .map(|runtime| &runtime.status),
+                Some(CodexThreadStatus::Idle)
+            )
+        {
+            return Err(CoordinatorError::InvalidWorkspaceState {
+                expected: "an idle child thread before context compaction",
+                actual: workspace.phase,
+            });
+        }
+        let thread_id = workspace
+            .codex_thread_id
+            .clone()
+            .ok_or(CoordinatorError::IncompleteWorkspace("Codex thread"))?;
+        let (workspace, _) = self.store.transition_workspace_lifecycle_with_event(
+            &workspace.id,
+            WorkspaceLifecycle::Ready,
+            WorkspaceLifecycle::Starting,
+            None,
+            EventDraft::workspace(
+                EventKind::ControlCallStarted,
+                EventSource::Coco,
+                json!({"method": "thread/compact/start", "threadId": thread_id}),
+            ),
+        )?;
+        self.finish_context_materialization(workspace, &thread_id, true)
+            .await
+    }
+
     pub(super) async fn compact_thread(&self, thread_id: &str) -> Result<(), CoordinatorError> {
         let (completion, receiver) = oneshot::channel();
         {

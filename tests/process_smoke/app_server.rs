@@ -112,8 +112,34 @@ pub(super) async fn run_fake_fork_server(
                 )
                 .await?;
             }
-            Some("thread/name/set") => send_result(&mut websocket, &frame, json!({})).await?,
+            Some("thread/name/set") => {
+                if frame.pointer("/params/threadId") == Some(&json!(FORK_CHILD_THREAD_ID)) {
+                    // Naming is cosmetic; the acknowledged fork must still bind.
+                    send_json(&mut websocket, json!({
+                        "id": frame["id"], "error": {"code": -32603, "message": "name unavailable"},
+                    })).await?;
+                } else {
+                    send_result(&mut websocket, &frame, json!({})).await?;
+                }
+            }
+            Some("thread/turns/list") => {
+                ensure!(frame.pointer("/params/itemsView") == Some(&json!("notLoaded")));
+                ensure!(frame.pointer("/params/sortDirection") == Some(&json!("desc")));
+                ensure!(frame.pointer("/params/limit") == Some(&json!(50)));
+                send_result(
+                    &mut websocket,
+                    &frame,
+                    json!({
+                        "data": [{"id": "source-completed-turn", "status": "completed"}],
+                        "nextCursor": null,
+                    }),
+                )
+                .await?;
+            }
             Some("thread/fork") => {
+                ensure!(
+                    frame.pointer("/params/lastTurnId") == Some(&json!("source-completed-turn"))
+                );
                 ensure!(
                     experimental_api,
                     "thread/fork.deferGoalContinuation requires experimentalApi capability"

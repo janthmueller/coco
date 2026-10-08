@@ -35,6 +35,7 @@ use crate::protocol::{
 use crate::store::{OperationState, WorkspaceDeletionIntent};
 
 mod context;
+mod context_capture;
 mod creation;
 mod decisions;
 mod doctor;
@@ -118,6 +119,7 @@ enum WorkerCall {
     Fork {
         name: String,
         source_thread_id: String,
+        last_turn_id: Option<String>,
         cwd: PathBuf,
         config: Value,
         model: Option<String>,
@@ -142,6 +144,11 @@ enum WorkerCall {
 struct FakeWorker {
     calls: StdMutex<Vec<WorkerCall>>,
     native_threads: StdMutex<BTreeMap<String, NativeThread>>,
+    context_boundaries: StdMutex<BTreeMap<String, Option<String>>>,
+    fail_fork: bool,
+    fail_fork_after_creation: bool,
+    fork_entered: Option<Arc<Notify>>,
+    fork_release: Option<Arc<Notify>>,
     materialized_threads: StdMutex<HashSet<String>>,
     archived_threads: StdMutex<HashSet<String>>,
     descendants: StdMutex<BTreeMap<String, Vec<String>>>,
@@ -173,6 +180,14 @@ struct FakeWorker {
 }
 
 impl FakeWorker {
+    fn paused_fork(entered: Arc<Notify>, release: Arc<Notify>) -> Self {
+        Self {
+            fork_entered: Some(entered),
+            fork_release: Some(release),
+            ..Self::default()
+        }
+    }
+
     fn failing_thread_start() -> Self {
         Self {
             fail_thread_start: true,
@@ -336,6 +351,16 @@ impl FakeWorker {
 
 #[async_trait]
 impl WorkerRuntime for FakeWorker {
+    async fn last_completed_turn_id(&self, thread_id: &str) -> Result<Option<String>, WorkerError> {
+        Ok(self
+            .context_boundaries
+            .lock()
+            .unwrap()
+            .get(thread_id)
+            .cloned()
+            .unwrap_or_else(|| Some(format!("{thread_id}-completed"))))
+    }
+
     async fn list_models(&self) -> Result<Vec<CodexModel>, WorkerError> {
         self.calls.lock().unwrap().push(WorkerCall::Models);
         Ok(vec![CodexModel {
@@ -752,28 +777,35 @@ impl WorkerRuntime for FakeWorker {
 
     async fn fork_thread(
         &self,
-        _workspace_id: &str,
         name: &str,
         source_thread_id: &str,
+        last_turn_id: Option<&str>,
         cwd: &Path,
         config: Value,
         model: Option<&str>,
     ) -> Result<StartedThread, WorkerError> {
         let effective_model = model.unwrap_or("gpt-test").to_owned();
-        let mut calls = self.calls.lock().unwrap();
-        calls.push(WorkerCall::Fork {
-            name: name.to_owned(),
-            source_thread_id: source_thread_id.to_owned(),
-            cwd: cwd.to_owned(),
-            config,
-            model: model.map(ToOwned::to_owned),
-        });
-        let sequence = calls
-            .iter()
-            .filter(|call| matches!(call, WorkerCall::Fork { .. }))
-            .count();
+        let sequence = {
+            let mut calls = self.calls.lock().unwrap();
+            calls.push(WorkerCall::Fork {
+                name: name.to_owned(),
+                source_thread_id: source_thread_id.to_owned(),
+                last_turn_id: last_turn_id.map(ToOwned::to_owned),
+                cwd: cwd.to_owned(),
+                config,
+                model: model.map(ToOwned::to_owned),
+            });
+            calls
+                .iter()
+                .filter(|call| matches!(call, WorkerCall::Fork { .. }))
+                .count()
+        };
         let id = format!("fork-thread-{sequence}");
-        drop(calls);
+        if self.fail_fork {
+            return Err(WorkerError::runtime(std::io::Error::other(
+                "injected fork failure",
+            )));
+        }
         self.remember_native_thread(NativeThread {
             id: id.clone(),
             cwd: cwd.to_owned(),
@@ -784,6 +816,17 @@ impl WorkerRuntime for FakeWorker {
             forked_from_id: Some(source_thread_id.to_owned()),
         });
         self.materialized_threads.lock().unwrap().insert(id.clone());
+        if let Some(entered) = &self.fork_entered {
+            entered.notify_one();
+        }
+        if let Some(release) = &self.fork_release {
+            release.notified().await;
+        }
+        if self.fail_fork_after_creation {
+            return Err(WorkerError::runtime(std::io::Error::other(
+                "native fork was accepted but its reply was lost",
+            )));
+        }
         Ok(StartedThread {
             id: id.clone(),
             status: CodexThreadStatus::Idle,

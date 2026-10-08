@@ -72,7 +72,8 @@ impl Coordinator {
         } else {
             native.status
         };
-        Ok(self.project_native_thread_runtime(workspace, status))
+        let workspace = self.project_native_thread_runtime(workspace, status);
+        self.finish_captured_context_preparation(workspace).await
     }
 
     async fn resume_workspace_thread(

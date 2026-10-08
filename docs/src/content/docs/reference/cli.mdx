@@ -148,7 +148,7 @@ Omit `NAME` in a terminal to start the creation walkthrough. A named command
 uses the defaults immediately unless `--interactive`/`-i` is present. Existing
 flags prefill and skip those decisions, and Enter accepts the highlighted
 default at each remaining step. The walkthrough offers the current workspace
-when its conversation is reusable, another Ready or Unloaded workspace, or an
+when its conversation is reusable, another workspace with saved context, or an
 exact Codex thread ID. It does not create anything until you accept the final
 summary. `--interactive` cannot be combined with `--no-input`.
 
@@ -169,8 +169,12 @@ the selected repository or an exact native Codex thread ID. Workspace matches
 take precedence; `workspace:` and `thread:` prefixes explicitly choose a kind.
 Use `-c .` inside a CoCo worktree to select that current workspace, including
 from one of its subdirectories. Without this option, the context is fresh.
+Copied context is saved during creation through the source's latest finished
+turn, even while it continues working. A source without a finished turn cannot
+be copied. Later source activity does not change or block the new conversation.
 `--compact-context`/`-C` requires a context source and affects only the new
-fork. `-Cc <reference>` is the compact form of both options together.
+fork, shortening it before its first `send` or `jump`.
+`-Cc <reference>` is the compact form of both options together.
 
 The default creates `coco/<NAME>`. `--branch` chooses another new branch,
 `--checkout` selects an existing local branch, and `--detached` creates no

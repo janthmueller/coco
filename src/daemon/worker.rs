@@ -20,6 +20,8 @@ use crate::domain::{CodexModel, CodexThreadStatus};
 
 use super::execution::WorkspaceExecutors;
 
+mod context;
+
 const MODEL_PAGE_LIMIT: u32 = 100;
 const MAX_MODEL_PAGES: usize = 100;
 const THREAD_PAGE_LIMIT: u32 = 100;
@@ -187,6 +189,10 @@ impl CodexWorker {
 
 #[async_trait]
 impl WorkerRuntime for CodexWorker {
+    async fn last_completed_turn_id(&self, thread_id: &str) -> Result<Option<String>, WorkerError> {
+        self.read_last_completed_turn_id(thread_id).await
+    }
+
     async fn list_models(&self) -> Result<Vec<CodexModel>, WorkerError> {
         let mut models = Vec::new();
         let mut cursor: Option<String> = None;
@@ -556,15 +562,16 @@ impl WorkerRuntime for CodexWorker {
 
     async fn fork_thread(
         &self,
-        workspace_id: &str,
         name: &str,
         source_thread_id: &str,
+        last_turn_id: Option<&str>,
         cwd: &Path,
         config: Value,
         model: Option<&str>,
     ) -> Result<StartedThread, WorkerError> {
-        let _environment = self.workspace_environment(workspace_id, cwd).await?;
-        let params = with_model(
+        // Capturing history does not execute a turn and cannot select an
+        // environment. Start the workspace executor only on activation.
+        let mut params = with_model(
             json!({
                 "threadId": source_thread_id,
                 "cwd": cwd,
@@ -575,13 +582,24 @@ impl WorkerRuntime for CodexWorker {
             }),
             model,
         );
+        if let Some(last_turn_id) = last_turn_id {
+            params["lastTurnId"] = json!(last_turn_id);
+        }
         let response = self
             .client
             .request("thread/fork", params)
             .await
-            .map_err(WorkerError::runtime)?;
+            .map_err(|error| context::fork_error(error, last_turn_id.is_some()))?;
         let started = decode_thread_response(response, cwd)?;
-        self.set_thread_name_request(&started.id, name).await?;
+        // The persistent fork already exists. A cosmetic naming failure must
+        // not turn its acknowledged ID into an unconfirmed capture.
+        if self
+            .set_thread_name_request(&started.id, name)
+            .await
+            .is_err()
+        {
+            tracing::warn!(thread_id = %started.id, "captured thread display name could not be set");
+        }
         Ok(started)
     }
 

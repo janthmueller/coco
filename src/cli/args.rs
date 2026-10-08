@@ -489,7 +489,7 @@ pub(super) struct CreateArgs {
     /// Use the committed HEAD of another workspace as the Git base.
     #[arg(long, value_name = "WORKSPACE", conflicts_with_all = ["base", "checkout"])]
     pub(super) base_workspace: Option<String>,
-    /// Fork history from a workspace, thread ID, or `.` for the workspace containing the selected path.
+    /// Copy completed context now from a workspace, thread ID, or `.` for the current workspace.
     #[arg(
         long,
         short = 'c',

@@ -21,6 +21,8 @@ use crate::domain::{
     WorkspaceLifecycle,
 };
 
+mod context;
+
 impl Store {
     pub fn create_workspace_with_event(
         &self,
@@ -811,7 +813,12 @@ impl Store {
         let now = now_ms();
         let uncertain_operations = reconcile_unconfirmed_operations(&transaction, now)?;
         let mut statement = transaction.prepare(&format!(
-            "{} WHERE lifecycle IN ('provisioning', 'starting') ORDER BY id",
+            "{} WHERE lifecycle IN ('provisioning', 'starting')
+                OR (lifecycle = 'ready' AND context_mode = 'fork'
+                    AND codex_thread_id IS NULL
+                    AND json_extract(context_json, '$.version') = 4
+                    AND json_extract(context_json, '$.resolved.context.captureTiming') = 'create')
+                ORDER BY id",
             WORKSPACE_SELECT
         ))?;
         let workspaces = statement

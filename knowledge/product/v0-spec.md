@@ -214,8 +214,10 @@ peer-response routing remain separate, unimplemented capabilities.
   not task or session. Earlier prerelease `task` records are migrated
   losslessly; the CLI, daemon protocol, MCP surface, and current storage model
   use `workspace` consistently.
-- `coco create` prepares the Git workspace without allocating an empty native
-  thread. Its phase is `prepared`. `--send <message>` materializes context and
+- Fresh `coco create` prepares the Git workspace without allocating an empty
+  native thread. Its phase is `prepared`; inherited context instead captures
+  and binds its own persistent native fork during creation.
+  `--send <message>` materializes fresh context or activates the captured child and
   starts its first turn; `--jump` either resumes the bound thread or lets the
   official TUI create the first fresh thread through a session-scoped
   correlated relay. The two options compose in the fixed order create, send,
@@ -225,7 +227,9 @@ peer-response routing remain separate, unimplemented capabilities.
   local changes independently. `--base-workspace` selects committed code;
   `--context`/`-c` selects native Codex history by workspace reference, exact
   thread ID, or `.` for the workspace that owns the selected path. A context
-  source must be idle or unloaded. Optional
+  source must have a finished native turn. Capture uses its exact latest
+  terminal `lastTurnId`, so an active source keeps working and its unfinished
+  turn is excluded. Later source work neither changes nor blocks the child. Optional
   `--compact-context`/`-C` applies only to the child and completes before
   `--send` or `--jump` runs.
 - `coco model list`/`coco model ls` exposes the visible catalog reported by the daemon-owned Codex
@@ -425,13 +429,15 @@ they are one deferred feature, not a second metadata mechanism:
   first `send` or fresh `jump` activates the prepared workspace. The first turn
   supplies the work instruction; provenance still records the selected code
   base and any explicitly supplied source material.
-- `fork` uses Codex's native `thread/fork` on first activation from either a selected workspace
+- `fork` uses Codex's native `thread/fork` during creation from either a selected workspace
   thread or an exact native `thread.id`, preserving its history while binding
   the new thread to the newly prepared worktree and effective configuration.
   The transition must explicitly tell the agent that `cwd`, branch, and base
   commit may differ. CoCo requests a metadata-only fork response; this omits
   duplicated turn data from the transport response without removing any
-  inherited conversation context from the child.
+  inherited conversation context from the child. The inclusive `lastTurnId`
+  freezes its latest terminal turn (`completed`, `interrupted`, or `failed`),
+  never an in-progress turn; a source without such a boundary is rejected.
 - `handoff` starts a fresh thread from bounded, reviewable transfer material
   rather than copying the full conversation. The material may be authored by
   an agent, supplied as an existing Markdown document or CLI input, or refer
@@ -447,7 +453,9 @@ an exact readable native Codex `thread.id`, which may originate elsewhere.
 `.` is a CLI-only selector for the open workspace whose managed worktree
 contains the selected repository path; the CLI normalizes it to
 `workspace:<stable-id>` before creation. `workspace:` and `thread:` prefixes
-force the rare ambiguous case. The source thread must be idle or unloaded.
+force the rare ambiguous case. Source activity does not prevent capture at a
+terminal boundary. A successful create has its own persistent child before
+any initial message or TUI activation and never recaptures the source later.
 CoCo always creates a child; it never adopts or moves the source thread. An
 explicit compact modifier runs
 `thread/compact/start` on the new child, never on the source, and must finish
@@ -716,7 +724,7 @@ semantic default; the cursor alone shows what Enter would select. The
 walkthrough covers Git binding, code base, applicable Git-change carry,
 conversation context, profile, model, and the post-create action. Context
 defaults to fresh. When
-the selected path belongs to an idle or unloaded workspace, the guide offers
+the selected path belongs to an idle, unloaded, or active workspace, the guide offers
 that current workspace directly, records its stable ID at selection time, and
 omits it from the generic workspace picker. It may otherwise select an eligible
 same-repository workspace by name/number or accept an exact native thread ID,
@@ -749,7 +757,10 @@ guide is cancelled.
    interpretation. A direct native reference means exact `thread.id`, not the
    root `thread.sessionId`. `--compact-context`/`-C` is valid only with a
    source and compacts only the child; `-Cc <reference>` combines both short
-   options in value-safe order.
+   options in value-safe order. Creation captures the latest terminal native
+   turn with `lastTurnId`, including when the source is working or waiting for
+   input/approval. It rejects a missing boundary before worktree provisioning;
+   it never interrupts the source or silently includes a partial turn.
 3. **Git binding.** The default allocates `coco/<workspace>`.
    `--branch <branch>` allocates another new branch, `--checkout <branch>`
    uses an existing local branch that Git reports as free, and `--detached`/
@@ -795,31 +806,56 @@ saga:
 2. Resolve the selected Git binding and immutable `base_sha`. Resolve a base
    workspace only within that repository.
 3. Validate and snapshot the explicitly selected source-checkout state in
-   memory; resolve context separately with a non-loading native read.
+   memory; resolve context separately with a non-loading native read and bounded,
+   metadata-only terminal-boundary lookup.
 4. Validate workspace/path/ref invariants and reject name, branch-namespace,
    existing-checkout, or destination collisions before creating artifacts.
 5. Persist a `provisioning` workspace with the typed worktree mode, optional
    branch, and versioned creation provenance.
 6. Create the worktree at the exact base SHA, verify its binding, then apply
    the in-memory staged, unstaged, untracked, and ignored-file selections.
-7. Persist the verified worktree binding as lifecycle `ready` with no native
-   thread and return the derived phase `prepared`.
-8. On the first `send`, materialize fresh or forked context in the destination
-   worktree. For fresh context, bind the thread only in the transaction that
-   records the direct first-turn acceptance response. For inherited context,
-   retain exact parent/source provenance independently from Git-base
-   provenance and compact only the child when requested.
+7. Persist the verified worktree binding as lifecycle `ready` for fresh context,
+   or directly as `starting` for inherited context. Fresh creation returns
+   `prepared` without a native thread. For inherited context, persist a
+   capture intent without an unbound-ready gap, call native persistent
+   `thread/fork` with the frozen cutoff and destination configuration, and bind its exact returned ID
+   before returning. Capture starts no model turn or workspace executor.
+8. On the first `send`, materialize fresh context or activate the captured
+   child in the destination worktree. For fresh context, bind the thread only
+   in the transaction that records the direct first-turn acceptance response.
+   Inherited parent/source provenance remains independent from Git-base
+   provenance; requested child-only compaction finishes before send or jump.
 9. On a first fresh `jump`, let the official TUI start its native thread and
    adopt only its exact durable candidate; an empty TUI exit leaves the
    workspace prepared.
 10. `--send` and `--jump` run after successful preparation in that order;
     failure of a later action does not roll back an earlier successful action.
 
-If deferred thread start or fork fails before binding, CoCo leaves the ready
-Git workspace prepared so the operator can retry. A post-binding compaction
-failure marks the workspace failed while preserving the child and worktree.
-CoCo never hides failure by destructively cleaning up. Retrying an operation
-ID must not create duplicate artifacts.
+Context descriptor v4 records capture timing, the exact cutoff, and durable
+pending child compaction. A rejected or unconfirmed eager fork leaves a failed,
+diagnosable workspace; replay and activation cannot blindly repeat it or
+recapture changed source context. If capture intent is interrupted, restart
+reconciliation fails it closed. A confirmed binding is retained on operation
+replay, including after close; no new native child is created. Naming is
+cosmetic and cannot discard an acknowledged fork binding.
+
+Old Codex history can expose terminal turns with synthetic, unusable fork
+anchors. Known synthetic IDs are rejected before provisioning; native
+canonical-anchor rejections receive the same actionable
+`CONTEXT_SOURCE_UNSUPPORTED` error. Completing a new turn with current Codex
+provides a usable anchor without discarding older history. No implicit
+different cutoff or unbounded-history fallback is permitted. Startup also
+fails an unbound, ready v4 create-time capture from the preceding local
+implementation without changing fresh ready or old deferred workspaces.
+
+Older descriptors remain deferred recipes, with their previous idle/unloaded
+source validation and lazy activation behavior. They cannot be retrospectively
+treated as create-time captures. Fresh deferred starts and legacy forks may
+still leave the ready Git workspace prepared on failure. Child-only compaction
+is deferred until activation, survives restart when pending, and atomically
+clears its pending marker when finished. Interrupted or failed compaction marks
+the workspace failed while preserving artifacts, rather than being repeated
+automatically. No storage-schema migration is required for these descriptors.
 
 ### `coco list` / `coco ls`
 
@@ -1390,7 +1426,8 @@ full native event mirroring.
   thread: passive reads reconstruct current runtime state with validated
   `thread/read`, while later `send` and bound `jump` resume only the selected
   workspace thread. First activation creates or adopts fresh context, or
-  addresses the exact inherited source through `thread/fork`. An individual failure remains explicit
+  resumes the child captured during creation; only older deferred recipes
+  still address their recorded source through `thread/fork`. An individual failure remains explicit
   and does not stop another workspace or daemon startup. Recovery must not
   report guessed success or create a replacement thread.
 - `closing`, `reopening`, and `deleting` are durable saga states. Startup
@@ -1448,7 +1485,8 @@ The following are intentionally outside v0:
   files require `.worktreeinclude`, the source remains unchanged, and path,
   symlink, overwrite, file-count, and byte bounds fail closed.
 - Failures before the worktree is ready leave a diagnosable failed workspace.
-  Deferred start/fork failures leave the Git workspace prepared; post-binding
+  Unconfirmed eager capture also fails closed without automatic recapture.
+  Deferred fresh start/legacy fork failures leave the Git workspace prepared; post-binding
   compaction failure preserves artifacts and marks it failed. No path deletes
   external artifacts automatically.
 - Restarting the daemon preserves the stored binding without eagerly resuming
@@ -1458,8 +1496,9 @@ The following are intentionally outside v0:
   an old SQLite snapshot as current.
 - The first post-restart `send` or `jump` activates only its selected
   workspace. A bound thread is resumed and subscribed; prepared fresh context
-  is created or adopted, while prepared inherited context uses native
-  `thread/fork` from its exact source without coupling conversation to Git base.
+  is created or adopted. Captured inherited context resumes its own child
+  independently of source activity; only older prepared recipes still fork
+  their exact source without coupling conversation to Git base.
   Activation rejects a missing, invalid, moved, or changed named profile and a
   mismatched returned thread ID or working directory. The default profile
   consistently reloads as an empty overlay; one failed activation does not
@@ -1718,20 +1757,22 @@ design handoff artifacts independently from native conversation forking.
 
 ### Agreed follow-up order
 
-User-approved planning order recorded on 2026-10-08. This is internal future
-work, not shipped functionality or authorization to implement or publish the
-following slices. Review blockers take precedence; publication and operational
-changes still require explicit approval.
+User-approved planning order recorded on 2026-10-08. Completed entries are
+identified explicitly; the remaining candidates are internal future work, not
+authorization to implement or publish them. Review blockers take precedence;
+publication and operational changes still require explicit approval.
 
 1. Finish the current responsiveness/framing/doctor baseline: final review,
    practical local testing, and a checkpoint only when authorized. Prepare
    explicit alpha versus stable release selection before considering promotion
    to suffix-free `0.1.0`; changing channels does not authorize publication.
-2. Clarify inherited-context capture for `create -c`. A prepared fork recipe is
-   currently materialized at first activation, so the child can depend on the
-   source's later activity and history. Decide eager native fork versus an
-   exact completed-turn boundary with recovery/compaction semantics; keep
-   fresh-context creation lazy and never invent a synthetic model turn.
+2. Inherited-context capture is now implemented: `create -c` captures and binds
+   a persistent native child immediately, using a terminal `lastTurnId` even
+   while its source works. Later activation is independent of source history
+   and activity. Fresh creation remains lazy; pending child compaction and
+   uncertain forks have explicit recovery semantics. Unit/process regressions
+   and the isolated real-Codex 0.160.1 test cover the contract; the test source
+   continues while the child is independently jumped/sent to after restart.
 3. Add generic client-presence metadata to existing attachment leases, then a
    passive opt-in projection and optional tmux status/navigation plugin. See
    [client attachments](../engineering/client-attachments.md). Presence must

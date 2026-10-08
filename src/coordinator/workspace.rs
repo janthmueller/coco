@@ -32,6 +32,8 @@ use crate::store::{
 const DEFAULT_DIFF_BYTES: usize = 4 * 1024 * 1024;
 const MAX_DIFF_BYTES: usize = 16 * 1024 * 1024;
 
+mod capture;
+
 struct CreationContext {
     mode: ContextMode,
     fork: Option<ForkContext>,
@@ -71,6 +73,7 @@ struct ForkContext {
     source: ResolvedContextSource,
     thread_id: String,
     compact: bool,
+    last_turn_id: Option<String>,
 }
 
 enum ResolvedContextSource {
@@ -186,6 +189,7 @@ impl Coordinator {
             .workspace_by_create_operation_id(&params.operation_id)?
         {
             ensure_create_replay_matches(&existing, &params, &repository.id)?;
+            capture::validate_creation_replay(&existing)?;
             let existing = self.hydrate_native_thread_runtime(existing).await;
             return self.workspace_response(existing);
         }
@@ -249,8 +253,12 @@ impl Coordinator {
             &creation.worktree,
             &creation.local_state,
             &workspace.id,
+            creation.context.fork.is_some(),
             hook,
         )?;
+        let workspace = self
+            .capture_created_context(workspace, &creation.context, loaded_profile)
+            .await?;
         if notify_hook {
             self.hooks.notify();
         }
@@ -258,9 +266,8 @@ impl Coordinator {
         self.workspace_response(workspace)
     }
 
-    /// Materializes the native Codex conversation on the first activating
-    /// operation. A prepared Git workspace deliberately has no empty native
-    /// thread: current Codex versions do not persist one until its first turn.
+    /// Materializes fresh context or a legacy deferred context recipe. New
+    /// inherited context is already persistently captured during creation.
     pub(super) async fn materialize_workspace_thread(
         &self,
         workspace: Workspace,
@@ -276,6 +283,7 @@ impl Coordinator {
         if workspace.codex_thread_id.is_some() {
             return Ok(workspace);
         }
+        capture::validate_creation_replay(&workspace)?;
         let worktree = workspace
             .worktree_path
             .as_deref()
@@ -307,6 +315,7 @@ impl Coordinator {
             loaded_profile.snapshot,
             &started_thread,
             compact,
+            WorkspaceLifecycle::Ready,
         )?;
         self.finish_context_materialization(workspace, &started_thread.id, compact)
             .await
@@ -415,6 +424,7 @@ impl Coordinator {
             pending.profile.clone(),
             &pending.started,
             false,
+            WorkspaceLifecycle::Ready,
         )
     }
 
@@ -425,6 +435,7 @@ impl Coordinator {
         profile: ProfileSnapshot,
         started_thread: &super::StartedThread,
         compact: bool,
+        expected: WorkspaceLifecycle,
     ) -> Result<Workspace, CoordinatorError> {
         let effective_profile = with_effective_thread_settings(profile, &started_thread.response);
         self.store
@@ -438,7 +449,7 @@ impl Coordinator {
             .store
             .bind_thread_with_event(
                 workspace_id,
-                WorkspaceLifecycle::Ready,
+                expected,
                 next_lifecycle,
                 NewThreadBinding {
                     thread_id: started_thread.id.clone(),
@@ -458,7 +469,7 @@ impl Coordinator {
         Ok(workspace)
     }
 
-    async fn finish_context_materialization(
+    pub(super) async fn finish_context_materialization(
         &self,
         workspace: Workspace,
         thread_id: &str,
@@ -471,11 +482,8 @@ impl Coordinator {
             self.mark_workspace_failed(&workspace.id, "thread.compact", &error, EventSource::Codex);
             return Err(error);
         }
-        let (workspace, _) = self.store.transition_workspace_lifecycle_with_event(
+        let (workspace, _) = self.store.complete_context_compaction(
             &workspace.id,
-            WorkspaceLifecycle::Starting,
-            WorkspaceLifecycle::Ready,
-            None,
             EventDraft {
                 workspace_id: Some(workspace.id.clone()),
                 turn_id: None,
@@ -578,12 +586,16 @@ impl Coordinator {
         };
 
         let (native, source) = self.resolve_context_source(source, repository).await?;
-        if !matches!(
-            native.status,
-            crate::domain::CodexThreadStatus::Idle | crate::domain::CodexThreadStatus::NotLoaded
-        ) {
+        if matches!(native.status, crate::domain::CodexThreadStatus::SystemError) {
             return Err(CoordinatorError::InvalidParams(
-                "context source thread must be idle or not loaded".to_owned(),
+                "context source thread is unavailable".to_owned(),
+            ));
+        }
+        let last_turn_id = self.worker.last_completed_turn_id(&native.id).await?;
+        if last_turn_id.is_none() {
+            return Err(CoordinatorError::InvalidParams(
+                "context source has no completed turn yet; wait for its first turn to finish"
+                    .to_owned(),
             ));
         }
         Ok(CreationContext {
@@ -592,6 +604,7 @@ impl Coordinator {
                 source,
                 thread_id: native.id,
                 compact: *compact,
+                last_turn_id,
             }),
         })
     }
@@ -676,13 +689,6 @@ impl Coordinator {
         source: Workspace,
         requested_reference: &str,
     ) -> Result<(super::NativeThread, ResolvedContextSource), CoordinatorError> {
-        let source = self.project_current_runtime_turn(source);
-        if source.active_turn_id.is_some() {
-            return Err(CoordinatorError::InvalidWorkspaceState {
-                expected: "an idle or unloaded source workspace",
-                actual: source.phase,
-            });
-        }
         let native = self.read_bound_thread(&source).await?;
         let source = ResolvedContextSource::Workspace {
             requested_reference: requested_reference.to_owned(),
@@ -725,7 +731,14 @@ impl Coordinator {
         match &context.fork {
             Some(fork) => Ok(self
                 .worker
-                .fork_thread(workspace_id, name, &fork.thread_id, cwd, config, model)
+                .fork_thread(
+                    name,
+                    &fork.thread_id,
+                    fork.last_turn_id.as_deref(),
+                    cwd,
+                    config,
+                    model,
+                )
                 .await?),
             None => Ok(self
                 .worker
@@ -811,6 +824,7 @@ impl Coordinator {
         plan: &WorktreePlan,
         local_state: &crate::git::LocalStateSnapshot,
         workspace_id: &str,
+        capture_pending: bool,
         hook: Option<HookDispatch>,
     ) -> Result<Workspace, CoordinatorError> {
         let binding = self
@@ -843,7 +857,11 @@ impl Coordinator {
             .transition_workspace_lifecycle_with_event_and_hook(
                 workspace_id,
                 WorkspaceLifecycle::Provisioning,
-                WorkspaceLifecycle::Ready,
+                if capture_pending {
+                    WorkspaceLifecycle::Starting
+                } else {
+                    WorkspaceLifecycle::Ready
+                },
                 None,
                 EventDraft::workspace(
                     EventKind::WorktreeCreated,
@@ -900,7 +918,7 @@ impl Coordinator {
             }),
         });
         let context_descriptor = json!({
-            "version": 3,
+            "version": 4,
             "request": {
                 "context": params.context,
                 "worktree": params.worktree,
@@ -917,6 +935,9 @@ impl Coordinator {
                     "mode": context.mode,
                     "source": context_source,
                     "compact": context.fork.as_ref().is_some_and(|fork| fork.compact),
+                    "captureTiming": if context.fork.is_some() { "create" } else { "activation" },
+                    "lastTurnId": context.fork.as_ref().and_then(|fork| fork.last_turn_id.as_deref()),
+                    "compactionPending": context.fork.as_ref().is_some_and(|fork| fork.compact),
                 },
                 "localState": local_state.manifest(),
             },
@@ -1348,6 +1369,11 @@ fn stored_creation_context(workspace: &Workspace) -> Result<CreationContext, Coo
                     source,
                     thread_id,
                     compact,
+                    last_turn_id: workspace
+                        .context
+                        .pointer("/resolved/context/lastTurnId")
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned),
                 }),
             })
         }

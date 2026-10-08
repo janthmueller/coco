@@ -101,6 +101,10 @@ pub(crate) enum WorkerError {
     InvalidModelCatalog(String),
     #[error("Codex returned an invalid thread read response: {0}")]
     InvalidThreadRead(String),
+    #[error(
+        "This conversation has older Codex history without a usable fork boundary. Finish a new turn in the source with current Codex, then retry"
+    )]
+    ContextBoundaryUnsupported,
     #[error("Codex returned an invalid thread usage response: {0}")]
     InvalidThreadUsage(String),
     #[error("Codex returned an invalid account quota response: {0}")]
@@ -138,6 +142,10 @@ pub(crate) trait WorkerRuntime: Send + Sync + 'static {
             "thread/read is not supported by this worker".to_owned(),
         ))
     }
+
+    /// Returns the latest terminal native turn boundary without loading the
+    /// source or exposing its conversation items to the coordinator.
+    async fn last_completed_turn_id(&self, thread_id: &str) -> Result<Option<String>, WorkerError>;
 
     /// Reads an optional backend-owned billing estimate without loading the
     /// native thread or starting its workspace executor.
@@ -246,9 +254,9 @@ pub(crate) trait WorkerRuntime: Send + Sync + 'static {
 
     async fn fork_thread(
         &self,
-        workspace_id: &str,
         name: &str,
         source_thread_id: &str,
+        last_turn_id: Option<&str>,
         cwd: &Path,
         config: Value,
         model: Option<&str>,

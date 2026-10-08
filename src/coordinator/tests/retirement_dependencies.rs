@@ -134,12 +134,8 @@ async fn record_only_delete_preserves_prepared_context_forks() {
     let source = fixture
         .create_and_materialize(fixture.create_params())
         .await;
-    let child = fixture
-        .coordinator
-        .create_workspace(fixture.fork_params(&source, "prepared-child", false))
-        .await
-        .unwrap()
-        .workspace;
+    let child =
+        super::context_capture::legacy_context_workspace(&fixture, &source, "prepared-child");
     fixture
         .coordinator
         .close_workspace(close_params(&fixture, &source))
@@ -177,11 +173,7 @@ async fn thread_delete_detects_prepared_context_dependants() {
     let source = fixture
         .create_and_materialize(fixture.create_params())
         .await;
-    fixture
-        .coordinator
-        .create_workspace(fixture.fork_params(&source, "prepared-child", false))
-        .await
-        .unwrap();
+    super::context_capture::legacy_context_workspace(&fixture, &source, "prepared-child");
     fixture
         .coordinator
         .close_workspace(close_params(&fixture, &source))
@@ -213,13 +205,6 @@ async fn deletion_recovery_preserves_a_new_prepared_context_dependency() {
     let source = fixture
         .create_and_materialize(fixture.create_params())
         .await;
-    let mut params = fixture.fork_params(&source, "prepared-child", false);
-    params.worktree = WorkspaceWorktreeRequest::NewBranch {
-        branch: None,
-        base: WorkspaceBaseRequest::Revision {
-            revision: "HEAD".to_owned(),
-        },
-    };
     fixture
         .coordinator
         .close_workspace(close_params(&fixture, &source))
@@ -238,7 +223,7 @@ async fn deletion_recovery_preserves_a_new_prepared_context_dependency() {
         )
         .unwrap();
     // Simulate a dependency present at restart after interrupted deletion.
-    fixture.coordinator.create_workspace(params).await.unwrap();
+    super::context_capture::legacy_context_workspace(&fixture, &source, "prepared-child");
     assert_eq!(fixture.coordinator.recover_workspace_retirements().await, 0);
     assert_eq!(
         fixture

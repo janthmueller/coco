@@ -632,6 +632,7 @@ pub(super) fn verify_fork_requests(requests: &[Value], child_worktree: &Path) ->
             "thread/start",
             "thread/name/set",
             "turn/start",
+            "thread/turns/list",
             "thread/fork",
             "thread/name/set",
             "thread/compact/start",
