@@ -15,14 +15,17 @@ use crate::domain::{
     Repository, Workspace,
 };
 
+mod doctor;
 mod hooks;
 mod signals;
+pub(crate) use doctor::*;
 pub(crate) use hooks::*;
 pub(crate) use signals::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DaemonMethod {
     Health,
+    Doctor,
     ModelList,
     AccountQuotaGet,
     RepositoryRegister,
@@ -62,8 +65,9 @@ pub enum DaemonMethod {
 
 impl DaemonMethod {
     #[cfg(test)]
-    pub const ALL: [Self; 36] = [
+    pub const ALL: [Self; 37] = [
         Self::Health,
+        Self::Doctor,
         Self::ModelList,
         Self::AccountQuotaGet,
         Self::RepositoryRegister,
@@ -104,6 +108,7 @@ impl DaemonMethod {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Health => "health",
+            Self::Doctor => "doctor",
             Self::ModelList => "model.list",
             Self::AccountQuotaGet => "account.quota.get",
             Self::RepositoryRegister => "repository.register",
@@ -145,6 +150,7 @@ impl DaemonMethod {
     pub fn parse(value: &str) -> Option<Self> {
         match value {
             "health" => Some(Self::Health),
+            "doctor" => Some(Self::Doctor),
             "model.list" => Some(Self::ModelList),
             "account.quota.get" => Some(Self::AccountQuotaGet),
             "repository.register" => Some(Self::RepositoryRegister),
@@ -1072,6 +1078,7 @@ mod tests {
             names,
             [
                 "health",
+                "doctor",
                 "model.list",
                 "account.quota.get",
                 "repository.register",
@@ -1119,6 +1126,7 @@ mod tests {
     #[test]
     fn request_dtos_preserve_all_wire_field_names_and_defaults() {
         assert_request(HealthParams {}, DaemonMethod::Health, json!({}));
+        assert_request(DoctorParams {}, DaemonMethod::Doctor, json!({}));
         assert_request(ModelListParams {}, DaemonMethod::ModelList, json!({}));
         assert_request(HookListParams {}, DaemonMethod::HookList, json!({}));
         assert_request(HookReloadParams {}, DaemonMethod::HookReload, json!({}));

@@ -32,6 +32,12 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub(super) enum Command {
+    /// Check installation, connections, and saved workspace bindings without changing them.
+    Doctor {
+        /// Emit the complete diagnostic report as machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Manage repositories known to CoCo.
     Repo {
         #[command(subcommand)]
@@ -153,6 +159,7 @@ impl Command {
             Self::Status(args) => args.all_repos,
             Self::Signal { command } => command.all_repos(),
             Self::Repo { .. }
+            | Self::Doctor { .. }
             | Self::Model { .. }
             | Self::Models { .. }
             | Self::Create(_)
@@ -181,6 +188,7 @@ impl Command {
             Self::Reopen(args) => args.global,
             Self::Delete(args) => args.global,
             Self::Repo { .. }
+            | Self::Doctor { .. }
             | Self::Model { .. }
             | Self::Models { .. }
             | Self::Create(_)

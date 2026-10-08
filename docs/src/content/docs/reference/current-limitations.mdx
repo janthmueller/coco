@@ -6,6 +6,28 @@ description: Resolve connection, workspace, cleanup, and compatibility problems.
 CoCo is alpha software for Linux and macOS. These checks cover common
 problems with the current repository version and its tested Codex 0.160.1 setup.
 
+## Check your setup
+
+```bash
+coco doctor
+```
+
+Get a short report about your installed commands, connection, repositories,
+worktrees, saved conversations, and available resource controls. Problems
+include a suggested next step. It also detects a coordinator left running
+from another installation or using different settings.
+
+You can run it from any directory, even before starting `cocod`. Checks that
+need the coordinator are skipped when it is unavailable. Doctor leaves your
+workspaces unchanged and does not start agents or repair anything.
+
+For the individual checks and selected executable paths, use
+`coco doctor --json`. Review local paths and workspace names before sharing
+that report. Credential contents, conversations, and raw command errors are
+not included. Checks have time limits; a partial report says what could not
+be checked. See [diagnostic options](../cli/#diagnostics) for exit codes and
+collection limits.
+
 ## CoCo cannot connect
 
 Start the coordinator in another terminal:

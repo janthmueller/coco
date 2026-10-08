@@ -51,6 +51,9 @@ pub(super) async fn run(cli: Cli) -> Result<()> {
 async fn run_with_interaction(cli: Cli, interaction: &mut dyn Interaction) -> Result<()> {
     validate_interaction_mode(&cli)?;
     let paths = CocoPaths::from_env()?;
+    if matches!(&cli.command, Command::Doctor { .. }) {
+        return run_doctor(&cli, &paths).await;
+    }
     let cwd = std::env::current_dir().context("could not determine current directory")?;
     let all_repos = cli.requests_all_repositories();
     let global = cli.requests_global_search();
@@ -65,6 +68,9 @@ async fn run_with_interaction(cli: Cli, interaction: &mut dyn Interaction) -> Re
     let repository_path = resolve_repository_path(&cwd, scope_path);
 
     match command {
+        Command::Doctor { .. } => {
+            unreachable!("doctor runs without a repository or current-directory lookup")
+        }
         Command::Signal { command } => {
             super::signals::run(command, &paths, repository_path, all_repos, global).await
         }
@@ -156,6 +162,17 @@ pub(super) fn validate_interaction_mode(cli: &Cli) -> Result<()> {
         bail!("--interactive cannot be used with --no-input");
     }
     Ok(())
+}
+
+async fn run_doctor(cli: &Cli, paths: &CocoPaths) -> Result<()> {
+    reject_top_level_scope(
+        cli.scope_path.is_some() || cli.requests_all_repositories() || cli.requests_global_search(),
+        "doctor",
+    )?;
+    let Command::Doctor { json } = &cli.command else {
+        unreachable!("doctor dispatch")
+    };
+    super::doctor::run(paths, *json).await
 }
 
 async fn run_limits_scoped(

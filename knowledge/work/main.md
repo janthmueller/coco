@@ -5,7 +5,7 @@ description: Tracks repository bootstrap, the Rust baseline, and early CoCo arch
 tags: [work, branch, bootstrap, rust, mcp, architecture]
 status: active
 branch: main
-updated: 2026-10-06
+updated: 2026-10-08
 ---
 
 # main — repository foundation
@@ -17,10 +17,62 @@ architectural baseline for CoCo.
 
 ## Active work
 
-- [ ] Implement the approved release-channel transition after this CLI slice:
-  make normal publication deliberate, support explicit alpha versus stable
-  releases, optionally bake one final `0.1.0-alpha.N`, and promote the tested
-  line to `0.1.0` without claiming `1.0` compatibility.
+- [x] Record the user-approved follow-up order in canonical product knowledge:
+  finish/review the current baseline and release-channel preparation; clarify
+  inherited-context capture; add generic client presence then tmux; prove the
+  optional dev-stack adapter; harden opt-in background operation. See
+  [the ordered plan](../product/v0-spec.md#agreed-follow-up-order).
+- [x] Review the complete current local diff, including new untracked modules,
+  for runtime/cancellation correctness, passive diagnostics, safety, regression
+  coverage, and public/internal documentation consistency. Report findings;
+  product fixes require separate authorization.
+- [x] Fix doctor's two reproduced Git false positives before
+  the baseline checkpoint: accept registered repositories with an unborn HEAD
+  and preserve protected user `safe.directory` configuration. Add regressions
+  for both without weakening checkout-binding or ownership validation.
+- [x] Resolve the re-review's diagnostic subprocess-fixture instability before
+  the checkpoint: freshly written executable scripts can fail with `ETXTBSY`
+  under parallel tests. The separate cancellation assertion was traced to an
+  exited but unreaped child and fixed with bounded owned reaping, preserving
+  strict process-disappearance checks. Corrections and verification are
+  recorded below; no checkpoint or publication was authorized.
+- [x] Remove cross-workspace blocking from the executor registry before adding
+  more pre-`0.1.0` surface area.
+  - [x] Add a deterministic regression proving a slow activation for one
+    workspace does not delay activation or passive runtime inspection for an
+    unrelated workspace.
+  - [x] Replace daemon-wide executor mutation across awaited startup/App
+    Server work with per-workspace single-flight coordination.
+  - [x] Preserve same-workspace serialization, shutdown, policy-update,
+    containment, and resource-sampling semantics; run focused and full gates.
+- [x] Harden outbound Codex frame cancellation before proceeding to doctor:
+  interrupted partial writes must not corrupt the shared transport. The
+  post-implementation review reproduced this remaining failure mode.
+- [x] After the concurrency correction, design and implement a bounded,
+  read-only `coco doctor` with timeouts, no repair mode, no model turn, and no
+  secret output.
+  - [x] Add installation and live-daemon checks with compact human output,
+    versioned JSON, and failure exit status without discarding the report.
+  - [x] Inspect persisted bindings and Git/native thread truth through the
+    existing adapter boundaries; never resume a thread or activate an executor.
+  - [x] Bound subprocess/native probes and total work, distinguish failures
+    from unavailable optional capabilities, and redact untrusted errors.
+  - [x] Cover unavailable, stalled, mismatched, and healthy installations;
+    update troubleshooting/reference docs and run quality gates sequentially.
+- [ ] Only after both slices, finish the explicit alpha/stable release-channel
+  workflow: make publication deliberate, support explicit alpha versus stable,
+  optionally bake a final `0.1.0-alpha.N`, then promote the tested line to
+  `0.1.0` without claiming `1.0` compatibility. Do not commit, push, or publish
+  during the current work unless the user asks separately.
+- [x] Record the accepted post-v0 client-attachment and tmux-integration
+  direction without presenting it as shipped behavior or a `0.1.0` blocker.
+- [x] Record optional per-workspace Compose stacks and local routing as a
+  possible future integration, without implementing or publishing it.
+- [ ] After context semantics and client/tmux integration, design and prove a
+  small external dev-stack adapter:
+  isolated Compose project identity, optional shared proxy, ordinary localhost
+  fallback, explicit start/stop, and safe retirement with retained data. See
+  [the feature candidate](../product/v0-spec.md#candidate-per-workspace-development-stacks).
 - [x] Make interactive CLI choices faster to scan and visually consistent.
   - [x] Represent defaults structurally instead of embedding `default` and
     separators in arbitrary detail strings.
@@ -6994,3 +7046,980 @@ Unresolved follow-up:
 
 - Implement and verify the approved explicit alpha/stable release-channel
   workflow before promoting the tested line to `0.1.0`.
+
+## Client attachments and tmux integration design — 2026-10-08
+
+Scope:
+
+- Record the accepted direction for an optional tmux plugin that can show and
+  navigate the panes attached to CoCo workspaces. Keep the design internal and
+  explicitly unimplemented.
+
+Decisions:
+
+- Model terminal presence as generic generation-local client attachments on
+  the existing renewable `workspace.attach` leases. tmux is the first proposed
+  adapter, not a coordinator dependency or a new workspace runtime.
+- Keep agent execution and terminal presence independent. A workspace may work
+  headlessly, remain ready with attached TUIs, or have multiple simultaneous
+  attachments. No pane owns the workspace.
+- Identify a tmux pane by both an opaque server scope and pane ID; treat the
+  session/window/pane label as bounded untrusted display text. Expiry and
+  release remove the association, and nothing is persisted to SQLite.
+- Reserve ordinary compact status. A future explicit generic clients
+  projection may expose attachments, while a tmux status-line integration must
+  use a passive bounded snapshot instead of repeatedly invoking the full native
+  status path.
+- Do not infer exact thread attachment from a manually launched Codex process
+  merely because its pane is in a managed worktree.
+- Stage generic lease metadata and tests before status projection and the
+  separately installable plugin. This remains suitable post-`0.1.0` work,
+  after the current responsiveness and diagnostic priorities.
+
+Canonical record:
+
+- `knowledge/engineering/client-attachments.md` defines the terminology,
+  lifecycle, security constraints, presentation direction, delivery slices,
+  acceptance boundaries, and non-goals. The runtime and v0 specification link
+  to it without changing shipped behavior.
+
+Verification:
+
+- Documentation-only change; checked internal links and formatting with
+  `git diff --check`.
+
+Unresolved follow-up:
+
+- Finalize the CLI projection name during implementation (`--clients` is the
+  current provisional choice) and decide whether plugin distribution starts in
+  this repository or a dedicated integration repository.
+
+## Pre-0.1 responsiveness and diagnostics plan — 2026-10-08
+
+Scope:
+
+- Correct the known executor-registry contention first, then add a bounded
+  diagnostic command, and only afterward complete release-channel work.
+- Keep the entire sequence local and uncommitted until explicitly requested;
+  do not push or publish.
+
+Plan and invariants:
+
+1. Reproduce the executor contention deterministically. Today one mutex guards
+   every workspace runtime and remains held across process startup,
+   containment activation, `environment/add`, and `environment/info`. An
+   unrelated workspace can therefore wait behind a slow or failing activation.
+2. Introduce per-workspace single-flight coordination. Operations concerning
+   one workspace remain ordered, while unrelated workspaces may start, stop,
+   sample resources, or update policy independently. No duplicate executor may
+   be created for one workspace.
+3. Keep daemon close safe: it must prevent or reconcile concurrent new starts,
+   drain each runtime exactly once, and retain best-effort cleanup across all
+   workspaces.
+4. Preserve durable desired resource-policy revisions while keeping live
+   runtime state generation-local. Policy updates and runtime replacement for
+   the same workspace must stay serialized.
+5. Add focused concurrency and failure-cleanup coverage, then run formatting,
+   Clippy, the complete Rust suite, and relevant real-process gates in sequence.
+6. Once responsiveness is proven, specify `coco doctor` as a finite read-only
+   report over installation, daemon transport, Codex capabilities, persistent
+   state, Git/worktree bindings, and platform containment. Each probe needs a
+   timeout; doctor performs no repair, starts no model turn, and prints no
+   credential or capability token.
+7. Treat tmux client attachments as later `0.1.x` integration work, not part of
+   either pre-`0.1.0` slice.
+
+Current state:
+
+- The executor registry correction and its outbound cancellation follow-up
+  plus bounded diagnostics are complete and verified. Release-channel work
+  remains the next planned slice after the current review. All changes remain
+  local, unstaged, and uncommitted.
+
+### Executor concurrency correction — 2026-10-08
+
+Implementation and findings:
+
+- The global executor-state mutex was held across awaited process startup,
+  containment activation, `environment/add`, `environment/info`, and live
+  resource-policy application. The new runtime registry holds its lookup mutex
+  only long enough to obtain a workspace entry; each entry serializes its own
+  runtime and desired policy.
+- Shared lifecycle leases admit runtime operations. Daemon close acquires the
+  exclusive lease, waits for admitted operations, rejects new operations, and
+  drains every registered runtime. Repository-level coordinator locks retain
+  their existing Git/lifecycle safety contract.
+- RPC-server shutdown cancels callers. A mutation that already owns its
+  workspace lock therefore continues in one Tokio task until it finishes
+  registration or cleanup. This creates no additional OS process. Registration
+  and verification requests each have a fifteen-second timeout so a missing
+  native response cannot hold daemon close indefinitely.
+- Cancelling a native request previously retained its pending response slot.
+  Added cancellation cleanup at the Codex transport boundary with coverage for
+  a busy correlation lock and for ignored late responses.
+- Resource and policy reads for unknown workspaces remain passive and do not
+  allocate registry entries. Existing runtime replacement, revision checks,
+  CPU-cap-removal staging, and containment enforcement stay authoritative.
+- Test fixtures and cases live under `daemon/execution/tests/` in separate
+  support, concurrency, and lifecycle modules. The shared fake Codex IO helper
+  is test-only; no external library API was expanded.
+
+Verification:
+
+- Both blocked-registration and blocked-verification regressions fail against
+  the exact previous `HEAD` implementation: an unrelated operation cannot
+  advance until its timeout. Restored the new implementation afterward.
+- All 17 focused executor tests pass, including delayed endpoint publication,
+  single-flight, stop/start ordering, policy ordering, replacement, real child
+  termination after errors, and bounded missing-response cleanup.
+- Formatting and all-target/all-feature Clippy with warnings denied pass.
+- `cargo test --locked --all-targets --all-features --no-fail-fast` passes:
+  446 library tests and all 5 process-smoke tests pass; 10 explicit live,
+  platform, or interactive tests remain ignored in that default gate.
+- All 3 model-free `real_codex_compat` contracts pass against the existing
+  official `codex-cli 0.160.1` binary, with no wrapper, in 34.47 seconds.
+  The installed PATH version is still 0.159.3 and was not changed.
+- `cargo machete` finds no unused dependency. `cargo deny --locked --offline
+  check` passes against the existing advisory cache with only the pre-existing
+  duplicate-version warnings. The cache lock and socket-dependent tests used
+  approved execution outside the filesystem/socket sandbox.
+- `cargo fmt --all -- --check` and `git diff --check` pass. No public command
+  surface changed, so the public documentation and its static build were not
+  modified or rebuilt.
+
+Unresolved follow-up:
+
+- Follow-up review below reopened outbound cancellation safety before doctor.
+  No commit, push, release, registry publication, or remote configuration
+  change was performed.
+
+### Post-implementation concurrency review — 2026-10-08
+
+Scope and findings:
+
+- Reviewed the complete CLI attach path rather than inferring command-level
+  parallelism from runtime-registry tests. Separate RPC connections are
+  concurrent; an attachment's repository lock is released before its native
+  TUI lifetime. An already-open TUI does not monopolize that lock.
+- Different workspaces in the same repository still serialize attach
+  preparation, including resume/fork and executor activation. Different
+  repositories no longer share CoCo's awaited runtime-registry lock, but native
+  operations can still queue.
+- Matching upstream 0.160.1 source declares `environment/add` exclusive and
+  `environment/info` shared-read in one global `environment` serialization
+  domain. A blocked native verification can hold up another registration;
+  mock executor tests do not prove otherwise.
+- Found a reproducible outbound cancellation edge in `Inner::write_frame`:
+  cancelling `write_all` under backpressure after a partial frame leaves bytes
+  that join the next frame. The new request deadlines can exercise this
+  pre-existing transport weakness. Correlation-slot cleanup is insufficient;
+  frame ownership needs a separate correction before doctor.
+
+Verification:
+
+- All six executor concurrency regressions pass again, as do both new Codex
+  response-cancellation tests and the existing concurrent attach/resume test.
+- A temporary direct-client test used a 128 KiB request against the existing
+  64 KiB duplex buffer, cancelled after observing its first byte, then sent
+  another message. It confirmed invalid combined JSON deterministically. The
+  probe was removed afterward; no production code was changed in this review.
+
+Next action:
+
+- Finish cancellation-safe outbound framing before starting the bounded
+  read-only `coco doctor` slice. Keep repository-lock granularity as a separate
+  design topic; do not claim that all jumps are now wait-free. No commit, push,
+  or publication is authorized.
+
+### Outbound framing correction — 2026-10-08
+
+Active scope and plan:
+
+- User authorized fixing the reproduced partial-write cancellation defect;
+  retain the no-commit, no-push, and no-publication boundary.
+- Give the transport one owned writer task and a bounded frame queue. Caller
+  cancellation may abandon a queued frame before writing starts, but cannot
+  interrupt a frame already being written. Do not create an OS process or a
+  detached task per message.
+- Bound each admitted write; on timeout or I/O failure mark the connection
+  terminal before considering another frame. Explicit close must interrupt a
+  blocked writer without waiting for its deadline.
+- Keep framing/correlation, byte writing, and their regression cases in focused
+  private modules. Do not expand the library API or change dependencies.
+- Cover mid-write cancellation, queued cancellation, terminal write failure,
+  timeout, and shutdown, then run focused/full tests and normal quality gates
+  sequentially. No changes to repository-lock granularity or doctor in this
+  correction.
+
+Implementation findings:
+
+- Added one private transport writer task with an eight-frame queue. Once a
+  write starts, caller cancellation abandons only its acknowledgement/response
+  wait, not the bytes being written. Queued cancelled frames are skipped and
+  cancellation during queue backpressure does not enqueue a request.
+- A fifteen-second write deadline or I/O failure marks the connection terminal
+  before another frame is written. Failure and explicit close signal the
+  writer even when a previous failure already exists, without replacing that
+  first failure.
+- The first process gate exposed shutdown ordering that isolated framing tests
+  did not cover. Explicit close must stop the writer, explicitly shut down its
+  generic split write half, and allow a bounded WebSocket close before stopping
+  the App Server process. Dropping the write half alone retains its underlying
+  stream through the reader and gives the peer a reset without a close frame.
+- The writer shutdown and bridge close each have a two-second bound. The
+  bridge discards an unterminated JSONL prefix instead of forwarding it as a
+  complete WebSocket message. Focused tests now cover both graceful close and
+  a bridge that never completes its handshake.
+- Production writing lives in `codex/writer.rs`; regression cases, fake write
+  failure evidence, and WebSocket shutdown cases remain separate private test
+  modules. Existing layering and external visibility are unchanged.
+
+Verification:
+
+- All twelve new framing/shutdown regressions pass in the complete suite,
+  including mid-write cancellation of requests, notifications, and responses;
+  cancelled queued/capacity-blocked frames; partial-write errors; the real
+  fifteen-second deadline; earlier-failure shutdown; and graceful/bounded
+  WebSocket close. No model request was made for these cases.
+- The corrected five-test process-smoke gate passes independently. The final
+  `cargo test --locked --all-targets --all-features --no-fail-fast --quiet --
+  --test-threads=4` passes: 458 library tests and all 5 process-smoke tests pass,
+  with the existing 10 opt-in tests ignored in that default gate.
+- All 3 model-free `real_codex_compat` cases pass against the existing official
+  Codex 0.160.1 executable in 33.87 seconds using the explicit opt-in and one
+  test thread. The installed Codex and running user daemon were not changed.
+- All-target/all-feature Clippy with warnings denied, formatting, and
+  `git diff --check` pass. `cargo machete` finds no unused dependency;
+  `cargo deny --locked --offline check` passes against the existing advisory
+  cache with only the pre-existing duplicate-version warnings.
+- Resource-intensive Cargo gates ran sequentially. Socket-dependent gates and
+  the advisory-cache lock used approved execution outside the sandbox. No
+  public CLI/docs, manifest, lockfile, or release settings changed.
+
+Handoff:
+
+- The reproduced framing defect and shutdown regression are resolved. The
+  next planned slice remains bounded read-only `coco doctor`; no doctor
+  implementation started here. Same-repository attach preparation and native
+  environment queueing remain the separately documented concurrency limits.
+- No staging, commit, push, publication, or remote configuration change was
+  performed.
+
+### Read-only doctor implementation — 2026-10-08
+
+Active scope:
+
+- Implement the approved next diagnostics slice locally. Keep earlier runtime
+  and framing changes intact; no staging, commit, push, or publication.
+- `doctor` must remain usable when the daemon is unavailable: local checks
+  still run, dependent checks are explicitly skipped, and no service starts.
+- Preserve the dependency direction: CLI owns presentation, installation
+  checks, and local RPC; the daemon/coordinator/adapters own persisted state,
+  native thread inspection, Git binding checks, and capability evidence.
+- Use a finite report with stable check identifiers and severities, actionable
+  hints, versioned JSON, and no raw subprocess/native errors, credential
+  contents, full native conversations, or configuration dumps.
+
+Plan:
+
+1. Add typed diagnostics contracts and focused private modules rather than
+   growing the CLI/coordinator facades.
+2. Probe binaries and the live daemon with deadlines. Report the actual live
+   daemon's configuration separately from the caller's installation.
+3. Inspect selected repository/workspace bindings passively with bounded
+   adapter probes; cap collection work and report incompleteness explicitly.
+4. Add regression/process tests, concise public troubleshooting instructions,
+   and canonical engineering/product documentation.
+5. Run focused tests, format, Clippy, full tests, and relevant native/docs
+   gates sequentially before handoff.
+
+Implementation and findings:
+
+- Added system-wide `coco doctor [--json]` without selectors, current-directory
+  dependence, repair, daemon auto-start, native resumes, executor activation,
+  or model turns. Explicit scope arguments are rejected rather than silently
+  ignored. Normal output summarizes healthy bindings and prints problems with
+  actionable hints; JSON retains individual checks and actual live metadata.
+- The CLI reports its own installation separately from the running daemon.
+  Codex's captured `initialize.userAgent` identifies the running native build,
+  avoiding a misleading version from an executable updated after startup.
+  Error reports remain usable on stdout and exit 1 without a second stderr
+  message; warnings and expected prepared/closed skips alone exit 0.
+- Saved-state inspection uses a separate read-only SQLite connection, a short
+  busy timeout, and its own interrupt handle. It neither waits for CoCo's
+  ordinary connection mutex nor migrates or interrupts that connection.
+  Minimal binding columns avoid loading profiles, context, or conversations.
+- Git metadata and native `thread/read(includeTurns=false)` verify bindings
+  through their existing adapter boundaries. Private runtime-file checks use
+  type/permission metadata only. No credentials, native raw errors, Git output,
+  SQL errors, endpoint URLs, or subprocess stderr appear in the report.
+- Three-second probe deadlines, bounded subprocess output/cleanup, one
+  twenty-second daemon report budget, and 32-repository/64-workspace caps keep
+  diagnostic work finite. Timeouts and unavailable dependencies mark coverage
+  incomplete explicitly; expected lifecycle skips do not.
+- Focused private modules and tests preserve the staged dependency direction.
+  Canonical diagnostics documentation and short public setup/reference
+  instructions describe the implemented contract. No dependency, lockfile,
+  release configuration, or running user service was changed.
+- The initial full gate exposed a process-harness expectation, not a product
+  failure: doctor reads both model pages, so CLI/MCP/doctor now legitimately
+  produce six discovery requests rather than four. The assertion now proves
+  exactly three first-page and three second-page requests; doctor's own check
+  separately proves exactly two passive requests.
+- A new process-cancellation fixture initially observed its PID file between
+  creation and writing. Atomic fixture publication removes that test race;
+  process kill/reap assertions remain intact.
+
+Verification:
+
+- `cargo clippy --locked --all-targets --all-features -- -D warnings` passes.
+- Final `cargo test --locked --all-targets --all-features --no-fail-fast
+  --quiet -- --test-threads=4` passes: 484 library tests and all 6 process-smoke
+  tests pass. The existing 10 explicitly opted-in live/platform/interactive
+  tests remain ignored by this default gate.
+- All 3 model-free native compatibility cases pass against the existing
+  official Codex 0.160.1 executable in 34.43 seconds with
+  `COCO_RUN_REAL_CODEX_COMPAT=1`, the exact `COCO_REAL_CODEX_BINARY`, and one
+  test thread. The extended lifecycle contract runs doctor before and after
+  daemon restart, validates native checks and the exact running version, and
+  proves stored workspace fields and executor PID are unchanged.
+- `pnpm --dir docs check` passes with no errors or warnings.
+  `DOCS_BASE_PATH=/coco pnpm --dir docs build` produces the static 17-page
+  GitHub Pages export and search index; the public-boundary check passes.
+- `cargo machete` finds no unused dependencies. `cargo deny --locked --offline
+  check` passes against the existing advisory cache with only the pre-existing
+  duplicate-version warnings. Socket-dependent tests, the cached package
+  manager's build access, and the advisory-cache lock used approved execution
+  outside the sandbox; no model access or user-service changes occurred.
+- `cargo fmt --all -- --check`, `git diff --check`, and the compiled
+  `target/debug/coco doctor --help` pass. The Git index remains empty.
+- No Nix flake gate was run: newly added Rust files are still untracked and
+  therefore absent from Git-flake input `.`. Staging was not authorized; do
+  not replace the reference with `path:.` to include ignored build output.
+
+Handoff and remaining scope:
+
+- The doctor slice is complete locally. To test the full new report, use the
+  matching newly built CLI and daemon; an older running daemon is reported as
+  unsupported rather than restarted automatically. Stop active work before
+  deliberately replacing a running coordinator.
+- Diagnostics is a bounded best-effort inspection, not an atomic cross-system
+  snapshot, repair mechanism, or proof of every native Codex operation. These
+  are explicit contract limits, not outstanding implementation defects.
+- The next planned product discussion remains deliberate alpha/stable release
+  channels. Generic client attachments/tmux and repository-level attach
+  concurrency remain separate documented work; none was implemented here.
+- No staging, commit, push, publication, installation change, or remote
+  configuration change was performed.
+
+### Optional workspace development stacks — 2026-10-08
+
+Scope and plan:
+
+- User requested recording the Compose/Traefik idea as a possible next feature
+  only. Preserve the completed doctor work and existing release-plan ordering;
+  do not implement an adapter, install Docker/Traefik, or change public docs.
+- Promote the candidate into the internal product specification with explicit
+  proposed status, integration boundaries, safety constraints, and unresolved
+  design questions. Track a later design/proof task rather than a shipped
+  command or promised plugin API.
+
+Recorded direction:
+
+- Parallel application stacks belong to the corresponding worktrees, with
+  stable unique Compose project identities and independently scoped data.
+  Reuse Compose's existing project mechanism; optional shared Traefik supplies
+  convenient workspace URLs but does not provide stack/data isolation itself.
+- Preserve ordinary `docker compose up` and localhost defaults for colleagues.
+  An opt-in adapter supplies explicit variables and a separate Compose overlay
+  that removes conflicting host-port bindings and adds unique routing labels.
+- Prefer a separately usable adapter over Docker/proxy ownership in the CoCo
+  core or a new generic plugin framework. Existing lifecycle hooks and guards
+  provide integration seams; their retries and pre/post boundaries still apply.
+- Start and stop stacks explicitly initially. A read-only guard may reject
+  close/delete while owned containers are running. Post-close/delete hooks are
+  too late to protect a worktree; retain volumes by default and require
+  separate authorization for destructive data cleanup.
+- Container CPU/memory accounting and limits are independent from CoCo's
+  executor containment. DNS/TLS, routing names, application URLs/CORS, storage
+  isolation, recovery, and configuration provenance need a later design review.
+
+Verification and handoff:
+
+- Reviewed the existing hook/guard contract and relevant official Compose and
+  Traefik documentation during the preceding discussion; source links remain
+  with the canonical candidate. Checked the documentation diff and local link
+  targets; no runtime test is required for this documentation-only addition.
+- This is an unimplemented feature candidate, not a `0.1.0` release blocker or
+  authorization to start development. No staging, commit, push, publication,
+  installation, or external configuration change was performed.
+
+### Follow-up ordering and complete diff review — 2026-10-08
+
+Active scope and plan:
+
+- User approved recording the proposed next-step order and then reviewing the
+  entire existing diff. This authorizes planning documentation and diagnostic
+  review, not feature implementation, product fixes, staging, commit, push,
+  publication, or installation changes.
+- Put the order in canonical product knowledge rather than only this branch
+  record. Preserve explicit release authorization and keep candidate features
+  out of README and the public site.
+- Review production runtime coordination and transport cancellation first,
+  including new files absent from ordinary `git diff`. Then inspect doctor
+  ownership, bounds, privacy, process/file/native probes, CLI exit/rendering,
+  test changes, and documentation consistency.
+- Use existing focused/full tests proportionally and only isolated, reversible
+  diagnostic probes if a suspected defect needs reproduction. Run heavyweight
+  checks sequentially; do not spawn subagents or touch running user services.
+- Record reproducible findings with severity, source locations, user impact,
+  evidence, and any unresolved verification limits before handoff.
+
+Recorded plan:
+
+- Canonical product knowledge now contains the agreed five-step order: current
+  baseline and deliberate release channels; inherited-context capture;
+  generic client presence and tmux; optional development-stack proof; optional
+  background-operation hardening and service adapters. Candidates stay out of
+  the public documentation and are not authorization to implement or publish.
+- Review blockers precede the planned baseline checkpoint. Automatic idle
+  retirement remains lower priority; neither tmux nor Compose is a stable
+  release requirement.
+
+Review findings:
+
+- **P2 — valid unborn repository reported as broken.**
+  `src/git/diagnostics.rs:31` requires `rev-parse --symbolic-full-name HEAD`
+  for every binding, including registered repositories without workspaces.
+  Ordinary repository discovery/registration does not require a first commit.
+  In an isolated newly initialized repository, discovery succeeds while the
+  exact diagnostic command exits 128 for the unborn HEAD. Doctor maps this to
+  a repository error with an accessibility hint and therefore exits 1 although
+  the registered Git identity is valid. Separate repository identity from
+  checkout/branch validation or explicitly handle unborn HEAD; add a
+  registration-plus-doctor regression without relaxing workspace validation.
+- **P2 — protected ownership exception discarded by diagnostics.**
+  `src/git/diagnostics.rs:35` sets `GIT_CONFIG_GLOBAL=/dev/null`, unlike ordinary
+  Git execution, which clears that override and retains protected user config.
+  A repository trusted through the user's `safe.directory` therefore works
+  normally but fails the doctor probe with dubious ownership. Reproduced with
+  isolated XDG Git config and Git's different-owner test switch, without
+  changing user configuration or ownership: the normal environment succeeds;
+  adding the diagnostic global-config override exits 128. Preserve the
+  adapter's legitimate trust configuration; never bypass ownership validation
+  with a blanket `safe.directory=*`. Add a focused regression.
+- No additional confirmed defect was found in per-workspace runtime
+  coordination, cancellation-safe framing, bounded shutdown, passive
+  diagnostics ownership, redaction, CLI exits, or public/internal separation.
+  Repository-level attach and native environment-domain queueing remain
+  documented limits, not a claim that all complete CLI commands run in parallel.
+
+Verification:
+
+- Fresh `cargo test --locked --all-targets --all-features --no-fail-fast
+  --quiet -- --test-threads=4` passes: 484 library tests and 6 process-smoke
+  tests; 10 explicitly opted-in tests remain ignored by the default gate.
+- Fresh `cargo clippy --locked --all-targets --all-features -- -D warnings`,
+  `cargo fmt --all -- --check`, and `git diff --check` pass.
+- The two failures above were reproduced with native Git commands and traced
+  through the doctor source; no new end-to-end regression was added during
+  this review. Green existing tests do not cover these cases. Earlier native
+  Codex and static-doc gates remain recorded above and were not rerun here.
+- Reviewed the complete tracked diff and newly added modules/tests, including
+  files omitted from ordinary `git diff`. No product code, running service,
+  installed version, Git index, or remote state was changed.
+
+Handoff:
+
+- The review is complete, but the current baseline has two outstanding doctor
+  fixes before treating it as checkpoint-ready. Next action is user approval
+  to correct both and add targeted regression coverage, then rerun the gates.
+- No staging, commit, push, publication, or external configuration change was
+  performed. New files remain untracked; a Git-flake gate still requires their
+  inclusion in the index and must not substitute `path:.`.
+
+These two review findings were subsequently resolved in the correction below.
+
+### Doctor Git false-positive corrections — 2026-10-08
+
+Active scope and plan:
+
+- User authorized correcting the two findings from the complete diff review.
+  Preserve all existing local changes; do not stage, commit, push, publish,
+  change installed versions, or touch running user services.
+- Separate registered-repository identity inspection from checkout/HEAD
+  inspection. Empty repositories may register successfully, but workspace
+  branch/detached binding validation must remain strict.
+- Preserve protected user Git configuration, including `safe.directory`,
+  while retaining sanitized ambient repository/config overrides, disabled
+  optional locks, bounded capture, cancellation, and ownership checks.
+- Add focused regression coverage for registration of an unborn repository,
+  trusted versus untrusted ownership, and branch/detached bindings. Keep
+  process environment and user Git configuration unchanged by the tests.
+- Prove the regressions fail before the corrections, then run targeted and
+  full tests, formatting, and warning-denied lint gates sequentially. Update
+  canonical diagnostic knowledge and handoff evidence after verification.
+
+Implementation and decisions:
+
+- Added a repository-identity-only diagnostic alongside the existing strict
+  checkout binding probe. Coordinator repository checks use the former;
+  workspace checks still require a resolved HEAD and matching branch/detached
+  state. Both share the same bounded command builder and validated canonical
+  path parser; no missing HEAD is treated as a detached checkout.
+- Removed the `/dev/null` global-config override. As with ordinary Git
+  execution, clear the ambient config-path override and let protected user
+  configuration apply. Do not install an exception or weaken ownership checks.
+- Added four tests in focused Git diagnostics and coordinator test modules:
+  successful unborn-repository registration/reporting, strict rejection of an
+  unborn checkout, branch/detached metadata, and trusted versus untrusted
+  ownership with isolated child XDG configuration. Tests neither change real
+  ownership nor mutate process-global environment or user configuration.
+- Updated canonical diagnostic ownership/verification knowledge and its log.
+  Existing public docs already describe the corrected contract; no command,
+  flag, output schema, dependency, release setting, or public API changed.
+
+Verification:
+
+- Before correction, the new coordinator regression failed on the false
+  repository error and the native Git trust regression rejected the explicitly
+  trusted fixture. Both then passed with the fixes applied.
+- All 3 focused Git diagnostics tests and all 7 coordinator doctor tests pass,
+  including existing unexpected-branch and closed/thread binding cases.
+- `cargo test --locked --all-targets --all-features --no-fail-fast --quiet
+  -- --test-threads=4` passes: 488 library tests and 6 process-smoke tests;
+  10 explicitly opted-in tests remain ignored. Library/process stages took
+  39.38/17.61 seconds. Socket fixtures used approved sandbox escalation.
+- `cargo clippy --locked --all-targets --all-features -- -D warnings`,
+  `cargo fmt --all -- --check`, `git diff --check`, and `cargo machete` pass.
+  `cargo deny --locked --offline check` passes against the existing advisory
+  cache with only the pre-existing duplicate-version warnings.
+- Final source review confirms shared bounds/redaction, checkout and ownership
+  rejection, and per-child test isolation remain intact. The full tests also
+  exercise the real CLI/daemon report. No extra live-Codex, docs, or Nix gate
+  was rerun: native transport/public docs are unchanged in this fix; untracked
+  modules are still absent from Git-flake input `.`.
+
+Handoff:
+
+- Both P2 review findings are resolved with regression coverage. The next
+  planned step remains deliberate local baseline/checkpoint and release-channel
+  preparation, not automatic publication or a new feature.
+- No staging, commit, push, publication, installation, running user-service,
+  remote configuration, or dependency change was performed. Preserve the full
+  existing local diff and obtain separate authority for a checkpoint.
+
+### Full diff re-review after Git corrections — 2026-10-08
+
+Active scope and plan:
+
+- User requested another review of the complete local diff after the two
+  doctor fixes. Inspect tracked changes and new files, with particular focus
+  on Git trust/binding correctness, runtime ordering, transport cancellation
+  and shutdown, diagnostic deadlines/privacy, tests, and documentation claims.
+- Preserve the implementation and all existing changes; this review permits
+  evidence gathering and working-document updates, not new product fixes,
+  staging, commit, push, publication, or operational changes.
+- Reproduce only concrete suspected failures with isolated diagnostic fixtures.
+  Reuse the immediately preceding full-gate evidence for unchanged code and
+  run additional focused checks where they improve review confidence.
+
+Review results:
+
+- The two Git corrections preserve their intended boundaries: registered
+  repository identity does not require a commit, checkout binding still does,
+  and protected user trust configuration is retained without installing trust
+  exceptions. No new confirmed product defect was found in the complete diff.
+- Rechecked the tracked changes and new modules/tests, including executor
+  per-workspace ordering, cancellation-owned activation and retirement,
+  cancellation-safe outbound framing and shutdown, passive diagnostic probes,
+  report bounds/privacy, and public/internal documentation boundaries. Proposed
+  client/tmux and dev-stack features remain internal and explicitly unshipped.
+- New P2 finding: `src/diagnostics/tests.rs` writes a temporary script, marks
+  it executable, and immediately executes that file directly. Focused parallel
+  tests intermittently receive `ProbeError::Unavailable` instead of their
+  intended timeout/output-bound error. An isolated temporary spawn tracer
+  captured `posix_spawnp` returning errno 26 (`ETXTBSY`, text file busy) on the
+  oversized-output fixture, confirming this is not merely a speculative
+  sandbox permission failure. Direct execution of freshly written scripts is
+  vulnerable to transient executable/write-descriptor contention during
+  concurrent spawning. Invoke these fixtures through an existing shell rather
+  than executing the generated file; do not weaken product error handling or
+  add arbitrary sleeps. Review other newly added executable-script fixtures
+  for the same pattern when fixing it.
+- Separate verification limitation: the cancellation test also failed its
+  two-second process-disappearance assertion in the sandbox, including an
+  unmodified exact-test run without tracing. The exact test passed outside
+  the sandbox. Its cause is not established; this does not yet prove that a
+  running subprocess survives cancellation. Distinguish child liveness,
+  reaping, and sandbox effects before proposing a product change.
+
+Verification:
+
+- All 20 focused doctor tests pass with approved socket access. Repeated
+  runs of all 10 diagnostics/Git/store tests outside the sandbox pass; sandbox
+  runs include both successful runs and the concrete failures above.
+- Temporary tracing was confined to task-owned `/tmp` artifacts and the test
+  process environment; it did not alter repository code or user settings.
+  Sandbox ptrace is unavailable, so the confirmed spawn errno came from a
+  temporary process-local interposer, alongside uninstrumented failures.
+- The immediately preceding 488-library/6-process full gate and warning-denied
+  lint evidence apply to the unchanged implementation. They do not erase the
+  newly reproduced fixture failure, and this review does not claim a fresh
+  uniformly green full gate. No native-Codex, docs, dependency, or Nix rebuild
+  was repeated for unchanged code.
+- Fresh `cargo fmt --all -- --check` and `git diff --check` pass.
+
+Handoff:
+
+- Full diff re-review is complete. Resolve the fixture stability finding and
+  investigate the isolated cancellation assertion, then rerun the sequential
+  gates before an unconditional checkpoint-ready verdict.
+- Only this working document and isolated temporary diagnostic artifacts were
+  edited during the review. No product fix, staging, commit, push, publication,
+  running-service, installation, or remote configuration change was performed.
+
+### Diagnostic subprocess-fixture corrections — 2026-10-08
+
+Active scope and plan:
+
+- User authorized fixing the re-review findings. Preserve the existing diff;
+  do not stage, commit, push, publish, alter installed versions, or touch
+  running user services.
+- Remove direct execution of freshly written diagnostic scripts by invoking
+  them through an existing shell. Keep timeout, output limits, and failure
+  assertions strict; inspect related new script fixtures for the same race.
+- Diagnose the cancellation assertion with isolated owned test processes.
+  Distinguish a running child from an exited but unreaped process and avoid
+  arbitrary sleeps, retries of product operations, or blanket assertion
+  weakening. Change product cleanup only if evidence requires it.
+- Add regression coverage where needed, run repeated focused tests in and
+  outside the sandbox, then run formatting, full tests, and warning-denied
+  lint sequentially. Record results and durable fixture/cleanup decisions.
+
+Findings and implementation:
+
+- Removed fresh executable-script spawning from the diagnostic helpers and
+  the new executor concurrency/lifecycle fixture. Scripts are now data read
+  by `/bin/sh`; no spawn retries or timing sleeps were added. The executor
+  fixture preserves the normal `exec-server` argv and worktree-relative gates
+  by placing its script in the isolated fixture working directory.
+- Traced the cancellation failure with temporary owned-process state output:
+  the child was `Z (zombie)`, not still executing. Tokio's kill-on-drop killed
+  it but its best-effort orphan queue did not reap it within the strict test
+  window. Temporary instrumentation was removed after establishing this.
+- Added a private child owner around bounded diagnostic probes. On cancellation
+  it requests termination synchronously and retains the child handle in a
+  one-second wait task on the active runtime. Completed probes do not spawn
+  cleanup tasks; kill-on-drop remains the fallback at runtime shutdown. The
+  timeout/output limits and redacted error categories remain unchanged.
+- Kept strict process-disappearance assertions rather than accepting zombies.
+  Added coverage for dropping a child before polling its wait future, running
+  a non-executable script fixture successfully, and unchanged missing-binary
+  errors. Existing timeout and task-abort tests still require reaping.
+- Extracted private version-result recording so the CLI redaction test invokes
+  a fixed existing shell and proves the command ran. It now covers both an
+  actual failing exit and invalid successful output; a spawn failure cannot
+  accidentally satisfy the redaction assertion.
+- Updated canonical diagnostic lifecycle/fixture knowledge and its log. No
+  user-facing command, flag, schema, dependency, public visibility, or module
+  layout changed, so public docs remain applicable without another rewrite.
+
+Verification:
+
+- Before the cleanup correction, the strict cancellation test failed again
+  with the shell-based fixture and temporary state evidence confirmed an
+  unreaped zombie. It passes after the correction without changing its
+  two-second assertion window or accepting a zombie as success.
+- All 13 diagnostics/Git/store tests pass in five successive sandbox runs
+  (one Cargo run and four direct repeats). The exact task-abort case also
+  passes ten additional sandbox repetitions. The same 13-test group passes
+  in the approved outside-sandbox environment.
+- `cargo test --locked --all-targets --all-features --no-fail-fast --quiet
+  -- --test-threads=4` passes: 491 library tests and 6 real CLI/daemon
+  process-smoke tests; 10 explicitly opted-in tests remain ignored. The
+  library/process stages took 39.05/11.75 seconds. This covers all doctor
+  checks and the interpreter-based executor concurrency/lifecycle fixtures.
+- `cargo clippy --locked --all-targets --all-features -- -D warnings`,
+  `cargo fmt --all -- --check`, `git diff --check`, and `cargo machete` pass.
+- Final source inspection confirms bounded ownership, no cleanup task for
+  already-reaped children, strict error/privacy assertions, and removal of
+  temporary instrumentation. No dependency, public-doc, native transport,
+  or schema behavior changed; no new live-Codex/docs/dependency rebuild was
+  required. Nix input `.` still excludes the unstaged new files, so no Nix
+  gate is claimed and `path:.` was not used.
+
+Handoff:
+
+- Both re-review issues are resolved with focused regressions and a fresh
+  green full test/lint gate. The local baseline is ready for a deliberately
+  authorized checkpoint; release-channel preparation remains a separate task.
+- No staging, commit, push, publication, installed-version, running-service,
+  or remote configuration change was performed. Preserve all existing local
+  changes and the untracked new modules.
+
+### Release-readiness assessment — 2026-10-08
+
+Active scope:
+
+- User requested a readiness assessment after the corrections, explicitly
+  forbidding commit/push. Inspect the current release configuration and the
+  agreed release gates; distinguish another alpha from promotion to `0.1.0`.
+- This is an assessment only: no workflow/channel edits, staging, publication,
+  or remote operational changes are authorized.
+
+Assessment and evidence:
+
+- No unresolved confirmed product/test blocker remains from the current
+  reviews. The 491-library/6-process test, Clippy, format, and dependency-use
+  evidence above is fresh; the earlier doctor/native Codex 0.160.1 and static
+  public-site evidence remains applicable to unchanged native/public surfaces.
+  The implementation is a candidate for another alpha, subject to exact-revision
+  CI/package gates; this is not authorization to publish it.
+- Suffix-free `0.1.0` preparation is still incomplete. Release currently forces
+  `prerelease: true` and token `alpha` in both publishing and rehearsal steps;
+  dispatch exposes only `publish`, not alpha-versus-stable selection. The
+  approved deliberate stable-channel transition remains unimplemented.
+- Final release-revision gates still include Git-flake `.` checks, actual Cargo
+  package verification/publish dry-run, and native Linux/macOS binary smoke
+  builds. They require the full source revision to be included and, for hosted
+  gates, an independently authorized checkpoint/push. The present unstaged new
+  modules make a current Git-flake package check incomplete.
+- A read-only `cargo package --list --locked --offline --allow-dirty` succeeds
+  and includes the new doctor, diagnostics, and outbound-writer modules. This
+  checks package selection, not compilation of the registry artifact, and is
+  not substituted for a publish dry-run. `git diff --check` also passes.
+- Context-capture redesign, generic clients/tmux, Compose integration, and
+  optional background supervision remain separately scoped follow-ups; they
+  are not new prerequisites for the next alpha or automatic requirements for
+  `0.1.0`. A stable publication also requires the explicit channel/checklist
+  decision and post-publication verification before public installation text
+  is changed to an unversioned stable install.
+
+Handoff:
+
+- Recommend completing the agreed explicit release-channel workflow next,
+  without publishing anything, then verifying the exact release revision once
+  staging/checkpoint authority is given. No new feature is needed merely to
+  make another alpha possible.
+- No product/workflow changes, staging, commit, push, remote configuration,
+  publication, or model turn were performed. Only this assessment was recorded.
+
+### Pre-checkpoint and release diff review — 2026-10-08
+
+Active scope and plan:
+
+- User requested one more review before checkpoint/release. Inspect the full
+  current tracked diff and new files, especially the latest probe ownership
+  correction, executable-script test replacements, transport/executor ordering,
+  diagnostic safety, packaging, and public claims.
+- Distinguish reproducible defects from still-unperformed exact-revision
+  packaging/hosted gates and the deliberate stable-channel transition. Reuse
+  the immediately preceding full-test/lint evidence for unchanged code; add
+  only targeted, reversible checks that close an actual review gap.
+- Review only: preserve all product changes, do not stage, commit, push,
+  publish, change channels, installed versions, or running user services.
+
+Review outcome:
+
+- No new confirmed defect found in the production, regression-test, public
+  documentation, or package-selection changes. Reviewed new untracked modules
+  as well as the tracked diff; they are part of the proposed checkpoint.
+- Rechecked per-workspace executor serialization and shutdown ownership,
+  cancellation-safe bounded transport writes and response correlation, and
+  passive doctor behavior, coverage limits, private-file checks, redaction,
+  and read-only store/Git/thread bindings. The latest process-reaping fixes
+  keep strict disappearance assertions rather than weakening the tests.
+- The code is checkpoint-ready. Another alpha remains a release candidate,
+  not an unconditional publication approval: verify the complete exact source
+  revision through Cargo package/publish rehearsal, Git-flake checks, and
+  native Linux/macOS binary smoke gates before release.
+- The release workflow still forces the alpha channel. Deliberate alpha/stable
+  selection and the stable promotion checklist remain separate unfinished work;
+  this review does not implement or authorize suffix-free `0.1.0` publication.
+
+Verification:
+
+- Fresh targeted runs pass: 13 diagnostics/Git/store cases and 20 doctor cases
+  with four test threads. Doctor socket cases ran in the approved environment;
+  probes and resources belonged to temporary test fixtures, not user services.
+- Fresh `cargo fmt --all -- --check` and `git diff --check` pass.
+- The immediately preceding full gate remains applicable because product and
+  test code did not change during this review: 491 library tests, 6 process
+  smoke tests, Clippy, formatting, and dependency-use checks passed. Earlier
+  native Codex and static public-site evidence is not relabeled as a new run.
+
+Handoff:
+
+- No product fixes are pending from this review. Preserve all existing changes
+  and include the new modules when a checkpoint is explicitly authorized.
+- No staging, commit, push, workflow/configuration change, publication,
+  installed-version change, or running user-service change was performed.
+
+### Finish local release preparation — 2026-10-08
+
+Active scope and plan:
+
+- User requested finishing the remaining readiness work. Implement the already
+  agreed explicit alpha/stable release choice and a promotion checklist locally,
+  then finish package and Nix verification without publishing or changing any
+  remote setting. Keep the current Cargo version and public alpha claims.
+- Make publication deliberately dispatched; default to alpha and a non-publishing
+  rehearsal. Preserve exact tested-main checks and version/lockfile consistency.
+  Add focused automation regression checks and validate workflow syntax.
+- Verify the proposed complete source in an isolated temporary Git snapshot,
+  including untracked modules but excluding ignored outputs. Use Git-flake `.`
+  and run heavy gates sequentially. Do not stage or commit in the user repository.
+- No source-repository commit, push, publication, service/installed-version
+  change, credential access, or remote workflow execution is authorized.
+
+Implementation and decisions:
+
+- Release is now deliberately manual-only with explicit `alpha`/`stable`
+  selection; defaults remain alpha and `publish=false`. Ordinary pushes cannot
+  trigger publication after this workflow is installed. The old remote release
+  variable is no longer consumed; no variable was changed remotely.
+- Added a small standard-library release-check adapter and focused tests.
+  Validate dispatch/main/channel/publish input before emitting outputs, require
+  the requested/checked-out/current-main SHAs to agree, and require the latest
+  Rust run for that SHA to be completed and successful. Do not filter out newer
+  pending/failing runs in favor of an older completed success.
+- Always rehearse native Semantic Release without commit/tag/push/VCS release,
+  verify selected-channel version/tag plus the manifest and unique source-less
+  root lock entry, then recheck SHA and CI immediately before publication.
+  Only the publishing step's outputs enable registry/archive jobs.
+- Use `python3` explicitly for native lock synchronization, matching other
+  automation rather than depending on a `python` alias. Nix tooling now runs
+  release-check regressions alongside workflow lint and lock-sync tests.
+- Canonical release knowledge now records the implemented selection, exact-SHA
+  protection, and explicit pre-/post-publication checklist. Public alpha wording
+  and the source Cargo version remain unchanged until actual verified promotion.
+
+Verification:
+
+- Eleven release-check tests and three existing lock-sync tests pass. Cases cover
+  channel defaults/publication opt-in, wrong events/branches, malformed inputs,
+  stale checkout/main, latest CI status, version/tag/lock mismatches, output
+  emission only after success, and redaction of failed subprocess stderr.
+- `actionlint`, `nixfmt --check flake.nix`, `cargo fmt --all -- --check`, and
+  `git diff --check` pass. The Rust code/test surface did not change in this
+  slice; the preceding full Rust test/Clippy evidence still applies.
+- Actual `nix run .#package -- --allow-dirty` in the isolated complete Git source
+  succeeds: 173 files, 1.9 MiB uncompressed/361.1 KiB compressed, archive
+  compilation verified. The upload is explicitly aborted by dry-run. Offline
+  metadata was insufficient, so the successful run fetched public registry
+  metadata; no registry token was supplied or publication performed.
+- `nix flake check --no-write-lock-file --max-jobs 1 --cores 2 .` passes on
+  x86_64-linux, including the complete package, apps, and release tooling.
+  The optimized package compiled with `-j 2` in 3m48s. A final rerun after the
+  last workflow correction passes with the package cached. This is not native
+  macOS/aarch64 build evidence; Nix explicitly skipped incompatible systems.
+- All three freshly built Nix executables report the unchanged source version
+  and pass help smoke checks; `coco doctor --help` exposes the new command.
+  Source/test directories and Cargo metadata compare identically against the
+  verified snapshot, including the untracked Rust modules.
+- Pinned Semantic Release 10.6.1 was installed only in a temporary venv and
+  exercised against a separate synthetic Git fixture with complete release
+  history. Two alpha rehearsals both choose `0.1.0-alpha.12`; two stable
+  rehearsals both choose `0.1.0`, and real Cargo/lock/tag checks pass. A final
+  native stable versioning step creates the expected release commit/tag only
+  inside that disposable fixture with push and VCS release disabled. This
+  proves rehearsal followed by versioning does not double-increment.
+- The constrained sandbox could not resolve Semantic Release's nested Python
+  build invocation; the successful semantic probes used the approved execution
+  environment, without tokens. No temporary fixture commit/tag exists in the
+  user's repository, and no hosted Docker action or release workflow was run.
+
+Remote-history finding and handoff:
+
+- Read-only fetch into the temporary semantic fixture found origin main at
+  `e45340b`, one generated alpha.11 release commit beyond the user's local
+  `4e44014`. Only Cargo.toml, Cargo.lock, and CHANGELOG.md differ. Local tags had
+  stopped at alpha.8, so complete remote tags were needed for meaningful native
+  version probes. The user's Git refs, index, and worktree were not updated.
+- Local implementation/verification is complete. Before the final source
+  checkpoint/release, explicitly authorize checkpoint plus integration of the
+  remote version-only commit, then push and require exact-revision hosted Rust,
+  native Linux/macOS binary smoke, and a non-publishing selected-channel
+  rehearsal. Publishing still requires independent explicit authorization.
+- No staging, commit/tag, push, publication, installation/service change, or
+  remote configuration change occurred in the user's repository. Its index
+  remains empty and all pre-existing changes/new modules are preserved.
+
+### Restore automatic alpha publication — 2026-10-08
+
+Active scope and plan:
+
+- User clarified that alpha should continue to publish automatically after
+  successful CI, while stable must remain explicitly manual. This supersedes
+  the preceding manual-only choice; do not alter remote settings or publish.
+- Restore the Rust `workflow_run` trigger and existing opt-in
+  `COCO_RELEASE_ENABLED=true` switch. Automatic requests are always alpha and
+  use the tested upstream run's SHA, never the callback's current main SHA.
+- Preserve explicit manual alpha/stable rehearsal/publication and all current
+  exact-revision, latest-CI, metadata, and no-publication-default protections.
+- Add event/source-SHA/publication regression tests, update canonical release
+  knowledge, and rerun focused workflow/tooling checks sequentially. Rust
+  product code, registry packaging, and installed/running services are unchanged.
+- No source-repository staging, commit, push, workflow execution, release,
+  token handling, or remote variable change is authorized.
+
+Outcome and verification:
+
+- Restored automatic alpha after successful main-push Rust CI, guarded by the
+  unchanged `COCO_RELEASE_ENABLED=true` opt-in. The workflow and helper both
+  enforce eligible events; automatic requests cannot select stable. Manual
+  alpha/stable still default to a non-publishing rehearsal independently of
+  that switch.
+- The guard checks out the upstream tested SHA and reads the native
+  `GITHUB_EVENT_PATH` callback metadata. It must not substitute the callback's
+  default-branch SHA, which can have advanced independently. Both initial and
+  pre-publication checks retain exact current-main and latest-CI validation.
+- Added regressions for enabled/disabled automation, callback/source SHA
+  separation, malformed/failed/non-push/non-main runs, forbidden stable
+  overrides, native event-file reading, and stale callbacks emitting no outputs.
+  All 16 release-check tests and 3 lock-sync tests pass; `actionlint` and
+  `git diff --check` also pass.
+- The complete Git-flake check passes again on x86_64-linux in the existing
+  isolated source snapshot with one build job/two cores. Only the updated
+  tooling derivation rebuilt; the previously verified unchanged product package
+  and apps stayed cached. No native macOS or hosted workflow run is claimed.
+- Updated canonical release knowledge and its log to describe automatic alpha,
+  explicit stable selection, the retained opt-in switch, and the publication
+  consequences of a future qualifying push. The earlier manual-only record
+  above is historical and superseded by this user-approved correction.
+
+Handoff:
+
+- This correction is complete locally; no new product/package blocker exists.
+  Preserve the earlier final-revision integration/hosted-CI requirements.
+- No source-repository staging, commit, push, release execution, publication,
+  installation/service change, or remote variable change was performed. The
+  real index remains empty; all pre-existing changes are preserved.
+
+### Authorized source checkpoint and push — 2026-10-08
+
+Active scope and decisions:
+
+- User authorized committing and pushing the reviewed slice: independent
+  workspace runtime coordination, cancellation-safe Codex transport, passive
+  `coco doctor`, regression coverage, public help/docs, and release safeguards.
+- Fetch confirmed `origin/main` at `e45340b`, with only the generated alpha.11
+  Cargo/lock/changelog update beyond local HEAD. Integrated it by fast-forward;
+  no rebase or rewriting was necessary, and all local changes were preserved.
+- Keep existing automatic alpha publication after successful qualifying Rust
+  CI when `COCO_RELEASE_ENABLED=true`. This authorized push can trigger that
+  pipeline; stable remains manual. Do not manually dispatch a release or alter
+  remote settings, secrets, installed packages, or running services.
+
+Verification and handoff:
+
+- After integration, all 16 release-check tests and 3 lock-sync tests pass;
+  `actionlint`, `cargo fmt --all -- --check`, and `git diff --check` also pass.
+  The version-only integration did not change product source or dependencies;
+  the complete Rust, packaging, Nix, live compatibility, and documentation
+  verification recorded above remains applicable to this source slice.
+- Stage the complete reviewed slice, including the new modules/tests, and
+  create one conventional feature checkpoint on main before a normal push.
+  Exact-revision hosted CI and any automatic alpha publication remain pending
+  until the pushed revision is processed; no hosted success is claimed here.

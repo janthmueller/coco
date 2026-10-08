@@ -37,6 +37,7 @@ use crate::store::{OperationState, WorkspaceDeletionIntent};
 mod context;
 mod creation;
 mod decisions;
+mod doctor;
 mod events;
 mod guards;
 mod jump;

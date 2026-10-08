@@ -6,6 +6,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use tracing::error;
 
+use super::doctor::DoctorContext;
 use crate::codex::CodexError;
 use crate::coordinator::{Coordinator, CoordinatorError, WorkerError};
 use crate::daemon::execution::{ContainmentError, WorkspaceExecutionError};
@@ -24,11 +25,15 @@ use crate::rpc::{RpcErrorPayload, RpcHandler};
 
 pub(crate) struct DaemonHandler {
     coordinator: Arc<Coordinator>,
+    doctor: DoctorContext,
 }
 
 impl DaemonHandler {
-    pub(crate) fn new(coordinator: Arc<Coordinator>) -> Self {
-        Self { coordinator }
+    pub(crate) fn new(coordinator: Arc<Coordinator>, doctor: DoctorContext) -> Self {
+        Self {
+            coordinator,
+            doctor,
+        }
     }
 }
 
@@ -42,6 +47,10 @@ impl RpcHandler for DaemonHandler {
             )
         })?;
         match method {
+            DaemonMethod::Doctor => {
+                decode::<crate::protocol::DoctorParams>(params)?;
+                encode(self.doctor.report(&self.coordinator).await)
+            }
             method @ (DaemonMethod::Health
             | DaemonMethod::ModelList
             | DaemonMethod::AccountQuotaGet) => self.handle_global_read(method, params).await,

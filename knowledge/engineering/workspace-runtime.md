@@ -90,6 +90,77 @@ namespace before starting its App Server. Until that restart, the scope may
 continue running. The process-tree fallback still cannot prove every detached
 descendant is gone.
 
+## Coordination and shutdown
+
+The executor registry uses a short lookup lock plus one operation mutex per
+workspace. The registry lock is released before process startup, containment
+activation, App Server requests, policy application, or process shutdown.
+A slow activation therefore does not block runtime operations for another
+workspace. Passive reads for unknown workspaces return inactive and do not
+create registry entries.
+
+This is a runtime-registry guarantee, not a promise that complete CLI commands
+never queue. `workspace.attach` still holds the coordinator's repository lock
+through thread preparation and executor activation, so simultaneous jumps into
+different workspaces of the same repository can wait during preparation. That
+lock is released when attach returns, before the CLI starts the native TUI;
+an open TUI does not hold it. Codex 0.160.1 also serializes `environment/add`
+exclusively in its global `environment` domain while `environment/info` uses
+shared reads in that domain. A pending native verification can therefore delay
+another registration even for different repositories. Mock transport tests
+prove CoCo's registry independence, not the absence of native queueing.
+
+Each workspace operation mutex orders start, replacement, stop, resource
+sampling, and desired/applied policy revisions for that workspace. Concurrent
+activation of the same workspace reuses one verified executor. Replacement
+finishes the previous runtime's cleanup before starting another under the same
+stable environment ID. The coordinator's repository-level serialization of
+Git/lifecycle mutations remains a separate safety boundary.
+
+Admitted mutations run in owned Tokio tasks while holding a shared lifecycle
+lease. Cancelling an RPC caller therefore does not drop a process midway
+through startup or cleanup. The operation finishes registration or cleanup
+before releasing the lease. This adds no process beyond the workspace's
+ordinary Exec Server.
+
+Daemon close acquires the exclusive lifecycle lease, waits for admitted
+operations, prevents later operations, and drains each tracked runtime once.
+Each `environment/add` and `environment/info` request has a fifteen-second
+deadline; missing responses cause explicit failure and executor cleanup.
+Timeouts do not retry registration or start a model turn. Cancelled Codex
+requests release their correlation slots, and any late responses cannot
+complete another request.
+
+Outbound framing has its own cancellation boundary. One transport-owned writer
+task receives an eight-frame bounded queue, with the existing maximum message
+size enforced before admission. Queued frames whose caller has already left
+are skipped when dequeued. Once a write starts, it completes independently of
+caller cancellation; a fifteen-second write deadline or an I/O error marks the
+connection terminal before another frame can be written. A request timeout
+therefore cannot splice a truncated message into the next one. This creates
+one task per connection, not a task or OS process per message, and does not
+retry a request or promise to cancel an already dispatched native operation.
+
+Explicit transport close signals shutdown before waiting for the writer. That
+interrupts a blocked write only on the terminal connection, drops queued
+frames, and rejects their waiters. Shutdown is signalled even if the process
+monitor recorded an earlier failure without requesting shutdown; the first
+failure remains authoritative. The writer explicitly shuts down its write
+half with a two-second bound: dropping a generic split half alone does not
+publish EOF while its reader still holds the stream. Ordinary close then
+allows the WebSocket bridge up to two seconds for its close frame before
+stopping the owned process. An unresponsive bridge is aborted after that bound;
+write and read failures still request immediate process shutdown. The bridge
+never forwards an unterminated JSONL prefix as a complete WebSocket message.
+Tests cover partial requests, notifications, server responses, queue
+cancellation and backpressure, write failure/deadline, and graceful/bounded
+close with or without an earlier failure.
+
+The regression suite holds an activation at endpoint publication,
+registration, and connection verification while another workspace remains
+usable. It also checks same-workspace single-flight behavior, policy ordering,
+replacement, timeout/failure cleanup, and cancellation during daemon close.
+
 ## Environment routing
 
 Codex 0.160.1 exposes environment selection only on `thread/start` and
@@ -110,6 +181,11 @@ connection; fresh-thread adoption state survives between those connection
 generations, while unanswered JSON-RPC request IDs do not. A clean TUI close
 ends the relay. An unrecovered leg-specific transport failure is retained and
 included in the final `jump` error.
+
+The lease may later carry optional generic client-presence metadata for
+terminal integrations. That metadata does not move workspace execution into
+the terminal client or change lease authority, and remains generation-local.
+See [Client attachments and tmux integration](client-attachments.md).
 
 Relay construction encodes whether the workspace is awaiting its first
 thread or already has a durable binding. Only the fresh form observes and

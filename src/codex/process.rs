@@ -285,7 +285,17 @@ async fn initialize_client(
         )
         .await;
     match initialize {
-        Ok(_) => {}
+        Ok(response) => {
+            if let Some(version) = response
+                .get("userAgent")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|agent| agent.split_whitespace().next())
+                .and_then(|prefix| prefix.split_once('/').map(|(_, version)| version))
+                .filter(|version| crate::diagnostics::valid_version(version))
+            {
+                let _ = client.inner.server_version.set(version.to_owned());
+            }
+        }
         Err(error) => {
             let _ = client.close().await;
             return Err(error);

@@ -3,6 +3,7 @@ mod cli;
 mod codex;
 mod coordinator;
 mod daemon;
+mod diagnostics;
 mod domain;
 mod git;
 mod hooks;

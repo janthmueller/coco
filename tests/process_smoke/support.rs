@@ -45,7 +45,14 @@ impl TestPaths {
     }
 
     pub(super) fn apply(&self, command: &mut Command) {
+        let existing = std::env::var_os("PATH").unwrap_or_default();
+        let task_bins = Path::new(env!("CARGO_BIN_EXE_cocod")).parent().unwrap();
+        let search_path = std::env::join_paths(
+            std::iter::once(task_bins.to_path_buf()).chain(std::env::split_paths(&existing)),
+        )
+        .unwrap();
         command
+            .env("PATH", search_path)
             .env("HOME", &self.home)
             .env("COCO_DATA_DIR", &self.data_dir)
             .env("COCO_DATABASE_PATH", &self.database)
@@ -116,6 +123,10 @@ pub(super) fn write_fake_codex(path: &Path) -> Result<()> {
 set -eu
 kind=""
 case "${1:-}" in
+  --version)
+    printf 'codex-cli 0.160.1\n'
+    exit 0
+    ;;
   app-server)
     : "${COCO_TEST_CODEX_ARGS:?}"
     destination="${COCO_TEST_CODEX_ARGS}"
@@ -453,7 +464,11 @@ pub(super) fn verify_codex_requests(requests: &[Value], worktree: &Path) -> Resu
         .iter()
         .filter(|request| request.get("method") == Some(&json!("model/list")))
         .collect::<Vec<_>>();
-    assert_eq!(model_requests.len(), 4);
+    assert_eq!(
+        model_requests.len(),
+        6,
+        "CLI, MCP, and doctor each read both model pages"
+    );
     for request in &model_requests {
         assert_eq!(request.pointer("/params/limit"), Some(&json!(100)));
         assert_eq!(
@@ -466,7 +481,7 @@ pub(super) fn verify_codex_requests(requests: &[Value], worktree: &Path) -> Resu
             .iter()
             .filter(|request| request.pointer("/params/cursor").is_none())
             .count(),
-        2
+        3
     );
     assert_eq!(
         model_requests
@@ -475,7 +490,7 @@ pub(super) fn verify_codex_requests(requests: &[Value], worktree: &Path) -> Resu
                 request.pointer("/params/cursor") == Some(&json!("models-page-2"))
             })
             .count(),
-        2
+        3
     );
 
     let thread_start = request(requests, "thread/start")?;

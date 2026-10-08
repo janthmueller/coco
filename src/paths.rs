@@ -1,4 +1,5 @@
 use std::env;
+use std::path::Path;
 use std::path::PathBuf;
 
 use thiserror::Error;
@@ -67,6 +68,31 @@ impl CocoPaths {
             data_dir,
         })
     }
+}
+
+/// Resolve the executable actually selected by this process without launching
+/// it. Canonicalization also makes profile symlinks comparable to live binaries.
+pub(crate) fn resolve_executable(program: &Path) -> Option<PathBuf> {
+    if program.components().count() > 1 || program.is_absolute() {
+        return executable_file(program);
+    }
+    env::split_paths(&env::var_os("PATH")?)
+        .find_map(|directory| executable_file(&directory.join(program)))
+}
+
+fn executable_file(path: &Path) -> Option<PathBuf> {
+    let metadata = std::fs::metadata(path).ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o111 == 0 {
+            return None;
+        }
+    }
+    std::fs::canonicalize(path).ok()
 }
 
 #[cfg(test)]

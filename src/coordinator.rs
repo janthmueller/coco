@@ -25,6 +25,7 @@ mod activity;
 mod codex_events;
 mod context;
 mod decision;
+mod doctor;
 mod error;
 mod hooks;
 mod jump;

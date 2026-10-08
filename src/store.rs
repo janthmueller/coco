@@ -13,6 +13,8 @@ use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
+pub(crate) const SUPPORTED_SCHEMA_VERSION: i64 = 15;
+
 use crate::domain::{
     AuditOutcome, ContextMode, EventKind, EventSource, ProfileSnapshot, Repository, WorktreeMode,
 };
@@ -21,6 +23,7 @@ use crate::domain::{Decision, DecisionKind, DecisionPrompt, TurnPhase};
 
 #[cfg(test)]
 mod decisions;
+mod diagnostics;
 mod events;
 mod hooks;
 mod migrations;
@@ -31,6 +34,7 @@ mod signals;
 mod usage;
 mod workspaces;
 
+pub(crate) use diagnostics::{DiagnosticSnapshot, DiagnosticWorkspaceBinding};
 use migrations::migrate;
 use rows::{
     get_registered_repository_by_common_dir, get_registered_repository_by_root,
@@ -319,6 +323,7 @@ impl ReconciliationSummary {
 
 pub struct Store {
     connection: Mutex<Connection>,
+    diagnostic_path: Option<PathBuf>,
 }
 
 impl Store {
@@ -349,8 +354,13 @@ impl Store {
              PRAGMA synchronous = NORMAL;",
         )?;
         migrate(&connection)?;
+        let diagnostic_path = connection
+            .path()
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from);
         Ok(Self {
             connection: Mutex::new(connection),
+            diagnostic_path,
         })
     }
 

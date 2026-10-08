@@ -235,6 +235,8 @@
               releaseConfig = ./releaserc.toml;
               releaseVersionSync = ./.github/scripts/sync_cargo_lock.py;
               releaseVersionTests = ./.github/scripts/test_sync_cargo_lock.py;
+              releaseChecks = ./.github/scripts/release_checks.py;
+              releaseCheckTests = ./.github/scripts/test_release_checks.py;
             }
             ''
               metadata_project="$TMPDIR/coco-metadata"
@@ -288,6 +290,7 @@
               cargo machete --version >/dev/null
               actionlint "$workflowDirectory"/*.yml
               COCO_RELEASE_SCRIPT="$releaseVersionSync" python3 "$releaseVersionTests"
+              COCO_RELEASE_CHECKS="$releaseChecks" python3 "$releaseCheckTests"
               grep -F 'version_toml = ["Cargo.toml:package.version"]' "$releaseConfig" >/dev/null
               grep -F 'assets = ["Cargo.lock"]' "$releaseConfig" >/dev/null
               rust-analyzer --version >/dev/null

@@ -1,23 +1,25 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use serde_json::Value;
 use thiserror::Error;
-use tokio::io::{AsyncWrite, AsyncWriteExt};
-use tokio::sync::{Mutex, oneshot, watch};
+use tokio::sync::{Mutex, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
+use tokio::time::timeout;
 
 pub const DEFAULT_MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
 pub const DEFAULT_EVENT_BUFFER: usize = 256;
 
 const STDERR_TAIL_BYTES: usize = 64 * 1024;
+const BRIDGE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
 mod jsonl;
 mod process;
 mod websocket;
+mod writer;
 
 pub type RequestId = Value;
 
@@ -118,12 +120,14 @@ impl std::fmt::Debug for CodexClient {
 }
 
 struct Inner {
-    writer: Mutex<Pin<Box<dyn AsyncWrite + Send>>>,
+    server_version: OnceLock<String>,
+    outbound: mpsc::Sender<writer::OutboundFrame>,
     state: Mutex<ConnectionState>,
     stderr_tail: Arc<Mutex<StderrTail>>,
     max_message_bytes: usize,
     next_id: AtomicU64,
     shutdown: watch::Sender<bool>,
+    writer_shutdown: watch::Sender<bool>,
     tasks: Mutex<TaskHandles>,
     runtime_files: Mutex<Vec<PathBuf>>,
 }
@@ -135,6 +139,7 @@ struct ConnectionState {
 
 #[derive(Default)]
 struct TaskHandles {
+    writer: Option<JoinHandle<()>>,
     reader: Option<JoinHandle<()>>,
     stderr: Option<JoinHandle<()>>,
     process: Option<JoinHandle<()>>,
@@ -183,6 +188,10 @@ impl StderrTail {
 }
 
 impl CodexClient {
+    pub(crate) fn server_version(&self) -> Option<&str> {
+        self.inner.server_version.get().map(String::as_str)
+    }
+
     /// Closes the transport, terminates the owned App Server if it is still
     /// running, waits for its I/O tasks, and rejects outstanding requests.
     pub async fn close(&self) -> Result<(), CodexError> {
@@ -192,23 +201,21 @@ impl CodexClient {
         };
         self.inner.fail(close_error, false).await;
 
+        let mut tasks = std::mem::take(&mut *self.inner.tasks.lock().await);
+        if let Some(writer) = tasks.writer.take() {
+            let _ = writer.await;
+        }
+        if let Some(mut bridge) = tasks.bridge.take()
+            && timeout(BRIDGE_SHUTDOWN_TIMEOUT, &mut bridge).await.is_err()
         {
-            let mut writer = self.inner.writer.lock().await;
-            let _ = writer.as_mut().shutdown().await;
+            bridge.abort();
+            let _ = bridge.await;
         }
         let _ = self.inner.shutdown.send(true);
-
-        let mut tasks = std::mem::take(&mut *self.inner.tasks.lock().await);
         let process = tasks.process.take();
         let had_process = process.is_some();
         if let Some(process) = process {
             let _ = process.await;
-        }
-        if let Some(bridge) = tasks.bridge.take() {
-            if !bridge.is_finished() {
-                bridge.abort();
-            }
-            let _ = bridge.await;
         }
         if let Some(reader) = tasks.reader.take() {
             if !had_process && !reader.is_finished() {
@@ -221,6 +228,22 @@ impl CodexClient {
         }
         self.inner.cleanup_runtime_files().await;
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn test_io_pair(
+        max_message_bytes: usize,
+    ) -> (
+        Self,
+        tokio::sync::mpsc::Receiver<CodexEvent>,
+        tokio::io::DuplexStream,
+    ) {
+        let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
+        let (reader, writer) = tokio::io::split(client_stream);
+        let stderr = Arc::new(Mutex::new(StderrTail::new(STDERR_TAIL_BYTES)));
+        let (client, events, _shutdown) =
+            Self::from_io(reader, writer, max_message_bytes, 8, stderr).await;
+        (client, events, server_stream)
     }
 }
 

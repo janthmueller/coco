@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 
-use super::StoreError;
+use super::{SUPPORTED_SCHEMA_VERSION, StoreError};
 
 mod hooks;
 mod repositories;
@@ -11,10 +11,10 @@ mod usage;
 
 pub(super) fn migrate(connection: &Connection) -> Result<(), StoreError> {
     let mut version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if version > 15 {
+    if version > SUPPORTED_SCHEMA_VERSION {
         return Err(StoreError::UnsupportedSchema(version));
     }
-    if version == 15 {
+    if version == SUPPORTED_SCHEMA_VERSION {
         return Ok(());
     }
     if version == 14 {

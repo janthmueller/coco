@@ -3,10 +3,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 
 use serde_json::{Map, Value, json};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 use tokio::sync::{Mutex, mpsc, oneshot, watch};
 
 use super::websocket::remove_runtime_file;
+use super::writer::{OUTBOUND_FRAME_BUFFER, run_writer};
 use super::{
     CodexClient, CodexError, CodexEvent, ConnectionState, Inner, RequestId, StderrTail, TaskHandles,
 };
@@ -31,6 +32,10 @@ impl CodexClient {
             }
             state.pending.insert(id.clone(), sender);
         }
+        let mut pending = PendingRequest {
+            inner: Arc::clone(&self.inner),
+            id: Some(id.clone()),
+        };
 
         let frame = json!({
             "id": id,
@@ -42,10 +47,12 @@ impl CodexClient {
             return Err(error);
         }
 
-        match receiver.await {
+        let result = match receiver.await {
             Ok(result) => result,
             Err(_) => Err(self.inner.current_failure().await),
-        }
+        };
+        pending.id = None;
+        result
     }
 
     pub async fn notify(
@@ -107,9 +114,12 @@ impl CodexClient {
         W: AsyncWrite + Send + Unpin + 'static,
     {
         let (event_sender, event_receiver) = mpsc::channel(event_buffer);
+        let (outbound, frames) = mpsc::channel(OUTBOUND_FRAME_BUFFER);
         let (shutdown, shutdown_receiver) = watch::channel(false);
+        let (writer_shutdown, writer_shutdown_receiver) = watch::channel(false);
         let inner = Arc::new(Inner {
-            writer: Mutex::new(Box::pin(writer)),
+            server_version: Default::default(),
+            outbound,
             state: Mutex::new(ConnectionState {
                 failure: None,
                 pending: HashMap::new(),
@@ -118,6 +128,7 @@ impl CodexClient {
             max_message_bytes,
             next_id: AtomicU64::new(1),
             shutdown,
+            writer_shutdown,
             tasks: Mutex::new(TaskHandles::default()),
             runtime_files: Mutex::new(Vec::new()),
         });
@@ -128,49 +139,45 @@ impl CodexClient {
             max_message_bytes,
             event_buffer,
         ));
-        inner.tasks.lock().await.reader = Some(reader_task);
+        {
+            let mut tasks = inner.tasks.lock().await;
+            tasks.reader = Some(reader_task);
+            tasks.writer = Some(tokio::spawn(run_writer(
+                writer,
+                frames,
+                Arc::downgrade(&inner),
+                writer_shutdown_receiver,
+            )));
+        }
 
         (Self { inner }, event_receiver, shutdown_receiver)
     }
 }
 
-impl Inner {
-    pub(super) async fn write_frame(&self, value: &Value) -> Result<(), CodexError> {
-        let mut encoded = serde_json::to_vec(value).map_err(|error| CodexError::Protocol {
-            message: format!("could not encode outbound message: {error}"),
-            stderr: "(not applicable)".to_owned(),
-        })?;
-        if encoded.len() > self.max_message_bytes {
-            return Err(CodexError::MessageTooLarge {
-                observed: encoded.len(),
-                limit: self.max_message_bytes,
+struct PendingRequest {
+    inner: Arc<Inner>,
+    id: Option<String>,
+}
+
+impl Drop for PendingRequest {
+    fn drop(&mut self) {
+        let Some(id) = self.id.take() else {
+            return;
+        };
+        if let Ok(mut state) = self.inner.state.try_lock() {
+            state.pending.remove(&id);
+            return;
+        }
+        let inner = Arc::clone(&self.inner);
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move {
+                inner.state.lock().await.pending.remove(&id);
             });
         }
-        encoded.push(b'\n');
-
-        {
-            let state = self.state.lock().await;
-            if let Some(error) = &state.failure {
-                return Err(error.clone());
-            }
-        }
-
-        let result = {
-            let mut writer = self.writer.lock().await;
-            writer.as_mut().write_all(&encoded).await
-        };
-        if let Err(error) = result {
-            let failure = CodexError::Io {
-                operation: "writing stdin",
-                message: error.to_string(),
-                stderr: self.stderr_context().await,
-            };
-            self.fail(failure.clone(), true).await;
-            return Err(failure);
-        }
-        Ok(())
     }
+}
 
+impl Inner {
     pub(super) async fn handle_message(
         &self,
         value: Value,
@@ -237,15 +244,17 @@ impl Inner {
     pub(super) async fn fail(&self, error: CodexError, request_shutdown: bool) {
         let pending = {
             let mut state = self.state.lock().await;
-            if state.failure.is_some() {
-                return;
+            if state.failure.is_none() {
+                state.failure = Some(error.clone());
+                std::mem::take(&mut state.pending)
+            } else {
+                HashMap::new()
             }
-            state.failure = Some(error.clone());
-            std::mem::take(&mut state.pending)
         };
         for (_, sender) in pending {
             let _ = sender.send(Err(error.clone()));
         }
+        let _ = self.writer_shutdown.send(true);
         if request_shutdown {
             let _ = self.shutdown.send(true);
         }

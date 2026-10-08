@@ -8,6 +8,73 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-10-08
+
+- **Deliberate release channels**: Preserved opt-in automatic alpha after
+  successful main-push CI and prepared explicit manual alpha/stable selection
+  with alpha/non-publishing defaults. Automatic publication cannot select stable
+  and uses the tested upstream SHA, not the callback's main SHA. Exact selected/
+  current main and latest successful Rust CI are checked before rehearsal and
+  again before publication;
+  stamped Cargo/lock/tag versions must match the selected channel. Added
+  fail-closed regression checks to Nix tooling and an explicit promotion and
+  post-publication checklist. No local version, public alpha claim, remote
+  variable, or publication state is changed by this preparation.
+- **Diagnostic subprocess stability**: Generated shell fixtures run through an
+  existing interpreter instead of direct execution of freshly written files.
+  Cancellation retains the child handle for bounded explicit reaping rather
+  than relying solely on Tokio's orphan queue; runtime-shutdown fallback
+  remains kill-on-drop. Strict cancellation/timeout assertions and early-drop,
+  non-executable-fixture, missing-executable, and redaction coverage protect
+  both cleanup and unchanged probe-error behavior.
+- **Doctor Git binding corrections**: Separated registered-repository identity
+  from resolved checkout/branch validation so unborn repositories are not
+  reported as broken. Diagnostic commands retain protected user Git trust
+  configuration after clearing ambient overrides, preserving `safe.directory`
+  without bypassing ownership checks. Focused native-Git and coordinator
+  regressions cover both review findings and strict checkout/ownership behavior.
+- **Agreed follow-up order**: Recorded baseline/release-channel preparation,
+  inherited-context capture semantics, generic clients and optional tmux,
+  optional dev stacks, then safe opt-in background operation as the next-step
+  sequence. Candidates remain unimplemented and do not authorize publication;
+  handoff, annotations, worker MCP selection, and idle retirement stay later.
+- **Optional workspace dev-stack candidate**: Recorded a possible external
+  Compose adapter with isolated project/data identity, optional shared local
+  Traefik routing, and ordinary localhost defaults for non-adapter users.
+  Explicit lifecycle, idempotent hooks, retirement guards, data retention, and
+  separate container resource controls remain design constraints. This is
+  unimplemented, not scheduled, and not a stable-release blocker.
+- **Read-only installation diagnostics**: Added system-wide `coco doctor`
+  and its versioned JSON report. Installation, actual running configuration,
+  private runtime-file safety, resource capabilities, saved-state integrity,
+  Git bindings, and native conversation metadata use bounded passive probes.
+  Healthy bindings are summarized; problems retain stable identifiers,
+  suggested actions, explicit timeout evidence, and coverage information.
+  Independent read-only SQLite access and existing native worker boundaries
+  avoid state migrations, thread resumes, executor startup, or model turns.
+  Reports exclude credential contents, conversation text, and raw errors.
+- **Workspace runtime concurrency**: Replaced the daemon-wide executor-state
+  mutex with brief registry lookup and per-workspace operation locks. Startup,
+  registration, stop, resource sampling, and policy changes for unrelated
+  workspaces can proceed independently. Owned mutation tasks preserve cleanup
+  across RPC cancellation, an exclusive lifecycle lease orders daemon close,
+  and fifteen-second registration/verification deadlines bound unresponsive
+  App Server requests. Cancelled requests now release their response slots.
+  Follow-up review distinguishes this registry guarantee from repository-level
+  attach ordering and native Codex environment queueing, and corrects outbound
+  framing before the diagnostics slice. The correction
+  gives each connection one owned writer with an eight-frame bounded queue;
+  an in-progress frame finishes despite caller cancellation, while write
+  failure or deadline makes the transport terminal before another write.
+  Explicit close interrupts blocked writes even after an earlier failure.
+- **Generic client attachments and optional tmux integration**: Recorded the
+  accepted post-v0 direction for associating live `coco jump` clients with
+  workspaces through existing renewable attachment leases. The model permits
+  multiple clients, remains generation-local, distinguishes terminal presence
+  from agent execution, and keeps tmux an optional adapter. A future opt-in
+  status projection and lightweight plugin read path must remain passive,
+  bounded, sanitized, and independent of durable workspace state.
+
 ## 2026-10-06
 
 - **Codex 0.160.1 compatibility baseline**: Advanced the selected exact

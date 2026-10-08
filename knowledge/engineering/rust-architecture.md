@@ -165,6 +165,7 @@ src/
   codex/
     process.rs                   # child lifecycle and initialization
     jsonl.rs                     # framing/correlation
+    writer.rs                    # owned bounded writes and terminal failure
     websocket.rs                 # authenticated shared transport
     tests.rs
 
@@ -194,6 +195,10 @@ src/
   cli.rs
   cli/
     args.rs
+    doctor.rs                   # installation probes and typed diagnostic RPC
+    doctor/
+      output.rs                 # compact diagnostic projection
+      tests.rs                  # rendering and redaction behavior
     commands.rs
     commands/
       status.rs
@@ -211,6 +216,7 @@ src/
   paths.rs
   daemon.rs
   daemon/
+    doctor.rs                    # actual running configuration and private-file checks
     handler.rs                   # RPC-to-coordinator translation
     worker.rs                    # WorkerRuntime adapter around CodexClient
     execution.rs                 # lazy workspace executor lifecycle
@@ -313,13 +319,28 @@ request correlation, and server-event dispatch; and `codex/websocket.rs` owns
 the authenticated shared transport and private runtime files. The public
 client state and close contract remain in the roughly 240-line `codex.rs`
 facade, while its unchanged transport tests live in `codex/tests.rs`.
-The Git adapter followed on 2026-09-06. `git/command.rs` is now the only place
-that spawns Git and bounds stdout/stderr; repository identity, worktree
+The 2026-10-08 cancellation correction adds a private `codex/writer.rs` for
+owned, bounded byte writes and terminal failure. Its cases and deterministic
+failure fixture live under `codex/tests/framing.rs` and
+`codex/tests/framing/support.rs`; this is a behavior-specific boundary, not an
+external API or crate split.
+WebSocket shutdown regression cases stay in the focused
+`codex/tests/framing/websocket.rs` child.
+The Git adapter followed on 2026-09-06. `git/command.rs` owns ordinary Git
+execution and its stdout/stderr bounds; repository identity, worktree
 lifecycle, explicit local-state carry, and diff/observation policy live in
 their corresponding child modules. `git.rs` retains the error and shared data
 types plus adapter construction. Worktree-mode and local-state cases now live
 under focused `git/tests/` children while the shared native-Git fixture
 remains in `git/tests.rs`.
+The 2026-10-08 doctor slice deliberately uses separate read-only probes in
+`git/diagnostics.rs` and `store/diagnostics.rs`. A neutral private
+`diagnostics.rs` owns only common subprocess bounds and metadata validation;
+it imports no application, transport, or presentation module. CLI diagnostics
+depend on typed protocol/RPC and this neutral helper, while daemon metadata,
+coordinator binding checks, and adapter inspection retain their existing
+owners. Tests stay with those responsibilities; no visibility or crate split
+is needed. See [diagnostics](diagnostics.md) for the safety contract.
 The final physical split completed with the CLI: the facade now only parses
 and delegates, while Clap arguments, typed command execution, the status
 follow-loop, authenticated TUI jump, output rendering, and tests have focused

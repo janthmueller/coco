@@ -20,6 +20,7 @@ use super::{
     CodexClient, CodexError, CodexEvent, STDERR_TAIL_BYTES, SharedAppServerOptions, StderrTail,
 };
 
+mod framing;
 #[cfg(unix)]
 mod real_git_approval;
 
@@ -30,12 +31,7 @@ async fn client_pair(
     tokio::sync::mpsc::Receiver<CodexEvent>,
     DuplexStream,
 ) {
-    let (client_stream, server_stream) = tokio::io::duplex(64 * 1024);
-    let (reader, writer) = tokio::io::split(client_stream);
-    let stderr = Arc::new(tokio::sync::Mutex::new(StderrTail::new(STDERR_TAIL_BYTES)));
-    let (client, events, _shutdown) =
-        CodexClient::from_io(reader, writer, max_message_bytes, 8, stderr).await;
-    (client, events, server_stream)
+    CodexClient::test_io_pair(max_message_bytes).await
 }
 
 struct AssertAuthorization;
@@ -204,6 +200,73 @@ async fn correlates_out_of_order_responses() {
     assert_eq!(second.await.unwrap().unwrap(), json!("second result"));
     drop(server_writer);
     drop(server_reader);
+    client.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn cancelled_requests_release_correlation_state_and_ignore_late_responses() {
+    let (client, _events, server) = client_pair(4096).await;
+    let (reader, mut writer) = tokio::io::split(server);
+    let mut reader = BufReader::new(reader);
+    let cancelled = tokio::spawn({
+        let client = client.clone();
+        async move { client.request("environment/add", json!({})).await }
+    });
+    let mut line = String::new();
+    reader.read_line(&mut line).await.unwrap();
+    let first: Value = serde_json::from_str(&line).unwrap();
+    cancelled.abort();
+    assert!(cancelled.await.unwrap_err().is_cancelled());
+    assert!(client.inner.state.lock().await.pending.is_empty());
+
+    let current = tokio::spawn({
+        let client = client.clone();
+        async move { client.request("environment/info", json!({})).await }
+    });
+    line.clear();
+    reader.read_line(&mut line).await.unwrap();
+    let second: Value = serde_json::from_str(&line).unwrap();
+    writer
+        .write_all(
+            format!(
+                "{}\n{}\n",
+                json!({"id": first["id"], "result": "late"}),
+                json!({"id": second["id"], "result": "current"}),
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(current.await.unwrap().unwrap(), json!("current"));
+    assert!(client.inner.state.lock().await.pending.is_empty());
+    client.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn cancelled_request_cleanup_waits_for_a_busy_correlation_lock() {
+    let (client, _events, server) = client_pair(4096).await;
+    let mut reader = BufReader::new(server);
+    let request = tokio::spawn({
+        let client = client.clone();
+        async move { client.request("environment/add", json!({})).await }
+    });
+    let mut line = String::new();
+    reader.read_line(&mut line).await.unwrap();
+    let state = client.inner.state.lock().await;
+    request.abort();
+    assert!(request.await.unwrap_err().is_cancelled());
+    assert_eq!(state.pending.len(), 1);
+    drop(state);
+    timeout(Duration::from_secs(5), async {
+        loop {
+            if client.inner.state.lock().await.pending.is_empty() {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("cancelled request retained its pending response slot");
     client.close().await.unwrap();
 }
 

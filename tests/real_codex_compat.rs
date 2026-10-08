@@ -40,6 +40,9 @@ mod containment;
 #[path = "real_codex_compat/resources.rs"]
 mod resources;
 
+#[path = "real_codex_compat/doctor.rs"]
+mod doctor;
+
 #[path = "real_codex_compat/retirement.rs"]
 mod retirement;
 
@@ -74,7 +77,14 @@ impl TestPaths {
     }
 
     fn apply(&self, command: &mut Command, codex_binary: &Path) {
+        let existing = env::var_os("PATH").unwrap_or_default();
+        let task_bins = Path::new(env!("CARGO_BIN_EXE_cocod")).parent().unwrap();
+        let search_path = env::join_paths(
+            std::iter::once(task_bins.to_path_buf()).chain(env::split_paths(&existing)),
+        )
+        .unwrap();
         command
+            .env("PATH", search_path)
             .env("HOME", &self.home)
             .env("CODEX_HOME", &self.codex_home)
             .env("COCO_CODEX_BINARY", codex_binary)
@@ -791,6 +801,7 @@ async fn run_daemon_lifecycle(
     let status = workspace_status(paths, codex_binary, repository)
         .await
         .with_context(|| format!("cocod log:\n{}", read_log(&log)))?;
+    doctor::verify(paths, codex_binary, repository, &status).await?;
     let loaded = if attach_after_status {
         attach_workspace(paths, repository)
             .await

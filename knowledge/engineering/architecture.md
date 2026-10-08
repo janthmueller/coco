@@ -1214,7 +1214,11 @@ The verified 0.160.1 runtime uses this minimal sequence:
    the canonical worktree. Register its opaque stable ID, ephemeral endpoint,
    and raw bearer token through the in-memory `environment/add` request, then
    verify `environment/info`. Do not persist its URL, token, PID, or resource
-   samples.
+   samples. Runtime operations serialize per workspace; registry lookup never
+   holds a daemon-wide mutex over startup, registration, or shutdown. Owned
+   activation tasks and bounded registration requests allow daemon shutdown
+   to reconcile cancelled RPC callers before stopping every executor; see the
+   runtime document's [coordination contract](workspace-runtime.md#coordination-and-shutdown).
 7. On the first fresh `send`, resolve `default` to an empty `config` object or
    parse the complete `$CODEX_HOME/<name>.config.toml` overlay, call persistent
    `thread/start` with the workspace environment, and immediately dispatch the

@@ -65,6 +65,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
     assert_mode(&paths.endpoint, 0o600)?;
     assert_mode(&paths.database, 0o600)?;
     super::hooks::verify_loaded(&paths, &repository).await?;
+    super::doctor::verify_live(&paths, &repository, &capability_token, &observed_requests).await?;
 
     let models = cli_json(&run_cli(&paths, &repository, &["model", "list", "--json"]).await?)?;
     assert_eq!(models["schemaVersion"], 14);

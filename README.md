@@ -36,6 +36,10 @@ cargo install --locked --git https://github.com/janthmueller/coco codex-coordina
 See [Installation](https://janthmueller.github.io/coco/installation/) for
 published releases, Nix, and setup.
 
+Run `coco doctor` to check your installation and workspace connections.
+See [Troubleshooting](https://janthmueller.github.io/coco/reference/current-limitations/#check-your-setup)
+if a check reports a problem.
+
 ## Start two agents
 
 Run `cocod` in another terminal and leave it running. Inside a Git repository

@@ -7,8 +7,16 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      channel:
+        description: Release channel
+        required: true
+        default: alpha
+        type: choice
+        options:
+          - alpha
+          - stable
       publish:
-        description: Publish the alpha instead of rehearsing the version build
+        description: Publish the selected channel instead of only rehearsing
         required: true
         default: false
         type: boolean
@@ -26,6 +34,7 @@ jobs:
     if: >
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
       (
+        github.event_name == 'workflow_run' &&
         vars.COCO_RELEASE_ENABLED == 'true' &&
         github.event.workflow_run.conclusion == 'success' &&
         github.event.workflow_run.event == 'push' &&
@@ -33,46 +42,27 @@ jobs:
       )
     runs-on: ubuntu-latest
     outputs:
-      should_release: ${{ steps.check.outputs.should_release }}
       target_sha: ${{ steps.check.outputs.target_sha }}
       publish_requested: ${{ steps.check.outputs.publish_requested }}
+      channel: ${{ steps.check.outputs.channel }}
+      prerelease: ${{ steps.check.outputs.prerelease }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
-          ref: main
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
-      - name: Require the tested commit to remain current
+      - name: Require the selected and tested main revision
         id: check
         env:
-          PUBLISH_REQUESTED: ${{ inputs.publish || false }}
-          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
-            {
-              echo "should_release=true"
-              echo "target_sha=$(git rev-parse HEAD)"
-              echo "publish_requested=$PUBLISH_REQUESTED"
-            } >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          git fetch origin main
-          CURRENT_SHA="$(git rev-parse origin/main)"
-          if [ "$TESTED_SHA" = "$CURRENT_SHA" ]; then
-            {
-              echo "should_release=true"
-              echo "target_sha=$TESTED_SHA"
-              echo "publish_requested=true"
-            } >> "$GITHUB_OUTPUT"
-          else
-            echo "Tested SHA $TESTED_SHA is no longer current main ($CURRENT_SHA); skipping release."
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
-          fi
+          GH_TOKEN: ${{ github.token }}
+          COCO_RELEASE_ENABLED: ${{ vars.COCO_RELEASE_ENABLED }}
+          RELEASE_CHANNEL: ${{ github.event_name == 'workflow_run' && 'alpha' || inputs.channel }}
+          PUBLISH_REQUESTED: ${{ github.event_name == 'workflow_run' && 'true' || inputs.publish }}
+        run: python3 .github/scripts/release_checks.py request
 
   release:
     needs: guard
-    if: needs.guard.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -94,24 +84,15 @@ jobs:
           git branch --set-upstream-to=origin/main main
           test "$(git rev-parse HEAD)" = "$TARGET_SHA"
 
-      - name: Require successful tests for a manual release
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          SHA="$(git rev-parse HEAD)"
-          CONCLUSION="$(gh run list --workflow rust.yml --commit "$SHA" --status completed --limit 1 --json conclusion --jq '.[0].conclusion // ""')"
-          test "$CONCLUSION" = success
-
-      - name: Rehearse alpha version and build
-        if: needs.guard.outputs.publish_requested != 'true'
+      - name: Rehearse selected version and build without publication
+        id: rehearsal
         uses: python-semantic-release/python-semantic-release@39dd2052f2ce8282a5d932c31d58a2ca06d2550e # v10.6.1
         with:
           config_file: releaserc.toml
           github_token: ${{ secrets.GH_PAT || github.token }}
           git_committer_name: github-actions[bot]
           git_committer_email: github-actions[bot]@users.noreply.github.com
-          prerelease: true
+          prerelease: ${{ needs.guard.outputs.prerelease }}
           prerelease_token: alpha
           commit: false
           tag: false
@@ -119,7 +100,23 @@ jobs:
           vcs_release: false
           strict: true
 
-      - name: Version and publish alpha release
+      - name: Verify channel, tag, and synchronized Cargo metadata
+        env:
+          RELEASE_CHANNEL: ${{ needs.guard.outputs.channel }}
+          RELEASE_VERSION: ${{ steps.rehearsal.outputs.version }}
+          RELEASE_TAG: ${{ steps.rehearsal.outputs.tag }}
+        run: python3 .github/scripts/release_checks.py version
+
+      - name: Recheck the tested main revision before publication
+        if: needs.guard.outputs.publish_requested == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COCO_RELEASE_ENABLED: ${{ vars.COCO_RELEASE_ENABLED }}
+          RELEASE_CHANNEL: ${{ needs.guard.outputs.channel }}
+          PUBLISH_REQUESTED: ${{ needs.guard.outputs.publish_requested }}
+        run: python3 .github/scripts/release_checks.py request
+
+      - name: Version and publish selected release
         if: needs.guard.outputs.publish_requested == 'true'
         id: publish
         uses: python-semantic-release/python-semantic-release@39dd2052f2ce8282a5d932c31d58a2ca06d2550e # v10.6.1
@@ -128,7 +125,7 @@ jobs:
           github_token: ${{ secrets.GH_PAT || github.token }}
           git_committer_name: github-actions[bot]
           git_committer_email: github-actions[bot]@users.noreply.github.com
-          prerelease: true
+          prerelease: ${{ needs.guard.outputs.prerelease }}
           prerelease_token: alpha
           strict: true
 

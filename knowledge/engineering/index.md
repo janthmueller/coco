@@ -19,6 +19,9 @@ agents.
 - [Per-workspace Codex execution runtime](workspace-runtime.md) - Defines the
   shared control plane, lazy workspace executors, environment routing,
   resource observations, lifecycle, and current containment limits.
+- [Client attachments and tmux integration](client-attachments.md) - Records
+  the proposed generation-local client-presence model and optional tmux
+  presentation/navigation adapter without coupling execution to terminal panes.
 - [Workspace token usage and billing estimates](workspace-usage.md) - Defines
   native token evidence, optional billing estimates, attribution/recovery
   requirements, and the implemented passive status projection.
@@ -26,8 +29,11 @@ agents.
   rate-limit source, account-global ownership, cache invalidation, and optional
   status projection for remaining usage windows.
 - [Release process](release.md) - Defines semantic versioning, the tested-main
-  release guard, Cargo version synchronization, alpha tags, and native binary
-  archives.
+  release guard, explicit alpha/stable selection, Cargo version synchronization,
+  native binary archives, and the publication checklist.
+- [Read-only diagnostics](diagnostics.md) - Defines bounded installation,
+  daemon, native-thread, Git-binding, and resource-capability checks through
+  `coco doctor`, including privacy, coverage, and failure exit codes.
 - [MCP catalog and worker runtime boundary](mcp-runtime.md) - Separates CoCo's
   control MCP server from worker-facing MCP tools and records native Codex as
   the initial runtime with Agentgateway as a deferred optional adapter.

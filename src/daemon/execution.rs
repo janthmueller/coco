@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -10,7 +11,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Child;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OwnedMutexGuard, OwnedRwLockReadGuard, RwLock};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tracing::{debug, warn};
@@ -32,6 +33,7 @@ pub(super) use containment::WorkspaceContainment;
 use containment::{ActiveContainment, PendingContainment};
 
 const EXEC_SERVER_START_TIMEOUT: Duration = Duration::from_secs(10);
+const EXEC_SERVER_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const EXEC_SERVER_OUTPUT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const EXEC_SERVER_CONNECT_TIMEOUT_MS: u64 = 10_000;
 const EXEC_SERVER_ENDPOINT_BYTES: usize = 256;
@@ -78,11 +80,15 @@ pub(super) enum WorkspaceExecutionError {
         #[source]
         source: CodexError,
     },
+    #[error("the Codex App Server did not register the workspace executor within 15 seconds")]
+    RegistrationTimeout,
     #[error("the Codex App Server could not connect to the workspace executor: {source}")]
     Connection {
         #[source]
         source: CodexError,
     },
+    #[error("the Codex App Server did not verify the workspace executor within 15 seconds")]
+    ConnectionTimeout,
     #[error("could not inspect the workspace executor process: {0}")]
     ProcessInspection(#[source] std::io::Error),
     #[error("could not stop the workspace executor: {0}")]
@@ -97,6 +103,10 @@ pub(super) enum WorkspaceExecutionError {
     StaleResourcePolicy { requested: u64, current: u64 },
     #[error("workspace resource policy revision {0} has conflicting contents")]
     ResourcePolicyRevisionConflict(u64),
+    #[error("workspace execution is shutting down")]
+    ShuttingDown,
+    #[error("workspace executor operation failed: {0}")]
+    OperationTask(#[source] tokio::task::JoinError),
 }
 
 #[derive(Clone)]
@@ -117,12 +127,55 @@ struct WorkspaceExecutorsInner {
     codex_binary: PathBuf,
     codex_home: Option<PathBuf>,
     containment: WorkspaceContainment,
-    state: Mutex<WorkspaceExecutorState>,
+    lifecycle: Arc<RwLock<WorkspaceExecutorLifecycle>>,
+    entries: Mutex<HashMap<String, Arc<Mutex<WorkspaceExecutorEntry>>>>,
 }
 
-struct WorkspaceExecutorState {
-    runtimes: HashMap<String, ManagedExecServer>,
-    policies: HashMap<String, WorkspaceResourcePolicySnapshot>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorkspaceExecutorLifecycle {
+    Open,
+    Closed,
+}
+
+struct WorkspaceExecutorEntry {
+    runtime: Option<ManagedExecServer>,
+    policy: WorkspaceResourcePolicySnapshot,
+}
+
+impl WorkspaceExecutorEntry {
+    fn new(policy: WorkspaceResourcePolicySnapshot) -> Self {
+        Self {
+            runtime: None,
+            policy,
+        }
+    }
+
+    fn resource_policy_status(
+        &mut self,
+        capabilities: WorkspaceResourceCapabilities,
+    ) -> Result<WorkspaceResourceControllerStatus, WorkspaceExecutionError> {
+        let Some(runtime) = self.runtime.as_mut() else {
+            return Ok(WorkspaceResourceControllerStatus {
+                capabilities,
+                runtime_state: WorkspaceRuntimeState::Inactive,
+                applied_policy: None,
+            });
+        };
+        let running = runtime
+            .child
+            .try_wait()
+            .map_err(WorkspaceExecutionError::ProcessInspection)?
+            .is_none();
+        Ok(WorkspaceResourceControllerStatus {
+            capabilities,
+            runtime_state: if running {
+                WorkspaceRuntimeState::Running
+            } else {
+                WorkspaceRuntimeState::Exited
+            },
+            applied_policy: running.then(|| runtime.applied_policy.clone()),
+        })
+    }
 }
 
 impl WorkspaceExecutors {
@@ -133,18 +186,76 @@ impl WorkspaceExecutors {
         containment: WorkspaceContainment,
         policies: HashMap<String, WorkspaceResourcePolicySnapshot>,
     ) -> Self {
+        let entries = policies
+            .into_iter()
+            .map(|(workspace_id, policy)| {
+                (
+                    workspace_id,
+                    Arc::new(Mutex::new(WorkspaceExecutorEntry::new(policy))),
+                )
+            })
+            .collect();
         Self {
             inner: Arc::new(WorkspaceExecutorsInner {
                 client,
                 codex_binary,
                 codex_home,
                 containment,
-                state: Mutex::new(WorkspaceExecutorState {
-                    runtimes: HashMap::new(),
-                    policies,
-                }),
+                lifecycle: Arc::new(RwLock::new(WorkspaceExecutorLifecycle::Open)),
+                entries: Mutex::new(entries),
             }),
         }
+    }
+
+    async fn begin_operation(
+        &self,
+    ) -> Result<OwnedRwLockReadGuard<WorkspaceExecutorLifecycle>, WorkspaceExecutionError> {
+        let lifecycle = Arc::clone(&self.inner.lifecycle).read_owned().await;
+        if *lifecycle == WorkspaceExecutorLifecycle::Closed {
+            return Err(WorkspaceExecutionError::ShuttingDown);
+        }
+        Ok(lifecycle)
+    }
+
+    async fn entry(&self, workspace_id: &str) -> Arc<Mutex<WorkspaceExecutorEntry>> {
+        let mut entries = self.inner.entries.lock().await;
+        Arc::clone(entries.entry(workspace_id.to_owned()).or_insert_with(|| {
+            Arc::new(Mutex::new(WorkspaceExecutorEntry::new(
+                WorkspaceResourcePolicySnapshot::default(),
+            )))
+        }))
+    }
+
+    async fn existing_entry(
+        &self,
+        workspace_id: &str,
+    ) -> Option<Arc<Mutex<WorkspaceExecutorEntry>>> {
+        self.inner.entries.lock().await.get(workspace_id).cloned()
+    }
+
+    async fn mutate<T, F, Fut>(
+        &self,
+        workspace_id: &str,
+        operation: F,
+    ) -> Result<T, WorkspaceExecutionError>
+    where
+        T: Send + 'static,
+        F: FnOnce(Arc<WorkspaceExecutorsInner>, OwnedMutexGuard<WorkspaceExecutorEntry>) -> Fut
+            + Send
+            + 'static,
+        Fut: Future<Output = Result<T, WorkspaceExecutionError>> + Send + 'static,
+    {
+        let lifecycle = self.begin_operation().await?;
+        let entry = self.entry(workspace_id).await.lock_owned().await;
+        let inner = Arc::clone(&self.inner);
+        // RPC shutdown can cancel the caller. Keep ownership until startup,
+        // policy application, or cleanup completes; close waits for this lease.
+        tokio::spawn(async move {
+            let _lifecycle = lifecycle;
+            operation(inner, entry).await
+        })
+        .await
+        .map_err(WorkspaceExecutionError::OperationTask)?
     }
 
     pub(super) async fn ensure(
@@ -158,141 +269,78 @@ impl WorkspaceExecutors {
             ));
         }
 
-        let mut state = self.inner.state.lock().await;
-        if let Some(runtime) = state.runtimes.get_mut(workspace_id) {
-            match runtime.child.try_wait() {
-                Ok(None) if runtime.cwd == cwd => return Ok(runtime.environment.clone()),
-                Ok(None) | Ok(Some(_)) => {}
-                Err(error) => return Err(WorkspaceExecutionError::ProcessInspection(error)),
-            }
-        }
-        if let Some(runtime) = state.runtimes.remove(workspace_id) {
-            runtime.shutdown().await?;
-        }
-
-        let policy = state
-            .policies
-            .get(workspace_id)
-            .cloned()
-            .unwrap_or_default();
-
-        let environment = WorkerExecutionEnvironment {
-            environment_id: environment_id(workspace_id),
-            cwd: cwd.to_owned(),
-            runtime_workspace_roots: vec![cwd.to_owned()],
-        };
-        let containment = self
-            .inner
-            .containment
-            .prepare_with_policy(workspace_id, policy.clone())?;
-        let runtime = ManagedExecServer::spawn(
-            &self.inner.codex_binary,
-            self.inner.codex_home.as_deref(),
-            cwd,
-            environment.clone(),
-            containment,
-            policy,
-        )
-        .await?;
-        debug!(
-            workspace_id,
-            environment_id = %environment.environment_id,
-            workspace_executor_pid = runtime.process_id,
-            "registering workspace exec-server"
-        );
-
-        if let Err(source) = self
-            .inner
-            .client
-            .request("environment/add", runtime.registration_params())
-            .await
-        {
-            if let Err(error) = runtime.shutdown().await {
-                warn!(%error, "could not clean up an unregistered workspace exec-server");
-            }
-            return Err(WorkspaceExecutionError::Registration { source });
-        }
-        debug!(
-            workspace_id,
-            environment_id = %environment.environment_id,
-            "workspace exec-server registered"
-        );
-        if let Err(source) = self
-            .inner
-            .client
-            .request(
-                "environment/info",
-                json!({"environmentId": environment.environment_id}),
-            )
-            .await
-        {
-            if let Err(error) = runtime.shutdown().await {
-                warn!(%error, "could not clean up a disconnected workspace exec-server");
-            }
-            return Err(WorkspaceExecutionError::Connection { source });
-        }
-        debug!(
-            workspace_id,
-            environment_id = %environment.environment_id,
-            "workspace exec-server ready"
-        );
-
-        state.runtimes.insert(workspace_id.to_owned(), runtime);
-        Ok(environment)
+        let workspace = workspace_id.to_owned();
+        let cwd = cwd.to_owned();
+        self.mutate(workspace_id, move |inner, mut entry| async move {
+            inner.ensure(&workspace, &cwd, &mut entry).await
+        })
+        .await
     }
 
     pub(super) async fn close(&self) {
-        let runtimes = {
-            let mut state = self.inner.state.lock().await;
-            state
-                .runtimes
-                .drain()
-                .map(|(_, runtime)| runtime)
+        let mut lifecycle = self.inner.lifecycle.write().await;
+        if *lifecycle == WorkspaceExecutorLifecycle::Closed {
+            return;
+        }
+        *lifecycle = WorkspaceExecutorLifecycle::Closed;
+
+        let entries = {
+            let mut entries = self.inner.entries.lock().await;
+            std::mem::take(&mut *entries)
+                .into_values()
                 .collect::<Vec<_>>()
         };
-        for runtime in runtimes {
-            if let Err(error) = runtime.shutdown().await {
+        for entry in entries {
+            if let Some(runtime) = entry.lock().await.runtime.take()
+                && let Err(error) = runtime.shutdown().await
+            {
                 warn!(%error, "could not stop a workspace exec-server cleanly");
             }
         }
     }
 
     pub(super) async fn stop(&self, workspace_id: &str) -> Result<(), WorkspaceExecutionError> {
-        let runtime = self.inner.state.lock().await.runtimes.remove(workspace_id);
-        if let Some(runtime) = runtime {
-            debug!(
-                workspace_id,
-                workspace_executor_pid = runtime.process_id,
-                "stopping workspace exec-server"
-            );
-            runtime.shutdown().await?;
-        }
-        Ok(())
+        let workspace = workspace_id.to_owned();
+        self.mutate(workspace_id, move |_, mut entry| async move {
+            if let Some(runtime) = entry.runtime.take() {
+                debug!(
+                    workspace_id = workspace,
+                    workspace_executor_pid = runtime.process_id,
+                    "stopping workspace exec-server"
+                );
+                runtime.shutdown().await?;
+            }
+            Ok(())
+        })
+        .await
     }
 
     pub(super) async fn resources(
         &self,
         workspace_id: &str,
     ) -> Result<WorkspaceRuntimeResources, WorkspaceExecutionError> {
-        let mut state = self.inner.state.lock().await;
-        let Some(runtime) = state.runtimes.get_mut(workspace_id) else {
-            return Ok(WorkspaceRuntimeResources {
-                backend: WorkspaceRuntimeBackend::ExecServer,
-                state: WorkspaceRuntimeState::Inactive,
-                scope: self.inner.containment.resource_scope(),
-                process_id: None,
-                process_count: None,
-                task_count: None,
-                resident_memory_bytes: None,
-                memory_current_bytes: None,
-                cpu_percent: None,
-                cpu_usage_usec: None,
-                cgroup_unit: None,
-                events: None,
-                sampled_at_ms: None,
-            });
-        };
-        runtime.resources()
+        let _lifecycle = self.begin_operation().await?;
+        if let Some(entry) = self.existing_entry(workspace_id).await {
+            let mut entry = entry.lock().await;
+            if let Some(runtime) = entry.runtime.as_mut() {
+                return runtime.resources();
+            }
+        }
+        Ok(WorkspaceRuntimeResources {
+            backend: WorkspaceRuntimeBackend::ExecServer,
+            state: WorkspaceRuntimeState::Inactive,
+            scope: self.inner.containment.resource_scope(),
+            process_id: None,
+            process_count: None,
+            task_count: None,
+            resident_memory_bytes: None,
+            memory_current_bytes: None,
+            cpu_percent: None,
+            cpu_usage_usec: None,
+            cgroup_unit: None,
+            events: None,
+            sampled_at_ms: None,
+        })
     }
 
     pub(super) fn resource_capabilities(&self) -> WorkspaceResourceCapabilities {
@@ -303,27 +351,17 @@ impl WorkspaceExecutors {
         &self,
         workspace_id: &str,
     ) -> Result<WorkspaceResourceControllerStatus, WorkspaceExecutionError> {
-        let mut state = self.inner.state.lock().await;
-        let Some(runtime) = state.runtimes.get_mut(workspace_id) else {
-            return Ok(WorkspaceResourceControllerStatus {
-                capabilities: self.resource_capabilities(),
-                runtime_state: WorkspaceRuntimeState::Inactive,
-                applied_policy: None,
-            });
-        };
-        let running = runtime
-            .child
-            .try_wait()
-            .map_err(WorkspaceExecutionError::ProcessInspection)?
-            .is_none();
+        let _lifecycle = self.begin_operation().await?;
+        if let Some(entry) = self.existing_entry(workspace_id).await {
+            return entry
+                .lock()
+                .await
+                .resource_policy_status(self.resource_capabilities());
+        }
         Ok(WorkspaceResourceControllerStatus {
             capabilities: self.resource_capabilities(),
-            runtime_state: if running {
-                WorkspaceRuntimeState::Running
-            } else {
-                WorkspaceRuntimeState::Exited
-            },
-            applied_policy: running.then(|| runtime.applied_policy.clone()),
+            runtime_state: WorkspaceRuntimeState::Inactive,
+            applied_policy: None,
         })
     }
 
@@ -338,12 +376,108 @@ impl WorkspaceExecutors {
             .map_err(WorkspaceExecutionError::InvalidResourcePolicy)?;
         self.inner.containment.validate_policy(&snapshot.policy)?;
 
-        let mut state = self.inner.state.lock().await;
-        let current = state
-            .policies
-            .get(workspace_id)
-            .cloned()
-            .unwrap_or_default();
+        self.mutate(workspace_id, move |inner, mut entry| async move {
+            entry
+                .configure_resource_policy(snapshot, inner.containment.capabilities())
+                .await
+        })
+        .await
+    }
+}
+
+impl WorkspaceExecutorsInner {
+    async fn ensure(
+        &self,
+        workspace_id: &str,
+        cwd: &Path,
+        entry: &mut WorkspaceExecutorEntry,
+    ) -> Result<WorkerExecutionEnvironment, WorkspaceExecutionError> {
+        if let Some(runtime) = entry.runtime.as_mut() {
+            match runtime.child.try_wait() {
+                Ok(None) if runtime.cwd == cwd => return Ok(runtime.environment.clone()),
+                Ok(None) | Ok(Some(_)) => {}
+                Err(error) => return Err(WorkspaceExecutionError::ProcessInspection(error)),
+            }
+        }
+        if let Some(runtime) = entry.runtime.take() {
+            runtime.shutdown().await?;
+        }
+
+        let policy = entry.policy.clone();
+
+        let environment = WorkerExecutionEnvironment {
+            environment_id: environment_id(workspace_id),
+            cwd: cwd.to_owned(),
+            runtime_workspace_roots: vec![cwd.to_owned()],
+        };
+        let containment = self
+            .containment
+            .prepare_with_policy(workspace_id, policy.clone())?;
+        let runtime = ManagedExecServer::spawn(
+            &self.codex_binary,
+            self.codex_home.as_deref(),
+            cwd,
+            environment.clone(),
+            containment,
+            policy,
+        )
+        .await?;
+        debug!(
+            workspace_id,
+            environment_id = %environment.environment_id,
+            workspace_executor_pid = runtime.process_id,
+            "registering workspace exec-server"
+        );
+
+        if let Err(error) = self.register(&runtime).await {
+            if let Err(error) = runtime.shutdown().await {
+                warn!(%error, "could not clean up an unregistered workspace exec-server");
+            }
+            return Err(error);
+        }
+
+        entry.runtime = Some(runtime);
+        Ok(environment)
+    }
+
+    async fn register(&self, runtime: &ManagedExecServer) -> Result<(), WorkspaceExecutionError> {
+        let environment_id = &runtime.environment.environment_id;
+        timeout(
+            EXEC_SERVER_REQUEST_TIMEOUT,
+            self.client
+                .request("environment/add", runtime.registration_params()),
+        )
+        .await
+        .map_err(|_| WorkspaceExecutionError::RegistrationTimeout)?
+        .map_err(|source| WorkspaceExecutionError::Registration { source })?;
+        debug!(
+            %environment_id,
+            "workspace exec-server registered"
+        );
+
+        timeout(
+            EXEC_SERVER_REQUEST_TIMEOUT,
+            self.client
+                .request("environment/info", json!({"environmentId": environment_id})),
+        )
+        .await
+        .map_err(|_| WorkspaceExecutionError::ConnectionTimeout)?
+        .map_err(|source| WorkspaceExecutionError::Connection { source })?;
+        debug!(
+            %environment_id,
+            "workspace exec-server ready"
+        );
+        Ok(())
+    }
+}
+
+impl WorkspaceExecutorEntry {
+    async fn configure_resource_policy(
+        &mut self,
+        snapshot: WorkspaceResourcePolicySnapshot,
+        capabilities: WorkspaceResourceCapabilities,
+    ) -> Result<WorkspaceResourceControllerStatus, WorkspaceExecutionError> {
+        let current = &self.policy;
         if snapshot.revision < current.revision {
             return Err(WorkspaceExecutionError::StaleResourcePolicy {
                 requested: snapshot.revision,
@@ -356,13 +490,12 @@ impl WorkspaceExecutors {
                     snapshot.revision,
                 ));
             }
-            drop(state);
-            return self.resource_policy_status(workspace_id).await;
+            return self.resource_policy_status(capabilities);
         }
 
         let mut runtime_state = WorkspaceRuntimeState::Inactive;
         let mut applied_policy = None;
-        if let Some(runtime) = state.runtimes.get_mut(workspace_id) {
+        if let Some(runtime) = self.runtime.as_mut() {
             if runtime
                 .child
                 .try_wait()
@@ -378,9 +511,9 @@ impl WorkspaceExecutors {
                 runtime_state = WorkspaceRuntimeState::Exited;
             }
         }
-        state.policies.insert(workspace_id.to_owned(), snapshot);
+        self.policy = snapshot;
         Ok(WorkspaceResourceControllerStatus {
-            capabilities: self.resource_capabilities(),
+            capabilities,
             runtime_state,
             applied_policy,
         })
@@ -886,6 +1019,13 @@ impl ByteTail {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    mod concurrency;
+    #[cfg(unix)]
+    mod lifecycle;
+    #[cfg(unix)]
+    mod support;
 
     #[test]
     fn mode_defaults_to_exec_server_and_rejects_unknown_values() {

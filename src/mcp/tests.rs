@@ -45,6 +45,7 @@ impl DaemonRpc for RecordingDaemon {
 
 fn fake_response(method: DaemonMethod) -> Value {
     match method {
+        DaemonMethod::Doctor => unreachable!("doctor is exposed through the CLI"),
         DaemonMethod::SignalCatalogLoad
         | DaemonMethod::SignalTypeList
         | DaemonMethod::SignalEmit

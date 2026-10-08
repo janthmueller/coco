@@ -9,6 +9,7 @@ use crate::domain::WorktreeMode;
 const DEFAULT_CAPTURE_LIMIT: usize = 16 * 1024 * 1024;
 
 mod command;
+mod diagnostics;
 mod diff;
 mod local_state;
 mod repository;

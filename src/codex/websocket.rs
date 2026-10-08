@@ -199,9 +199,11 @@ pub(super) async fn bridge_jsonl_websocket<S>(
                 let _ = websocket_writer.close().await;
                 return Ok::<(), String>(());
             }
-            if frame.last() == Some(&b'\n') {
-                frame.pop();
+            if frame.last() != Some(&b'\n') {
+                let _ = websocket_writer.close().await;
+                return Err("outbound JSONL frame ended before its newline".to_owned());
             }
+            frame.pop();
             if frame.last() == Some(&b'\r') {
                 frame.pop();
             }

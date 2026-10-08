@@ -15,6 +15,15 @@ mod resources;
 mod retirement;
 
 #[test]
+fn doctor_is_non_interactive_and_has_a_json_report_without_a_workspace_argument() {
+    let parsed = Cli::try_parse_from(["coco", "doctor", "--json", "--no-input"]).unwrap();
+    assert!(matches!(parsed.command, Command::Doctor { json: true }));
+    assert!(!parsed.requests_all_repositories());
+    assert!(!parsed.requests_global_search());
+    assert!(Cli::try_parse_from(["coco", "doctor", "some-workspace"]).is_err());
+}
+
+#[test]
 fn create_help_describes_the_codex_named_profile_file() {
     let mut command = Cli::command();
     let help = command

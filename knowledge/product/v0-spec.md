@@ -494,6 +494,7 @@ is an explicit independent request.
 ## Supported commands
 
 ```text
+coco doctor [--json]
 coco repo add [path]
 coco repo (remove | rm) [path]
 coco repo (list | ls) [--json]
@@ -629,6 +630,23 @@ All orchestration commands must use the daemon contract. The CLI must not open
 SQLite or operate worktrees. `jump` first resolves the workspace through the daemon,
 then launches the official Codex TUI against the daemon-owned App Server; it
 does not duplicate thread or turn orchestration.
+
+### `coco doctor`
+
+- System-wide read-only diagnostics work from any directory without a
+  repository, workspace argument, scope flag, picker, repair, or daemon start.
+- Inspect installed/running versions, local connection, saved-state health,
+  Git and native thread bindings, and the selected resource capabilities.
+  Expected prepared/unbound conversations and closed checkouts are not errors.
+- Bound each probe and total report work; show partial coverage explicitly.
+  An absent or older daemon does not suppress the remaining installation
+  evidence. Report problems with actionable hints, never raw backend errors,
+  credential contents, conversation text, or configuration dumps.
+- Human output summarizes healthy bindings. `--json` exposes all individual
+  checks and selected executable/live-daemon metadata. Exit 1 on errors, 0 on
+  warnings alone; do not append a redundant stderr error to the report.
+- The [diagnostic contract](../engineering/diagnostics.md) records adapter
+  ownership, exact bounds, privacy, coverage, and verification requirements.
 
 ### `coco repo add [path]`
 
@@ -1389,7 +1407,9 @@ full native event mirroring.
 The following are intentionally outside v0:
 
 - a CoCo-native TUI, web UI, tmux navigation, remote access, or multi-user
-  operation;
+  operation; the post-v0 tmux direction is recorded as a generic
+  [client-attachment model](../engineering/client-attachments.md), not a v0
+  promise;
 - other coding-agent runtimes;
 - automatic merging or destructive cleanup;
 - automatic or implicit transfer of dirty source state;
@@ -1695,3 +1715,103 @@ Remaining creation follow-ups are deliberately narrower: design an atomic
 detached-to-branch promotion before considering detached as the default,
 decide whether cross-repository Git-base transfer has a safe use case, and
 design handoff artifacts independently from native conversation forking.
+
+### Agreed follow-up order
+
+User-approved planning order recorded on 2026-10-08. This is internal future
+work, not shipped functionality or authorization to implement or publish the
+following slices. Review blockers take precedence; publication and operational
+changes still require explicit approval.
+
+1. Finish the current responsiveness/framing/doctor baseline: final review,
+   practical local testing, and a checkpoint only when authorized. Prepare
+   explicit alpha versus stable release selection before considering promotion
+   to suffix-free `0.1.0`; changing channels does not authorize publication.
+2. Clarify inherited-context capture for `create -c`. A prepared fork recipe is
+   currently materialized at first activation, so the child can depend on the
+   source's later activity and history. Decide eager native fork versus an
+   exact completed-turn boundary with recovery/compaction semantics; keep
+   fresh-context creation lazy and never invent a synthetic model turn.
+3. Add generic client-presence metadata to existing attachment leases, then a
+   passive opt-in projection and optional tmux status/navigation plugin. See
+   [client attachments](../engineering/client-attachments.md). Presence must
+   not become execution state or ownership by one terminal pane.
+4. Design and prove the optional development-stack adapter below on one real
+   project: parallel code/data isolation first, shared local routing second,
+   lifecycle hooks/guards and reconciliation afterward. Keep ordinary Compose
+   usage available independently and avoid a premature general plugin API.
+5. Harden optional background operation before adding service-manager adapters:
+   graceful SIGTERM, App Server child-failure behavior, recovery, logs, and
+   bounded restart policy. Only then design explicit opt-in Linux/macOS user
+   services; package installation must not enable them automatically.
+
+Handoff artifacts, optional ticket/PR annotations, and convenient worker-facing
+MCP selection remain later independently designed capabilities. They must not
+introduce ticket scheduling or a mandatory gateway. Automatic idle-runtime
+retirement remains lower priority until observed resource pressure justifies
+its lifecycle cost. Neither the tmux nor dev-stack candidate is a stable
+`0.1.0` release requirement.
+
+### Candidate: per-workspace development stacks
+
+Recorded on 2026-10-08 as a possible future feature and placed after client/tmux
+integration in the follow-up order above. It is not implemented, has no
+delivery date, and is not a requirement for stable `0.1.0`. The problem is switching
+between branch-specific application stacks without having to stop the other
+workspace's stack. Parallel agents should be able to run and inspect their
+applications from their respective Git worktrees at the same time.
+
+Prefer an optional, separately usable dev-stack adapter. CoCo supplies
+workspace identity and worktree information through existing control and hook
+boundaries; Docker Compose owns application stacks and an optional shared
+local reverse proxy, initially Traefik, owns HTTP routing. This does not change
+CoCo's Codex execution backend or require Docker/proxy dependencies in the core.
+Do not introduce a general plugin framework merely for this candidate.
+
+Candidate behavior and constraints:
+
+- Assign each stack a stable, unique Compose project identity derived from
+  repository/workspace identity. Human-readable names may aid display, but
+  branch renames, slash-separated names, and equivalent slugs must not collide.
+  Each stack builds or mounts code from its own worktree.
+- Reuse Compose's native `-p`/`COMPOSE_PROJECT_NAME` isolation. Explicit
+  container/volume/network names, external resources, bind-mounted data, and
+  fixed host ports require separate collision checks; a proxy alone cannot
+  isolate them. Database data is separate per workspace unless sharing is
+  explicitly configured.
+- Keep ordinary `docker compose up` and localhost defaults usable without
+  CoCo or Traefik. An opt-in overlay supplies workspace-specific routing and
+  removes conflicting host-port publications. Application variables may use
+  defaults such as `${APP_URL:-http://localhost:3000}`; these are proposed
+  adapter conventions, not existing automatic CoCo variables.
+- A shared proxy may route readable workspace hostnames to containers with
+  unique router/service labels and an explicitly selected network. Resolve
+  local DNS and optional TLS deliberately; do not change host networking or
+  expose services beyond loopback implicitly.
+- Start and stop stacks explicitly in the first slice. Creation/reopen hooks
+  may prepare configuration only when opted in, and repeated delivery must be
+  idempotent. Existing hooks clear ambient environment and run from the hook
+  configuration directory, so the adapter must select worktree/configuration
+  and variables explicitly rather than assuming inherited shell state.
+- A close/delete guard may reject retirement while an owned stack is running.
+  Post-event hooks run after worktree retirement and cannot protect its files.
+  Keep data volumes by default; deleting them needs independent, explicit
+  authorization. Scope every operation to the exact adapter-owned project,
+  never all containers or a project guessed solely from a branch name.
+- Container resource use and limits need separate Docker/Compose handling.
+  Docker-daemon-created workloads must not be assumed to inherit the Codex
+  workspace executor's cgroup, measurements, or policies.
+
+Before implementation, settle project configuration and ownership, URL/CORS
+and callback settings, proxy/network trust, persisted adapter state and restart
+reconciliation, retirement races/failure policy, and data cleanup semantics.
+The first proof should run two stacks from one repository concurrently,
+demonstrate distinct code/routes/data, preserve the no-adapter localhost path,
+and prove stopping or retiring one cannot affect the other. CLI names and a
+future generic plugin API remain open; this record does not authorize them.
+
+Native foundations: [Compose project names](https://docs.docker.com/compose/how-tos/project-name/),
+[variable defaults](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/),
+[overlay merge/reset rules](https://docs.docker.com/reference/compose-file/merge/),
+[volume naming](https://docs.docker.com/reference/compose-file/volumes/), and
+[Traefik routing](https://docs.docker.com/guides/traefik/).

@@ -198,6 +198,11 @@ impl WorkspaceContainment {
     }
 
     #[cfg(test)]
+    pub(super) fn process_tree_for_test() -> Self {
+        Self::process_tree()
+    }
+
+    #[cfg(test)]
     pub(super) fn prepare(&self, workspace_id: &str) -> PendingContainment {
         self.prepare_with_policy(workspace_id, WorkspaceResourcePolicySnapshot::default())
             .expect("an empty resource policy is supported by every containment backend")

@@ -20,6 +20,7 @@ use crate::paths::CocoPaths;
 use crate::rpc::{RpcHandler, RpcServer};
 use crate::store::Store;
 
+mod doctor;
 mod execution;
 mod handler;
 mod worker;
@@ -67,7 +68,7 @@ pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<
     let workspace_resource_policies = store
         .workspace_resource_policies()
         .context("could not load workspace resource policies")?;
-    let (codex, events) = CodexClient::spawn(codex_options)
+    let (codex, events) = CodexClient::spawn(codex_options.clone())
         .await
         .context("could not start the Codex App Server")?;
     let workspace_executors = build_workspace_executors(
@@ -76,6 +77,13 @@ pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<
         workspace_executor,
         workspace_containment,
         workspace_resource_policies,
+    );
+    let doctor = doctor::DoctorContext::new(
+        &paths,
+        &codex_options,
+        workspace_execution_mode,
+        workspace_executors.as_ref(),
+        codex.clone(),
     );
     let runtime_generation = Uuid::new_v4().to_string();
     let coordinator = Arc::new(Coordinator::new(
@@ -96,7 +104,8 @@ pub async fn run(paths: CocoPaths, codex_options: CodexClientOptions) -> Result<
         );
     }
 
-    let handler: Arc<dyn RpcHandler> = Arc::new(DaemonHandler::new(Arc::clone(&coordinator)));
+    let handler: Arc<dyn RpcHandler> =
+        Arc::new(DaemonHandler::new(Arc::clone(&coordinator), doctor));
     let server = match RpcServer::bind(&paths.socket_path, handler).await {
         Ok(server) => server,
         Err(source) => {

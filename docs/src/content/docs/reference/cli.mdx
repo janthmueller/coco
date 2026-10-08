@@ -14,7 +14,8 @@ version.
 | `cocod`    | Keep threads and active Codex work reachable            |
 | `coco-mcp` | Expose repository-scoped workspace tools to an MCP host |
 
-Start `cocod` before using either of the other commands.
+Start `cocod` before managing workspaces or using MCP. `coco doctor` can also
+run before the coordinator is started.
 
 ## Command shape
 
@@ -48,9 +49,30 @@ coco status fix/login --global
 coco jump -g
 ```
 
-`create` always needs one repository. `repo`, `model`, `decide`, and `mcp` do
+`create` always needs one repository. `doctor`, `repo`, `model`, `decide`, and `mcp` do
 not accept a leading path or either scope flag. A full workspace ID resolves
 globally without `-g`.
+
+## Diagnostics
+
+```text
+coco doctor [--json]
+```
+
+Check your installation and registered workspaces without changing them.
+This command is system-wide, works from any directory, and does not accept a
+workspace, repository path, or scope flag. It never opens a selector.
+
+The normal output groups healthy repositories, worktrees, and conversations,
+and gives problems their own lines with a suggested action. `--json` includes
+every individual check and executable paths. Review paths and workspace names
+before sharing it.
+
+Exit code `1` means at least one check failed; `0` means there were no errors.
+Warnings and expected skips, such as a closed checkout or a conversation that
+has not started, do not cause failure. The report includes whether its coverage
+is complete. It inspects up to 32 registered repositories and 64 workspaces;
+collection limits and exhausted time budgets are reported explicitly.
 
 ## Repository commands
 
