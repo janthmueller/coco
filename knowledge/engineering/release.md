@@ -20,7 +20,7 @@ CoCo uses the same release control pattern as Wuf, adapted to one Rust package:
    of `main`.
 4. Python Semantic Release stamps `Cargo.toml`, synchronizes the root package
    entry in `Cargo.lock`, updates `CHANGELOG.md`, creates a release commit, and
-   tags automatic alpha or an explicitly selected manual alpha/stable channel.
+   tags the explicitly selected manual alpha/stable channel.
    A rehearsal first stamps and checks the metadata without committing,
    tagging, pushing, or creating a release.
 5. A GitHub Release is created from that tag.
@@ -41,7 +41,7 @@ Nix, registry, and executable output from one source value.
 
 ## Daemon service policy
 
-Alpha packages install the `cocod` executable but never start or enable it as a
+Packages install the `cocod` executable but never start or enable it as a
 background service. The supported lifecycle is an explicit foreground
 invocation, independent of whether installation used Cargo, a release archive,
 or Nix. Package installation must not create a surprising persistent process.
@@ -55,14 +55,21 @@ launchd agents, and the eventual Windows equivalent enable supervision.
 
 ## Publication guard
 
-The repository, GitHub Pages site, release archives, and alpha crate are
+The repository, GitHub Pages site, release archives, and crate are
 public. Repository visibility and package publication remain operationally
 sensitive changes even though the initial publication decision is complete.
 
-Successful `Rust` completion after a push to `main` triggers automatic alpha
-publication only when `COCO_RELEASE_ENABLED` is exactly `true`. Ordinary pushes
-still run verification and documentation delivery when this switch is off.
-Automatic publication always selects alpha; it can never promote stable.
+Publication is deliberately dispatched for both regular releases and optional
+alpha previews. `COCO_RELEASE_ENABLED=false` disables the previous automatic
+main-push alpha train; ordinary pushes run verification and documentation
+delivery without publication. This switch was disabled for the first regular
+release on 2026-10-08 and must not be re-enabled incidentally.
+
+The workflow retains the tested optional automatic-alpha path for a separately
+authorized operational decision. It requires `COCO_RELEASE_ENABLED` to be exactly
+`true` and successful `Rust` completion after a main push. It always selects
+alpha and can never promote stable. Keeping this capability does not make it
+the current release policy.
 
 Manual dispatch remains available independently of the automatic switch and
 defaults to `channel=alpha` and `publish=false`: a non-publishing version/build
@@ -105,23 +112,23 @@ committed as a release asset so a tag always passes `cargo --locked`.
 The synchronization build command uses `python3`, consistently with the other
 automation checks; no shell alias for `python` is part of the release contract.
 
-The `main` branch configuration is stable-capable. The workflow's automatic or
-manually selected alpha uses Semantic Release's `prerelease` action input and
-`alpha` token; stable selection leaves the normal-version calculation intact. Both
-use the same Conventional Commit history and Cargo lock synchronization.
+The `main` branch configuration is stable-capable. Manually selected alpha uses
+Semantic Release's `prerelease` action input and `alpha` token; stable selection
+leaves the normal-version calculation intact. Both use the same Conventional
+Commit history and Cargo lock synchronization.
 No branch rename, manual version edit, or incidental commit type changes the
 selected channel.
 
-During the current channel, release commits stamp `0.1.0-alpha.N`; local and
-flake-built executables report that exact source version. Semantic Release
-advances the prerelease number from qualifying commits through enabled automatic
-alpha or an explicit manual alpha request. The package version is not changed
-merely by preparing or testing the release automation.
+The first suffix-free `0.1.0` was published through the guarded stable channel
+on 2026-10-08 after the exact-revision Rust workflow and a non-publishing stable
+rehearsal passed. Release commits stamp the selected version; local and
+flake-built executables report that exact source version. Optional alpha
+previews keep the `-alpha.N` suffix through an explicit alpha request. Preparing
+or rehearsing automation does not change the source repository version.
 
-The approved post-alpha direction is to promote the tested `0.1` line to a
-suffix-free `0.1.0`, not to claim `1.0.0`. A final `0.1.0-alpha.N` may be used
-as a bounded release candidate, but alpha numbering must not substitute for
-ordinary `0.x` evolution indefinitely. After promotion, compatible fixes use
+The post-alpha baseline is suffix-free `0.1.0`, not a `1.0.0` compatibility
+promise. Alpha numbering must not substitute for ordinary `0.x` evolution
+indefinitely. After promotion, compatible fixes use
 `0.1.x`; meaningful feature or breaking changes before 1.0 advance the minor
 line (`0.2.0`, `0.3.0`, and so on). A future minor may have explicit
 `0.2.0-alpha.N` previews when external testing is useful, but every minor does
@@ -129,12 +136,12 @@ not require an alpha train or a beta phase.
 
 Stable package publication is deliberate rather than an automatic consequence
 of every qualifying commit. Ordinary pushes run verification and documentation
-delivery, followed by conditional automatic alpha publication. The release
+delivery without publication under the current policy. The release
 workflow exposes an explicit preview-versus-stable choice: preview publication
 carries the `alpha` suffix and prerelease channel,
 while stable publication is suffix-free and becomes the normal GitHub/crates.io
-release. This choice is implemented; completing the checklist below remains
-necessary before the first stable publication.
+release. The first normal publication is complete; the same checklist applies
+to subsequent releases.
 
 `1.0.0` is reserved for an intentional compatibility promise covering at least
 the CLI, control MCP surface, configuration, persisted-state migrations, and
@@ -172,25 +179,29 @@ the registry artifact. CI runs `cargo publish --dry-run --locked` before a
 revision can release; the tagged release job reads its credential only from
 the `CARGO_REGISTRY_TOKEN` GitHub secret.
 
-Until a suffix-free version exists on crates.io, Cargo installation examples
-must name an exact alpha version because a bare install does not select a
-prerelease. After the first stable `0.x` publication, verify the registry and
-archives before changing the public guide to the unversioned install form.
+The normal crate is available on crates.io, so public Cargo installation
+examples use `cargo install --locked codex-coordinator`. Optional alpha
+installation must name an exact preview version because a bare install selects
+the normal release. Verify registry and archive availability before updating
+public installation/status claims for a newly published line.
 
 ## Release checklist
 
 Before either channel:
 
 1. Review the complete intended source, including newly added modules. Obtain
-   authorization for checkpoint/push and intended publication. With automatic
-   alpha enabled, a qualifying tested push can publish alpha; a verification-only
-   push requires the automatic switch to be off. Local preparation does not
-   change that switch or authorize either a push or publication.
+   authorization for checkpoint/push and intended publication. Confirm the
+   automatic-alpha switch is off under the regular-release policy. If separately
+   re-enabled, a qualifying tested push can publish alpha. Local preparation
+   does not change that switch or authorize either a push or publication.
 2. Require the exact current `main` revision to pass `Rust`: format, Clippy,
    all-target tests, dependency use/policy, actual registry-package dry-run,
    Git-flake checks, and native Linux/macOS binary smoke. Static documentation
    checks must also pass when public content changes. A local snapshot can
    validate pending source, but cannot substitute for the exact hosted SHA.
+   Generated release commits carry `[skip ci]`; if the current main tip is such
+   a commit, use the Rust workflow's manual dispatch before rehearsing or
+   promoting it. A successful test of its parent is not exact-tip proof.
 3. For a manual release, dispatch the selected channel with `publish=false`,
    inspect the calculated version/changelog, and verify the stamped Cargo/lock/tag
    checks pass. For
@@ -213,8 +224,9 @@ automatic stable selection, manual default rehearsals and explicit publication,
 stale SHA, latest CI state, channel/version/tag crossovers, and mismatched or
 duplicate Cargo lock roots. Nix tooling checks run these alongside actionlint
 and the lockfile synchronizer tests. The
-workflow still needs an authorized exact-SHA hosted rehearsal before first
-publication; its Docker action cannot be represented by static lint alone.
+workflow requires an authorized exact-SHA hosted rehearsal before publication;
+its Docker action cannot be represented by static lint alone. The first stable
+promotion proved that native hosted action path, in addition to local fixtures.
 
 The pinned Semantic Release [action input contract](https://github.com/python-semantic-release/python-semantic-release/blob/39dd2052f2ce8282a5d932c31d58a2ca06d2550e/action.yml)
 and [input-to-CLI mapping](https://github.com/python-semantic-release/python-semantic-release/blob/39dd2052f2ce8282a5d932c31d58a2ca06d2550e/src/gh_action/action.sh)

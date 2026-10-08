@@ -26,15 +26,15 @@ CoCo uses Codex App Server and your existing Codex login and configuration.
 
 ## Install
 
-You need Git, configured Codex, and Rust 1.98.1 or newer. Install the current
-repository version with Cargo:
+You need Git, configured Codex, and Rust 1.98.1 or newer. Install the published
+package with Cargo:
 
 ```bash
-cargo install --locked --git https://github.com/janthmueller/coco codex-coordinator
+cargo install --locked codex-coordinator
 ```
 
 See [Installation](https://janthmueller.github.io/coco/installation/) for
-published releases, Nix, and setup.
+release binaries, Nix, development builds, and setup.
 
 Run `coco doctor` to check your installation and workspace connections.
 See [Troubleshooting](https://janthmueller.github.io/coco/reference/current-limitations/#check-your-setup)
@@ -76,7 +76,8 @@ machine.
 
 ## Project status
 
-CoCo is alpha software for Linux and macOS, tested with Codex 0.160.1.
+CoCo runs on Linux and macOS and is tested with Codex 0.160.1.
+The 0.x series is under active development.
 Resource measurements and limits are Linux features; limits require a
 compatible systemd user session.
 

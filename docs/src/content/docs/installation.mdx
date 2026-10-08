@@ -4,33 +4,31 @@ description: Install CoCo with Cargo or Nix and start its coordinator.
 ---
 
 CoCo runs on Linux and macOS and uses your existing Codex login and
-configuration. The current repository version is tested with Codex 0.160.1.
+configuration. CoCo is tested with Codex 0.160.1.
 
 You need Git and a configured `codex` command on your `PATH`.
 
 ## Install with Cargo
 
-With Rust 1.98.1 or newer, install the current repository version:
-
-```bash
-cargo install --locked --git https://github.com/janthmueller/coco codex-coordinator
-```
-
-For the latest published alpha instead:
+With Rust 1.98.1 or newer, install the published package:
 
 ```bash
 cargo install --locked codex-coordinator
 ```
 
-These docs describe the repository version; newly added commands may appear
-here before the next published alpha.
-
 The package installs `coco`, `cocod`, and `coco-mcp`, normally into
 `~/.cargo/bin`. Make sure that directory is on your `PATH`.
 
+## Use release binaries
+
+Download an archive for your platform from
+[GitHub Releases](https://github.com/janthmueller/coco/releases). Extract it
+and place `coco`, `cocod`, and `coco-mcp` in a directory on your `PATH`.
+Each archive has a matching SHA-256 checksum file.
+
 ## Install with Nix
 
-With flakes enabled:
+Install the current repository version with flakes enabled:
 
 ```bash
 nix profile add github:janthmueller/coco
@@ -38,7 +36,15 @@ nix profile add github:janthmueller/coco
 
 This provides the same three commands and supplies the build toolchain.
 
-## Build from a checkout
+## Install a development version
+
+For the latest development version directly from Git:
+
+```bash
+cargo install --locked --git https://github.com/janthmueller/coco codex-coordinator
+```
+
+Or build from your own checkout:
 
 ```bash
 git clone https://github.com/janthmueller/coco.git
@@ -48,6 +54,9 @@ cargo install --path . --locked
 
 With Nix, you can use `nix develop -c cargo install --path . --locked` for
 the final command.
+
+These docs follow the repository version; newly added commands may appear
+here before the next published release.
 
 ## Start CoCo
 

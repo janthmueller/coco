@@ -10,6 +10,15 @@ status: stable
 
 ## 2026-10-08
 
+- **First regular release and policy**: Published suffix-free `0.1.0` through
+  the guarded CI pipeline after exact-tip Rust/native platform checks and a
+  successful stable rehearsal. Confirmed the normal GitHub release, unyanked
+  registry version, and both archives/checksums; updated user installation and
+  status wording only after availability was proven. Disabled
+  `COCO_RELEASE_ENABLED` for the post-alpha policy: regular releases and
+  optional alpha previews are deliberately dispatched; pushes continue to
+  verify source and deploy docs without automatic publication. The retained
+  automatic-alpha path requires a separate explicit decision to re-enable.
 - **Deliberate release channels**: Preserved opt-in automatic alpha after
   successful main-push CI and prepared explicit manual alpha/stable selection
   with alpha/non-publishing defaults. Automatic publication cannot select stable

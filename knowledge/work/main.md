@@ -8023,3 +8023,120 @@ Verification and handoff:
   create one conventional feature checkpoint on main before a normal push.
   Exact-revision hosted CI and any automatic alpha publication remain pending
   until the pushed revision is processed; no hosted success is claimed here.
+
+### Hosted workflow status check — 2026-10-08
+
+- Confirmed checkpoint `1f5a48e` is pushed to origin/main. Read-only GitHub
+  inspection found Documentation run `37819699569` successful, including both
+  static build and GitHub Pages deployment.
+- Rust run `37819700326` has successfully completed formatting, lint, all-target
+  tests, dependency checks, crates.io packaging verification, and the Nix flake
+  check. Native Linux/macOS binary smoke jobs are still running; no failure is
+  reported, but overall Rust success and the subsequent release are not yet
+  established.
+- No workflow rerun/dispatch, remote setting change, repair, commit, or push was
+  performed during this status check. Follow up on the remaining binary jobs
+  and the resulting Release run before claiming publication is complete.
+
+Follow-up verification:
+
+- Rust run `37819700326` is now successful, including both native Linux/macOS
+  binary smoke jobs. Documentation and GitHub Pages remain successful.
+- Release run `37820987623` completed successfully: revision/channel guards,
+  semantic rehearsal and publication, crates.io publication, and both native
+  binary builds, smoke tests, and GitHub asset uploads all passed.
+- GitHub release listing confirms `v0.1.0-alpha.12` is published as a
+  prerelease, not a draft. No repair, rerun, dispatch, commit, or push was needed.
+
+### Post-alpha promotion assessment — 2026-10-08
+
+- User reports additional practical running time and asks whether leaving alpha
+  is appropriate. This is an assessment request, not publication authorization.
+- The shipped alpha.12 has successful hosted Rust, native Linux/macOS, Pages,
+  registry, and release evidence above. No confirmed unresolved baseline blocker
+  is currently recorded; pending context-capture semantics, client/tmux presence,
+  development stacks, and service supervision remain separately scoped work.
+- Recommend the planned suffix-free `0.1.0`, not `1.0.0`; a beta stage is not
+  necessary without specific remaining validation goals. Practical running time
+  adds evidence but does not prove every lifecycle or integration path.
+- Before promotion, verify current main with exact-revision Rust CI and a manual
+  stable rehearsal calculating `0.1.0`. Generated release commits skip push CI;
+  a manual Rust run is available when the current tip has no matching proof.
+- Decide the post-promotion automatic-alpha policy explicitly: it currently
+  remains enabled for qualifying main pushes. Do not silently turn stable
+  publication automatic. Update public install/alpha wording only after the
+  suffix-free package and archives are actually available.
+- No product/configuration edit, remote switch change, workflow dispatch,
+  publication, commit, or push was performed for this assessment.
+
+### Authorized first regular release — 2026-10-08
+
+Active scope and plan:
+
+- User approved promoting the tested line to suffix-free `0.1.0` through the
+  existing GitHub CI release pipeline and updating its public installation/status.
+- Integrate the generated alpha.12 commit, disable automatic main-push alpha
+  publication with the existing repository switch, and keep both channels
+  explicitly selectable manually. Stable publication remains deliberate.
+- Run Rust CI for the exact current main tip, then dispatch a non-publishing
+  stable rehearsal and verify it calculates exactly `0.1.0`. Publish only that
+  tested revision through the stable channel after the rehearsal succeeds.
+- Verify the normal GitHub release, checksummed Linux/macOS archives and
+  crates.io version. Only then replace alpha wording and prefer the standard
+  registry Cargo install in README and user docs; retain compatibility/safety
+  limitations and Git/Nix alternatives.
+- Promote the new regular-release/channel policy into canonical knowledge;
+  commit/push the documentation follow-up and verify its static Pages delivery.
+  Do not change credentials, supported platforms, runtime behavior, or installed
+  services. Do not manually edit Cargo versions or publish outside CI.
+
+Progress:
+
+- Integrated alpha.12 release commit `e2aed4d` by fast-forward; it changes only
+  Cargo/lock/changelog metadata. Existing local working-document edits remain
+  intact. `COCO_RELEASE_ENABLED` is now confirmed `false`; manual publication
+  remains available and no credentials were read or changed.
+- Started exact-revision Rust CI run `37823371884` for
+  `e2aed4d15ccf335ce0ae6f0e4f5f665ff78a80db`. Do not advance remote main while
+  validating/rehearsing/publishing this revision.
+- Canonical release guidance now records deliberate normal releases, optional
+  manual alpha previews, and the disabled legacy automatic-alpha switch. Public
+  content and Cargo stamps remain unchanged until successful publication.
+
+- Exact-revision Rust run `37823371884` completed successfully, including all
+  source/policy/packaging/Nix checks and native Linux/macOS binary smoke builds.
+  The release-control regressions (16) and lock-sync regressions (3) also pass
+  locally, as do actionlint and whitespace checks.
+
+- Non-publishing stable rehearsal `37825147391` passed for the same exact
+  revision. Its native Semantic Release output is `0.1.0`, and the metadata
+  guard confirms `RELEASE_VERSION=0.1.0` / `RELEASE_TAG=v0.1.0`. Publishing,
+  crates.io, and binary-upload steps were correctly skipped in that rehearsal.
+
+- Started authorized stable publishing run `37825479502` for the tested source
+  revision. Its guards and native version/publish step passed, and crates.io
+  publication completed successfully. Native tagged Linux/macOS archive builds
+  are still in progress; do not claim all release assets are available yet.
+
+- Publishing run `37825479502` is now entirely successful. GitHub confirms
+  `v0.1.0` is neither draft nor prerelease; crates.io's version API confirms
+  `0.1.0` exists and is not yanked. Downloaded both platform archives and their
+  checksum files into a temporary directory: both SHA-256 checks pass and both
+  archives contain all three executables, license, and README.
+- Integrated generated normal-release commit/tag `77f1842` by fast-forward;
+  only Cargo/lock/changelog changed. Public source docs now prefer normal Cargo
+  installation, retain development Git/Nix alternatives and compatibility/safety
+  notes, describe available release binaries, and remove obsolete alpha wording.
+  The immutable tagged artifacts are not rewritten by this documentation follow-up.
+
+Documentation verification and delivery:
+
+- Astro source checks pass with zero errors/warnings/hints. The static export
+  passes for `/coco`: 62 files, 17 pages, Pagefind search, local routing, and
+  public-only boundaries. A sandboxed build could not open the package-manager
+  cache database; the same build passed with approved cache access, with no
+  dependency or source workaround. No alpha claims remain in README/site sources.
+- Reviewed the complete documentation/policy diff and whitespace checks pass.
+  No production Rust, workflow code, credentials, or runtime services changed.
+  Checkpoint/push the follow-up, verify hosted Pages delivery, and retain the
+  already successful immutable `v0.1.0` publication as the release proof.

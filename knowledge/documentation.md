@@ -163,7 +163,7 @@ do not recreate an application-style landing shell around the documentation.
 
 ## Static GitHub Pages deployment contract
 
-CoCo is published as a public alpha. The GitHub repository is public, and the
+CoCo is published publicly. The GitHub repository is public, and the
 active Documentation workflow deploys the static site to GitHub Pages from the
 default branch. Changes to repository visibility or publication still require
 an explicit user decision.
