@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.2.0 (2026-10-09)
+
+### Documentation
+
+- Adopt regular release installation and status
+  ([`8f93ec8`](https://github.com/janthmueller/coco/commit/8f93ec8ef2a34571f01261bb02483e2c80d08f79))
+
+### Features
+
+- **context**: Capture inherited threads during workspace creation
+  ([`f13bb2b`](https://github.com/janthmueller/coco/commit/f13bb2b913b2bb5155b04b3067e628152c30f522))
+
+
 ## v0.1.0 (2026-10-08)
 
 
