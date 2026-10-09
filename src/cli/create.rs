@@ -470,6 +470,7 @@ async fn list_repository_workspaces(
 ) -> Result<Vec<WorkspaceListItem>> {
     match client
         .request(WorkspaceListParams {
+            include_clients: false,
             scope: RepositoryScope::repository(repository_path.to_path_buf()),
             phases,
             include_resources: false,

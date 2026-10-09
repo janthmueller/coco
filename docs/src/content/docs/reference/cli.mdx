@@ -200,9 +200,9 @@ In the forms below, `<WORKSPACE>` may be a repository-local name or full ID.
 | ------------------------------------------------------------------- | ----------------------------------------------- |
 | `coco list [--json]` (`ls`)                                         | List workspaces in the selected scope           |
 | `coco list --closed [--json]`                                       | List closed workspaces instead                  |
-| `coco status [-a] [-t \| --sort name\|state] [-r] [-u] [-q] [--json]` | Show an ordered workspace overview           |
-| `coco status [-a] [-t \| --sort name\|state] [-r] [-u] [-q] -f`       | Follow that collection view                  |
-| `coco status WORKSPACE [-g] [-r] [-u] [-q] [--json] [--follow]`        | Show or follow one workspace                  |
+| `coco status [-a] [-t \| --sort name\|state] [-r] [-u] [-q] [-c] [--json]` | Show an ordered workspace overview    |
+| `coco status [-a] [-t \| --sort name\|state] [-r] [-u] [-q] [-c] -f`       | Follow that collection view           |
+| `coco status WORKSPACE [-g] [-r] [-u] [-q] [-c] [--json] [--follow]`        | Show or follow one workspace           |
 | `coco limits show [WORKSPACE] [-g] [--json]`                        | Show desired and currently applied limits       |
 | `coco limits set [WORKSPACE] [-g] [OPTIONS]`                        | Change selected workspace limits                |
 | `coco limits reset [WORKSPACE] [-g] [--json]`                       | Remove all configured workspace limits          |
@@ -229,6 +229,16 @@ uses a `Model` detail line. In a collection, a prepared workspace shows `—`
 until Codex has a conversation to report; targeted output omits the unavailable
 detail. Under `--follow`, the value updates after a model change in Codex.
 Plain `list` remains compact and omits it.
+
+Add `--clients` (`-c`) to show open Codex UIs alongside the agent state. tmux
+locations use `session:window.pane`, such as `tmux dev:2.1`; other terminals
+show `TUI`. Several UIs may be open at once, and `—` means none was reported.
+This tracks UIs opened through CoCo's `jump` or `create -j`; it works without
+tmux or a plugin. Combine it with `-a`, `-t`, `-f`, or the usage flags.
+For example, `-fartc` follows all repositories with resources, tree, and clients.
+Location labels are captured when you jump. Reopen after renaming or moving
+a pane to update its label.
+After a terminal crashes, its entry may take up to 30 seconds to disappear.
 
 During an active turn, `status` may append one short Codex activity detail to
 `Working`. It follows context compaction and the latest usable reasoning
@@ -452,7 +462,12 @@ coco limits show feat/first --json
 ```
 
 These commands emit one JSON value to standard output. Human-oriented follow
-mode is intentionally excluded. The current top-level schema version is `14`.
+mode is intentionally excluded. The current top-level schema version is `15`.
+Status JSON always includes a `clients` array. Each entry has a temporary
+`id` and `metadata.kind`, plus optional `metadata.integration` with `kind`,
+an opaque `scope`, a `locator`, and an optional readable `label`. An empty
+array means no open CoCo UI was reported. Keep workspace names or IDs, rather
+than temporary client identifiers, in saved references.
 Status JSON may include `runtimeResources`; its optional measurements are a
 current sample and are not persisted. During an active turn, it may also
 include `activity` with the displayed label, source, thread, turn, item,

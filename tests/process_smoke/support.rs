@@ -66,6 +66,8 @@ impl TestPaths {
             .env("COCO_TEST_CODEX_ARGS", &self.codex_args)
             .env("COCO_TEST_JUMP_ARGS", &self.jump_args)
             .env("COCO_HOOKS_PATH", &self.hooks)
+            .env_remove("TMUX")
+            .env_remove("TMUX_PANE")
             .env("RUST_LOG", "warn");
     }
 }
@@ -153,6 +155,11 @@ if [ "$kind" = "app-server" ]; then
   exec sleep 3600
 fi
 if [ "$kind" = "resume" ]; then
+  attempts=0
+  while [ -n "${COCO_TEST_JUMP_HOLD_PATH:-}" ] && [ -e "$COCO_TEST_JUMP_HOLD_PATH" ] && [ "$attempts" -lt 150 ]; do
+    sleep 0.1
+    attempts=$((attempts + 1))
+  done
   exit "${COCO_TEST_JUMP_EXIT:-0}"
 fi
 if [ "$kind" = "fresh" ]; then

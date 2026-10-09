@@ -34,6 +34,7 @@ use crate::protocol::{
 };
 use crate::store::{OperationState, WorkspaceDeletionIntent};
 
+mod clients;
 mod context;
 mod context_capture;
 mod creation;
@@ -977,6 +978,7 @@ impl Fixture {
     async fn attach(&self, workspace: &Workspace) -> Workspace {
         self.coordinator
             .attach_workspace(WorkspaceAttachParams {
+                client: None,
                 scope: RepositoryScope::repository(self.source.clone()),
                 workspace: workspace.id.clone(),
             })

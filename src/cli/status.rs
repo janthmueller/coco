@@ -26,6 +26,7 @@ pub(super) struct StatusProjection {
     pub(super) resources: bool,
     pub(super) usage: bool,
     pub(super) quota: bool,
+    pub(super) clients: bool,
 }
 
 pub(super) fn sort_workspace_collection(workspaces: &mut [WorkspaceListItem], order: StatusSort) {
@@ -137,6 +138,7 @@ pub(super) async fn follow_status(
                 scope: scope.clone(),
                 workspace: workspace.to_owned(),
                 include_resources: projection.resources,
+                include_clients: projection.clients,
             })
             .await?;
         let usage = workspace_usage(client, &response, projection.usage).await?;
@@ -191,6 +193,7 @@ pub(super) async fn follow_status_collection(
                 phases: None,
                 include_resources: projection.resources,
                 include_activity: true,
+                include_clients: projection.clients,
             })
             .await?;
         sort_workspace_collection(&mut workspaces, sort);

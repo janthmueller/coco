@@ -5,7 +5,7 @@ description: Tracks repository bootstrap, the Rust baseline, and early CoCo arch
 tags: [work, branch, bootstrap, rust, mcp, architecture]
 status: active
 branch: main
-updated: 2026-10-08
+updated: 2026-10-09
 ---
 
 # main — repository foundation
@@ -8560,3 +8560,365 @@ Review result and verification:
   `origin`, and use a normal fast-forward push without rewriting remote history.
 - Next work is not started here. The remaining user-approved candidates are
   recorded in the canonical product follow-up order.
+
+### Authorized context-capture release — 2026-10-09
+
+- User requests publication after the reviewed context-capture checkpoint.
+  Use the existing guarded GitHub Actions pipeline with the normal `stable`
+  channel. Do not re-enable automatic alpha publication, change credentials,
+  edit package versions manually, or begin a new feature slice.
+- Remote `main` is exactly `f13bb2b913b2bb5155b04b3067e628152c30f522`.
+  Its Rust run `37849554291` and Documentation run `37849553854` both completed
+  successfully; the automatic Release callback was correctly skipped under
+  the disabled auto-alpha policy.
+- Plan: dispatch a non-publishing stable rehearsal for that exact current
+  main revision; inspect the calculated semantic version and stamped Cargo/
+  lock/tag checks; then explicitly publish the same tested revision. Verify
+  the normal GitHub release, supported binary archives/checksums, and crates.io
+  package. Keep main unchanged until the release pipeline creates its own
+  version/changelog commit.
+- Only this continuation record is edited locally during release operations.
+  Existing installed packages, production runtimes, and workspaces remain
+  untouched. Record hosted verification and publication outcome before handoff.
+
+Progress:
+
+- Stable rehearsal `37890206735` completed successfully for the exact tested
+  checkpoint. Semantic Release calculated `0.2.0`; the stable channel, tag
+  `v0.2.0`, and synchronized Cargo/lock metadata checks all passed. Publication
+  steps and registry/binary jobs were skipped as requested by `publish=false`.
+- Remote main remains exactly the tested checkpoint before publishing. Start
+  the explicit `stable`, `publish=true` dispatch under the user's authorization;
+  do not claim registry or archive availability until the publishing jobs pass.
+- Publishing run `37890379881` targets the same reviewed/tested checkpoint.
+  Its guard, metadata rehearsal, final remote-tip check, and version/publish
+  step passed. The crates.io and native Linux/macOS archive jobs are running;
+  the overall release is not yet considered complete.
+
+Completed publication and handoff:
+
+- Publishing run `37890379881` completed successfully across every job.
+  GitHub confirms `v0.2.0` is published, not draft and not prerelease. The
+  public crates.io API confirms `codex-coordinator` version `0.2.0` exists and
+  is not yanked.
+- Linux x86_64 and macOS arm64 jobs passed native version/help smoke tests for
+  all three executables and attached both archives plus their SHA-256 files.
+  Downloaded the actual published archives into isolated temporary storage;
+  both checksum validations pass. Archive listings contain `coco`, `cocod`,
+  `coco-mcp`, README, and MIT license, as required.
+- Integrated only generated release commit `a7a9802` locally by fast-forward.
+  The peeled annotated `v0.2.0` tag matches that exact commit, whose sole changes
+  are Cargo version/lock metadata and the changelog. No source, public guide,
+  installed package, runtime, credential, or release-switch change was made.
+- Release scope is complete. The automatic-alpha switch remains disabled;
+  no automatic normal-release policy was introduced. Only this local release
+  continuation record remains uncommitted; no additional documentation commit
+  or push was necessary for publication. Future work awaits user direction.
+
+### Status-first client presence — 2026-10-09
+
+- User prioritizes seeing the attached tmux session/window/pane directly in
+  `coco status`; a separate tmux plugin is secondary. Clarify the existing
+  proposed design and preserve this preference in canonical knowledge.
+- Scope is planning only: keep generic, generation-local client leases;
+  capture optional tmux location in the ordinary `jump` CLI and project it
+  through an opt-in status view without requiring a plugin. Support multiple
+  attachments and preserve the distinction between UI presence and agent state.
+- Update the accepted delivery order and knowledge log. No Rust, public docs,
+  CLI implementation, external configuration, commit, push, or release change
+  is authorized by this clarification.
+
+- Recorded the clarified priority in the canonical client-attachment concept,
+  product follow-up order, and knowledge log. The first usable slice includes
+  ordinary-CLI tmux discovery and an opt-in status projection; plugin UI follows
+  independently. Existing bounds, renewal/expiry, multi-client semantics,
+  no-tmux fallback, and the passive-status boundary remain required.
+- Handoff: planning clarification is complete; implementation is still pending
+  and requires the next explicit go-ahead. Only internal knowledge files changed;
+  preserve the preceding local release record. Whitespace checks pass. No
+  compile/test gate is needed for this documentation-only priority change.
+
+### Client presence and optional tmux discovery — 2026-10-09
+
+User authorizes implementing the agreed status-first slice. Preserve the local
+release record and planning edits; continue on `main` without a checkpoint,
+push, publication, or operational configuration change.
+
+- [x] Add bounded generic presentation metadata to generation-local attach
+  leases, preserving adoption, multi-client renewal/reconnect, retirement, and
+  expiry. Status must never expose renewable lease capabilities.
+- [x] Add opt-in `status --clients` rendering for single/collection/tree/follow
+  views and structured JSON, without native thread or executor activation and
+  without any tmux process in status polling.
+- [x] Add best-effort tmux location discovery in ordinary `jump`: direct argv,
+  short timeout, bounded/validated output, no shell execution, and graceful
+  fallback for missing installation/environment, unavailable server, or bad
+  output. Retain generic client presence when location is unavailable.
+- [x] Add modular protocol, registry/coordinator, discovery, output, and process
+  regressions, including multiple clients, independent expiry/release, reconnect,
+  passive reads, and absent/broken tmux. Verify actual isolated tmux behavior
+  where available; never operate on the user's running sessions.
+- [x] Update only concrete user guidance plus canonical engineering/product
+  knowledge; keep plugin UI and plugin frameworks deferred. Run Rust, protocol,
+  dependency, and static-doc gates sequentially with bounded Cargo concurrency,
+  then review the final diff and record verification and unresolved limits.
+
+Architecture stays one private library and three thin binaries. Coherent new
+helper/test children are allowed; no crate split, broad layout refactor, new
+execution backend, or public library API is introduced.
+
+Implementation findings and decisions:
+
+- Reuse the existing 30-second generation-local jump leases and their existing
+  10-second CLI renewal. Add presentation metadata, not a second registration
+  protocol or a database table. Normal relay reconnect preserves the lease and
+  metadata; explicit release/expiry removes only its own client.
+- Public presence UUIDs are separate from renewable lease UUIDs. The status
+  projection never exposes the capability that can renew/release/adopt a lease.
+  An adoption-in-flight lease may remain pinned for correctness after expiry
+  or release, but must then disappear from live client presentation.
+- `--clients` adds a human column/detail only on request; status JSON always
+  includes structured clients, using an empty array when none are attached.
+  Plain list/pickers and normal status remain unchanged. CLI output schema
+  advances from 14 to 15; the SQLite schema is unchanged.
+- The optional CLI tmux adapter reads the current socket/pane and runs one
+  literal-argv format query with a 300 ms timeout and bounded capture. The
+  opaque scope hashes server socket, PID, and server start time; raw socket
+  paths are not published. Missing/broken tmux falls back to generic `TUI`.
+  Session/window/pane labels are captured at jump time, not refreshed by status
+  or heartbeat; a later rename/move can make the display label stale until the
+  next jump. Exact pane/server identity stays separate from the cached label.
+- Compilation and the first focused checks pass (12 tests, native tmux test
+  explicitly opt-in). Added modular lease, coordinator, wire, CLI/output, and
+  process coverage; full gates and actual isolated tmux verification follow.
+
+Verification and completed handoff:
+
+- `cargo check --all-targets --jobs 2` and all-target/all-feature Clippy with
+  `-D warnings` pass. Added no lint suppression; factored a new coordinator
+  test helper to stay below the existing function-size gate. Source remains
+  private and staged in the existing one-package dependency direction.
+- `cargo test --all-targets --jobs 2 --quiet -- --test-threads=4` passes:
+  539 library tests, seven explicitly ignored/manual library tests, and all
+  six process tests. The new subprocess scenario holds two independent TUIs,
+  one with a missing tmux server, and verifies collection/target/tree/follow,
+  JSON, independent closure, and unchanged working state. The first broad
+  run caught a test-only byte-vs-visible-character column comparison; corrected
+  the assertion and reran the complete suite successfully.
+- The exact opt-in isolated native tmux probe passes, using two owned temporary
+  servers and confirming distinct scopes for identical pane IDs. It also
+  checks renamed-session labels while the pane/server identity stays stable.
+- All five opt-in real-Codex compatibility tests pass against the retained
+  official `0.160.1` binary. Extended the existing real inherited-context TUI
+  proof to inspect actual presence/location after opening two TUIs in separate
+  servers and after closing each. Tests use isolated homes, dummy authentication,
+  and the local provider only; no external model call or user workspace.
+  The first sandboxed attempt hit denied loopback/user-bus access before product
+  setup; the approved outside-sandbox rerun passes all five in 38.92 seconds.
+- Formatting, whitespace, and unused-dependency checks pass. Offline locked
+  dependency policy passes all advisory/bans/licenses/sources gates against
+  the existing cache, with only pre-existing duplicate-version warnings. Its
+  sandboxed attempt could not acquire the read-only cache lock; the approved
+  offline rerun succeeds. No dependency/lockfile or installed tooling changes.
+- Astro source check passes with zero errors/warnings/hints. Static export
+  and public-only boundary verification pass: 17 pages, 62 static files,
+  Pagefind search, and routing. Public changes are only concrete usage/reference
+  guidance; canonical concepts, engineering index/runtime, product contract,
+  and knowledge log distinguish implemented presence from deferred plugin UI.
+- Final review finds no outstanding product blocker in this slice. Remaining
+  limits are deliberate: launch-time labels may stale after a rename/move;
+  presence is generation-local, tracks CoCo-launched clients only, and crash
+  cleanup may wait up to the existing 30-second lease TTL. No plugin framework,
+  status-bar UI, pane-switch command, or durable pane restoration was added.
+- Preserve all preceding release/planning edits. No commit, push, publication,
+  package installation, production daemon restart, or user tmux operation was
+  performed. All code and documentation changes remain local and unstaged.
+
+### Client status short flag — 2026-10-09
+
+- User requests the missing `-c` shortcut for `status --clients`. This is
+  command-local, so `create -c` continues to select conversation context.
+- [x] Add the shortcut and cover standalone, bundled, targeted/global, JSON,
+  and generated-help forms. Preserve the default and long-form behavior.
+- [x] Update concrete user examples/reference and canonical naming, run the
+  focused CLI tests plus formatting/lint and static-doc checks, and record the
+  result. Preserve all existing local changes; no commit/push/publication.
+
+- Verification: all 36 focused CLI tests pass, including `-c`, `-fartc`,
+  targeted `-gfc`, JSON `-ac`, unchanged default/long form, generated help,
+  and the existing create-context short forms. All-target/all-feature Clippy
+  with `-D warnings`, formatting, and whitespace checks pass. Astro check
+  reports zero errors/warnings/hints; static export verification passes for
+  all 17 pages and 62 files. No protocol, runtime, persistence, dependency,
+  or installation change; no commit or push. This shortcut follow-up is complete.
+
+### Full client-presence diff review — 2026-10-09
+
+User requests another full review, not fixes or publication. Review tracked
+and untracked changes against `a7a9802`, preserve the preceding release record,
+and leave product code, staging, installed tooling, and user sessions unchanged.
+
+- [x] Inspect wire compatibility, generic metadata validation, lease authority
+  versus presentation, adoption/reconnect/expiry, passive status, optional tmux
+  failure behavior, all output forms, test changes, and public/internal docs.
+- [x] Repeat the full automated suite, actual isolated tmux/native-Codex tests,
+  lint/format/dependency-use checks, and static documentation gates sequentially.
+- [x] Independently check suspicious lifecycle edges and report actionable
+  findings without implementing them.
+
+Finding (P2): client presence can reappear after expiry during slow adoption.
+`JumpLeaseRegistry::clients` uses the authority lease's `expires_at`. Adoption
+keeps an expired authority pinned, correctly hiding its presence while expired,
+but `finish_adoption` advances that same expiry even without another heartbeat.
+If the CLI died during the operation and could not release its lease, completion
+can make the vanished client visible again for another TTL. The current tests
+cover expiry, explicit renewal, and release separately, not completion after
+expiry without renewal. This supersedes the earlier no-outstanding-blocker
+assessment: the strict thirty-second crash-cleanup claim is not yet reliable
+for that edge.
+
+An isolated test under `/tmp/coco-client-review.z0Lo8a` compiles the registry
+directly from the unchanged repository source, using only minimal DTO/UUID/error
+stand-ins. It admits adoption, advances expiry into the past, verifies hidden
+presence with retained authority, completes adoption without renewal, and fails
+because the client reappears. No production or repository test file was edited.
+Suggested next step: separate client-presence expiry from the authority pin and
+adoption-driven expiry changes, preserving admitted adoption and late renewal;
+add success/failure/reconciliation regressions with no intervening heartbeat.
+Implementation awaits explicit approval.
+
+Verification:
+
+- Full all-target suite: 540 library tests and six process tests pass; seven
+  manual/opt-in library cases, the paid-live test, and five native cases are
+  initially ignored as intended.
+- The exact isolated tmux probe passes. All five explicitly opted-in native
+  compatibility tests pass against official Codex `0.160.1` in 38.38 seconds,
+  including two real TUIs and independent client removal. Only owned temporary
+  homes/servers, dummy credentials, and the local provider are used.
+- All-target/all-feature warning-denied Clippy, `cargo fmt --all -- --check`,
+  `cargo machete`, and whitespace checks pass. No dependency change; the prior
+  locked offline dependency-policy result remains applicable and was not rerun.
+- Astro check: zero errors/warnings/hints. Static export verification passes:
+  17 pages, 62 files, Pagefind, routing, and public-only content boundary.
+- No other actionable defect identified in this diff. The only repository
+  edit during review is this required continuation record. No commit, push,
+  publication, package installation, or production restart was performed.
+
+### Keep expired client presence separate from adoption — 2026-10-09
+
+User authorizes fixing the review finding. Continue on `main`, preserve all
+preceding local changes, and do not commit, push, publish, install, or restart
+production services.
+
+- [x] Give presentation its own expiry, advanced only by registration and an
+  explicit client heartbeat. Keep existing authority expiry, adoption pinning,
+  reconciliation, late renewal, release, and retirement semantics unchanged.
+- [x] Add deterministic regression coverage for successful/failed adoption,
+  repeated reconciliation, expiry during adoption, a surviving second client,
+  and late heartbeat recovery. Prove the new cases fail before the fix.
+- [x] Promote the invariant to canonical client/runtime knowledge and repeat
+  full tests, lint/format, and relevant real-Codex checks; review the final fix
+  diff and record results and remaining deliberate limits before handoff.
+
+Progress:
+
+- Added two regressions before editing production: the six-case registry run
+  fails only the new completion/reconciliation cases, proving the reported
+  defect. After adding `client_expires_at`, all eight registry tests pass.
+- Registration initializes both deadlines; only explicit renewal advances
+  the client deadline thereafter. Adoption and authority pruning are unchanged.
+  Existing tests now expire both clocks deliberately and assert passive reads
+  do not refresh either. Additional cases cover successful and failed adoption,
+  duplicate bound reconciliation, a second independent client, identity-preserving
+  late heartbeats, and generation clear with pinned adoption and later renewal.
+- Promoted the invariant into client-attachment/runtime concepts and knowledge
+  log. Public CLI/wire/SQLite contracts, dependencies, and public docs are
+  unchanged by this correction; their preceding review gates remain applicable.
+- The full all-target suite passes: 544 library tests and six process tests.
+  The first Clippy pass flags two unnecessary clones in the new assertions;
+  replaced them with borrowed slices, without changing test intent or product
+  behavior. Final focused tests and Clippy will be rerun after native checks.
+
+Completed verification and handoff:
+
+- The eight focused registry cases pass again after assertion cleanup.
+  All-target/all-feature Clippy with `-D warnings`, formatting, whitespace,
+  and unused-dependency checks pass. No lint suppression was added.
+- All five opt-in real-Codex `0.160.1` compatibility cases pass in 39.26 seconds,
+  including fresh adoption, reconnect/multiple native TUIs, independent closure,
+  inherited context, restart, MCP, and native session-hook baseline checks.
+  They use only temporary test homes/servers, dummy auth, and the local provider.
+- Final source review confirms only acquire and explicit renewal write the
+  client deadline; authority pinning, completion, retries, pruning, and release
+  retain their existing semantics. No additional outstanding finding remains
+  in this correction. The public documentation source did not change, so its
+  preceding successful check/static-export verification was not repeated.
+- The review's expired-presence finding is fixed. Deliberate launch-time label,
+  generation-local presence, and CoCo-launched-client boundaries remain as
+  documented. All prior work is preserved and unstaged; HEAD remains `a7a9802`.
+  No commit, push, publication, installation, or production restart was made.
+
+### Client-presence follow-up review — 2026-10-09
+
+User requests another review only. Reinspect the complete tracked/untracked
+client-presence diff against `a7a9802`, particularly the independent presence
+deadline correction. Preserve all preceding work; do not fix product code,
+stage, commit, push, publish, install, or change production services.
+
+- [x] Check authority/presence expiry, delayed adoption and reconciliation,
+  late heartbeats, release/generation-clear dominance, and independent clients.
+- [x] Reinspect optional tmux capture, bounded command execution, metadata
+  validation, capability separation, passive status projection, CLI flags,
+  collection/tree/target/follow/JSON rendering, and corresponding documentation.
+- [x] Repeat the full all-target tests, warning-denied Clippy, formatting, and
+  whitespace checks sequentially with bounded Cargo concurrency.
+- [x] Complete the isolated native-Codex rerun and record the review result.
+
+Current verification: 544 library tests and six process tests pass again;
+seven manual library cases, the paid-live case, and five native cases are
+initially ignored as intended. Clippy, formatting, and whitespace checks pass.
+All five explicitly opted-in Codex `0.160.1` compatibility cases pass again
+in 37.90 seconds, using temporary homes/servers, dummy credentials, and a local
+provider only. This includes two real TUIs, distinct tmux-server identities,
+independent closure, context capture/restart, and the native MCP/hook baseline.
+
+Review result and handoff:
+
+- No additional actionable defect found. Only registration and an explicit
+  heartbeat advance presence expiry; adoption cannot revive it, while existing
+  authority pinning and retirement checks remain intact. Release and generation
+  clear keep pinned clients hidden even if a late heartbeat arrives.
+- Optional discovery remains outside polling, validates exact server/pane
+  context and bounded untrusted text, and falls back to generic TUI presence.
+  Public presence IDs remain distinct from secret renewable lease capabilities.
+- Deliberate limits remain documented: labels are launch-time snapshots;
+  presence is generation-local and reports CoCo-launched UIs; a crashed client
+  can remain visible until the thirty-second heartbeat deadline. Human table
+  cells may truncate, while JSON retains all structured client entries.
+- Documentation still matches the implementation. Its source did not change
+  during this review, so the preceding successful static-doc gates were not
+  repeated. No dependency changes; the prior dependency-policy checks remain
+  applicable and were not repeated.
+- This continuation record is the only repository edit in the review. All
+  product changes remain local and unstaged, with HEAD still `a7a9802`.
+  No commit, push, publication, installation, production restart, or user
+  session operation was performed.
+
+### Client-presence checkpoint — 2026-10-09
+
+- User authorizes a local commit of the reviewed client-presence slice and
+  explicitly withholds pushing. Include the generic lease metadata, optional
+  tmux discovery, status projections, independent presence-expiry correction,
+  modular regressions, and corresponding public/internal documentation.
+- Checkpoint message: `feat(clients): show live TUI and tmux attachments in status`.
+  Preserve the preceding release/planning record in this branch document.
+- The final review's 544 library tests, six process tests, five isolated native
+  Codex tests, Clippy, and formatting remain applicable; product code has not
+  changed since that verification. Whitespace and staging checks are repeated
+  for the checkpoint. No additional broad test run is needed for this Git-only
+  operation.
+- Handoff: the reviewed feature is complete. Launch-time labels, generation-local
+  presence, CoCo-launched clients, and the thirty-second crash-expiry boundary
+  remain deliberate. No push, release, installation, or production restart
+  is authorized or performed by this checkpoint.

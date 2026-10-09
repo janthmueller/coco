@@ -8,6 +8,32 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-10-09
+
+- **Client-presence expiry correction**: Decoupled live client presentation
+  from adoption authority. Only registration and explicit heartbeats extend
+  presence; a slow adoption or reconciliation cannot revive a vanished client.
+  Existing adoption pinning, late renewal, release, and generation-clear
+  semantics are retained. Regression tests reproduce the original completion
+  and reconciliation failures and cover independent clients and heartbeat
+  recovery; verification is recorded in the branch working document.
+
+- **Live client presence**: Implemented the status-first slice locally:
+  optional bounded generic metadata on existing jump leases, independent
+  public presence IDs, `status --clients` across targeted/collection/tree/follow,
+  and schema-version-15 structured JSON. Ordinary jump performs a bounded,
+  best-effort tmux query and otherwise reports a generic TUI; status and renew
+  never invoke tmux. Launch-time labels can become stale after pane changes.
+  Metadata is ephemeral and independent of agent state; plugin UI remains
+  deferred. Full verification is tracked in the branch working document.
+
+- **Status-first client presence**: Prioritize showing where a workspace's TUI
+  is open directly in the CLI. The proposed ordinary `jump` flow captures
+  optional tmux session/window/pane metadata, and the opt-in status view
+  displays it without a plugin dependency. Generic multi-client leases remain
+  separate from agent activity; a tmux status/navigation plugin is a later
+  optional consumer. This is a planning clarification, not shipped behavior.
+
 ## 2026-10-08
 
 - **Capture review corrections**: Inherited Git completion now stays unfinished

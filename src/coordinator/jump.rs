@@ -5,6 +5,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use super::{Coordinator, CoordinatorError, validate_non_empty};
+use crate::domain::clients::{ClientMetadata, WorkspaceClient};
 use crate::domain::{
     ContextMode, EventKind, EventSource, Workspace, WorkspaceAvailability, WorkspaceLifecycle,
 };
@@ -19,9 +20,15 @@ use crate::store::{EventDraft, NewThreadBinding};
 
 const JUMP_LEASE_TTL: Duration = Duration::from_secs(30);
 
+#[cfg(test)]
+mod tests;
+
 struct JumpLease {
     workspace_id: String,
+    client: WorkspaceClient,
     expires_at: Instant,
+    // Adoption may extend authority, but only a heartbeat extends presence.
+    client_expires_at: Instant,
     candidate_thread_id: Option<String>,
     pending_adoption: bool,
     adoption_in_flight: bool,
@@ -47,6 +54,7 @@ impl JumpLeaseRegistry {
         &mut self,
         workspace_id: &str,
         pending_adoption: bool,
+        metadata: Option<ClientMetadata>,
     ) -> Result<String, CoordinatorError> {
         self.prune();
         if self.leases.values().any(|lease| {
@@ -55,11 +63,17 @@ impl JumpLeaseRegistry {
             return Err(CoordinatorError::WorkspaceAttachInProgress);
         }
         let id = Uuid::new_v4().to_string();
+        let expires_at = Instant::now() + self.ttl;
         self.leases.insert(
             id.clone(),
             JumpLease {
                 workspace_id: workspace_id.to_owned(),
-                expires_at: Instant::now() + self.ttl,
+                client: WorkspaceClient {
+                    id: Uuid::new_v4().to_string(),
+                    metadata: metadata.unwrap_or_default(),
+                },
+                expires_at,
+                client_expires_at: expires_at,
                 candidate_thread_id: None,
                 pending_adoption,
                 adoption_in_flight: false,
@@ -67,6 +81,23 @@ impl JumpLeaseRegistry {
             },
         );
         Ok(id)
+    }
+
+    fn clients(&mut self, workspace_id: &str) -> Vec<WorkspaceClient> {
+        self.prune();
+        let now = Instant::now();
+        let mut clients: Vec<_> = self
+            .leases
+            .values()
+            .filter(|lease| {
+                lease.workspace_id == workspace_id
+                    && lease.client_expires_at > now
+                    && !lease.release_requested
+            })
+            .map(|lease| lease.client.clone())
+            .collect();
+        clients.sort_by(|left, right| left.id.cmp(&right.id));
+        clients
     }
 
     fn begin_adoption(
@@ -190,6 +221,7 @@ impl JumpLeaseRegistry {
             .filter(|lease| lease.workspace_id == workspace_id)
             .ok_or(CoordinatorError::InvalidWorkspaceAttachLease)?;
         lease.expires_at = Instant::now() + self.ttl;
+        lease.client_expires_at = lease.expires_at;
         Ok(())
     }
 
@@ -243,6 +275,16 @@ impl Coordinator {
         &self,
         params: WorkspaceAttachParams,
     ) -> Result<WorkspaceAttachResult, CoordinatorError> {
+        if params
+            .client
+            .as_ref()
+            .is_some_and(|client| !client.is_valid())
+        {
+            return Err(CoordinatorError::InvalidParams(
+                "client metadata must be bounded, nonempty text without control characters"
+                    .to_owned(),
+            ));
+        }
         let resolved = self.resolve_workspace(&params.scope, &params.workspace)?;
         let repository_lock = self.repository_lock(&resolved.repository_id).await;
         let _guard = repository_lock.lock().await;
@@ -256,7 +298,7 @@ impl Coordinator {
         }
 
         if workspace.codex_thread_id.is_some() {
-            return self.resume_launch(workspace).await;
+            return self.resume_launch(workspace, params.client).await;
         }
         if workspace.lifecycle != WorkspaceLifecycle::Ready {
             return Err(CoordinatorError::InvalidWorkspaceState {
@@ -266,7 +308,7 @@ impl Coordinator {
         }
         if workspace.context_mode == ContextMode::Fork {
             let workspace = self.materialize_workspace_thread(workspace).await?;
-            return self.resume_launch(workspace).await;
+            return self.resume_launch(workspace, params.client).await;
         }
         if workspace.context_mode != ContextMode::Fresh {
             return Err(CoordinatorError::InvalidParams(
@@ -280,7 +322,7 @@ impl Coordinator {
             .jump_leases
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .acquire(&workspace.id, true)?;
+            .acquire(&workspace.id, true, params.client)?;
         Ok(WorkspaceAttachResult {
             workspace,
             launch: WorkspaceAttachLaunch::Start { lease_id },
@@ -488,6 +530,7 @@ impl Coordinator {
     async fn resume_launch(
         &self,
         workspace: Workspace,
+        client: Option<ClientMetadata>,
     ) -> Result<WorkspaceAttachResult, CoordinatorError> {
         let workspace = self.ensure_workspace_thread_loaded(workspace).await?;
         let thread_id = workspace
@@ -499,7 +542,7 @@ impl Coordinator {
             .jump_leases
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .acquire(&workspace.id, false)?;
+            .acquire(&workspace.id, false, client)?;
         Ok(WorkspaceAttachResult {
             execution_environment,
             workspace,
@@ -508,6 +551,13 @@ impl Coordinator {
                 lease_id,
             },
         })
+    }
+
+    pub(super) fn workspace_clients(&self, workspace_id: &str) -> Vec<WorkspaceClient> {
+        self.jump_leases
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clients(workspace_id)
     }
 
     async fn prepare_attach_environment(

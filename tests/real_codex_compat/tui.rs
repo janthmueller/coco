@@ -13,6 +13,9 @@ const SESSION: &str = "coco-real-tui";
 const EXIT_MARKER: &str = "__COCO_REAL_TUI_EXIT__=";
 const INHERITED_HISTORY_MARKER: &str = "coco-native-history";
 
+#[path = "tui/clients.rs"]
+mod clients;
+
 pub(super) async fn verify_inherited_context_resume(
     paths: &TestPaths,
     codex_binary: &Path,
@@ -24,13 +27,26 @@ pub(super) async fn verify_inherited_context_resume(
     let command = jump_command(paths, codex_binary, repository);
     start_jump(&first, &command).await?;
     wait_for_inherited_history(&first, "first").await?;
+    let original = clients::verify(paths, codex_binary, repository, 1).await?;
     start_jump(&second, &command).await?;
     wait_for_inherited_history(&second, "second").await?;
+    let both = clients::verify(paths, codex_binary, repository, 2).await?;
+    ensure!(
+        both[0]["metadata"]["integration"]["scope"] != both[1]["metadata"]["integration"]["scope"],
+        "native TUI clients in separate tmux servers had the same scope"
+    );
 
     ensure_tui_is_open(&first, "first").await?;
     close_tui(&first, "first").await?;
+    let remaining = clients::verify(paths, codex_binary, repository, 1).await?;
+    ensure!(
+        remaining[0]["id"] != original[0]["id"],
+        "closing the first TUI removed the wrong client"
+    );
     ensure_tui_is_open(&second, "second after the first exited").await?;
-    close_tui(&second, "second").await
+    close_tui(&second, "second").await?;
+    clients::verify(paths, codex_binary, repository, 0).await?;
+    Ok(())
 }
 
 async fn start_jump(server: &TmuxServer, command: &str) -> Result<()> {

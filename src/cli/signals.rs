@@ -103,6 +103,7 @@ async fn list(args: SignalListArgs, client: &RpcClient, scope: RepositoryScope) 
         Some(reference) => Some(
             client
                 .request(WorkspaceGetParams {
+                    include_clients: false,
                     scope: scope.clone(),
                     workspace: reference,
                     include_resources: false,

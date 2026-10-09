@@ -23,7 +23,14 @@ pub(crate) enum ProbeError {
     InvalidOutput,
 }
 
-pub(crate) async fn capture_command(mut command: Command) -> Result<String, ProbeError> {
+pub(crate) async fn capture_command(command: Command) -> Result<String, ProbeError> {
+    capture_command_with_timeout(command, PROBE_TIMEOUT).await
+}
+
+pub(crate) async fn capture_command_with_timeout(
+    mut command: Command,
+    probe_timeout: Duration,
+) -> Result<String, ProbeError> {
     command
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -32,7 +39,7 @@ pub(crate) async fn capture_command(mut command: Command) -> Result<String, Prob
     let mut owned = ProbeChild(Some(command.spawn().map_err(|_| ProbeError::Unavailable)?));
     let child = owned.0.as_mut().expect("owned diagnostic child");
     let stdout = child.stdout.take().expect("piped diagnostic stdout");
-    let result = timeout(PROBE_TIMEOUT, async {
+    let result = timeout(probe_timeout, async {
         let (status, output) = tokio::try_join!(child.wait(), read_output(stdout))?;
         Ok::<_, io::Error>((status, output))
     })

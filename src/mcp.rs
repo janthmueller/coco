@@ -197,6 +197,7 @@ where
         self.call(
             WORKSPACES_LIST,
             WorkspaceListParams {
+                include_clients: false,
                 scope: RepositoryScope::repository(self.repository.clone()),
                 phases: input.phases,
                 include_resources: false,
@@ -213,6 +214,7 @@ where
         self.call(
             WORKSPACES_STATUS,
             WorkspaceGetParams {
+                include_clients: false,
                 scope: RepositoryScope::repository(self.repository.clone()),
                 workspace: workspace.clone(),
                 include_resources: true,

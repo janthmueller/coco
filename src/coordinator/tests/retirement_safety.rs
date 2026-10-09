@@ -64,6 +64,7 @@ async fn send_remains_available_with_an_idle_resumed_tui() {
     let first = fixture
         .coordinator
         .attach_workspace(WorkspaceAttachParams {
+            client: None,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
         })
@@ -72,6 +73,7 @@ async fn send_remains_available_with_an_idle_resumed_tui() {
     let second = fixture
         .coordinator
         .attach_workspace(WorkspaceAttachParams {
+            client: None,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
         })

@@ -43,6 +43,7 @@ async fn normalizes_codex_events_and_allows_an_idempotent_follow_up_turn() {
         fixture
             .coordinator
             .get_workspace(WorkspaceGetParams {
+                include_clients: false,
                 scope: RepositoryScope::repository(fixture.source.clone()),
                 workspace: workspace.id.clone(),
                 include_resources: false,
@@ -136,6 +137,7 @@ async fn presents_terminal_input_approvals_without_calling_them_commands() {
     let status = fixture
         .coordinator
         .get_workspace(WorkspaceGetParams {
+            include_clients: false,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
             include_resources: false,
@@ -343,6 +345,7 @@ async fn record_and_approve_command(fixture: &Fixture, workspace: &Workspace) {
     let status = fixture
         .coordinator
         .get_workspace(WorkspaceGetParams {
+            include_clients: false,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
             include_resources: false,
@@ -458,6 +461,7 @@ async fn forwards_validated_user_input_without_exposing_answer_values() {
     let status = fixture
         .coordinator
         .get_workspace(WorkspaceGetParams {
+            include_clients: false,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
             include_resources: false,
@@ -573,6 +577,7 @@ async fn presents_bounded_file_changes_and_orphans_them_on_disconnect() {
     let status = fixture
         .coordinator
         .get_workspace(WorkspaceGetParams {
+            include_clients: false,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
             include_resources: false,

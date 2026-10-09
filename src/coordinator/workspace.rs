@@ -1022,7 +1022,12 @@ impl Coordinator {
             let activity = include_activity
                 .then(|| self.workspace_activity(&workspace))
                 .flatten();
-            listed.push(self.workspace_list_item(workspace, runtime_resources, activity)?);
+            let clients = params
+                .include_clients
+                .then(|| self.workspace_clients(&workspace.id));
+            let mut item = self.workspace_list_item(workspace, runtime_resources, activity)?;
+            item.clients = clients;
+            listed.push(item);
         }
         Ok(listed)
     }
@@ -1074,11 +1079,15 @@ impl Coordinator {
             None
         };
         let activity = self.workspace_activity(&workspace);
+        let clients = params
+            .include_clients
+            .then(|| self.workspace_clients(&workspace.id));
         Ok(WorkspaceStatusResult {
             workspace,
             git,
             runtime_resources,
             activity,
+            clients,
             open_decisions,
             next_sequence,
         })

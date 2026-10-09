@@ -170,6 +170,7 @@ async fn read_workspace(fixture: &Fixture, workspace_id: &str) -> Workspace {
     fixture
         .coordinator
         .get_workspace(WorkspaceGetParams {
+            include_clients: false,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace_id.to_owned(),
             include_resources: false,
@@ -255,6 +256,7 @@ async fn native_events_cannot_prove_an_ambiguous_dispatch_was_accepted() {
     let status = fixture
         .coordinator
         .get_workspace(WorkspaceGetParams {
+            include_clients: false,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id,
             include_resources: false,
@@ -352,6 +354,7 @@ async fn a_completion_notification_may_overtake_the_confirming_response() {
     let status = fixture
         .coordinator
         .get_workspace(WorkspaceGetParams {
+            include_clients: false,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id,
             include_resources: false,

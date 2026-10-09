@@ -195,6 +195,7 @@ async fn captured_child_survives_restart_without_looking_up_source() {
     let restarted = fixture.recovery_coordinator(fixture.worker.clone(), "restarted-capture");
     let attached = restarted
         .attach_workspace(WorkspaceAttachParams {
+            client: None,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: child.id,
         })
@@ -293,6 +294,7 @@ async fn pending_child_compaction_survives_restart_and_runs_only_once() {
         .remember_bound_thread(&child, CodexThreadStatus::NotLoaded);
     let restarted = fixture.recovery_coordinator(fixture.worker.clone(), "restarted-compaction");
     let attached = restarted.attach_workspace(WorkspaceAttachParams {
+        client: None,
         scope: RepositoryScope::repository(fixture.source.clone()),
         workspace: child.id.clone(),
     });
@@ -323,6 +325,7 @@ async fn pending_child_compaction_survives_restart_and_runs_only_once() {
     );
     restarted
         .attach_workspace(WorkspaceAttachParams {
+            client: None,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: child.id,
         })

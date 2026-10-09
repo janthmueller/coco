@@ -182,9 +182,12 @@ generations, while unanswered JSON-RPC request IDs do not. A clean TUI close
 ends the relay. An unrecovered leg-specific transport failure is retained and
 included in the final `jump` error.
 
-The lease may later carry optional generic client-presence metadata for
-terminal integrations. That metadata does not move workspace execution into
-the terminal client or change lease authority, and remains generation-local.
+The lease carries optional generic client-presence metadata for `status
+--clients`, including best-effort tmux location captured by ordinary jump.
+That metadata does not move execution into the terminal client or change
+lease authority, and remains generation-local. Public presence IDs are
+distinct from the renewable lease capability; status and renewal invoke no
+terminal helpers. The separately installable plugin UI remains deferred.
 See [Client attachments and tmux integration](client-attachments.md).
 
 Relay construction encodes whether the workspace is awaiting its first
@@ -207,7 +210,9 @@ daemon performs `thread/read`. Once the daemon admits that exact request under
 a live lease, it pins the attempt until verification finishes; the nominal
 thirty-second expiry or a concurrent relay release cannot invalidate CoCo's
 own in-flight read. A requested release takes effect as soon as the attempt is
-reconciled. This matters for very large rollout files whose metadata read can
+reconciled. Client presentation expires independently: adoption progress never
+substitutes for a foreground client's heartbeat or revives expired presence.
+This matters for very large rollout files whose metadata read can
 otherwise outlast the lease and Codex's reconnect progress.
 
 Both WebSocket legs of that relay use the same finite 128 MiB maximum frame

@@ -504,6 +504,7 @@ fn workspace_item() -> WorkspaceListItem {
 
 fn workspace_item_at(id: &str, name: &str, worktree_path: &Path) -> WorkspaceListItem {
     WorkspaceListItem {
+        clients: None,
         workspace: Workspace {
             id: id.to_owned(),
             create_operation_id: None,

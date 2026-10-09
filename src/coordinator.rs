@@ -221,6 +221,7 @@ impl Coordinator {
             repository: RepositorySummary::from(&repository),
             runtime_resources,
             activity,
+            clients: None,
         })
     }
 

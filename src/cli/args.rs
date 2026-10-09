@@ -422,6 +422,9 @@ pub(super) struct StatusArgs {
     /// Include remaining limits for the active Codex account.
     #[arg(long, short = 'q')]
     pub(super) quota: bool,
+    /// Show open Codex TUIs, including their tmux locations when available.
+    #[arg(long, short = 'c')]
+    pub(super) clients: bool,
     /// Show slash-separated workspace names as a hierarchy.
     #[arg(
         long,

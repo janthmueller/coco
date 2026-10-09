@@ -813,6 +813,7 @@ async fn resolve_workspace_input_with_phases(
     };
     let workspaces = client
         .request(WorkspaceListParams {
+            include_clients: false,
             scope,
             phases,
             include_resources: false,
@@ -1094,6 +1095,7 @@ async fn list_workspaces(
     let include_repository = matches!(scope, RepositoryScope::AllRepositories);
     let mut result = RpcClient::new(paths.socket_path.clone())
         .request(WorkspaceListParams {
+            include_clients: false,
             scope,
             phases: closed.then(|| vec!["closed".to_owned()]),
             include_resources: false,
@@ -1121,6 +1123,7 @@ async fn run_status(
         resources: args.resources,
         usage: args.usage,
         quota: args.quota,
+        clients: args.clients,
     };
     let repository_scope = RepositoryScope::repository(repository_path);
     if let Some(workspace) = args.workspace {
@@ -1168,6 +1171,7 @@ async fn show_status_collection(
             phases: None,
             include_resources: projection.resources || json_output,
             include_activity: true,
+            include_clients: projection.clients || json_output,
         })
         .await?;
     sort_workspace_collection(&mut result, sort);
@@ -1392,6 +1396,7 @@ async fn run_send(
     if message.is_none() && !target.verified {
         let result = RpcClient::new(paths.socket_path.clone())
             .request(WorkspaceGetParams {
+                include_clients: false,
                 scope: target.scope.clone(),
                 workspace: target.workspace.clone(),
                 include_resources: false,
@@ -1429,6 +1434,7 @@ async fn show_status(
             scope,
             workspace,
             include_resources: projection.resources || json_output,
+            include_clients: projection.clients || json_output,
         })
         .await?;
     let usage = workspace_usage(&client, &result, projection.usage).await?;
@@ -1528,7 +1534,11 @@ async fn attach_and_jump(
     workspace: String,
 ) -> Result<()> {
     let result = client
-        .request(WorkspaceAttachParams { scope, workspace })
+        .request(WorkspaceAttachParams {
+            scope,
+            workspace,
+            client: Some(super::clients::native_tui_metadata().await),
+        })
         .await?;
     jump(paths, client, result).await
 }

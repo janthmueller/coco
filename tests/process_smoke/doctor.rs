@@ -11,7 +11,7 @@ pub(super) async fn verify_live(
     let output = capture_cli(paths, repository, &["doctor", "--json"], None).await?;
     let report = cli_json(&output)?;
     ensure!(output.status.success(), "doctor failed: {report}");
-    ensure!(report["schemaVersion"] == 14 && report["complete"] == true);
+    ensure!(report["schemaVersion"] == 15 && report["complete"] == true);
     ensure!(report["daemon"]["pid"].as_u64().is_some());
     ensure!(
         report["checks"]

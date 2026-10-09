@@ -190,7 +190,7 @@ mod tests {
     fn collection_json_keeps_account_quota_at_the_top_level() {
         let value =
             super::super::status_collection_json(&[], None, Some(&quota(Some(true)))).unwrap();
-        assert_eq!(value["schemaVersion"], 14);
+        assert_eq!(value["schemaVersion"], 15);
         assert_eq!(value["workspaces"], serde_json::json!([]));
         assert_eq!(value["accountQuota"]["status"], "available");
         assert!(value.pointer("/workspaces/0/accountQuota").is_none());

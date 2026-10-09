@@ -6,6 +6,40 @@ use super::super::args::{Cli, Command, ModelCommand, RepoCommand, StatusSort};
 use super::super::commands::validate_scope_selection;
 
 #[test]
+fn clients_projection_composes_with_status_views_without_becoming_a_requirement() {
+    for arguments in [
+        vec!["coco", "status", "--clients"],
+        vec!["coco", "status", "-c"],
+        vec!["coco", "status", "-fartc"],
+        vec!["coco", "status", "fix/login", "-gfc"],
+        vec!["coco", "status", "-ac", "--json"],
+        vec!["coco", "status", "-aftruq", "--clients"],
+        vec!["coco", "status", "fix/login", "-gf", "--clients"],
+        vec!["coco", "status", "-a", "--json", "--clients"],
+    ] {
+        let parsed = Cli::try_parse_from(arguments).unwrap();
+        assert!(matches!(parsed.command, Command::Status(args) if args.clients));
+    }
+    let parsed = Cli::try_parse_from(["coco", "status"]).unwrap();
+    assert!(matches!(parsed.command, Command::Status(args) if !args.clients));
+}
+
+#[test]
+fn clients_short_flag_preserves_bundled_status_options_and_is_visible_in_help() {
+    let parsed = Cli::try_parse_from(["coco", "status", "-fartc"]).unwrap();
+    assert!(matches!(parsed.command, Command::Status(args)
+        if args.follow && args.all_repos && args.resources && args.tree && args.clients));
+
+    let mut command = Cli::command();
+    let help = command
+        .find_subcommand_mut("status")
+        .unwrap()
+        .render_long_help()
+        .to_string();
+    assert!(help.contains("-c, --clients"));
+}
+
+#[test]
 fn list_and_ls_are_visible_aliases_for_every_collection() {
     for spelling in ["list", "ls"] {
         let parsed = Cli::try_parse_from(["coco", spelling]).unwrap();

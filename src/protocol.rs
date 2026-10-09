@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::domain::activity::WorkspaceActivity;
+use crate::domain::clients::{ClientMetadata, WorkspaceClient};
 use crate::domain::runtime::{
     WorkspaceResourceControllerStatus, WorkspaceResourcePolicySnapshot, WorkspaceRuntimeResources,
 };
@@ -15,6 +16,8 @@ use crate::domain::{
     Repository, Workspace,
 };
 
+#[cfg(test)]
+mod clients_tests;
 mod doctor;
 mod hooks;
 mod signals;
@@ -347,6 +350,8 @@ pub struct WorkspaceListParams {
     pub include_resources: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub include_activity: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_clients: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -396,6 +401,8 @@ pub struct WorkspaceGetParams {
     pub workspace: String,
     #[serde(default, skip_serializing_if = "is_false")]
     pub include_resources: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_clients: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -475,6 +482,8 @@ pub struct WorkspaceLimitsResetParams {
 pub struct WorkspaceAttachParams {
     pub scope: RepositoryScope,
     pub workspace: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<ClientMetadata>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -819,6 +828,8 @@ pub struct WorkspaceListItem {
     pub runtime_resources: Option<WorkspaceRuntimeResources>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub activity: Option<WorkspaceActivity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clients: Option<Vec<WorkspaceClient>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -941,6 +952,8 @@ pub struct WorkspaceStatusResult {
     pub runtime_resources: Option<WorkspaceRuntimeResources>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub activity: Option<WorkspaceActivity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clients: Option<Vec<WorkspaceClient>>,
     pub open_decisions: Vec<Decision>,
     pub next_sequence: i64,
 }
@@ -1233,6 +1246,7 @@ mod tests {
     fn scoped_request_dtos_preserve_all_wire_field_names() {
         assert_request(
             WorkspaceListParams {
+                include_clients: false,
                 scope: RepositoryScope::repository("/repo"),
                 phases: None,
                 include_resources: false,
@@ -1243,6 +1257,7 @@ mod tests {
         );
         assert_request(
             WorkspaceListParams {
+                include_clients: false,
                 scope: RepositoryScope::repository("/repo"),
                 phases: None,
                 include_resources: true,
@@ -1308,6 +1323,7 @@ mod tests {
         );
         assert_request(
             WorkspaceGetParams {
+                include_clients: false,
                 scope: RepositoryScope::AllRepositories,
                 workspace: "workspace".to_owned(),
                 include_resources: false,
@@ -1317,6 +1333,7 @@ mod tests {
         );
         assert_request(
             WorkspaceGetParams {
+                include_clients: false,
                 scope: RepositoryScope::AllRepositories,
                 workspace: "workspace".to_owned(),
                 include_resources: true,
@@ -1382,6 +1399,7 @@ mod tests {
         );
         assert_request(
             WorkspaceAttachParams {
+                client: None,
                 scope: RepositoryScope::repository("/repo"),
                 workspace: "workspace".to_owned(),
             },

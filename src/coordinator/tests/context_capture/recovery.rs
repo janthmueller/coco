@@ -187,6 +187,7 @@ async fn restart_during_compaction_preserves_binding_but_does_not_repeat_the_tur
 
 fn attach_params(fixture: &Fixture, workspace: &Workspace) -> WorkspaceAttachParams {
     WorkspaceAttachParams {
+        client: None,
         scope: RepositoryScope::repository(fixture.source.clone()),
         workspace: workspace.id.clone(),
     }

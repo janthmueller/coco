@@ -14,6 +14,7 @@ async fn projected_status(fixture: &Fixture, workspace: &Workspace) -> Workspace
     fixture
         .coordinator
         .get_workspace(WorkspaceGetParams {
+            include_clients: false,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
             include_resources: false,
@@ -120,6 +121,7 @@ async fn projects_reasoning_activity_without_persisting_or_exposing_it_through_l
     let detailed = fixture
         .coordinator
         .list_workspaces(WorkspaceListParams {
+            include_clients: false,
             scope: RepositoryScope::repository(fixture.source.clone()),
             phases: None,
             include_resources: false,
@@ -138,6 +140,7 @@ async fn projects_reasoning_activity_without_persisting_or_exposing_it_through_l
     let compact = fixture
         .coordinator
         .list_workspaces(WorkspaceListParams {
+            include_clients: false,
             scope: RepositoryScope::repository(fixture.source.clone()),
             phases: None,
             include_resources: false,

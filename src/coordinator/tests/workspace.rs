@@ -42,6 +42,7 @@ async fn workspace_resources_are_observed_only_when_requested() {
     let compact = fixture
         .coordinator
         .list_workspaces(WorkspaceListParams {
+            include_clients: false,
             scope: RepositoryScope::repository(fixture.source.clone()),
             phases: None,
             include_resources: false,
@@ -55,6 +56,7 @@ async fn workspace_resources_are_observed_only_when_requested() {
     let detailed = fixture
         .coordinator
         .list_workspaces(WorkspaceListParams {
+            include_clients: false,
             scope: RepositoryScope::repository(fixture.source.clone()),
             phases: None,
             include_resources: true,
@@ -73,6 +75,7 @@ async fn workspace_resources_are_observed_only_when_requested() {
     let shown = fixture
         .coordinator
         .get_workspace(WorkspaceGetParams {
+            include_clients: false,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
             include_resources: true,
@@ -100,6 +103,7 @@ async fn status_projects_current_native_model_settings_without_persisting_them()
     let shown = fixture
         .coordinator
         .get_workspace(WorkspaceGetParams {
+            include_clients: false,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
             include_resources: false,
@@ -116,6 +120,7 @@ async fn status_projects_current_native_model_settings_without_persisting_them()
     let listed = fixture
         .coordinator
         .list_workspaces(WorkspaceListParams {
+            include_clients: false,
             scope: RepositoryScope::repository(fixture.source.clone()),
             phases: None,
             include_resources: false,
@@ -293,6 +298,7 @@ async fn fresh_attach_returns_a_start_lease_without_creating_a_native_thread() {
     let attached = fixture
         .coordinator
         .attach_workspace(WorkspaceAttachParams {
+            client: None,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: prepared.id.clone(),
         })
@@ -344,6 +350,7 @@ async fn passive_native_idle_preserves_the_local_mutation_guard() {
     let shown = fixture
         .coordinator
         .get_workspace(WorkspaceGetParams {
+            include_clients: false,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
             include_resources: false,
@@ -417,6 +424,7 @@ async fn native_thread_read_failure_projects_unavailable_without_serving_or_pers
     let shown = fixture
         .coordinator
         .get_workspace(WorkspaceGetParams {
+            include_clients: false,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
             include_resources: false,
@@ -464,6 +472,7 @@ async fn failed_lifecycle_remains_failed_without_a_native_thread_read() {
     let shown = fixture
         .coordinator
         .get_workspace(WorkspaceGetParams {
+            include_clients: false,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: failed.id,
             include_resources: false,
@@ -503,6 +512,7 @@ async fn workspace_list_filters_after_hydrating_every_native_phase() {
     let listed = fixture
         .coordinator
         .list_workspaces(WorkspaceListParams {
+            include_clients: false,
             scope: RepositoryScope::repository(fixture.source.clone()),
             phases: Some(vec!["waiting_for_input".to_owned()]),
             include_resources: false,
@@ -570,6 +580,7 @@ async fn serves_repository_views_events_and_bounded_diffs() {
     let listed = fixture
         .coordinator
         .list_workspaces(WorkspaceListParams {
+            include_clients: false,
             scope: RepositoryScope::repository(fixture.source.clone()),
             phases: Some(vec!["prepared".to_owned()]),
             include_resources: false,
@@ -582,6 +593,7 @@ async fn serves_repository_views_events_and_bounded_diffs() {
     let shown = fixture
         .coordinator
         .get_workspace(WorkspaceGetParams {
+            include_clients: false,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
             include_resources: false,
@@ -723,6 +735,7 @@ async fn scopes_workspace_names_to_repositories_and_resolves_global_references()
     let listed = fixture
         .coordinator
         .list_workspaces(WorkspaceListParams {
+            include_clients: false,
             scope: RepositoryScope::AllRepositories,
             phases: None,
             include_resources: false,
@@ -805,6 +818,7 @@ fn compact_status_params(
     workspace: impl Into<String>,
 ) -> WorkspaceGetParams {
     WorkspaceGetParams {
+        include_clients: false,
         scope,
         workspace: workspace.into(),
         include_resources: false,

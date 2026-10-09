@@ -1357,7 +1357,7 @@ struct SelectedModel {
 
 fn select_default_model(response: &Value) -> Result<SelectedModel> {
     ensure!(
-        response["schemaVersion"] == 14,
+        response["schemaVersion"] == 15,
         "coco model list returned an unexpected schema version: {response}"
     );
     let models = response["models"]

@@ -83,6 +83,22 @@ Use `/quit` or `/exit` to leave the Codex UI. Active work continues while
 Run `coco jump` without a name for a selector. Navigate with arrow keys or
 `j`/`k`, press Enter, or press a displayed number to choose immediately.
 
+### Find open terminals
+
+```bash
+coco status -a --clients
+```
+
+Add `--clients` (`-c`) to see Codex UIs opened through `coco jump` or `create -j`.
+Inside tmux, their locations appear as `tmux dev:2.1`: session `dev`, window
+`2`, pane `1`. Other terminals show `TUI`, and several open UIs are listed
+together. CoCo detects tmux automatically; no plugin setup is needed.
+
+Use `coco status -afc` to keep the overview updated. `—` means no
+open UI was reported; the agent can still be working. Locations are recorded
+when you jump, so reopen the UI after renaming or moving its tmux pane to
+update its label.
+
 ## Send another instruction
 
 When the workspace is ready:

@@ -157,6 +157,7 @@ async fn compacts_only_the_child_before_it_accepts_a_message() {
         .unwrap()
         .workspace;
     let attach = fixture.coordinator.attach_workspace(WorkspaceAttachParams {
+        client: None,
         scope: RepositoryScope::repository(fixture.source.clone()),
         workspace: prepared.id,
     });
@@ -301,6 +302,7 @@ async fn retains_a_bound_failed_child_when_compaction_cannot_start() {
         fixture
             .coordinator
             .attach_workspace(WorkspaceAttachParams {
+                client: None,
                 scope: RepositoryScope::repository(fixture.source.clone()),
                 workspace: prepared.id,
             })
@@ -337,6 +339,7 @@ async fn retains_a_bound_failed_child_when_native_compaction_fails() {
         .unwrap()
         .workspace;
     let attach = fixture.coordinator.attach_workspace(WorkspaceAttachParams {
+        client: None,
         scope: RepositoryScope::repository(fixture.source.clone()),
         workspace: prepared.id,
     });
@@ -440,6 +443,7 @@ async fn passive_reads_project_not_loaded_without_resuming_or_persisting_it() {
 
     let shown = coordinator
         .get_workspace(WorkspaceGetParams {
+            include_clients: false,
             scope: scope.clone(),
             workspace: workspace.id.clone(),
             include_resources: false,
@@ -449,6 +453,7 @@ async fn passive_reads_project_not_loaded_without_resuming_or_persisting_it() {
     assert_eq!(shown.workspace.phase, WorkspacePhase::NotLoaded);
     let listed = coordinator
         .list_workspaces(WorkspaceListParams {
+            include_clients: false,
             scope: scope.clone(),
             phases: None,
             include_resources: false,
@@ -534,6 +539,7 @@ async fn attach_subscribes_when_another_client_already_loaded_the_thread() {
 
     let attached = coordinator
         .attach_workspace(WorkspaceAttachParams {
+            client: None,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
         })
@@ -572,6 +578,7 @@ async fn concurrent_attach_resumes_a_not_loaded_thread_once() {
     worker.remember_bound_thread(&workspace, CodexThreadStatus::NotLoaded);
     let coordinator = Arc::new(fixture.recovery_coordinator(worker.clone(), "runtime-restarted"));
     let params = WorkspaceAttachParams {
+        client: None,
         scope: RepositoryScope::repository(fixture.source.clone()),
         workspace: workspace.id.clone(),
     };
@@ -619,6 +626,7 @@ async fn refuses_on_demand_resume_when_the_named_profile_changed() {
     let coordinator = fixture.recovery_coordinator(worker.clone(), "runtime-recovered");
     let error = coordinator
         .attach_workspace(WorkspaceAttachParams {
+            client: None,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: workspace.id.clone(),
         })
@@ -658,6 +666,7 @@ async fn rejects_a_mismatched_or_still_unloaded_resume_result() {
     assert!(matches!(
         coordinator
             .attach_workspace(WorkspaceAttachParams {
+                client: None,
                 scope: RepositoryScope::repository(fixture.source.clone()),
                 workspace: workspace.id.clone(),
             })
@@ -677,6 +686,7 @@ async fn rejects_a_mismatched_or_still_unloaded_resume_result() {
     assert!(matches!(
         coordinator
             .attach_workspace(WorkspaceAttachParams {
+                client: None,
                 scope: RepositoryScope::repository(fixture.source.clone()),
                 workspace: workspace.id.clone(),
             })
@@ -705,6 +715,7 @@ async fn rejects_a_resume_result_bound_to_another_worktree() {
     assert!(matches!(
         coordinator
             .attach_workspace(WorkspaceAttachParams {
+                client: None,
                 scope: RepositoryScope::repository(fixture.source.clone()),
                 workspace: workspace.id,
             })

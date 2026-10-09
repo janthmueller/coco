@@ -20,8 +20,8 @@ agents.
   shared control plane, lazy workspace executors, environment routing,
   resource observations, lifecycle, and current containment limits.
 - [Client attachments and tmux integration](client-attachments.md) - Records
-  the proposed generation-local client-presence model and optional tmux
-  presentation/navigation adapter without coupling execution to terminal panes.
+  implemented generation-local client presence, built-in optional tmux
+  discovery, and the deferred plugin UI without coupling execution to panes.
 - [Workspace token usage and billing estimates](workspace-usage.md) - Defines
   native token evidence, optional billing estimates, attribution/recovery
   requirements, and the implemented passive status projection.

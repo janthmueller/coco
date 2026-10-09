@@ -130,6 +130,12 @@ fn render_workspace_list(
     let usage_by_workspace = usage_index(usage);
     let include_usage = usage_by_workspace.is_some();
     let include_activity = workspaces.iter().any(|item| item.activity.is_some());
+    let columns = WorkspaceColumns {
+        resources: include_resources,
+        model: include_model,
+        clients: workspaces.iter().any(|item| item.clients.is_some()),
+        usage: usage_by_workspace.as_ref(),
+    };
     let rows = workspaces
         .iter()
         .map(|item| {
@@ -137,9 +143,7 @@ fn render_workspace_list(
                 item,
                 Cell::new(item.workspace.name.clone(), Tone::Primary),
                 include_repository,
-                include_resources,
-                include_model,
-                usage_by_workspace.as_ref(),
+                &columns,
             )
         })
         .collect::<Vec<_>>();
@@ -149,6 +153,7 @@ fn render_workspace_list(
         include_model,
         include_usage,
         include_activity,
+        columns.clients,
         false,
     );
     render_table(&headers, &rows, &caps, width, palette)
@@ -169,12 +174,19 @@ fn render_workspace_tree(
     let usage_by_workspace = usage_index(usage);
     let include_usage = usage_by_workspace.is_some();
     let include_activity = workspaces.iter().any(|item| item.activity.is_some());
+    let columns = WorkspaceColumns {
+        resources: include_resources,
+        model: include_model,
+        clients: workspaces.iter().any(|item| item.clients.is_some()),
+        usage: usage_by_workspace.as_ref(),
+    };
     let (headers, caps) = workspace_table_shape(
         false,
         include_resources,
         include_model,
         include_usage,
         include_activity,
+        columns.clients,
         true,
     );
 
@@ -191,15 +203,7 @@ fn render_workspace_tree(
             output.push('\n');
             let roots = workspace_tree(group);
             let mut rows = Vec::new();
-            append_tree_rows(
-                &roots,
-                &mut Vec::new(),
-                &mut rows,
-                include_resources,
-                include_model,
-                usage_by_workspace.as_ref(),
-                headers.len(),
-            );
+            append_tree_rows(&roots, &mut Vec::new(), &mut rows, &columns, headers.len());
             output.push_str(&render_table(&headers, &rows, &caps, width, palette));
         }
         return output;
@@ -207,19 +211,18 @@ fn render_workspace_tree(
 
     let roots = workspace_tree(workspaces);
     let mut rows = Vec::new();
-    append_tree_rows(
-        &roots,
-        &mut Vec::new(),
-        &mut rows,
-        include_resources,
-        include_model,
-        usage_by_workspace.as_ref(),
-        headers.len(),
-    );
+    append_tree_rows(&roots, &mut Vec::new(), &mut rows, &columns, headers.len());
     render_table(&headers, &rows, &caps, width, palette)
 }
 
 type UsageIndex<'a> = HashMap<&'a str, &'a WorkspaceUsageItem>;
+
+struct WorkspaceColumns<'a> {
+    resources: bool,
+    model: bool,
+    clients: bool,
+    usage: Option<&'a UsageIndex<'a>>,
+}
 
 fn usage_index(usage: Option<&[WorkspaceUsageItem]>) -> Option<UsageIndex<'_>> {
     usage.map(|usage| {
@@ -234,10 +237,11 @@ fn workspace_row(
     item: &WorkspaceListItem,
     workspace_cell: Cell,
     include_repository: bool,
-    include_resources: bool,
-    include_model: bool,
-    usage_by_workspace: Option<&UsageIndex<'_>>,
+    columns: &WorkspaceColumns<'_>,
 ) -> Vec<Cell> {
+    let include_resources = columns.resources;
+    let include_model = columns.model;
+    let usage_by_workspace = columns.usage;
     let include_usage = usage_by_workspace.is_some();
     let mut cells = Vec::with_capacity(
         3 + usize::from(include_repository)
@@ -259,6 +263,12 @@ fn workspace_row(
             |model| (model, Tone::Primary),
         );
         cells.push(Cell::new(model, tone));
+    }
+    if columns.clients {
+        cells.push(Cell::new(
+            super::clients::client_label(item.clients.as_deref().unwrap_or_default()),
+            Tone::Primary,
+        ));
     }
     if include_resources {
         let (rss, processes, cpu) = resource_cells(item.runtime_resources.as_ref());
@@ -290,6 +300,7 @@ fn workspace_table_shape(
     include_model: bool,
     include_usage: bool,
     include_activity: bool,
+    include_clients: bool,
     tree: bool,
 ) -> (Vec<&'static str>, Vec<usize>) {
     let mut headers = Vec::with_capacity(
@@ -311,6 +322,10 @@ fn workspace_table_shape(
     if include_model {
         headers.push("MODEL");
         caps.push(32);
+    }
+    if include_clients {
+        headers.push("CLIENTS");
+        caps.push(40);
     }
     if include_resources {
         headers.extend(["MEMORY", "CPU", "PROCS"]);
@@ -385,9 +400,7 @@ fn append_tree_rows(
     nodes: &[WorkspaceTreeNode<'_>],
     ancestor_is_last: &mut Vec<bool>,
     rows: &mut Vec<Vec<Cell>>,
-    include_resources: bool,
-    include_model: bool,
-    usage_by_workspace: Option<&UsageIndex<'_>>,
+    columns: &WorkspaceColumns<'_>,
     column_count: usize,
 ) {
     for (index, node) in nodes.iter().enumerate() {
@@ -407,14 +420,7 @@ fn append_tree_rows(
         let workspace_cell =
             Cell::segmented([(guide, Tone::Dim), (name, Tone::Primary)], Tone::Primary);
         if let Some(workspace) = visible_node.workspace {
-            rows.push(workspace_row(
-                workspace,
-                workspace_cell,
-                false,
-                include_resources,
-                include_model,
-                usage_by_workspace,
-            ));
+            rows.push(workspace_row(workspace, workspace_cell, false, columns));
         } else {
             rows.push(grouping_row(workspace_cell, column_count));
         }
@@ -423,9 +429,7 @@ fn append_tree_rows(
             &visible_node.children,
             ancestor_is_last,
             rows,
-            include_resources,
-            include_model,
-            usage_by_workspace,
+            columns,
             column_count,
         );
         ancestor_is_last.pop();
@@ -729,6 +733,8 @@ mod tests {
     };
     use serde_json::json;
 
+    mod clients;
+
     fn workspace_item(
         repository: &str,
         repository_name: &str,
@@ -736,6 +742,7 @@ mod tests {
         phase: WorkspacePhase,
     ) -> WorkspaceListItem {
         WorkspaceListItem {
+            clients: None,
             workspace: Workspace {
                 id: format!("{repository}-{name}"),
                 create_operation_id: None,
@@ -1020,7 +1027,7 @@ mod tests {
 
     #[test]
     fn status_columns_keep_primary_fields_before_ordered_resource_metrics() {
-        let (headers, caps) = workspace_table_shape(false, true, true, false, false, false);
+        let (headers, caps) = workspace_table_shape(false, true, true, false, false, false, false);
         assert_eq!(
             headers,
             vec![

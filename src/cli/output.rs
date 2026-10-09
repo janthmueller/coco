@@ -15,6 +15,7 @@ use crate::protocol::{
 
 use super::style::{Palette, Tone};
 
+mod clients;
 mod collections;
 mod quota;
 mod usage;
@@ -24,7 +25,7 @@ pub(super) use collections::{
     render_workspace_status_list_for_stdout,
 };
 
-const PUBLIC_SCHEMA_VERSION: u64 = 14;
+const PUBLIC_SCHEMA_VERSION: u64 = 15;
 
 pub(super) fn phase_label(phase: &str) -> &'static str {
     match phase {
@@ -589,6 +590,13 @@ fn render_status(
         output.push_str(&palette.paint(Tone::Primary, safe_line(&model)));
         output.push('\n');
     }
+    if let Some(clients) = &result.clients {
+        output.push_str(&format!(
+            "  {} {}\n",
+            palette.paint(Tone::Dim, "Clients"),
+            palette.paint(Tone::Primary, clients::client_label(clients)),
+        ));
+    }
     if let Some(detail) = workspace_location(workspace) {
         output.push_str("  ");
         output.push_str(&palette.paint(Tone::Dim, detail));
@@ -897,6 +905,7 @@ mod tests {
     #[test]
     fn targeted_status_shows_activity_as_secondary_state_detail() {
         let result = WorkspaceStatusResult {
+            clients: None,
             workspace: Workspace {
                 id: "workspace-1".to_owned(),
                 create_operation_id: None,

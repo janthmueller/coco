@@ -874,10 +874,20 @@ automatically. No storage-schema migration is required for these descriptors.
   `thread/read`; do not resume a thread merely to list it. An unbound ready
   workspace projects `prepared`; a missing or invalid existing binding projects
   unavailable instead of falling back to stored status.
-- `--json` emits one schema-version-14 JSON document and no decorative stdout
+- `--json` emits one schema-version-15 JSON document and no decorative stdout
   text. Every row includes a compact repository identity.
 
 ### `coco status`
+
+- `--clients`/`-c` opts into live foreground-client presentation, independently of
+  Codex state. Ordinary `jump` and `create -j` register generic native TUI
+  metadata and, when available, tmux server-scoped pane identity with a
+  launch-time session/window/pane label. No tmux plugin is required; absent,
+  broken, or slow tmux never blocks workspace control. Labels can become stale
+  after pane/session changes until the next jump. Multiple clients coexist;
+  release/expiry removes only its own presence. No metadata is durable.
+  Target/collection/tree/follow support this projection; schema-version-15
+  status JSON always includes structured `clients` (empty array if none).
 
 - With no workspace reference, return the same compact workspace collection as
   `list` in the selected/current repository. `--all-repos`/`-a` selects every
@@ -1773,8 +1783,10 @@ publication and operational changes still require explicit approval.
    uncertain forks have explicit recovery semantics. Unit/process regressions
    and the isolated real-Codex 0.160.1 test cover the contract; the test source
    continues while the child is independently jumped/sent to after restart.
-3. Add generic client-presence metadata to existing attachment leases, then a
-   passive opt-in projection and optional tmux status/navigation plugin. See
+3. Client-presence status-first slice implemented locally: generic metadata on
+   existing leases, built-in tmux discovery during `jump`, and passive opt-in
+   `status --clients` with session/window/pane labels. An optional tmux
+   status/navigation plugin is secondary and can follow independently. See
    [client attachments](../engineering/client-attachments.md). Presence must
    not become execution state or ownership by one terminal pane.
 4. Design and prove the optional development-stack adapter below on one real

@@ -18,6 +18,7 @@ async fn adopts_only_the_exact_materialized_thread_from_a_fresh_jump() {
     let attached = fixture
         .coordinator
         .attach_workspace(WorkspaceAttachParams {
+            client: None,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: prepared.id.clone(),
         })
@@ -30,6 +31,7 @@ async fn adopts_only_the_exact_materialized_thread_from_a_fresh_jump() {
         fixture
             .coordinator
             .attach_workspace(WorkspaceAttachParams {
+                client: None,
                 scope: RepositoryScope::repository(fixture.source.clone()),
                 workspace: prepared.id.clone(),
             })
@@ -132,6 +134,7 @@ async fn slow_adoption_cannot_expire_its_own_valid_lease() {
     let attached = fixture
         .coordinator
         .attach_workspace(WorkspaceAttachParams {
+            client: None,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: prepared.id.clone(),
         })
@@ -200,6 +203,7 @@ async fn releasing_a_slow_adoption_does_not_cancel_its_durable_binding() {
     let attached = fixture
         .coordinator
         .attach_workspace(WorkspaceAttachParams {
+            client: None,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: prepared.id.clone(),
         })
@@ -290,6 +294,7 @@ async fn releasing_an_empty_jump_keeps_the_workspace_prepared() {
     let first = fixture
         .coordinator
         .attach_workspace(WorkspaceAttachParams {
+            client: None,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: prepared.id.clone(),
         })
@@ -334,6 +339,7 @@ async fn releasing_an_empty_jump_keeps_the_workspace_prepared() {
     let second = fixture
         .coordinator
         .attach_workspace(WorkspaceAttachParams {
+            client: None,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: prepared.id.clone(),
         })
@@ -364,6 +370,7 @@ async fn app_server_disconnect_expires_a_fresh_jump_lease() {
     let first = fixture
         .coordinator
         .attach_workspace(WorkspaceAttachParams {
+            client: None,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: prepared.id.clone(),
         })
@@ -380,6 +387,7 @@ async fn app_server_disconnect_expires_a_fresh_jump_lease() {
     let second = fixture
         .coordinator
         .attach_workspace(WorkspaceAttachParams {
+            client: None,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: prepared.id.clone(),
         })
@@ -420,6 +428,7 @@ async fn a_pending_fresh_jump_blocks_a_competing_send_and_candidate_swap() {
     let attached = fixture
         .coordinator
         .attach_workspace(WorkspaceAttachParams {
+            client: None,
             scope: RepositoryScope::repository(fixture.source.clone()),
             workspace: prepared.id.clone(),
         })

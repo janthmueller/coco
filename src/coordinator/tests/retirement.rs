@@ -61,6 +61,7 @@ async fn close_hides_a_workspace_and_reopen_restores_its_exact_identity() {
     let active = fixture
         .coordinator
         .list_workspaces(WorkspaceListParams {
+            include_clients: false,
             scope: scope(&fixture),
             phases: None,
             include_resources: false,
@@ -72,6 +73,7 @@ async fn close_hides_a_workspace_and_reopen_restores_its_exact_identity() {
     let retained = fixture
         .coordinator
         .list_workspaces(WorkspaceListParams {
+            include_clients: false,
             scope: scope(&fixture),
             phases: Some(vec!["closed".to_owned()]),
             include_resources: false,
@@ -416,6 +418,7 @@ async fn descendants_background_terminals_and_tui_leases_block_close() {
     let attached = fixture
         .coordinator
         .attach_workspace(WorkspaceAttachParams {
+            client: None,
             scope: scope(&fixture),
             workspace: workspace.id.clone(),
         })

@@ -43,6 +43,8 @@ const DEFAULT_MODEL: &str = "gpt-default";
 
 #[path = "process_smoke/app_server.rs"]
 mod app_server;
+#[path = "process_smoke/clients.rs"]
+mod clients;
 #[path = "process_smoke/doctor.rs"]
 mod doctor;
 #[path = "process_smoke/fork.rs"]

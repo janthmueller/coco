@@ -1,23 +1,27 @@
 ---
 type: Engineering Decision
 title: Client attachments and tmux integration
-description: Defines the proposed generic client-presence model and an optional tmux adapter without coupling workspace execution to terminal panes.
+description: Defines generic live client presence and built-in optional tmux discovery, with a deferred plugin UI.
 tags: [architecture, clients, attachments, tmux, tui, status]
-status: proposed
+status: active
 ---
 
 # Client attachments and tmux integration
 
 ## Status and intent
 
-This is an accepted post-v0 direction, not implemented behavior and not a
-requirement for the first stable `0.1.0` release. It records how CoCo may show
-where a workspace is currently open and support tmux navigation without making
-tmux part of the coordinator's execution model.
+The status-first slice is implemented locally after `0.2.0`: ordinary CLI
+location discovery and live client projection. A separately installable tmux
+plugin, pane navigation, and other client adapters remain deferred. These
+additions do not make tmux part of the coordinator's execution model.
 
-The first adapter may be a separately installable tmux plugin. The CoCo core
-must model generic client attachments so the same boundary can later represent
-other terminal, GUI, or remote clients without changing workspace semantics.
+The first user-facing slice is built-in CLI support: `coco jump` records its
+optional tmux location and `coco status` can show where a workspace is open.
+Neither location discovery nor the status view requires a tmux plugin. A
+separately installable plugin is secondary, for status-bar and navigation
+convenience. The CoCo core must model generic client attachments so the same
+boundary can later represent other terminal, GUI, or remote clients without
+changing workspace semantics.
 
 ## Runtime and attachment are different facts
 
@@ -52,8 +56,12 @@ attachment lease
   display label     e.g. dev:2.1
 ```
 
-The exact wire names remain an implementation decision. The following rules
-are part of the design:
+`WorkspaceAttachParams.client` optionally supplies `ClientMetadata` (`kind`
+and optional `integration`). `ClientIntegration` has `kind`, opaque `scope`,
+`locator`, and optional `label`. Each live `WorkspaceClient` has an independent
+public `id` plus `metadata`; this ID is never the renewable lease capability.
+Old attach requests remain valid and project the client kind `unknown`.
+The following rules are part of the implementation:
 
 - The lease ID remains the authority for renew and release. Integration
   metadata is descriptive and must never become authentication material.
@@ -62,10 +70,20 @@ are part of the design:
 - Registration occurs with the existing attach operation. Renewal preserves
   the metadata across sequential TUI reconnects, and explicit release or lease
   expiry removes it.
+- Presentation has its own expiry, advanced only by registration and an
+  explicit client heartbeat. Adoption may pin or extend authority to finish
+  safely, but its start, completion, or reconciliation cannot extend presence
+  or make an expired client visible again. A late heartbeat under still-valid
+  authority can restore the same presence ID; release or generation clear
+  keeps the client hidden even while its adoption remains pinned.
 - The relation is workspace-to-many-attachments, not workspace-to-one-pane.
-- Every metadata field is optional, length-bounded, control-character
-  sanitized, and rendered as untrusted text. Locators are passed as argv data,
-  never interpolated into a shell command.
+- Client metadata and integration are optional groups; a supplied group has
+  required bounded identifiers and an optional readable label. Kinds are
+  lowercase ASCII tokens (32 bytes); scope/locator allow 128 bytes and labels
+  96 bytes. Empty text, control characters, and bidi embedding/isolate markers
+  are rejected before native or Git work.
+  Rendering still treats metadata as untrusted text. Locators are passed as
+  argv data, never interpolated into a shell command.
 - A tmux pane locator is unique only inside one tmux server. Navigation must
   use an opaque server identity together with the pane ID; a human label such
   as `dev:2.1` is display-only.
@@ -76,10 +94,32 @@ reconnect, close, delete, or thread-ownership rules.
 
 ## tmux adapter
 
-When `coco jump` runs inside tmux, it can detect the current pane from
+When `coco jump` runs inside tmux, it detects the current pane from
 `TMUX_PANE` and resolve a bounded human label with tmux's structured format
 output, such as session, window, and pane. Failure to inspect tmux must be
 non-fatal: the TUI still attaches without integration metadata.
+
+The adapter parses `TMUX` from the right (socket paths may contain commas),
+validates the absolute socket and numeric PID/pane identifiers, and uses
+`tmux -N -S <socket> display-message -p -t <pane> <fixed-format>`. The query
+has a 300 ms deadline, bounded output, literal argv, no stdin, and discarded
+stderr. `-N` prevents starting a missing server. It verifies socket/PID/pane
+against the launch environment before accepting the formatted location.
+The format fields follow the [tmux manual](https://man.openbsd.org/tmux#FORMATS).
+The opaque scope is a length-framed SHA-256 of socket path, PID, and server
+start time. Exact same pane IDs in separate/restarted servers cannot collide.
+Raw socket paths and PIDs are not included in the public client metadata.
+
+Readable labels are launch-time snapshots: renaming sessions, renumbering
+windows, or moving panes can make them stale until another jump. Renewal
+preserves metadata without invoking tmux; `status` never starts a helper.
+Exact pane/server identity remains separate from its display label. Refresh
+or navigation belongs to a later adapter slice, not background discovery.
+
+This location discovery belongs to the ordinary `jump` CLI and supplies the
+direct status view. It is part of the first usable client-presence slice, not
+deferred until plugin installation. The displayed location should identify
+the session, window, and pane clearly, for example `dev:2.1`.
 
 Only a client started through `coco jump`, or a future explicit registration
 flow, may claim an exact workspace/thread attachment. A manually launched
@@ -100,9 +140,9 @@ workspace runtime.
 
 ## Status and polling
 
-The normal compact `coco status` view should not gain a permanently empty or
-wide pane column. An explicit generic projection, provisionally
-`coco status --clients`, may add a `CLIENTS` field:
+The normal compact `coco status` view is unchanged. Explicit
+`coco status --clients` (`-c`) adds a `CLIENTS` column or targeted detail;
+the short flag composes with other status switches, such as `-fartc`:
 
 ```text
 WORKSPACE   STATE     CLIENTS
@@ -111,10 +151,16 @@ api/ref     Ready     tmux dev:3.0, work:1.2
 research    Ready     -
 ```
 
-A targeted view may include both the readable label and exact local locator.
-Machine output must expose a structured attachment collection rather than the
-formatted cell. Final CLI naming belongs to the implementation review; it
-must remain generic instead of introducing tmux-specific workspace status.
+A targeted view uses the same readable labels as the collection. Unavailable
+locations show `TUI`, old callers show `Client`, absent clients show `—`, and
+identical labels are counted (`TUI ×2`). Labels are sorted deterministically.
+Schema-version-15 status JSON always includes a structured `clients` array,
+even when empty; ordinary list/picker responses omit the projection. The
+internal get/list opt-in is `includeClients`, default false for old callers.
+
+This direct CLI view is the primary deliverable. It must support scoped and
+cross-repository views, tree rendering, and live follow without changing the
+underlying agent-state projection. A plugin is not needed to see tmux locations.
 
 A tmux status bar refreshes frequently. The plugin must not run the full
 workspace-status path on every redraw because that path may inspect native
@@ -127,23 +173,30 @@ are only a rendering cache.
 
 ## Delivery slices
 
-1. Add optional generic client metadata to attachment requests and the
-   generation-local lease registry. Cover bounds, sanitization, reconnect,
-   expiry, and multiple clients without adding tmux UI.
-2. Add an opt-in structured attachment projection to status and prove that it
-   neither loads threads nor starts executors.
-3. Add the tmux adapter and plugin with status-line, popup, and exact local-pane
-   navigation. Keep no-tmux behavior unchanged.
-4. Reuse the generic contract for another client only when a real consumer
+1. Implemented: optional generic metadata on attachment requests and the
+   generation-local lease registry, with bounded text, separate presentation
+   IDs, independent release/expiry, and adoption/reconciliation coverage.
+2. Implemented: opt-in structured status projection. Tests prove that reading
+   presence never loads threads or starts executors and preserves native state.
+3. Implemented: bounded tmux discovery during ordinary `jump`, with readable
+   session/window/pane labels in target/collection/tree/follow and structured
+   JSON. Missing/broken/slow tmux falls back to generic TUI presence. Isolated
+   native Codex 0.160.1 tests cover two real TUIs in separate tmux servers and
+   independent closure; no plugin is required.
+4. Optionally add the secondary tmux plugin with status-line, popup, and exact
+   local-pane navigation, using the same client-presence contract.
+5. Reuse the generic contract for another client only when a real consumer
    requires it.
 
-This work follows the pre-`0.1.0` responsiveness correction and bounded
-diagnostics work. It is a suitable `0.1.x` integration rather than a stable
-release blocker.
+This work follows the completed responsiveness/diagnostics and create-time
+context-capture baseline. The status-first slice can ship independently of a
+plugin; the release-channel decision remains separate.
 
 ## Acceptance boundaries
 
 - A non-tmux `coco jump` behaves exactly as it does today.
+- A TUI launched through `coco jump` in tmux has its location visible through
+  the opt-in status view without installing or loading any plugin.
 - One workspace can report zero, one, or several live client attachments.
 - A relay reconnect retains the same attachment; normal exit, failed renewal,
   or expiry removes only that attachment.
