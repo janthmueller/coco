@@ -2,6 +2,14 @@
 
 <!-- version list -->
 
+## v0.3.0 (2026-10-09)
+
+### Features
+
+- **clients**: Show live TUI and tmux attachments in status
+  ([`e5559de`](https://github.com/janthmueller/coco/commit/e5559decbffd72fda664027f42f24f86dc2880fe))
+
+
 ## v0.2.0 (2026-10-09)
 
 ### Documentation
