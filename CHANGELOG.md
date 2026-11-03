@@ -2,6 +2,22 @@
 
 <!-- version list -->
 
+## v0.4.0 (2026-11-03)
+
+### Bug Fixes
+
+- **deps**: Require patched Tokio 1.53.3
+  ([`442b3e9`](https://github.com/janthmueller/coco/commit/442b3e9c063b3e746b82251b827332710720a026))
+
+### Features
+
+- **cli**: Improve status queries and workspace creation
+  ([`fd25be5`](https://github.com/janthmueller/coco/commit/fd25be5c30e8366ba6dd6dbe494dd2df45b65810))
+
+- **codex**: Support 0.166.0 and reported usage costs
+  ([`8061922`](https://github.com/janthmueller/coco/commit/806192241685af3cd4441634a14a4af2765c3b4a))
+
+
 ## v0.3.0 (2026-10-09)
 
 ### Features
