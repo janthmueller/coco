@@ -72,6 +72,29 @@ impl Store {
         Ok(operation)
     }
 
+    /// Retains the fingerprint and original intent after the worker proves
+    /// that this dispatch started no turn. Never use for an unknown outcome.
+    pub(crate) fn reset_rejected_operation(&self, id: &str) -> Result<Operation, StoreError> {
+        let mut connection = self.lock()?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let operation = require_operation(&transaction, id)?;
+        if operation.state != OperationState::Dispatching {
+            return Err(StoreError::InvalidOperationState {
+                operation_id: operation.operation_id,
+                expected: "dispatching",
+                actual: operation.state.as_str().to_owned(),
+            });
+        }
+        transaction.execute(
+            "UPDATE operations SET state = 'prepared', dispatch_started_at_ms = NULL,
+                result_recorded_at_ms = NULL WHERE id = ?1 AND state = 'dispatching'",
+            [id],
+        )?;
+        let operation = require_operation(&transaction, id)?;
+        transaction.commit()?;
+        Ok(operation)
+    }
+
     /// Records a native result proven by the direct App Server response.
     pub fn accept_operation(
         &self,

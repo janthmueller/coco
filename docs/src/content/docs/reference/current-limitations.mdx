@@ -4,7 +4,7 @@ description: Resolve connection, workspace, cleanup, and compatibility problems.
 ---
 
 CoCo runs on Linux and macOS. These checks cover common
-problems with the current repository version and its tested Codex 0.160.1 setup.
+problems with the current repository version and its tested Codex 0.166.0 setup.
 
 ## Check your setup
 
@@ -49,6 +49,18 @@ environment and the terminal running `coco jump`.
 Cargo builds need Rust 1.98.1 or newer plus a C compiler and linker. On macOS,
 install the Command Line Tools. [Nix installation](../../installation/#install-with-nix)
 supplies the build toolchain.
+
+### Codex cannot reach its model provider
+
+Run Codex's focused connection checks:
+
+```bash
+codex doctor --network-only
+```
+
+For a model-provider mismatch, follow
+[Keep the model provider consistent](../../guides/execution-profiles/#keep-the-model-provider-consistent).
+Changing `--model` alone does not switch providers.
 
 ### Workspace execution cannot start
 
@@ -184,15 +196,15 @@ Resource measurements are Linux-only. Enforced limits additionally require
 cgroup v2 and a compatible systemd user session. `limits show` reports
 support and any changes waiting to take effect.
 
-Cost depends on Codex providing an estimate. A dash is an unavailable value;
+Cost depends on what Codex reports. A dash is an unavailable value;
 saved token reports after a restart may be marked `last seen`.
 See [Resource accounting](../resources/).
 
 ## Codex UI compatibility
 
-With the tested Codex 0.160.1 setup, the UI's `!command` shortcut is unavailable
-for CoCo's default workspace execution. Run ad-hoc commands in a separate shell
-at the worktree path shown by `coco status <workspace>`.
+The UI's `!command` shortcut is not a supported shell path with CoCo's default
+workspace execution. Run ad-hoc commands in a separate shell at the worktree
+path shown by `coco status <workspace>`.
 
 Immediately after loading or copying a conversation, send a normal prompt
 before using `/review` or `/compact`. CoCo uses experimental Codex

@@ -22,7 +22,7 @@ Raw token usage and monetary cost are separate evidence contracts:
   completed provider response supplies usage;
 - current-context occupancy is a latest-response view, not cumulative spend;
   and
-- cost is an optional billing estimate. It must never be inferred as zero when
+- cost is optional native evidence. It must never be inferred as zero when
   the authenticated Codex route cannot provide it.
 
 Codex 0.154.0 also accepts an optional thread ID on `account/usage/read` and
@@ -30,6 +30,18 @@ can return backend-estimated credits, optional USD, and grouped model usage.
 CoCo queries that route on demand and keeps its short-lived result in memory;
 it does not ship a price table. The response is nullable and eventually
 consistent, so token reporting remains useful without it.
+
+The selected 0.166.0 schema also exposes optional `nativeUsageUsdMicros`,
+independent of credit-based estimates. Preserve this field separately, prefer
+it over estimated USD and then credits for display, and label the detailed
+value `reported` rather than `estimate`. Missing/null is unknown; an explicit
+zero remains valid. Neither native dollars nor estimates are invoice evidence.
+The native field preserves Codex's signed 64-bit integer contract, including
+its sign and full-range formatting; CoCo does not infer a billing explanation
+from a negative value or reinterpret it as unavailable.
+Public JSON schema version 16 carries this optional value inside `usage.cost`;
+the existing account-read cache, thread attribution and passive behavior remain
+unchanged. No new persistence, network request or pricing calculation is added.
 
 The approved read surface is `coco status [workspace] --usage`, with
 current-repository collection scope by default, `--all-repos` for a global
@@ -97,7 +109,8 @@ the latest context became smaller.
 The per-thread account result, when available, includes:
 
 - `estimatedUsageCreditsMicros`;
-- optional `estimatedUsageUsdMicros`; and
+- optional `estimatedUsageUsdMicros`;
+- optional `nativeUsageUsdMicros` on the selected 0.166.0 server; and
 - groups keyed by optional model, reasoning effort, and speed with estimated
   credits plus optional input, net-new input, cached input, output, and total
   tokens.

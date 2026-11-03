@@ -111,6 +111,8 @@ struct ThreadUsageWire {
     estimated_usage_credits_micros: u64,
     #[serde(default)]
     estimated_usage_usd_micros: Option<u64>,
+    #[serde(default)]
+    native_usage_usd_micros: Option<i64>,
     groups: Vec<ThreadUsageGroupWire>,
 }
 
@@ -670,7 +672,7 @@ impl WorkerRuntime for CodexWorker {
             .client
             .request("turn/start", params)
             .await
-            .map_err(WorkerError::runtime)?;
+            .map_err(classify_turn_start_error)?;
         let id = response
             .pointer("/turn/id")
             .and_then(Value::as_str)
@@ -684,6 +686,14 @@ impl WorkerRuntime for CodexWorker {
             .respond(id, result)
             .await
             .map_err(WorkerError::runtime)
+    }
+}
+
+fn classify_turn_start_error(error: CodexError) -> WorkerError {
+    if error.is_model_provider_mismatch() {
+        WorkerError::TurnRejected(Box::new(error))
+    } else {
+        WorkerError::runtime(error)
     }
 }
 
@@ -787,6 +797,7 @@ fn decode_thread_cost_response(
         thread_id: expected_thread_id.to_owned(),
         estimated_usage_credits_micros: usage.estimated_usage_credits_micros,
         estimated_usage_usd_micros: usage.estimated_usage_usd_micros,
+        native_usage_usd_micros: usage.native_usage_usd_micros,
         groups: usage
             .groups
             .into_iter()
@@ -933,11 +944,42 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        decode_account_quota_response, decode_located_thread_response, decode_thread_cost_response,
-        decode_thread_read_response, with_environment,
+        classify_turn_start_error, decode_account_quota_response, decode_located_thread_response,
+        decode_thread_cost_response, decode_thread_read_response, with_environment,
     };
-    use crate::coordinator::{NativeAccountQuotaRead, WorkerExecutionEnvironment};
+    use crate::codex::CodexError;
+    use crate::coordinator::{NativeAccountQuotaRead, WorkerError, WorkerExecutionEnvironment};
     use crate::domain::CodexThreadStatus;
+
+    #[test]
+    fn only_a_structured_provider_rejection_proves_that_no_turn_started() {
+        for (code, data, rejected) in [
+            (-32600, Some(json!({"type": "modelProviderMismatch"})), true),
+            (
+                -32603,
+                Some(json!({"type": "modelProviderMismatch"})),
+                false,
+            ),
+            (-32600, None, false),
+            (-32600, Some(json!({"type": "anotherError"})), false),
+            (-32600, Some(json!({"type": 42})), false),
+            (-32600, Some(json!({"reason": "serverShuttingDown"})), false),
+        ] {
+            let error = classify_turn_start_error(CodexError::Rpc {
+                code,
+                data,
+                message: "modelProviderMismatch text alone is not proof".to_owned(),
+            });
+            assert_eq!(matches!(error, WorkerError::TurnRejected(_)), rejected);
+        }
+        assert!(matches!(
+            classify_turn_start_error(CodexError::Closed {
+                reason: "lost response".to_owned(),
+                stderr: String::new(),
+            }),
+            WorkerError::Runtime(_)
+        ));
+    }
 
     #[test]
     fn selects_one_workspace_environment_without_replacing_other_params() {
@@ -1104,6 +1146,7 @@ mod tests {
         .unwrap();
         assert_eq!(estimate.estimated_usage_credits_micros, 1_250_000);
         assert_eq!(estimate.estimated_usage_usd_micros, Some(420_000));
+        assert_eq!(estimate.native_usage_usd_micros, None);
         assert_eq!(estimate.groups[0].total_tokens, Some(175));
 
         assert_eq!(
@@ -1128,6 +1171,49 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.to_string().contains("thread ID mismatch"));
+    }
+
+    #[test]
+    fn preserves_reported_dollars_separately_from_estimates_and_unknown_values() {
+        for (amount, expected) in [
+            (json!(null), None),
+            (json!(0), Some(0)),
+            (json!(312_345), Some(312_345)),
+            (json!(-312_345), Some(-312_345)),
+            (json!(i64::MIN), Some(i64::MIN)),
+            (json!(i64::MAX), Some(i64::MAX)),
+        ] {
+            let cost = decode_thread_cost_response(
+                json!({"threadUsage": {
+                    "threadId": "thread-1", "estimatedUsageCreditsMicros": 10,
+                    "estimatedUsageUsdMicros": 20, "nativeUsageUsdMicros": amount,
+                    "groups": []
+                }}),
+                "thread-1",
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(cost.native_usage_usd_micros, expected);
+            assert_eq!(cost.estimated_usage_usd_micros, Some(20));
+            assert_eq!(cost.estimated_usage_credits_micros, 10);
+        }
+    }
+
+    #[test]
+    fn rejects_reported_dollars_outside_the_native_integer_contract() {
+        for amount in [json!(u64::MAX), json!(1.5), json!("0.25")] {
+            let result = decode_thread_cost_response(
+                json!({"threadUsage": {
+                    "threadId": "thread-1", "estimatedUsageCreditsMicros": 10,
+                    "nativeUsageUsdMicros": amount, "groups": []
+                }}),
+                "thread-1",
+            );
+            assert!(matches!(
+                result,
+                Err(crate::coordinator::WorkerError::InvalidThreadUsage(_))
+            ));
+        }
     }
 
     #[test]

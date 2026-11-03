@@ -689,6 +689,8 @@ pub enum WorkspaceCostEstimate {
         estimated_usage_credits_micros: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         estimated_usage_usd_micros: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        native_usage_usd_micros: Option<i64>,
         groups: Vec<NativeThreadCostGroup>,
         observed_at_ms: i64,
     },

@@ -87,6 +87,7 @@ impl Coordinator {
             Ok(Some(native)) if native.thread_id == thread_id => WorkspaceCostEstimate::Available {
                 estimated_usage_credits_micros: native.estimated_usage_credits_micros,
                 estimated_usage_usd_micros: native.estimated_usage_usd_micros,
+                native_usage_usd_micros: native.native_usage_usd_micros,
                 groups: native.groups,
                 observed_at_ms: checked_at_ms,
             },

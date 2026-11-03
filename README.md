@@ -11,7 +11,7 @@ and jump back into any conversation.
 - **Move quickly.** Find work across repositories and return to it with
   `coco jump`.
 - **Stay informed.** Follow agent activity, requests for input, token usage,
-  remaining account quota, and available cost estimates.
+  remaining account quota, and available cost reports.
 - **Connect your tools.** Agents publish structured signals; hooks run your
   programs in response.
 - **Stay in control.** Add guards before workspace close or deletion, and
@@ -76,7 +76,7 @@ machine.
 
 ## Project status
 
-CoCo runs on Linux and macOS and is tested with Codex 0.160.1.
+CoCo runs on Linux and macOS and is tested with Codex 0.166.0.
 The 0.x series is under active development.
 Resource measurements and limits are Linux features; limits require a
 compatible systemd user session.

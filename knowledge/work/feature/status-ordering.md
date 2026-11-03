@@ -1,8 +1,8 @@
 ---
 type: Working Document
-title: "feature/status-ordering: status queries and workspace creation"
-description: Implements status ordering/filters, repository-aware context selection and workspace-named default branches independently of Compose.
-tags: [work, branch, cli, status, sorting, filters, context, git]
+title: "feature/status-ordering: status, creation and Codex compatibility"
+description: Implements status queries, repository-aware context, workspace-named branches and verified Codex 0.166.0 compatibility independently of Compose.
+tags: [work, branch, cli, status, sorting, filters, context, git, codex, usage]
 status: active
 branch: feature/status-ordering
 updated: 2026-11-03
@@ -18,11 +18,126 @@ compose with flat/tree/follow/JSON without changing execution or native state.
 Context selection also spans registered repositories, with the current
 repository first and code selection still repository-local.
 Newly allocated default branches use the workspace name without an added prefix.
-Keep Compose isolated. The user now authorizes a local checkpoint of the
-completed slices followed by Codex 0.166.0 compatibility work. No push,
-publication or changes to the user's live installation/services.
+Keep Compose isolated. The user now authorizes finishing the confirmed
+provider-dispatch fix, final verification, committing, merging onto main and
+releasing through GitHub CI. Preserve unrelated changes and do not change the
+user's live installation/services.
 
 ## Active work
+
+### Finish provider rejection, integrate and release — 2026-11-03
+
+- [x] Classify only proven pre-turn native rejection at the worker boundary;
+  preserve unknown-dispatch protection for every ambiguous failure.
+- [x] Restore the retained operation intent safely after a proven rejection,
+  release its runtime guard, and cover retries/fingerprints and real CLI output.
+- [x] Run sequential quality/native/docs gates and record final results.
+- [ ] Commit the completed slice, integrate current origin/main without Compose,
+  then use the existing CI release path and verify its outcome.
+
+Implementation and integration notes:
+
+- The worker port now distinguishes a proven pre-turn rejection from an
+  uncertain runtime error. Only the exact structured native provider mismatch
+  is classified this way; text matches, other RPC failures and transport loss
+  are not proof. Coordinator imports no Codex transport types.
+- A transaction restores only a dispatching rejected operation to its original
+  prepared intent, retaining ID/fingerprint and clearing dispatch timestamps.
+  Accepted/uncertain records cannot be reset. Release the exact generation-local
+  turn guard only after this succeeds; persistence failure remains fail-closed.
+  Preserve an already materialized fresh binding as before, without pretending
+  the rejected turn was accepted. No schema migration or automatic retry added.
+- Focused coordinator tests cover fresh and materialized bindings, explicit
+  retry with the same or another operation ID, and conflicting payloads. Store
+  transition tests and a real-CoCo/native-Codex provider repair/restart test
+  accompany the adapter classification and redaction cases.
+- Origin/main advanced only by the generated 0.3.0 release stamp (`6461d27`).
+  The automatic-alpha variable remains false; use an explicit stable CI
+  rehearsal/publication after the exact integrated main revision passes Rust.
+  Do not alter release switches, credentials or Compose.
+- The real CLI regression now proves repeated same/new-ID rejection stays
+  actionable and non-blocking, different payloads still conflict, and a saved
+  same-ID send succeeds after matching the base provider and restarting the
+  isolated daemon. One initial probe hit the existing 10-second native listener
+  startup deadline; its isolated repeat and full seven-case run pass without a
+  product timeout change or a hidden retry. Separate startup/restart logs and
+  phase context improve failure diagnostics.
+- Final code verification so far: 598 ordinary tests pass (582 library, six
+  process-smoke, ten status-query; 15 opt-in/manual skips); all seven native
+  Codex 0.166.0 tests pass explicitly (41.47 s), including provider repair.
+  The 19 release/synchronizer unit tests also pass. The storage race regression
+  confirms an already-uncertain operation remains closed despite a later
+  proven-rejection response.
+- Final Clippy (all targets/features, warnings denied), Rustfmt, Machete,
+  cached offline dependency policy and whitespace checks pass. Astro check has
+  zero diagnostics; static export verifies 17 pages and 62 files. A local
+  registry-package dry-run cannot run fully offline because Cargo needs a
+  registry HTTP request; retain the exact-main hosted package/Nix/native-binary
+  gates before any publishing dispatch rather than bypassing verification.
+
+### Fresh review and verification — 2026-11-03
+
+- User requests another review and test run of the uncommitted compatibility
+  and usage slice. Review all changed and new files, verify the native error
+  paths and USD provenance, and rerun the isolated gates. Do not implement
+  product fixes, commit, push, publish or change live services during this
+  review-only request.
+- [x] Review production paths, new native fixtures and affected documentation.
+- [x] Reproduce actionable findings with bounded isolated checks where needed.
+- [x] Rerun sequential Rust/native/static-documentation gates and report findings
+  and remaining verification limits.
+
+Confirmed finding (P2, not fixed in this review):
+
+- The new provider-specific public guidance in `src/daemon/handler.rs` is
+  bypassed when a first `send` reaches `turn/start`. The coordinator converts
+  every worker error there into `OperationUncertain`, including Codex's explicit
+  `-32600` / `modelProviderMismatch` rejection. It discards the actionable
+  cause, marks the workspace unavailable and blocks subsequent sends in the
+  same runtime generation, despite Codex having rejected the request.
+- Reproduced with the built real CoCo CLI/daemon and installed Codex 0.166.0,
+  not just a synthetic error-mapper unit test. In an isolated temporary Git
+  repository, set base provider `provider-current`, create a workspace with
+  a profile selecting `provider-other`, then issue two distinct sends. Creation
+  succeeds; both sends return `OPERATION_UNCERTAIN` referencing the first
+  operation. Status reports `phase: unavailable`, even though native thread
+  status is `idle`. The test daemon's log contains the exact provider rejection.
+  Providers point only to unreachable loopback endpoints, so no model request
+  or user authentication is involved. The temporary daemon exits cleanly (0).
+- The existing negative native test verifies Codex's contract directly, and
+  the handler unit test verifies direct error projection; neither exercises
+  this intervening CoCo turn-dispatch path. Add a CLI/daemon regression before
+  claiming the provider-error UX complete. Distinguish this explicit rejection
+  from genuinely unknown transport outcomes without weakening duplicate-send
+  protection or retrying an uncertain request.
+- Diagnostic harness: `/tmp/coco-provider-review.TznKsj/repro.mjs`; disposable
+  fixture/log: `/tmp/coco-provider-review-fixture.y4qnDj`. These contain only
+  synthetic test data and are not repository artifacts.
+
+Fresh verification:
+
+- Full ordinary `cargo test --locked --offline --all-targets --jobs 2 --
+  --test-threads=4 --quiet`: 592 pass, zero failures, 14 opt-in/manual skips
+  (576 library, six process-smoke, ten status-query passes).
+- Explicit `COCO_RUN_REAL_CODEX_COMPAT=1 cargo test --locked --offline
+  --test real_codex_compat --jobs 2 -- --ignored --test-threads=1 --quiet`:
+  all six native cases pass against `codex-cli 0.166.0` (41.50 s). These are
+  separate from the additional diagnostic reproducing the finding above.
+- Warning-denied all-target/all-feature Clippy, Rustfmt and `cargo machete`
+  pass. Offline `cargo deny --locked --offline check` passes using the existing
+  advisory cache; existing duplicate-version warnings remain. The sandbox's
+  cache-lock restriction required approved execution, not a database update.
+- Pinned local Astro entry point: zero check errors/warnings/hints; static
+  `/coco` build and export verification pass for 17 pages / 62 files, Pagefind,
+  routing and the public boundary. No dependency installation was needed.
+- `git diff --check` passes. No manifests, lockfiles or Nix inputs changed.
+  No paid external inference, fresh account-billing proof or macOS run is
+  claimed. Ordinary opt-in/manual tests remain intentionally skipped; six
+  native opt-in cases were run explicitly as stated above.
+- Review is complete; the confirmed provider-dispatch issue remains open.
+  This request changes only this working record in the repository. Existing
+  product/doc changes remain uncommitted and unstaged; checkpoint `fd25be5`
+  is unchanged. No commit, push, publication, install or user-service changes.
 
 ### Checkpoint and Codex 0.166.0 compatibility — 2026-11-03
 
@@ -31,15 +146,84 @@ publication or changes to the user's live installation/services.
   cross-repository context picker and workspace-named branches before editing
   compatibility code. Existing verification for that snapshot is recorded below;
   the final whitespace check is clean.
-- [ ] Create the local checkpoint without touching main or Compose.
-- [ ] Select the installed 0.166.0 binary for isolated real-process contracts;
+- [x] Create the local checkpoint without touching main or Compose.
+- [x] Select the installed 0.166.0 binary for isolated real-process contracts;
   investigate actual failures rather than weakening assertions or security.
-- [ ] Add focused regression coverage and bounded native reuse where justified.
-- [ ] Run sequential Rust/documentation gates, update proven compatibility
+- [x] Add focused regression coverage and bounded native reuse where justified.
+- [x] Run sequential Rust/documentation gates, update proven compatibility
   guidance and leave the upgrade changes reviewable without pushing/publishing.
 - Queue/steer and designed handoffs remain separate feature work unless a
   compatibility finding makes a narrow change necessary. Consider the optional
   native USD field only with explicit provenance and validation tests.
+- Checkpoint: `fd25be5` (`feat(cli): improve status queries and workspace
+  creation`); working tree clean immediately afterward, no push. Select
+  0.166.0 for the opt-in test gate now; public compatibility claims stay at the
+  proven old version until the real native contracts pass.
+- Initial isolated tests hit sandbox-only loopback/user-bus restrictions;
+  approved execution removed those restrictions. Three native contracts passed,
+  while context resume and the session-hook proof exposed 0.166.0's real
+  `modelProviderMismatch` rejection. Workspace overlays cannot change the
+  process's current provider for resume/input. Align local test-provider base
+  configuration with the profile and preserve it when adding project trust;
+  do not disable the native check or add a provider pool.
+- All five existing opt-in native tests then pass (40.53 s): busy-source
+  capture/independent restart, legacy boundaries, full preparation/adoption/
+  resume/TUI/retirement/resources, session hooks and scoped MCP signals.
+- Next: a model-free negative native provider contract and actionable bounded
+  mismatch guidance; preserve existing unknown-dispatch/idempotency semantics.
+  Carry optional native USD evidence separately from estimated USD/credits,
+  prefer reported USD for display without calling it an invoice, and validate
+  missing/null/zero/invalid amounts, cache propagation and JSON provenance.
+  Do not add queue/steer, network-on-status, a price table or handoff behavior.
+- Native negative provider proof now materializes shell history before resume:
+  an empty thread instead fails with `no rollout found`, a separate native
+  contract, not provider evidence. The persisted case proves both resume and
+  input reject with the structured provider type and no inference; focused
+  run passes. Session-hook/provider cases have focused private test modules.
+- Full ordinary suite passes with the addition (592 passed, 14 opt-in/manual
+  skipped). One new CLI assertion initially expected targeted usage reads;
+  unfiltered collections correctly use the existing bulk usage read. Correct
+  the assertion to its exact two-query method sequence, not product behavior.
+- Final schema review preserves the new USD field's signed `int64` contract
+  rather than inventing a non-negative rule: null/zero/sign/both integer
+  boundaries are covered, invalid type/range is rejected, and exact formatting
+  handles `i64::MIN`. Re-run gates for this final type refinement.
+- Native provider mismatch guidance remains under the existing `CODEX_ERROR`
+  code, exposes no upstream data/identifiers, and tells users to preserve the
+  saved profile while matching base configuration before a stopped-work
+  restart. Unknown-dispatch state and retry behavior are unchanged.
+- A bounded isolated native CLI probe confirms `--exit-on-stdin-close` still
+  requires `--remote` and `--environment-id` in 0.166.0, so it cannot replace
+  CoCo's local runtime cleanup. Read-only inspection of the exact earlier
+  failed test's hashed systemd scope namespace finds no remaining scopes.
+
+Final verification and handoff:
+
+- Final exact-version native suite: `COCO_RUN_REAL_CODEX_COMPAT=1 cargo test
+  --locked --offline --test real_codex_compat --jobs 2 -- --ignored
+  --test-threads=1 --quiet` passes all six cases against installed 0.166.0
+  (56.02 s). The context case uses a loopback provider stub; no paid external
+  inference or user's authentication, daemon, workspace or configuration used.
+- Final ordinary `cargo test --locked --offline --all-targets --jobs 2 --
+  --test-threads=4 --quiet` passes 592 tests, zero failures, 14 opt-in/manual
+  skips: 576 library, six process-smoke and ten status-query tests pass.
+- Warning-denied all-target/all-feature Clippy, Rustfmt, `cargo machete` and
+  cached offline `cargo deny --locked --offline check` pass. Deny retains
+  existing duplicate-version warnings; dependency manifests/lockfiles and Nix
+  inputs are unchanged. No fresh advisory-database fetch is claimed.
+- Astro check has zero errors/warnings/hints; final static `/coco` build/export
+  verifies 17 pages, 62 files, navigation/search and the public-only boundary.
+  The sandbox prevented pnpm from opening its user-level database, so run the
+  same scripts through the pinned local `node_modules/astro/bin/astro.mjs`
+  entry point and `scripts/verify-export.mjs`, without installing dependencies
+  or changing user-level tooling.
+- Public tested-version/profile/cost guidance and canonical architecture,
+  runtime, hooks/MCP, usage, product and knowledge-log records are updated.
+  Reported USD is conditional backend evidence, not proof every account
+  supplies it. No broader Codex-version range is certified.
+- Checkpoint `fd25be5` is the only new commit. Upgrade/usage changes remain
+  unstaged and uncommitted for review on this branch. Main stays `e5559de`,
+  Compose stays `10e48d8`; no push, publication, service restart or installation.
 
 ### Upstream Codex review — 2026-11-03
 
@@ -284,10 +468,11 @@ Implementation findings:
 
 ## Handoff
 
-- Implementation and verification are complete; changes remain unstaged on
-  `feature/status-ordering`. Main and the isolated Compose branch are unchanged.
-  No commit or publication. Public docs and canonical contracts reflect the
-  implemented behavior; the prior review below is historical context.
+- Status/context/naming changes are checkpointed in `fd25be5`. Subsequent Codex
+  0.166.0 compatibility and reported-USD changes are complete and verified but
+  remain unstaged/uncommitted on `feature/status-ordering`. Main and Compose
+  are unchanged, and nothing was pushed or published. Current verification is
+  recorded in the active-scope section above; earlier review notes are history.
 - Use `status -af --sort state,name --exclude-state unloaded` for an
   attention-first live view across repositories, or `status -ar --sort
   state,-memory,name` for state followed by largest memory use.

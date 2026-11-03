@@ -1,5 +1,7 @@
 use super::*;
 
+mod rejections;
+
 #[tokio::test]
 async fn ambiguous_turn_dispatch_is_recorded_once_and_never_retried() {
     let fixture = Fixture::new(FakeWorker::failing_turn_start());

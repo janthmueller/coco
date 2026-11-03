@@ -68,7 +68,7 @@ peer-response routing remain separate, unimplemented capabilities.
 - At the specification baseline on 2026-09-05, the repository had no commit
   and no implementation files; it contained the handoff and documentation
   foundation only.
-- The official `codex-cli 0.160.1` release binary is the selected compatibility
+- The official `codex-cli 0.166.0` release binary is the selected compatibility
   baseline. Its model-free real-process test passes preparation, exact native
   materialization/adoption, inherited-context fork, history reads, daemon
   restart, and exact resume.
@@ -1033,13 +1033,15 @@ automatically. No storage-schema migration is required for these descriptors.
 - Query native per-thread cost on demand through `account/usage/read`, cache
   the result briefly in memory, and invalidate it when newer token usage
   arrives. Preserve credits, optional USD, grouped detail, and observation
-  time. A null or failed native result is explicit unavailable evidence and
+  time. Keep optional reported USD separate from estimated USD and credits;
+  prefer reported dollars for presentation without labeling them as an invoice.
+  A null or failed native result is explicit unavailable evidence and
   cannot fail token reporting.
 - Human collection output adds cumulative tokens, latest context-window
-  percentage, and optional estimated cost to the existing status row. The
+  percentage, and optional reported/estimated cost to the existing status row. The
   targeted view adds input/cached and output/reasoning breakdowns. JSON exposes
   the complete typed projection beneath `usage` with top-level schema version
-  13.
+  16.
 - One-shot and `--follow` reads are passive: they do not call `thread/resume`,
   create context, or start a workspace executor. A terminal replaces the prior
   frame; redirected output appends only changed requested views. State, usage,
@@ -1178,7 +1180,7 @@ automatically. No storage-schema migration is required for these descriptors.
   shell path with the default remote executor. Review or compaction immediately
   after a newly loaded resume may also use Codex's local default until the next
   ordinary turn selects the workspace executor; CoCo must not hide this native
-  0.160.1 limitation.
+  0.166.0 limitation.
 
 ### `coco decide`
 
@@ -1593,7 +1595,7 @@ The following are intentionally outside v0:
 - Fake App Server process tests exercise Git-only preparation, atomic first
   send, native fork/compaction, event correlation, one-use fresh-TUI relay,
   exact adoption, detach, and completion/failure. A separate opt-in real Codex
-  compatibility test consumes no model turn: it checks 0.160.1, registers and
+  compatibility test consumes no model turn: it checks 0.166.0, registers and
   probes workspace environments, proves an empty remote candidate remains
   unbound, materializes one exact local-shell candidate solely for the history
   contract, then verifies history and two simultaneous native TUI resumes of
@@ -1731,7 +1733,7 @@ The following are intentionally outside v0:
   read failure, restart, final-output selection, and binding mismatches before
   any table or existing record is removed. The initial direct read cutover is
   acceptable without a prolonged shadow-only checkpoint because the original
-  0.147.0 proof and current 0.160.1 real-process gate prove non-loading reads,
+  0.147.0 proof and current 0.166.0 real-process gate prove non-loading reads,
   restart persistence, exact ID/`cwd`, and optional history hydration. Eager recovery
   status/failure writes stop with that obsolete startup path. The later live-
   event reduction also stops user-message, native status/plan/diff/error,
@@ -1786,7 +1788,7 @@ approval model. CoCo neither supplies a separate Git database nor adds a
 custom commit proxy. A later app-side commit action may be useful UI
 convenience, but it is not part of the isolation contract.
 
-Codex 0.160.1 is now the selected and proven compatibility baseline;
+Codex 0.166.0 is now the selected and proven compatibility baseline;
 maintaining a broader range is optional rather than an alpha blocker. The
 two-repository, multi-client product proof now passes locally, so it no longer
 blocks continued public-alpha development. Publishing a particular revision,
@@ -1828,7 +1830,7 @@ publication and operational changes still require explicit approval.
    while its source works. Later activation is independent of source history
    and activity. Fresh creation remains lazy; pending child compaction and
    uncertain forks have explicit recovery semantics. Unit/process regressions
-   and the isolated real-Codex 0.160.1 test cover the contract; the test source
+   and the isolated real-Codex 0.166.0 test cover the contract; the test source
    continues while the child is independently jumped/sent to after restart.
 3. Client-presence status-first slice implemented locally: generic metadata on
    existing leases, built-in tmux discovery during `jump`, and passive opt-in

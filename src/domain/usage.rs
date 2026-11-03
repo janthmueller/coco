@@ -56,7 +56,7 @@ impl WorkspaceTokenUsageCheckpoint {
     }
 }
 
-/// Optional billing estimate returned by Codex for one native thread.
+/// Optional backend-reported costs returned by Codex for one native thread.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NativeThreadCostEstimate {
@@ -64,6 +64,10 @@ pub(crate) struct NativeThreadCostEstimate {
     pub(crate) estimated_usage_credits_micros: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) estimated_usage_usd_micros: Option<u64>,
+    /// Reported dollars are independent of credit-based estimates. Missing is
+    /// unknown, never zero; neither value is an independently verified invoice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) native_usage_usd_micros: Option<i64>,
     pub(crate) groups: Vec<NativeThreadCostGroup>,
 }
 

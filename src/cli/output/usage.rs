@@ -90,6 +90,14 @@ fn context_detail(current: u64, window: Option<u64>) -> String {
 fn cost_cell(cost: &WorkspaceCostEstimate) -> String {
     match cost {
         WorkspaceCostEstimate::Available {
+            native_usage_usd_micros: Some(value),
+            ..
+        } => format!(
+            "{}${}",
+            if *value < 0 { "-" } else { "" },
+            format_micros(value.unsigned_abs())
+        ),
+        WorkspaceCostEstimate::Available {
             estimated_usage_usd_micros: Some(value),
             ..
         } => format!("${}", format_micros(*value)),
@@ -103,6 +111,14 @@ fn cost_cell(cost: &WorkspaceCostEstimate) -> String {
 
 fn cost_detail(cost: &WorkspaceCostEstimate, palette: Palette) -> String {
     match cost {
+        WorkspaceCostEstimate::Available {
+            native_usage_usd_micros: Some(_),
+            ..
+        } => format!(
+            "{} {}",
+            cost_cell(cost),
+            palette.paint(Tone::Dim, "reported")
+        ),
         WorkspaceCostEstimate::Available { .. } => {
             format!(
                 "{} {}",
@@ -186,16 +202,50 @@ mod tests {
         let usd = WorkspaceCostEstimate::Available {
             estimated_usage_credits_micros: 1_250_000,
             estimated_usage_usd_micros: Some(420_000),
+            native_usage_usd_micros: None,
             groups: Vec::new(),
             observed_at_ms: 1,
         };
         assert_eq!(cost_cell(&usd), "$0.42");
+        assert_eq!(cost_detail(&usd, Palette::plain()), "$0.42 estimate");
         let credits = WorkspaceCostEstimate::Available {
             estimated_usage_credits_micros: 1_250_000,
             estimated_usage_usd_micros: None,
+            native_usage_usd_micros: None,
             groups: Vec::new(),
             observed_at_ms: 1,
         };
         assert_eq!(cost_cell(&credits), "1.25 credits");
+    }
+
+    #[test]
+    fn reported_dollars_win_without_erasing_estimates_or_treating_zero_as_missing() {
+        for (value, expected) in [
+            (310_000, "$0.31"),
+            (0, "$0"),
+            (-310_000, "-$0.31"),
+            (i64::MIN, "-$9223372036854.775808"),
+        ] {
+            let cost = WorkspaceCostEstimate::Available {
+                estimated_usage_credits_micros: 1_250_000,
+                estimated_usage_usd_micros: Some(420_000),
+                native_usage_usd_micros: Some(value),
+                groups: Vec::new(),
+                observed_at_ms: 1,
+            };
+            assert_eq!(cost_cell(&cost), expected);
+            assert_eq!(
+                cost_detail(&cost, Palette::plain()),
+                format!("{expected} reported")
+            );
+            let encoded = serde_json::to_value(&cost).unwrap();
+            assert_eq!(encoded["nativeUsageUsdMicros"], value);
+            assert_eq!(encoded["estimatedUsageUsdMicros"], 420_000);
+            assert_eq!(encoded["estimatedUsageCreditsMicros"], 1_250_000);
+            assert_eq!(
+                serde_json::from_value::<WorkspaceCostEstimate>(encoded).unwrap(),
+                cost
+            );
+        }
     }
 }

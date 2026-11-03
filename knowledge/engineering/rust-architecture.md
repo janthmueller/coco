@@ -373,6 +373,17 @@ The coordinator's context-specific resolver accepts exact workspace IDs across
 repositories; code bases and operational resolvers retain their existing scope.
 Focused CLI and coordinator context tests keep that distinction explicit.
 
+Native compatibility scenarios for session hooks and provider matching live
+in private `tests/real_codex_compat/{hooks,providers}` children. Shared bounded
+process/transport fixtures remain in the parent integration target; source
+boundaries and executable-only library visibility are unchanged.
+
+Proven turn rejection is a typed worker-port outcome; only the native adapter
+classifies the exact upstream evidence. The coordinator and store own the
+guard/intent transition without importing Codex transport types. Focused
+coordinator/store operation-rejection tests live in their private
+`tests/operations` children; no crate or external API boundary changes.
+
 Extract coherent child modules in this order:
 
 1. coordinator commands and Codex event projection;

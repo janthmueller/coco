@@ -121,17 +121,33 @@ pub(super) fn install_dummy_auth(paths: &TestPaths) -> Result<()> {
 }
 
 pub(super) fn trust_projects(paths: &TestPaths, projects: &[&Path]) -> Result<()> {
-    let mut config = String::new();
+    let config_path = paths.codex_home.join("config.toml");
+    let mut config: toml::Table = match fs::read_to_string(&config_path) {
+        Ok(config) => toml::from_str(&config)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => toml::Table::new(),
+        Err(error) => return Err(error.into()),
+    };
+    let configured_projects = config
+        .entry("projects")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+        .as_table_mut()
+        .context("test config projects must be a table")?;
     for project in projects {
         let project = project
             .canonicalize()
             .with_context(|| format!("could not canonicalize {}", project.display()))?;
-        let project_key = serde_json::to_string(&project)?;
-        config.push_str(&format!(
-            "[projects.{project_key}]\ntrust_level = \"trusted\"\n"
-        ));
+        configured_projects.insert(
+            project
+                .to_str()
+                .context("test project path is not UTF-8")?
+                .to_owned(),
+            toml::Value::Table(toml::Table::from_iter([(
+                "trust_level".to_owned(),
+                toml::Value::String("trusted".to_owned()),
+            )])),
+        );
     }
-    fs::write(paths.codex_home.join("config.toml"), config)?;
+    fs::write(config_path, toml::to_string(&config)?)?;
     Ok(())
 }
 

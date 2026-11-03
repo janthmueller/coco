@@ -106,6 +106,13 @@ pub enum CodexError {
     },
 }
 
+impl CodexError {
+    pub(crate) fn is_model_provider_mismatch(&self) -> bool {
+        matches!(self, Self::Rpc { code: -32600, data: Some(data), .. }
+            if data.get("type").and_then(Value::as_str) == Some("modelProviderMismatch"))
+    }
+}
+
 #[derive(Clone)]
 pub struct CodexClient {
     inner: Arc<Inner>,

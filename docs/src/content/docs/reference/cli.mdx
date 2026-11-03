@@ -230,7 +230,7 @@ messages.
 
 `status` also shows the model currently configured for each Codex conversation,
 together with its reasoning effort when available, such as
-`gpt-5.6-sol · max`. Collection status uses the `MODEL` column; targeted status
+`gpt-6.1-sol · max`. Collection status uses the `MODEL` column; targeted status
 uses a `Model` detail line. In a collection, a prepared workspace shows `—`
 until Codex has a conversation to report; targeted output omits the unavailable
 detail. Under `--follow`, the value updates after a model change in Codex.
@@ -259,8 +259,8 @@ count, cumulative CPU use, and controller events when available without
 requiring `-r`. `--follow` also has the short form `-f`, so `-fr` follows state
 and resource use together.
 
-Add `--usage` (`-u`) for cumulative tokens, current context-window use, and an
-available cost estimate. It composes with the other short flags: `-fu` follows
+Add `--usage` (`-u`) for cumulative tokens, current context-window use, and
+available cost information. It composes with the other short flags: `-fu` follows
 state and model usage, while `-fru` also includes local runtime resources.
 
 Add `--quota` (`-q`) for the active Codex account's remaining limits. The
@@ -511,7 +511,7 @@ coco limits show feat/first --json
 ```
 
 These commands emit one JSON value to standard output. Human-oriented follow
-mode is intentionally excluded. The current top-level schema version is `15`.
+mode is intentionally excluded. The current top-level schema version is `16`.
 Status JSON always includes a `clients` array. Each entry has a temporary
 `id` and `metadata.kind`, plus optional `metadata.integration` with `kind`,
 an opaque `scope`, a `locator`, and an optional readable `label`. An empty
@@ -529,8 +529,8 @@ configured `model` and `reasoningEffort`. They are omitted when no native
 conversation value is available.
 
 With `--usage`, status JSON adds a nested `usage` object containing the complete
-native token breakdown, its observation and freshness fields, and either the
-cost estimate reported by Codex or an explicit unavailable reason.
+native token breakdown, its observation and freshness fields, and available
+cost values or an explicit unavailable reason.
 
 With `--quota`, status JSON adds one top-level `accountQuota` object containing
 all returned limit buckets, windows, reset timestamps, and availability. It is

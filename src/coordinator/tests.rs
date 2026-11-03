@@ -165,6 +165,7 @@ struct FakeWorker {
     failed_thread_reads: StdMutex<Vec<String>>,
     fail_thread_start: bool,
     fail_turn_start: bool,
+    reject_next_turn_start: StdMutex<bool>,
     turn_start_entered: Option<Arc<Notify>>,
     turn_start_release: Option<Arc<Notify>>,
     thread_read_entered: Option<Arc<Notify>>,
@@ -890,6 +891,11 @@ impl WorkerRuntime for FakeWorker {
             return Err(WorkerError::runtime(std::io::Error::other(
                 "injected ambiguous turn failure",
             )));
+        }
+        if std::mem::take(&mut *self.reject_next_turn_start.lock().unwrap()) {
+            return Err(WorkerError::TurnRejected(Box::new(std::io::Error::other(
+                "injected known rejection before starting a turn",
+            ))));
         }
         self.set_native_status(
             thread_id,

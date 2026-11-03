@@ -1,6 +1,7 @@
 use serde_json::json;
 
 mod context_capture;
+mod operations;
 mod retirement;
 
 use super::*;

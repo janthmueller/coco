@@ -103,13 +103,21 @@ provenance when reloading it for recovery. This execution-profile mechanism
 remains separate from the future MCP capability-profile and binding records
 described above.
 
+Codex 0.166.0 additionally validates the saved model provider against the
+shared App Server's current provider before resume/input. A per-thread profile
+overlay cannot switch providers independently of that process. Keep model
+selection within the configured provider and do not rewrite global config or
+add a provider pool as a hidden workaround. The isolated native provider
+contract covers the structured mismatch rejection; project-trust test setup
+must preserve the configured provider when editing temporary configuration.
+
 Before relying on this boundary, a contract test against the pinned Codex
 version must prove that two threads in one App Server can use disjoint MCP
 server/tool selections and that the selections behave correctly across resume
 and fork.
 
 The model-free test in `tests/real_codex_compat/mcp.rs`, most recently rerun
-against Codex 0.160.1 on 2026-10-06, proves separate repository-scoped
+against Codex 0.166.0 on 2026-11-03, proves separate repository-scoped
 instances of the real CoCo MCP process across native start/fork/resume and
 restoration through CoCo's named execution profiles. It also verifies native
 `_meta.threadId` attribution for

@@ -171,6 +171,7 @@ fn cost(thread_id: &str, credits: u64) -> NativeThreadCostEstimate {
         thread_id: thread_id.to_owned(),
         estimated_usage_credits_micros: credits,
         estimated_usage_usd_micros: Some(credits / 2),
+        native_usage_usd_micros: Some(i64::try_from(credits / 4).unwrap()),
         groups: vec![NativeThreadCostGroup {
             model: Some("gpt-test".to_owned()),
             reasoning_effort: Some("medium".to_owned()),
@@ -191,7 +192,9 @@ fn assert_cost(cost: &WorkspaceCostEstimate, expected: u64) {
         WorkspaceCostEstimate::Available {
             estimated_usage_credits_micros,
             estimated_usage_usd_micros: Some(_),
+            native_usage_usd_micros: Some(native),
             ..
         } if *estimated_usage_credits_micros == expected
+            && *native == i64::try_from(expected / 4).unwrap()
     ));
 }

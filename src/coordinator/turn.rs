@@ -2,7 +2,9 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use tracing::{error, warn};
 
-use super::{Coordinator, CoordinatorError, validate_non_empty, validate_operation_id};
+use super::{
+    Coordinator, CoordinatorError, WorkerError, validate_non_empty, validate_operation_id,
+};
 use crate::domain::{
     ContextMode, Workspace, WorkspaceAvailability, WorkspacePhase, derive_workspace_runtime,
 };
@@ -119,26 +121,15 @@ impl Coordinator {
         let started = match started {
             Ok(started) => started,
             Err(source) => {
-                if let Some(pending) = fresh.as_ref() {
-                    self.preserve_ambiguous_fresh_thread(&workspace, pending)
-                        .await;
-                }
-                if let Err(store_error) = self.store.mark_operation_uncertain(&operation.id) {
-                    error!(
-                        operation_id = %operation.operation_id,
-                        %store_error,
-                        "could not mark an unconfirmed turn dispatch uncertain"
-                    );
-                }
-                self.mark_runtime_turn_uncertain(&thread_id, &operation.id);
-                warn!(
-                    operation_id = %operation.operation_id,
-                    %source,
-                    "Codex did not confirm whether the turn was accepted"
-                );
-                return Err(CoordinatorError::OperationUncertain {
-                    operation_id: params.operation_id,
-                });
+                return Err(self
+                    .handle_failed_turn_start(
+                        &workspace,
+                        fresh.as_ref(),
+                        &thread_id,
+                        &operation,
+                        source,
+                    )
+                    .await);
             }
         };
 
@@ -155,6 +146,51 @@ impl Coordinator {
             self.project_current_runtime_turn(workspace),
             &operation,
         ))
+    }
+
+    async fn handle_failed_turn_start(
+        &self,
+        workspace: &Workspace,
+        fresh: Option<&super::workspace::PendingFreshThread>,
+        thread_id: &str,
+        operation: &Operation,
+        source: WorkerError,
+    ) -> CoordinatorError {
+        if let Some(pending) = fresh {
+            self.preserve_materialized_fresh_thread(workspace, pending)
+                .await;
+        }
+        if matches!(source, WorkerError::TurnRejected(_)) {
+            match self.store.reset_rejected_operation(&operation.id) {
+                Ok(_) => {
+                    let mut active = self
+                        .active_turn_operations
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if active
+                        .get(thread_id)
+                        .is_some_and(|turn| turn.operation_id == operation.operation_id)
+                    {
+                        active.remove(thread_id);
+                    }
+                    return CoordinatorError::Worker(source);
+                }
+                Err(store_error) => {
+                    error!(%store_error, operation_id = %operation.operation_id,
+                        "could not restore rejected turn intent; keeping dispatch fail-closed");
+                }
+            }
+        }
+        if let Err(store_error) = self.store.mark_operation_uncertain(&operation.id) {
+            error!(%store_error, operation_id = %operation.operation_id,
+                "could not mark an unconfirmed turn dispatch uncertain");
+        }
+        self.mark_runtime_turn_uncertain(thread_id, &operation.id);
+        warn!(%source, operation_id = %operation.operation_id,
+            "Codex did not confirm whether the turn was accepted");
+        CoordinatorError::OperationUncertain {
+            operation_id: operation.operation_id.clone(),
+        }
     }
 
     fn accept_started_turn(
@@ -216,7 +252,7 @@ impl Coordinator {
         })
     }
 
-    async fn preserve_ambiguous_fresh_thread(
+    async fn preserve_materialized_fresh_thread(
         &self,
         workspace: &Workspace,
         pending: &super::workspace::PendingFreshThread,
@@ -238,7 +274,7 @@ impl Coordinator {
             warn!(
                 workspace_id = %workspace.id,
                 thread_id = %pending.started.id,
-                "refusing an invalid native thread after an ambiguous first turn"
+                "refusing an invalid native thread after an unsuccessful first turn"
             );
             return;
         }
@@ -247,7 +283,7 @@ impl Coordinator {
                 workspace_id = %workspace.id,
                 thread_id = %pending.started.id,
                 %error,
-                "could not preserve a materialized thread after an ambiguous first turn"
+                "could not preserve a materialized thread after an unsuccessful first turn"
             );
         }
     }
