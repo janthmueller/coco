@@ -199,6 +199,12 @@ Before either channel:
    Git-flake checks, and native Linux/macOS binary smoke. Static documentation
    checks must also pass when public content changes. A local snapshot can
    validate pending source, but cannot substitute for the exact hosted SHA.
+   A cached offline advisory check is limited evidence, not a current security
+   clearance: refresh the advisory database during release preparation and
+   retain the hosted fresh-data gate. The 2026-11-03 run caught
+   [RUSTSEC-2026-0386](https://rustsec.org/advisories/RUSTSEC-2026-0386.html)
+   in previously locked Tokio 1.53.1; require patched 1.53.3 or newer rather
+   than suppressing that advisory.
    Generated release commits carry `[skip ci]`; if the current main tip is such
    a commit, use the Rust workflow's manual dispatch before rehearsing or
    promoting it. A successful test of its parent is not exact-tip proof.

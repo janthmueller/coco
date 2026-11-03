@@ -28,7 +28,8 @@ architectural baseline for CoCo.
 - [x] Integrate origin/main's generated 0.3.0 stamp (`6461d27`) and the
   status/Codex branch without conflicts or Compose. Feature commits are
   `fd25be5` (status/creation) and `8061922` (Codex compatibility/usage/rejection).
-- [ ] Require successful Rust and Pages checks on the exact pushed main SHA.
+- [ ] Require successful Rust on the final pushed main SHA and successful
+  Pages verification for the unchanged public documentation content.
 - [ ] Run a non-publishing stable release rehearsal and verify its version.
 - [ ] Publish that tested revision through an explicit stable CI dispatch;
   verify archives/checksums and the crates.io version, then sync local main.
@@ -47,6 +48,21 @@ architectural baseline for CoCo.
 - `COCO_RELEASE_ENABLED` is false and remains unchanged. The existing latest
   normal release is `v0.3.0`; the two feature commits should request the next
   minor normal release, subject to the guarded rehearsal result.
+- Integrated/pushed candidate: `a8cf7d0473f3df381359be27a9f8dd5ab8590582`.
+  Rust run `41701918234` and Documentation run `41701918206` target that exact
+  SHA. Main was clean at push; publication is still pending those hosted gates.
+- First hosted Rust run passed format/lint/tests/dependency-use but failed its
+  fresh advisory check on Tokio 1.53.1: `RUSTSEC-2026-0386` (`AsyncFd`
+  constructors violate I/O safety). The local offline advisory cache did not
+  contain it. Update the minimum Tokio requirement and lockfile narrowly to
+  patched 1.53.3, not an advisory ignore or policy downgrade. CoCo has no direct
+  `AsyncFd` calls. Re-run the gates on the corrected revision before release.
+- The patch changes only Tokio's minimum/version/checksum (1.53.1 to 1.53.3),
+  with no transitive dependency or policy change. A fresh online
+  `cargo deny --locked check` now passes, including the updated advisory
+  database. Re-run complete local and hosted tests against this corrected
+  candidate; hold publication until they succeed. Documentation run
+  `41701918206` already succeeded, and its public inputs are unchanged.
 
 Earlier checklist and implementation history:
 
