@@ -28,10 +28,10 @@ architectural baseline for CoCo.
 - [x] Integrate origin/main's generated 0.3.0 stamp (`6461d27`) and the
   status/Codex branch without conflicts or Compose. Feature commits are
   `fd25be5` (status/creation) and `8061922` (Codex compatibility/usage/rejection).
-- [ ] Require successful Rust on the final pushed main SHA and successful
+- [x] Require successful Rust on the final pushed main SHA and successful
   Pages verification for the unchanged public documentation content.
-- [ ] Run a non-publishing stable release rehearsal and verify its version.
-- [ ] Publish that tested revision through an explicit stable CI dispatch;
+- [x] Run a non-publishing stable release rehearsal and verify its version.
+- [x] Publish that tested revision through an explicit stable CI dispatch;
   verify archives/checksums and the crates.io version, then sync local main.
 - Included behavior: explicit multi-key status sorting and state filters,
   repository-prioritized global context selection, workspace-named default
@@ -63,6 +63,41 @@ architectural baseline for CoCo.
   database. Re-run complete local and hosted tests against this corrected
   candidate; hold publication until they succeed. Documentation run
   `41701918206` already succeeded, and its public inputs are unchanged.
+- Corrected pushed candidate: `442b3e9c063b3e746b82251b827332710720a026`,
+  Rust run `41703139138`. Local complete tests pass again (598 ordinary;
+  seven explicit native cases against Codex 0.166.0, 45.48 s) with Tokio
+  1.53.3. The security fix changes no CoCo behavior or public documentation.
+- Final local all-target/all-feature Clippy and Rustfmt pass after the patch.
+  Hosted Rust `41703139138` succeeds on exact candidate `442b3e9`, including
+  fresh dependency policy, registry-package verification, complete Nix checks
+  and native Linux/macOS version/help smoke builds. Remote main still matches
+  that SHA immediately before the non-publishing stable dispatch.
+- Stable rehearsal `41705197506` succeeds: verified `RELEASE_VERSION=0.4.0`,
+  `RELEASE_TAG=v0.4.0`, synchronized Cargo metadata, no publication. Main is
+  rechecked against `442b3e9` before the authorized publishing dispatch.
+- Publishing run `41705717776` passes guard/versioning and creates normal,
+  non-draft GitHub Release `v0.4.0`. Local main fast-forwards to generated
+  release commit `10c407a`, whose only changes are Cargo version/lock stamp and
+  changelog. The Tokio requirement remains 1.53.3. The crates.io job succeeds;
+  final binary uploads and independent registry/asset verification are pending.
+- Completion: publishing run `41705717776` succeeds in full, including both
+  native upload jobs and crates.io. GitHub Release
+  <https://github.com/janthmueller/coco/releases/tag/v0.4.0> is normal,
+  non-draft and contains all five uploaded assets: Cargo.lock, Linux x86_64
+  and macOS arm64 archives, and their two SHA-256 manifests. The downloaded
+  manifests match GitHub's archive digests.
+- Independent crates.io API verification confirms `codex-coordinator 0.4.0`
+  exists and is not yanked. Its downloaded source archive matches the registry
+  checksum and records exact release commit
+  `10c407a657461da5f78b772088cdbe874fe9bea2`; original manifest confirms
+  version 0.4.0 and Tokio 1.53.3. Top-level internal knowledge, site sources,
+  integration tests and local configuration are excluded as intended.
+- Local main is synchronized with the generated release commit. Commit/push
+  this final knowledge-only verification record without changing the released
+  product or its tag. Main's current release task is complete. Compose remains
+  unmerged at `10e48d8`; no user daemon, installation, credentials, release
+  switch or live workspace was changed. No follow-up product fix remains
+  required by this slice; separately scoped roadmap items remain deferred.
 
 Earlier checklist and implementation history:
 

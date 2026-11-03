@@ -10,6 +10,12 @@ status: stable
 
 ## 2026-11-03
 
+- **Normal release 0.4.0**: Integrate verified status/creation and Codex 0.166.0
+  work, patch Tokio to 1.53.3 after the fresh advisory gate, and publish through
+  the guarded stable CI path. Exact-SHA Rust/Nix/package/Linux/macOS gates,
+  non-publishing rehearsal, crates.io, native uploads and artifact verification
+  pass. Compose remains on its independent local branch; automatic alpha stays
+  disabled.
 - **Proven turn rejection**: Handle the exact native provider mismatch before
   uncertain-dispatch projection. Retain its prepared intent/fingerprint and
   release its runtime guard only after a checked transaction; preserve genuine
