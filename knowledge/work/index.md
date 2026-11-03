@@ -43,6 +43,8 @@ it concise, factual, and useful to the next maintainer.
 
 ## Current records
 
+- [`feature/status-ordering`](feature/status-ordering.md) - Explicit multi-key
+  status ordering/filters, cross-repository context selection and workspace-named branches.
 - [`coco/docs/fuma2starlight`](coco/docs/fuma2starlight.md) - Migration of the
   public documentation from Fumadocs to Astro Starlight.
 - [`feature/signals`](feature/signals.md) - Combined control-plane proof and

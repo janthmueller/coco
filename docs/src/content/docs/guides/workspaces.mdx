@@ -42,8 +42,8 @@ To prepare a workspace before giving it an instruction, use
 `coco create fix/login`. Its status is `Prepared` until work begins.
 The first `create` also adds that repository to CoCo.
 
-CoCo normally starts from your current commit on a new
-`coco/<workspace-name>` branch. See [Choose code and context](../context/)
+CoCo normally starts from your current commit on a new branch named after
+the workspace, such as `fix/login`. See [Choose code and context](../context/)
 to select another base, reuse a conversation, or bring local changes.
 
 ## See who needs attention
@@ -70,6 +70,20 @@ status may add a short live detail such as `Working · Checking tests` or
 
 Ready means the agent can accept another instruction. Review its changes
 before treating the work as complete.
+
+### Focus the overview
+
+Bring agents needing attention to the top across repositories and hide
+unloaded conversations:
+
+```bash
+coco status -af --sort state,name --exclude-state unloaded
+```
+
+Prepared workspaces stay visible. This only changes what you see; agents keep
+their current state. Rows appear and disappear as their states change.
+See [ordering and filters](../../reference/cli/#order-and-filter-the-overview)
+to choose other sort keys or show only particular states.
 
 ## Enter and leave the conversation
 

@@ -7,10 +7,12 @@ use crate::paths::CocoPaths;
 use crate::protocol::{ModelListParams, RepositoryScope, WorkspaceListItem, WorkspaceListParams};
 use crate::rpc::{RpcClient, RpcClientError};
 
-use super::args::{CreateArgs, StatusSort};
+use super::args::CreateArgs;
 use super::output::phase_label;
 use super::prompt::{Choice, Interaction, ReviewField};
 use super::status::sort_workspace_collection;
+
+mod context;
 
 pub(super) fn walkthrough_requested(args: &CreateArgs) -> bool {
     args.interactive || args.name.is_none()
@@ -115,7 +117,7 @@ impl CreateWalkthrough<'_> {
             .name
             .as_deref()
             .expect("the walkthrough resolves the workspace name first");
-        let default_branch = format!("coco/{name}");
+        let default_branch = name.to_owned();
         let mut choices = vec![
             Choice::new("New branch", Some(default_branch)).with_default_marker(),
             Choice::new("Custom branch", None),
@@ -212,7 +214,7 @@ impl CreateWalkthrough<'_> {
             return Ok(());
         }
         let compact_was_requested = self.args.compact_context;
-        let mut workspaces = if path_is_within(&self.repository_path, &self.worktrees_root) {
+        let workspaces = if path_is_within(&self.repository_path, &self.worktrees_root) {
             self.list_workspaces(Some(reusable_context_phases()))
                 .await?
         } else {
@@ -221,10 +223,6 @@ impl CreateWalkthrough<'_> {
         let current = workspace_owning_path(&workspaces, &self.repository_path)
             .map(SelectedWorkspace::from_item);
         let has_current = current.is_some();
-        if let Some(current) = &current {
-            workspaces.retain(|item| item.workspace.id != current.id);
-        }
-
         let mut choices = Vec::with_capacity(4);
         let mut actions = Vec::with_capacity(4);
         if !compact_was_requested {
@@ -257,11 +255,8 @@ impl CreateWalkthrough<'_> {
                     break;
                 }
                 ContextChoice::Existing => {
-                    if workspaces.is_empty() {
-                        workspaces = self
-                            .list_workspaces(Some(reusable_context_phases()))
-                            .await?;
-                    }
+                    let mut workspaces =
+                        context::list_workspaces(&self.client, &self.repository_path).await?;
                     if let Some(current) = workspace_owning_path(&workspaces, &self.repository_path)
                     {
                         let current_id = current.workspace.id.clone();
@@ -274,10 +269,9 @@ impl CreateWalkthrough<'_> {
                         ))?;
                         continue;
                     }
-                    let selected =
-                        select_workspace(self.interaction, "Context from workspace", &workspaces)?;
-                    self.args.context = Some(format!("workspace:{}", selected.id));
-                    self.selected_context_source = Some(format!("workspace {}", selected.name));
+                    let selected = context::select_workspace(self.interaction, &workspaces)?;
+                    self.args.context = Some(format!("workspace:{}", selected.workspace.id));
+                    self.selected_context_source = Some(context::source_label(selected));
                     break;
                 }
                 ContextChoice::Thread => {
@@ -388,7 +382,7 @@ impl CreateWalkthrough<'_> {
     async fn list_workspaces(&self, phases: Option<Vec<String>>) -> Result<Vec<WorkspaceListItem>> {
         let mut workspaces =
             list_repository_workspaces(&self.client, &self.repository_path, phases).await?;
-        sort_workspace_collection(&mut workspaces, StatusSort::Name);
+        sort_workspace_collection(&mut workspaces);
         Ok(workspaces)
     }
 }
@@ -558,9 +552,7 @@ fn create_review_fields(
     } else {
         format!(
             "branch {}",
-            args.branch
-                .clone()
-                .unwrap_or_else(|| format!("coco/{name}"))
+            args.branch.clone().unwrap_or_else(|| name.to_owned())
         )
     };
     let code = if let Some(workspace) = selected_code_workspace {

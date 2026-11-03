@@ -1053,7 +1053,7 @@ category, not shell-expanded commands.
   lowercase ASCII alphanumeric/`-` components, and alphanumeric component
   boundaries. Reject traversal, leading/trailing/repeated separators, and dot
   components.
-- Validate every newly allocated branch (the default `coco/<name>` or an
+- Validate every newly allocated branch (the default workspace name or an
   explicit `--branch`) using Git's ref-format validation and separately check
   exact and ref-prefix collisions. An existing branch must resolve to a commit
   and must not be checked out by another worktree. Securely create and

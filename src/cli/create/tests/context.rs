@@ -44,11 +44,11 @@ async fn context_workspace_picker_requests_only_eligible_sources_and_stores_the_
     );
     assert_eq!(
         params.scope,
-        crate::protocol::RepositoryScope::repository(PathBuf::from("/repo"))
+        crate::protocol::RepositoryScope::AllRepositories
     );
     assert_eq!(
         final_review_value(&interaction, "Context"),
-        "workspace source/review"
+        "workspace source/review · /repo"
     );
     assert!(
         final_review_fields(&interaction)

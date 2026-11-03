@@ -122,7 +122,7 @@ The hook command receives exactly one compact JSON object on standard input:
     "name": "review/widget",
     "threadId": "...",
     "worktreePath": "/absolute/path/to/worktree",
-    "branchName": "coco/review/widget"
+    "branchName": "review/widget"
   },
   "data": {
     "signalId": "...",

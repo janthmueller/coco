@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 
+use super::status::{SortKey, StateSelector};
 use crate::domain::runtime::MAX_CPU_MILLICORES;
 
 pub(super) const DEFAULT_PROFILE_NAME: &str = "default";
@@ -432,18 +433,39 @@ pub(super) struct StatusArgs {
         conflicts_with_all = ["workspace", "json", "sort"]
     )]
     pub(super) tree: bool,
-    /// Order a collection by workspace name or attention-relevant state.
-    #[arg(long, value_enum, value_name = "ORDER", conflicts_with = "workspace")]
-    pub(super) sort: Option<StatusSort>,
+    /// Order by comma-separated keys; prefix - for descending.
+    ///
+    /// Keys: state, name, repo, model, branch.
+    /// With -r: memory, cpu, procs. With -u: tokens, context.
+    ///
+    /// Keys run left-to-right. Repeat --sort to add keys. Missing values stay last.
+    #[arg(
+        long,
+        value_name = "KEYS",
+        value_delimiter = ',',
+        allow_hyphen_values = true,
+        conflicts_with = "workspace"
+    )]
+    pub(super) sort: Vec<SortKey>,
+    /// Show only matching open states, such as working,needs-input. Repeat to add states.
+    #[arg(
+        long,
+        value_name = "STATES",
+        value_delimiter = ',',
+        conflicts_with = "workspace"
+    )]
+    pub(super) state: Vec<StateSelector>,
+    /// Hide matching open states, such as unloaded. Repeat to add states.
+    #[arg(
+        long,
+        value_name = "STATES",
+        value_delimiter = ',',
+        conflicts_with = "workspace"
+    )]
+    pub(super) exclude_state: Vec<StateSelector>,
     /// Emit stable, machine-readable JSON.
     #[arg(long)]
     pub(super) json: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub(super) enum StatusSort {
-    Name,
-    State,
 }
 
 #[derive(Debug, Subcommand)]
@@ -512,7 +534,7 @@ pub(super) struct CreateArgs {
     /// Compact the new fork before accepting its first message.
     #[arg(long, short = 'C')]
     pub(super) compact_context: bool,
-    /// Create a new branch with this name instead of `coco/<workspace>`.
+    /// Create a new branch with this name instead of the workspace name.
     #[arg(long, value_name = "BRANCH", conflicts_with_all = ["checkout", "detached"])]
     pub(super) branch: Option<String>,
     /// Check out an existing local branch instead of creating one.

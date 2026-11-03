@@ -184,7 +184,7 @@ async fn assert_no_child_artifacts(
             "show-ref",
             "--verify",
             "--quiet",
-            &format!("refs/heads/coco/{CHILD_NAME}"),
+            &format!("refs/heads/{CHILD_NAME}"),
         ])
         .current_dir(repository)
         .output()

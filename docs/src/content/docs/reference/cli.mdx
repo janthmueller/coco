@@ -149,7 +149,10 @@ uses the defaults immediately unless `--interactive`/`-i` is present. Existing
 flags prefill and skip those decisions, and Enter accepts the highlighted
 default at each remaining step. The walkthrough offers the current workspace
 when its conversation is reusable, another workspace with saved context, or an
-exact Codex thread ID. It does not create anything until you accept the final
+exact Codex thread ID. The context picker includes registered repositories:
+the current repository comes first, then the others by repository path and
+workspace name. Entries show their repository, including when names match.
+It does not create anything until you accept the final
 summary. `--interactive` cannot be combined with `--no-input`.
 
 `--base` defaults to `HEAD`. Names are 1–63 bytes and contain lowercase ASCII
@@ -163,9 +166,10 @@ The repository is registered automatically when this command first creates a
 workspace in it. `repo add` remains available when you want to register it
 before creation.
 
-`--base-workspace` selects another workspace's committed `HEAD` as code.
-`--context`/`-c` independently forks conversation history from a workspace in
-the selected repository or an exact native Codex thread ID. Workspace matches
+`--base-workspace` selects another workspace's committed `HEAD` in the selected
+repository as code. `--context`/`-c` independently forks conversation history
+from a workspace name in that repository, a full workspace ID from any
+registered repository, or an exact native Codex thread ID. Workspace matches
 take precedence; `workspace:` and `thread:` prefixes explicitly choose a kind.
 Use `-c .` inside a CoCo worktree to select that current workspace, including
 from one of its subdirectories. Without this option, the context is fresh.
@@ -176,10 +180,12 @@ be copied. Later source activity does not change or block the new conversation.
 fork, shortening it before its first `send` or `jump`.
 `-Cc <reference>` is the compact form of both options together.
 
-The default creates `coco/<NAME>`. `--branch` chooses another new branch,
+The default creates a branch named exactly `NAME`. `--branch` chooses another new branch,
 `--checkout` selects an existing local branch, and `--detached` creates no
 branch. `--checkout` cannot be combined with a base option, and Git rejects a
-branch already checked out elsewhere.
+branch already checked out elsewhere. A new branch must have a free name;
+Git also rejects parent/child conflicts such as `feat` and `feat/login`.
+Existing workspaces retain their saved branch names.
 
 `--carry-changes` copies tracked staged and unstaged changes.
 `--carry-untracked` additionally copies non-ignored `??` files and requires
@@ -200,8 +206,8 @@ In the forms below, `<WORKSPACE>` may be a repository-local name or full ID.
 | ------------------------------------------------------------------- | ----------------------------------------------- |
 | `coco list [--json]` (`ls`)                                         | List workspaces in the selected scope           |
 | `coco list --closed [--json]`                                       | List closed workspaces instead                  |
-| `coco status [-a] [-t \| --sort name\|state] [-r] [-u] [-q] [-c] [--json]` | Show an ordered workspace overview    |
-| `coco status [-a] [-t \| --sort name\|state] [-r] [-u] [-q] [-c] -f`       | Follow that collection view           |
+| `coco status [-a] [-t \| --sort KEYS] [-r] [-u] [-q] [-c] [--json]` | Show an ordered workspace overview    |
+| `coco status [-a] [-t \| --sort KEYS] [-r] [-u] [-q] [-c] -f`       | Follow that collection view           |
 | `coco status WORKSPACE [-g] [-r] [-u] [-q] [-c] [--json] [--follow]`        | Show or follow one workspace           |
 | `coco limits show [WORKSPACE] [-g] [--json]`                        | Show desired and currently applied limits       |
 | `coco limits set [WORKSPACE] [-g] [OPTIONS]`                        | Change selected workspace limits                |
@@ -262,17 +268,13 @@ result is global, so it appears once below either a targeted or collection
 view. `-fq` follows workspace state and quota together; combine it with `-u`
 when you also need per-workspace token usage.
 
-Collection output is naturally sorted by repository and workspace name, so
+Collection output is naturally sorted by repository path and workspace name, so
 names such as `frontend/w2` stay together and appear before `frontend/w10`.
 Add `--tree` (`-t`) to show slash-separated names as a hierarchy. With `-a`,
 each repository gets a section headed by its path. Only shared name prefixes
 are unfolded; unique paths stay on one line. `-t` also combines with `-f`,
 `-r`, `-u`, and `-q`. Tree output is a human-readable view and cannot be combined
 with `--json` or a single workspace.
-
-Use `--sort state` for an attention-first flat overview. Workspaces waiting
-for you appear before failures, active work, ready work, and prepared work.
-This order can move rows as states change, particularly with `--follow`.
 
 Add `--global`/`-g` to `status`, `limits`, `send`, `jump`, `diff`, `close`,
 `reopen`, or `delete` to resolve one workspace name from all repositories. For
@@ -285,6 +287,53 @@ Every `send` has an operation ID. If CoCo reports that ID after an interrupted
 wait or an unconfirmed request, retry the same workspace and exact message with
 `--operation-id <ID>`; add `--wait` to keep waiting for its result. Do not reuse
 the ID for a different message.
+
+### Order and filter the overview
+
+Give `--sort` comma-separated keys, in priority order. The first key wins
+across repositories; add `repo` first when you want repository grouping:
+
+```bash
+coco status -a --sort state,name
+coco status -a --sort repo,state,name
+coco status -ar --sort state,-memory,name
+```
+
+Prefix a key with `-` to reverse it. For a leading minus, use
+`--sort=-memory,state`. Repeating `--sort` adds keys in the same order.
+Unspecified ties use repository path, natural workspace name and finally ID.
+Missing values stay last in either direction.
+
+| Keys | Required option |
+| --- | --- |
+| `state`, `name`, `repo`, `model`, `branch` | None |
+| `memory`, `cpu`, `procs` | `--resources` (`-r`) |
+| `tokens`, `context` | `--usage` (`-u`) |
+
+`workspace` and `repository` are aliases for `name` and `repo`. Numeric keys
+use actual values; `context` sorts the percentage used. Model sorting uses the
+reported model and effort. State sorting puts requests for approval/input
+first, then errors, working/transitional states, ready/completed work, prepared
+work and unloaded conversations. Each state stays together. Explicit sorting
+uses the flat view and cannot be combined with `--tree`.
+
+Hide unloaded conversations while keeping the rest of the overview:
+
+```bash
+coco status -af --sort state,name --exclude-state unloaded
+```
+
+Use `--state working,needs-input,needs-approval` to select only those states.
+Both filter options accept comma-separated or repeated values. Included states
+are combined; exclusions remove any matching rows. Prepared and unloaded are
+distinct. Filters change only the view, work with tree/JSON/follow, and do not
+stop or close agents. Follow keeps running even when no rows currently match.
+
+State names are `needs-approval`, `needs-input`, `codex-error`, `unavailable`,
+`failed`, `working`, `preparing`, `starting`, `closing`, `reopening`, `deleting`,
+`ready`, `completed`, `prepared` and `unloaded`. Raw JSON phase names are also
+accepted. These options apply to collection overviews, not a named workspace.
+Closed workspaces remain separate; use `coco list --closed` to list them.
 
 ## Token usage and cost
 

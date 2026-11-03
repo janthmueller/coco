@@ -34,6 +34,7 @@ use crate::protocol::{
 };
 use crate::store::{OperationState, WorkspaceDeletionIntent};
 
+mod branch_names;
 mod clients;
 mod context;
 mod context_capture;

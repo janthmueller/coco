@@ -8,6 +8,30 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-11-03
+
+- **Workspace-named branches**: Newly allocated default branches use the exact
+  workspace name. Explicit overrides, adoption and detached mode retain their
+  behavior; collisions fail without fallback or implicit adoption. Existing
+  bindings retain actual names, including earlier `coco/` branches, without a
+  schema migration or rename.
+- **Cross-repository context selection**: Let the create context picker browse
+  eligible workspaces from every registered repository, prioritize the selected
+  repository by its resolved identity and disambiguate rows with repository
+  paths. Persist the exact chosen source ID and accept it across repositories
+  only for conversation context. Workspace names, code bases and operational
+  targets retain their explicit repository scoping.
+
+## 2026-11-02
+
+- **Explicit status ordering and filters**: Make ordered user sort keys primary
+  across repositories, with per-key direction, raw metric values, distinct
+  attention-ordered states and missing data last. Add view-only positive and
+  negative phase filters while retaining non-closed overview scope. One shared
+  query path composes filtered usage, JSON, tree pruning, account-global quota
+  and follow, including an empty filtered view. Preserve default list/context
+  ordering and keep this feature independent of the Compose branch.
+
 ## 2026-10-09
 
 - **Client-presence expiry correction**: Decoupled live client presentation

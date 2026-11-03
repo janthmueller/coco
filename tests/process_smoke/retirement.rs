@@ -138,7 +138,7 @@ async fn verify_direct_delete(paths: &TestPaths, repository: &Path) -> Result<()
         &["delete", name, "--keep-branch", "--keep-thread", "-y"],
     )
     .await?;
-    ensure!(String::from_utf8_lossy(&result.stdout).contains("Kept branch  coco/cleanup/keep"));
+    ensure!(String::from_utf8_lossy(&result.stdout).contains("Kept branch  cleanup/keep"));
     Ok(())
 }
 
