@@ -19,7 +19,7 @@ use crate::rpc::{RpcClient, RpcClientError};
 
 use super::args::{
     Cli, CloseArgs, Command, CreateArgs, DeleteArgs, LimitField, LimitsCommand, LimitsSetArgs,
-    LimitsTargetArgs, McpCommand, ModelCommand, RepoCommand, StatusArgs, StatusSort,
+    LimitsTargetArgs, McpCommand, ModelCommand, RepoCommand, StatusArgs,
 };
 use super::decision::decide;
 use super::jump::jump;
@@ -33,8 +33,8 @@ use super::output::{
 };
 use super::prompt::{Choice, Interaction, TerminalInteraction};
 use super::status::{
-    StatusProjection, account_quota, follow_status, follow_status_collection,
-    sort_workspace_collection, workspace_usage, workspace_usage_collection,
+    CollectionQuery, StatusProjection, account_quota, follow_status, follow_status_collection,
+    sort_workspace_collection, workspace_usage,
 };
 
 #[cfg(test)]
@@ -1102,7 +1102,7 @@ async fn list_workspaces(
             include_activity: false,
         })
         .await?;
-    sort_workspace_collection(&mut result, StatusSort::Name);
+    sort_workspace_collection(&mut result);
     if json_output {
         print_json(versioned_array("workspaces", serde_json::to_value(result)?))
     } else {
@@ -1118,13 +1118,13 @@ async fn run_status(
     all_repos: bool,
     global: bool,
 ) -> Result<()> {
-    let sort = args.sort.unwrap_or(StatusSort::Name);
     let projection = StatusProjection {
         resources: args.resources,
         usage: args.usage,
         quota: args.quota,
         clients: args.clients,
     };
+    let query = CollectionQuery::new(&args.sort, &args.state, &args.exclude_state, projection)?;
     let repository_scope = RepositoryScope::repository(repository_path);
     if let Some(workspace) = args.workspace {
         if all_repos {
@@ -1147,11 +1147,11 @@ async fn run_status(
             scope,
             projection,
             args.tree,
-            sort,
+            query,
         )
         .await
     } else {
-        show_status_collection(paths, scope, projection, args.tree, sort, args.json).await
+        show_status_collection(paths, scope, projection, args.tree, query, args.json).await
     }
 }
 
@@ -1160,37 +1160,27 @@ async fn show_status_collection(
     scope: RepositoryScope,
     projection: StatusProjection,
     tree: bool,
-    sort: StatusSort,
+    query: CollectionQuery,
     json_output: bool,
 ) -> Result<()> {
     let include_repository = matches!(scope, RepositoryScope::AllRepositories);
     let client = RpcClient::new(paths.socket_path.clone());
-    let mut result = client
-        .request(WorkspaceListParams {
-            scope: scope.clone(),
-            phases: None,
-            include_resources: projection.resources || json_output,
-            include_activity: true,
-            include_clients: projection.clients || json_output,
-        })
-        .await?;
-    sort_workspace_collection(&mut result, sort);
-    let usage = workspace_usage_collection(&client, scope, projection.usage).await?;
-    let quota = account_quota(&client, projection.quota).await?;
+    let snapshot = query.read(&client, scope, projection, json_output).await?;
     if json_output {
         print_json(status_collection_json(
-            &result,
-            usage.as_deref(),
-            quota.as_ref(),
+            &snapshot.workspaces,
+            snapshot.usage.as_deref(),
+            snapshot.quota.as_ref(),
         )?)
     } else {
         print_workspace_status_list(
-            &result,
+            &snapshot.workspaces,
             include_repository,
             projection.resources,
-            usage.as_deref(),
-            quota.as_ref(),
+            snapshot.usage.as_deref(),
+            snapshot.quota.as_ref(),
             tree,
+            query.filtered(),
         );
         Ok(())
     }

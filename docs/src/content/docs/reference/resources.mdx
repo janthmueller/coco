@@ -54,12 +54,17 @@ does not start an inactive workspace.
 
 ## Cost
 
-Cost is available only when Codex supplies a per-conversation estimate. CoCo
-shows USD when available and otherwise credits. Estimates can lag token
-updates. An unavailable estimate is shown as a dash, never as zero.
+Cost is available only when Codex supplies it for the conversation. CoCo
+prefers reported USD, then an estimated USD amount, and otherwise estimated
+credits. The detailed view labels USD as `reported` or `estimate`.
+Availability depends on your provider and account, and updates may lag token
+counts. A missing value is shown as a dash, never as zero.
 
-Use the estimate for observation, not as an invoice or enforced spending
-budget. CoCo's resource limits control local computation.
+Use these values for observation, not as an invoice or enforced spending
+budget. CoCo's resource limits control local computation. JSON keeps reported
+USD (`nativeUsageUsdMicros`), estimated USD (`estimatedUsageUsdMicros`) and
+estimated credits (`estimatedUsageCreditsMicros`) separate; each amount uses
+millionths of its unit.
 
 ## Account quota
 
@@ -82,7 +87,7 @@ measurement source, task count, cumulative CPU, and controller events where
 available. These are current observations, not persisted resource history.
 
 `coco status <workspace> --usage --json` adds a nested `usage` object with token
-breakdowns, observation and freshness fields, and an estimate or an
+breakdowns, observation and freshness fields, and the available cost values or an
 unavailable reason.
 
 `coco status <workspace> --quota --json` adds one top-level `accountQuota`

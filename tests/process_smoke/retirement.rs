@@ -138,7 +138,7 @@ async fn verify_direct_delete(paths: &TestPaths, repository: &Path) -> Result<()
         &["delete", name, "--keep-branch", "--keep-thread", "-y"],
     )
     .await?;
-    ensure!(String::from_utf8_lossy(&result.stdout).contains("Kept branch  coco/cleanup/keep"));
+    ensure!(String::from_utf8_lossy(&result.stdout).contains("Kept branch  cleanup/keep"));
     Ok(())
 }
 
@@ -186,7 +186,7 @@ async fn verify_retirement_hooks(paths: &TestPaths, repository: &Path) -> Result
 
 async fn assert_closed_workspace_listing(paths: &TestPaths, repository: &Path) -> Result<()> {
     let open = cli_json(&run_cli(paths, repository, &["list", "--json"]).await?)?;
-    assert_eq!(open["schemaVersion"], 15);
+    assert_eq!(open["schemaVersion"], 16);
     assert_eq!(open["workspaces"].as_array().map(Vec::len), Some(0));
     let closed = cli_json(&run_cli(paths, repository, &["list", "--closed", "--json"]).await?)?;
     assert_eq!(closed["workspaces"].as_array().map(Vec::len), Some(1));

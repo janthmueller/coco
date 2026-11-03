@@ -506,9 +506,7 @@ impl Coordinator {
         match &params.worktree {
             WorkspaceWorktreeRequest::NewBranch { branch, base } => {
                 let base = self.resolve_creation_base(base, repository, git_repository)?;
-                let branch_name = branch
-                    .clone()
-                    .unwrap_or_else(|| format!("coco/{}", params.name));
+                let branch_name = branch.clone().unwrap_or_else(|| params.name.clone());
                 Ok((base, WorktreeTarget::NewBranch { branch_name }))
             }
             WorkspaceWorktreeRequest::ExistingBranch { branch } => {
@@ -644,7 +642,7 @@ impl Coordinator {
             validate_non_empty("context.reference", thread_id)?;
             return self.resolve_thread_context_source(thread_id).await;
         }
-        match self.resolve_workspace_in_repository(repository, reference) {
+        match self.resolve_context_workspace(repository, reference) {
             Ok(workspace) => {
                 self.resolve_resolved_workspace_context_source(workspace, reference)
                     .await
@@ -679,9 +677,22 @@ impl Coordinator {
         repository: &Repository,
         reference: &str,
     ) -> Result<(super::NativeThread, ResolvedContextSource), CoordinatorError> {
-        let source = self.resolve_workspace_in_repository(repository, reference)?;
+        let source = self.resolve_context_workspace(repository, reference)?;
         self.resolve_resolved_workspace_context_source(source, reference)
             .await
+    }
+
+    fn resolve_context_workspace(
+        &self,
+        repository: &Repository,
+        reference: &str,
+    ) -> Result<Workspace, CoordinatorError> {
+        // Only exact IDs can cross repository boundaries. Human names remain
+        // local, and code bases and operational targets keep their own scope.
+        if let Some(workspace) = self.store.workspace_by_id(reference)? {
+            return Ok(workspace);
+        }
+        self.resolve_workspace_in_repository(repository, reference)
     }
 
     async fn resolve_resolved_workspace_context_source(

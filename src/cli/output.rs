@@ -25,7 +25,7 @@ pub(super) use collections::{
     render_workspace_status_list_for_stdout,
 };
 
-const PUBLIC_SCHEMA_VERSION: u64 = 15;
+const PUBLIC_SCHEMA_VERSION: u64 = 16;
 
 pub(super) fn phase_label(phase: &str) -> &'static str {
     match phase {

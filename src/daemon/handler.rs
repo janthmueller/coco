@@ -331,15 +331,20 @@ fn public_worker_error(error: &WorkerError) -> String {
             fields.join(", ")
         );
     }
-    let WorkerError::Runtime(source) = error else {
+    let (WorkerError::Runtime(source) | WorkerError::TurnRejected(source)) = error else {
         return "Codex returned a response CoCo could not use".to_owned();
     };
     if let Some(error) = source.downcast_ref::<WorkspaceExecutionError>() {
         return public_workspace_execution_error(error);
     }
-    let Some(CodexError::Rpc { code, message, .. }) = source.downcast_ref::<CodexError>() else {
+    let Some(native_error @ CodexError::Rpc { code, message, .. }) =
+        source.downcast_ref::<CodexError>()
+    else {
         return "Codex could not accept the operation".to_owned();
     };
+    if native_error.is_model_provider_mismatch() {
+        return "Codex's model provider does not match this conversation. Match model_provider in the main Codex configuration, keep the workspace profile unchanged, then restart cocod after active work stops".to_owned();
+    }
     format!(
         "Codex rejected the operation ({code}): {}",
         bounded_single_line(message, 512)
@@ -455,6 +460,32 @@ mod tests {
         )));
 
         assert_eq!(payload.message, "Codex could not accept the operation");
+    }
+
+    #[test]
+    fn provider_mismatch_has_actionable_guidance_without_forwarding_private_fields() {
+        for rejected in [false, true] {
+            let error = CodexError::Rpc {
+                code: -32600,
+                message: "private upstream details".to_owned(),
+                data: Some(json!({
+                    "type": "modelProviderMismatch",
+                    "modelProvider": "private-saved-provider",
+                    "currentModelProvider": "private-current-provider",
+                })),
+            };
+            let error = if rejected {
+                WorkerError::TurnRejected(Box::new(error))
+            } else {
+                WorkerError::runtime(error)
+            };
+            let payload = map_coordinator_error(CoordinatorError::Worker(error));
+            assert_eq!(payload.code, "CODEX_ERROR");
+            assert!(payload.message.contains("Match model_provider"));
+            assert!(payload.message.contains("after active work stops"));
+            assert!(!payload.message.contains("private"));
+            assert_eq!(payload.data, None);
+        }
     }
 
     #[test]

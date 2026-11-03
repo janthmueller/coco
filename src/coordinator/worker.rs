@@ -93,6 +93,10 @@ pub(crate) struct LocatedNativeThread {
 pub(crate) enum WorkerError {
     #[error(transparent)]
     Runtime(Box<dyn StdError + Send + Sync>),
+    /// The worker proves that no turn was started. Transport failures and
+    /// unclassified RPC errors must remain `Runtime`, never this variant.
+    #[error(transparent)]
+    TurnRejected(Box<dyn StdError + Send + Sync>),
     #[error("Codex response is missing required field {0}")]
     InvalidResponse(&'static str),
     #[error("Codex response contains an invalid native thread status: {0}")]

@@ -358,6 +358,32 @@ support; the long lifecycle scenario retains one local, reasoned function-size
 exception. The oversized protocol test was split by assertion responsibility
 instead.
 
+The status-ordering slice adds private `cli/status/{sorting,filter,collection}`
+children. Typed sort values and native phase aliases stay CLI policy; one query
+path filters and joins optional usage before ordering both one-shot and follow
+views. Default list/context ordering shares the existing natural comparator.
+No domain states, transport methods, schema fields, storage, external API or
+dependencies are introduced. Focused tests stay alongside ordering/filter/parser
+responsibilities, with an isolated real-binary/fake-RPC integration target.
+
+Cross-repository create-context discovery lives in private `cli/create/context`:
+it uses existing typed repository-resolution and workspace-list RPCs to sort
+and label context sources, without importing Git or coordinator internals.
+The coordinator's context-specific resolver accepts exact workspace IDs across
+repositories; code bases and operational resolvers retain their existing scope.
+Focused CLI and coordinator context tests keep that distinction explicit.
+
+Native compatibility scenarios for session hooks and provider matching live
+in private `tests/real_codex_compat/{hooks,providers}` children. Shared bounded
+process/transport fixtures remain in the parent integration target; source
+boundaries and executable-only library visibility are unchanged.
+
+Proven turn rejection is a typed worker-port outcome; only the native adapter
+classifies the exact upstream evidence. The coordinator and store own the
+guard/intent transition without importing Codex transport types. Focused
+coordinator/store operation-rejection tests live in their private
+`tests/operations` children; no crate or external API boundary changes.
+
 Extract coherent child modules in this order:
 
 1. coordinator commands and Codex event projection;

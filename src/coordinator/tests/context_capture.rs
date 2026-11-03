@@ -164,9 +164,7 @@ async fn missing_completed_boundary_rejects_before_creating_any_artifacts() {
             .iter()
             .any(|call| matches!(call, WorkerCall::Fork { .. }))
     );
-    assert!(
-        !git_output(&fixture.source, &["branch", "--list", "coco/too-early"]).contains("too-early")
-    );
+    assert!(!git_output(&fixture.source, &["branch", "--list", "too-early"]).contains("too-early"));
 }
 
 #[tokio::test]

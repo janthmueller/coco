@@ -15,7 +15,7 @@ status: draft
 - The repository now has an early Rust implementation for domain state, Git,
   SQLite, local RPC, the Codex App Server client, profiles, CLI parsing, the
   daemon coordinator, executable binaries, and CoCo's control MCP adapter.
-- The official `codex-cli 0.160.1` release binary is the
+- The official `codex-cli 0.166.0` release binary is the
   selected compatibility baseline. A model-free real-process test exercises
   the exact stable App Server methods and fields CoCo consumes.
 - The same compatibility suite now exercises the experimental environment
@@ -53,7 +53,7 @@ status: draft
   that an empty remote TUI launch remains unbound, a native action creates a
   non-empty rollout, the exact resulting thread can then be adopted, and the
   same binding survives both daemon and App Server restart. No synthetic turn
-  or unreleased `codex --worktree` behavior is used. The selected 0.160.1 gate
+  or native Codex worktree allocation is used. The selected 0.166.0 gate
   reconfirms the same contract.
 - The same real-process boundary proves exact native archive, unarchive, and
   delete behavior used by workspace retirement. Exact lookup uses
@@ -774,6 +774,17 @@ never dispatched again automatically. The current-generation in-memory guard
 prevents a transient native `idle` read from authorizing a second turn while
 the request is unresolved.
 
+The narrow exception is an exact worker-proven rejection before any turn
+starts. The native adapter currently proves this only for structured
+`modelProviderMismatch` (`-32600`), not for arbitrary RPC errors or message
+text. Atomically restore a dispatching intent to `prepared`, retain its ID and
+fingerprint, clear dispatch timestamps, then remove only its runtime guard.
+An explicit same-payload retry or new send is possible; a conflicting payload
+still fails. Accepted or uncertain intents cannot take this transition, and a
+failed persistence update retains fail-closed dispatch behavior. No automatic
+retry follows. Preserve an independently materialized fresh binding without
+claiming the rejected turn was accepted.
+
 ### Legacy `turns`
 
 Schema v6 retains the schema-v5 `turns` table and its foreign-key targets for
@@ -1053,7 +1064,7 @@ category, not shell-expanded commands.
   lowercase ASCII alphanumeric/`-` components, and alphanumeric component
   boundaries. Reject traversal, leading/trailing/repeated separators, and dot
   components.
-- Validate every newly allocated branch (the default `coco/<name>` or an
+- Validate every newly allocated branch (the default workspace name or an
   explicit `--branch`) using Git's ref-format validation and separately check
   exact and ref-prefix collisions. An existing branch must resolve to a commit
   and must not be checked out by another worktree. Securely create and
@@ -1202,12 +1213,22 @@ additive upstream definitions must not block the real-process test. Concrete
 request/response behavior is authoritative; removed methods, rejected params,
 or missing/changed consumed fields fail the compatibility test.
 
-The selected released build is Codex 0.160.1. Its real process behavior proves
+The selected released build is Codex 0.166.0. Its real process behavior proves
 native non-subscribing thread reads, history hydration, exact resume after an
 App Server restart, and the remote attachment path CoCo consumes. A
 documentation page, an upstream merge, or byte-for-byte equality of an
 additive generated schema is not release evidence. A broader compatibility
 range remains optional; every claimed version needs the same behavioral gate.
+
+The 0.166.0 gate also proves the native `modelProviderMismatch` rejection:
+resume and input require the conversation provider to match the shared App
+Server's current provider. Per-workspace configuration overlays do not make
+that process setting independent. Preserve named-profile provenance, surface
+bounded actionable guidance, and require an explicit stopped-work restart with
+matching base configuration rather than rewriting the user's config or adding
+a provider pool. A proven first-turn provider rejection also restores its
+intent and releases its guard as specified above; genuinely unknown-dispatch
+and duplicate-send protection remain unchanged.
 
 The generated bundle includes experimental fields so CoCo can audit the
 remote-attachment surface it depends on without retaining an upstream schema
@@ -1222,7 +1243,7 @@ particular, CoCo does not send the separate
 `runtimeWorkspaceRoots`. Do not adopt experimental pagination merely to mirror
 native history.
 
-The environment topology and its incomplete 0.160.1 request coverage are
+The environment topology and its incomplete 0.166.0 request coverage are
 normative in [Per-workspace Codex execution runtime](workspace-runtime.md).
 `thread/start` and `turn/start` accept environment selections; `thread/resume`,
 `thread/fork`, `thread/compact/start`, `review/start`, and host-local
@@ -1230,7 +1251,7 @@ normative in [Per-workspace Codex execution runtime](workspace-runtime.md).
 adapter must preserve those distinctions rather than claiming every action is
 already isolated.
 
-The verified 0.160.1 runtime uses this minimal sequence:
+The verified 0.166.0 runtime uses this minimal sequence:
 
 1. Generate a high-entropy capability token in a user-only runtime file.
 2. Reserve an IPv4-loopback port and spawn `codex app-server --listen
@@ -1270,7 +1291,7 @@ The verified 0.160.1 runtime uses this minimal sequence:
    without starting a workspace executor. First activation validates/resumes
    only that child; optional compaction completes before the first message/TUI.
    Older deferred recipes still revalidate/fork their recorded idle source.
-   Because 0.160.1 cannot select an environment on fork or compact, the first
+   Because 0.166.0 cannot select an environment on fork or compact, the first
    ordinary child turn performs the exact destination selection.
 9. On later `send`, read and validate the bound thread, resume it only when the
    current daemon connection lacks a subscription, and issue `turn/start` with
@@ -1913,7 +1934,7 @@ status, or waive the separate migration and supervision work below.
 The following still need confirmation; decision-response closure no longer
 blocks a safe complete v0:
 
-1. Whether a compatibility range broader than the proven Codex 0.160.1
+1. Whether a compatibility range broader than the proven Codex 0.166.0
    baseline is worth maintaining; it is optional follow-up evidence.
 2. When the selected Windows named-pipe local-IPC backend and Windows CI become
    release requirements; the cross-platform transport shape itself is settled.

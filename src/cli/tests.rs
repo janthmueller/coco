@@ -13,6 +13,7 @@ mod collections;
 mod creation;
 mod resources;
 mod retirement;
+mod status_query;
 
 #[test]
 fn doctor_is_non_interactive_and_has_a_json_report_without_a_workspace_argument() {

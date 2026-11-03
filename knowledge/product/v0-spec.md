@@ -68,7 +68,7 @@ peer-response routing remain separate, unimplemented capabilities.
 - At the specification baseline on 2026-09-05, the repository had no commit
   and no implementation files; it contained the handoff and documentation
   foundation only.
-- The official `codex-cli 0.160.1` release binary is the selected compatibility
+- The official `codex-cli 0.166.0` release binary is the selected compatibility
   baseline. Its model-free real-process test passes preparation, exact native
   materialization/adoption, inherited-context fork, history reads, daemon
   restart, and exact resume.
@@ -207,7 +207,7 @@ peer-response routing remain separate, unimplemented capabilities.
   workspace across repositories. CoCo keeps no hidden, persistent "selected
   repository" for CLI sessions.
 - Workspace names may use conventional slash-separated components such as
-  `feat/login`. A new `coco/<workspace-name>` branch is the default Git
+  `feat/login`. A new branch named exactly after the workspace is the default Git
   binding, but creation may instead select another new branch, an existing
   local branch, or detached HEAD.
 - The stable user-facing name for CoCo's durable aggregate is **workspace**,
@@ -292,7 +292,9 @@ release:
 - The current executable supports a single local operator on Linux and macOS.
   Its daemon protocol uses a Unix domain socket; native Windows support will
   use the same protocol and coordinator behind a named-pipe transport.
-- `fresh` and same-repository `fork` are executable context modes.
+- `fresh` and `fork` are executable context modes. Workspace context names are
+  repository-local; exact workspace IDs and native thread IDs may select
+  conversation context across repositories. Git bases remain repository-local.
   `handoff` remains reserved and returns a clear unsupported-mode error until
   its transfer-artifact contract is deliberately designed.
 - v0 uses the App Server's base Codex configuration by default, represented by
@@ -367,7 +369,7 @@ stable.
 ## Worktree binding direction
 
 Creation represents Git binding independently from conversation context.
-`new_branch` creates `coco/<name>` by default or another explicitly named
+`new_branch` creates `<name>` verbatim by default or another explicitly named
 branch; `existing_branch` checks out an existing local branch only when Git
 reports it is not checked out elsewhere; `detached` creates a regular
 registered worktree at the resolved base SHA without allocating a branch.
@@ -380,6 +382,12 @@ commits only with separate explicit approval.
 A later promotion design must atomically
 create and verify a branch before changing persisted binding metadata; until
 then, branch-backed workspaces are the durable default.
+
+The earlier `coco/` prefix is not an ownership or isolation boundary. Existing
+bindings keep their stored branch names; do not rename branches or derive their
+names again during replay, close/reopen, deletion or recovery. A default-name
+collision fails before creating a workspace/worktree and never silently adopts,
+suffixes or falls back to another branch. `--branch` remains the explicit override.
 
 ## Domain vocabulary and invariants
 
@@ -516,8 +524,8 @@ coco [<repository-path>] create [<name>]
   [--profile <name>] [--model <model>] [--send <message>] [--jump]
 coco [<repository-path>] (list | ls) [--json]
 coco (list | ls) --all-repos [--json]       # `-a` is the short form
-coco [<repository-path>] status [--tree | --sort <name|state>] [--resources] [--usage] [--quota] [--follow] [--json]
-coco status --all-repos [--tree | --sort <name|state>] [--resources] [--usage] [--quota] [--follow] [--json] # short: `-a`, `-t`, `-r`, `-u`, `-q`, `-f`
+coco [<repository-path>] status [--tree | --sort <keys>] [--state <states>] [--exclude-state <states>] [--resources] [--usage] [--quota] [--follow] [--json]
+coco status --all-repos [--tree | --sort <keys>] [--state <states>] [--exclude-state <states>] [--resources] [--usage] [--quota] [--follow] [--json] # short: `-a`, `-t`, `-r`, `-u`, `-q`, `-f`
 coco [<repository-path>] status <workspace> [--resources] [--usage] [--quota] [--follow] [--json]
 coco status <workspace> --global [--resources] [--usage] [--quota] [--follow] [--json] # short: `-g`, `-r`, `-u`, `-q`, `-f`
 coco [<repository-path>] limits show [<workspace>] [--json]
@@ -724,19 +732,27 @@ semantic default; the cursor alone shows what Enter would select. The
 walkthrough covers Git binding, code base, applicable Git-change carry,
 conversation context, profile, model, and the post-create action. Context
 defaults to fresh. When
-the selected path belongs to an idle, unloaded, or active workspace, the guide offers
+the selected path belongs to a workspace with reusable context, the guide offers
 that current workspace directly, records its stable ID at selection time, and
 omits it from the generic workspace picker. It may otherwise select an eligible
-same-repository workspace by name/number or accept an exact native thread ID,
+workspace from any registered repository by name/number in the picker or accept
+an exact native thread ID. Context discovery resolves the selected repository's
+identity with `repository.resolve`, including nested paths and worktrees,
+then lists eligible sources across all registered repositories. Stable sorting
+puts that repository first and naturally orders the remaining repositories by
+visible path and workspace name. Repository paths distinguish same-named
+sources in both picker details and the final review. Selection records an exact
+workspace ID; code-base discovery remains repository-scoped. It may
 then choose full or compact history. If `-C` preselects compaction without a
 source, fresh context is unavailable and the required source picker has no
 semantic default. A preset code base removes the incompatible existing-branch
 choice; final normalization independently rejects that invalid combination. A
 preset `.` context is resolved to its stable workspace ID before the first
 prompt, and an invalid local-change preset fails before the guide starts. If a
-lazily opened workspace picker has no entries, including because a valid Git
-repository has not yet been enrolled, the guide explains that fact and returns
-to the current decision instead of aborting. An empty native model catalog
+lazily opened workspace picker has no entries, the guide explains that fact
+and returns to the current decision instead of aborting. An unregistered target
+has no code-workspace inventory yet but can still reuse context from other
+registered repositories. An empty native model catalog
 likewise returns to the inherit-model choice. The last picker presents a
 bounded, multi-line review of the workspace, worktree, code, context, Git
 changes, profile, model, and post-create action above `Create` and `Cancel`.
@@ -749,7 +765,8 @@ guide is cancelled.
    invoking checkout's `HEAD`. `--base-workspace <workspace>` instead uses
    that same-repository workspace's committed `HEAD`.
 2. **Conversation context.** No context option starts a fresh thread.
-   `--context`/`-c` resolves a same-repository workspace first and otherwise
+   `--context`/`-c` resolves an exact workspace ID across repositories, otherwise
+   a same-repository workspace name first, and otherwise
    calls native `thread/fork` from that exact thread ID. `-c .` explicitly
    selects the workspace that owns the selected checkout, including from a
    nested directory; it fails rather than guessing or falling back to fresh
@@ -761,7 +778,7 @@ guide is cancelled.
    turn with `lastTurnId`, including when the source is working or waiting for
    input/approval. It rejects a missing boundary before worktree provisioning;
    it never interrupts the source or silently includes a partial turn.
-3. **Git binding.** The default allocates `coco/<workspace>`.
+3. **Git binding.** The default allocates `<workspace>` verbatim.
    `--branch <branch>` allocates another new branch, `--checkout <branch>`
    uses an existing local branch that Git reports as free, and `--detached`/
    `-D` allocates no branch. Existing-branch selection supplies its own base
@@ -867,7 +884,7 @@ automatically. No storage-schema migration is required for these descriptors.
   identity in each human and JSON row.
 - Normal lists omit closed workspaces. `--closed` selects closed workspaces
   instead and composes with repository or all-repository scope.
-- Sort deterministically by repository and natural workspace name, then
+- Sort deterministically by visible repository path and natural workspace name, then
   workspace ID. Numeric name components compare by value, so `w2` precedes
   `w10`.
 - For each bound ready workspace, read current Codex status with non-loading
@@ -901,10 +918,39 @@ automatically. No storage-schema migration is required for these descriptors.
   repositories under canonical-path headings. It composes with follow,
   resource, usage, and account-quota projections. Tree output is a human presentation and is
   invalid with JSON or a targeted workspace.
-  `--sort state` instead keeps repositories grouped and uses the stable name
-  order as a tie-breaker while prioritizing waiting, failed/unavailable,
-  active/transitional, ready, prepared/unloaded, then closed phases. Explicit
-  sort and tree views are mutually exclusive.
+  Explicit sort and tree views are mutually exclusive. Filters apply before
+  constructing the tree; empty structural/repository groups disappear.
+- `--sort` accepts comma-separated/repeated ordered keys. User keys win globally
+  left-to-right; do not insert repository priority ahead of them. Missing
+  default tie-breakers (repository path, natural name) are appended only after
+  user keys, with workspace ID last. `--sort repo,state,name` explicitly restores
+  repository-first grouping. Prefix each key with `-` for descending; unavailable
+  values stay last either way. Reject unknown/empty/duplicate keys.
+  Keys are state/name/repo/model/branch plus memory/cpu/procs with `-r` and
+  tokens/context with `-u`. Workspace/repository are aliases for name/repo.
+  Use typed raw values: observed model/effort, actual displayed memory source,
+  finite CPU, counts, cumulative tokens and latest context ratio. Never use
+  truncated/formatted labels or turn activity as keys. State order is approval,
+  input, system error, unavailable, failed, working, provisioning, starting,
+  closing, reopening, deleting, idle, completed, prepared, unloaded. Plain list
+  retains repository/name defaults; create pickers do not inherit status flags.
+  Cost/client-label
+  sorting remains deferred; quota is account-global and is not a row key.
+- `--state` includes the union of selected existing phases; `--exclude-state`
+  removes matching phases afterwards. Both accept comma-separated/repeated
+  visible CLI aliases and native JSON phase spellings. Never change native or
+  durable state for a view filter. Collections remain non-closed, and positive
+  closed selection fails with guidance to `list --closed`; targeted status
+  rejects collection sort/filter flags. Negative-only filters never opt into
+  explicit daemon phase scope. Prepared remains distinct from unloaded.
+- One-shot human/JSON and every follow refresh share the same query/filter/
+  enrich/sort pipeline. Join usage by ID before sorting while retaining hydrated
+  status/model evidence. Filtered usage reads target only surviving rows, ignore
+  concurrent removed-workspace evidence, and skip reads when the view is empty.
+  Unfiltered nonempty usage retains its existing bulk read. Quota remains one
+  independent account-wide result. Empty filtered human output is `No matching
+  workspaces.`; JSON has an empty workspace array. Follow continues until
+  interrupted, including when no rows match.
 - With an explicit reference, return exactly one workspace. The human view
   shows its current state, current native model and reasoning effort when
   available, branch/worktree location, reported error, and any actionable
@@ -987,13 +1033,15 @@ automatically. No storage-schema migration is required for these descriptors.
 - Query native per-thread cost on demand through `account/usage/read`, cache
   the result briefly in memory, and invalidate it when newer token usage
   arrives. Preserve credits, optional USD, grouped detail, and observation
-  time. A null or failed native result is explicit unavailable evidence and
+  time. Keep optional reported USD separate from estimated USD and credits;
+  prefer reported dollars for presentation without labeling them as an invoice.
+  A null or failed native result is explicit unavailable evidence and
   cannot fail token reporting.
 - Human collection output adds cumulative tokens, latest context-window
-  percentage, and optional estimated cost to the existing status row. The
+  percentage, and optional reported/estimated cost to the existing status row. The
   targeted view adds input/cached and output/reasoning breakdowns. JSON exposes
   the complete typed projection beneath `usage` with top-level schema version
-  13.
+  16.
 - One-shot and `--follow` reads are passive: they do not call `thread/resume`,
   create context, or start a workspace executor. A terminal replaces the prior
   frame; redirected output appends only changed requested views. State, usage,
@@ -1132,7 +1180,7 @@ automatically. No storage-schema migration is required for these descriptors.
   shell path with the default remote executor. Review or compaction immediately
   after a newly loaded resume may also use Codex's local default until the next
   ordinary turn selects the workspace executor; CoCo must not hide this native
-  0.160.1 limitation.
+  0.166.0 limitation.
 
 ### `coco decide`
 
@@ -1547,7 +1595,7 @@ The following are intentionally outside v0:
 - Fake App Server process tests exercise Git-only preparation, atomic first
   send, native fork/compaction, event correlation, one-use fresh-TUI relay,
   exact adoption, detach, and completion/failure. A separate opt-in real Codex
-  compatibility test consumes no model turn: it checks 0.160.1, registers and
+  compatibility test consumes no model turn: it checks 0.166.0, registers and
   probes workspace environments, proves an empty remote candidate remains
   unbound, materializes one exact local-shell candidate solely for the history
   contract, then verifies history and two simultaneous native TUI resumes of
@@ -1685,7 +1733,7 @@ The following are intentionally outside v0:
   read failure, restart, final-output selection, and binding mismatches before
   any table or existing record is removed. The initial direct read cutover is
   acceptable without a prolonged shadow-only checkpoint because the original
-  0.147.0 proof and current 0.160.1 real-process gate prove non-loading reads,
+  0.147.0 proof and current 0.166.0 real-process gate prove non-loading reads,
   restart persistence, exact ID/`cwd`, and optional history hydration. Eager recovery
   status/failure writes stop with that obsolete startup path. The later live-
   event reduction also stops user-message, native status/plan/diff/error,
@@ -1740,7 +1788,7 @@ approval model. CoCo neither supplies a separate Git database nor adds a
 custom commit proxy. A later app-side commit action may be useful UI
 convenience, but it is not part of the isolation contract.
 
-Codex 0.160.1 is now the selected and proven compatibility baseline;
+Codex 0.166.0 is now the selected and proven compatibility baseline;
 maintaining a broader range is optional rather than an alpha blocker. The
 two-repository, multi-client product proof now passes locally, so it no longer
 blocks continued public-alpha development. Publishing a particular revision,
@@ -1753,7 +1801,8 @@ across the supported service managers.
 
 Creation now separates four choices: Git base, Codex conversation context,
 worktree binding, and explicit local-state carry. A context source may be a
-same-repository CoCo workspace or an exact native Codex `thread.id`;
+CoCo workspace (local name or repo-independent exact ID) or an exact native
+Codex `thread.id`;
 `thread.sessionId` is deliberately not accepted because it identifies a fork
 tree rather than one exact conversation. The former coupled `--fork-from`
 surface is hidden as a temporary compatibility alias that selects both base and
@@ -1781,7 +1830,7 @@ publication and operational changes still require explicit approval.
    while its source works. Later activation is independent of source history
    and activity. Fresh creation remains lazy; pending child compaction and
    uncertain forks have explicit recovery semantics. Unit/process regressions
-   and the isolated real-Codex 0.160.1 test cover the contract; the test source
+   and the isolated real-Codex 0.166.0 test cover the contract; the test source
    continues while the child is independently jumped/sent to after restart.
 3. Client-presence status-first slice implemented locally: generic metadata on
    existing leases, built-in tmux discovery during `jump`, and passive opt-in

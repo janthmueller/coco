@@ -1,1 +1,1 @@
-pub(crate) const SELECTED_CODEX_VERSION: &str = "codex-cli 0.160.1";
+pub(crate) const SELECTED_CODEX_VERSION: &str = "codex-cli 0.166.0";

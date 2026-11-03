@@ -19,14 +19,15 @@ impl LocalProvider {
     pub(super) async fn start(paths: &TestPaths) -> Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
-        fs::write(
-            paths.codex_home.join("capture-proof.config.toml"),
-            format!(
-                "model_provider = \"capture-proof\"\n[model_providers.capture-proof]\n\
+        let config = format!(
+            "model_provider = \"capture-proof\"\n[model_providers.capture-proof]\n\
              name = \"Local context proof\"\nbase_url = \"http://{address}/v1\"\n\
              wire_api = \"responses\"\nrequires_openai_auth = false\nsupports_websockets = false\n"
-            ),
-        )?;
+        );
+        // Native resume/input validates the saved provider against the shared
+        // server's provider. Use the same isolated local provider at both levels.
+        fs::write(paths.codex_home.join("config.toml"), &config)?;
+        fs::write(paths.codex_home.join("capture-proof.config.toml"), config)?;
         let requests = Arc::new(AtomicUsize::new(0));
         let count = requests.clone();
         let task = tokio::spawn(async move {

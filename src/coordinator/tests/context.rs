@@ -1,5 +1,7 @@
 use super::*;
 
+mod repositories;
+
 #[tokio::test]
 async fn forks_committed_code_and_codex_history_from_an_idle_workspace() {
     let fixture = Fixture::new(FakeWorker::default());

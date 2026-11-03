@@ -34,6 +34,12 @@ New workspaces start with a fresh conversation by default. Use
 coco create review/login --base main --context investigate/login
 ```
 
+In the walkthrough, the workspace picker includes registered repositories,
+with the current repository first. Each entry shows its repository so you can
+distinguish matching names. You can also pass a full workspace ID to
+`--context` to copy a conversation from another repository; names refer to the
+selected repository.
+
 When you are already inside a CoCo workspace, `.` selects that workspace's
 conversation:
 
@@ -77,7 +83,7 @@ The source conversation stays unchanged.
 
 ## Choose a branch
 
-The default branch is `coco/<workspace-name>`. Choose a different new
+The default branch has the same name as the workspace. Choose a different new
 branch, an existing branch, or a detached checkout:
 
 ```bash
@@ -85,6 +91,10 @@ coco create fix/login --branch feature/login
 coco create review/login --checkout existing-login-branch
 coco create investigate/login --detached
 ```
+
+If the default branch already exists, choose a different `--branch` or use
+`--checkout` to select it explicitly. Existing workspaces keep their branch
+names, including older `coco/` names.
 
 An existing branch must be available locally and not checked out elsewhere.
 `--checkout` selects the branch's code directly, so it cannot be combined

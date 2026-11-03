@@ -6,16 +6,21 @@ use anyhow::Result;
 
 use crate::protocol::{
     AccountQuotaGetParams, AccountQuotaResult, RepositoryScope, WorkspaceGetParams,
-    WorkspaceListItem, WorkspaceListParams, WorkspaceStatusResult, WorkspaceUsageGetParams,
-    WorkspaceUsageItem, WorkspaceUsageListParams,
+    WorkspaceStatusResult, WorkspaceUsageGetParams, WorkspaceUsageItem, WorkspaceUsageListParams,
 };
 use crate::rpc::RpcClient;
 
-use super::args::StatusSort;
+mod collection;
+mod filter;
+mod sorting;
+
 use super::follow::{FollowOutput, stdout_supports_live_updates, wait_or_interrupt};
 use super::output::{
     render_follow_status, render_status_for_stdout, render_workspace_status_list_for_stdout,
 };
+pub(super) use collection::CollectionQuery;
+pub(super) use filter::StateSelector;
+pub(super) use sorting::{SortKey, sort_workspace_collection};
 const FOLLOW_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const COLLECTION_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const SPINNER_FRAME_INTERVAL: Duration = Duration::from_millis(125);
@@ -27,47 +32,6 @@ pub(super) struct StatusProjection {
     pub(super) usage: bool,
     pub(super) quota: bool,
     pub(super) clients: bool,
-}
-
-pub(super) fn sort_workspace_collection(workspaces: &mut [WorkspaceListItem], order: StatusSort) {
-    workspaces.sort_by(|left, right| {
-        repository_cmp(left, right)
-            .then_with(|| match order {
-                StatusSort::Name => Ordering::Equal,
-                StatusSort::State => {
-                    state_priority(left.workspace.phase).cmp(&state_priority(right.workspace.phase))
-                }
-            })
-            .then_with(|| natural_cmp(&left.workspace.name, &right.workspace.name))
-            .then_with(|| left.workspace.id.cmp(&right.workspace.id))
-    });
-}
-
-fn repository_cmp(left: &WorkspaceListItem, right: &WorkspaceListItem) -> Ordering {
-    natural_cmp(
-        &left.repository.display_name,
-        &right.repository.display_name,
-    )
-    .then_with(|| left.repository.root_path.cmp(&right.repository.root_path))
-    .then_with(|| left.repository.id.cmp(&right.repository.id))
-}
-
-const fn state_priority(phase: crate::domain::WorkspacePhase) -> u8 {
-    use crate::domain::WorkspacePhase;
-
-    match phase {
-        WorkspacePhase::WaitingForApproval | WorkspacePhase::WaitingForInput => 0,
-        WorkspacePhase::SystemError | WorkspacePhase::Unavailable | WorkspacePhase::Failed => 1,
-        WorkspacePhase::Active
-        | WorkspacePhase::Provisioning
-        | WorkspacePhase::Starting
-        | WorkspacePhase::Closing
-        | WorkspacePhase::Reopening
-        | WorkspacePhase::Deleting => 2,
-        WorkspacePhase::Idle | WorkspacePhase::Completed => 3,
-        WorkspacePhase::Prepared | WorkspacePhase::NotLoaded => 4,
-        WorkspacePhase::Closed => 5,
-    }
 }
 
 fn natural_cmp(left: &str, right: &str) -> Ordering {
@@ -181,31 +145,21 @@ pub(super) async fn follow_status_collection(
     scope: RepositoryScope,
     projection: StatusProjection,
     tree: bool,
-    sort: StatusSort,
+    query: CollectionQuery,
 ) -> Result<()> {
     let include_repository = matches!(scope, RepositoryScope::AllRepositories);
     let mut output = FollowOutput::new(io::stdout(), stdout_supports_live_updates())?;
     let mut previous_frame: Option<String> = None;
     loop {
-        let mut workspaces = client
-            .request(WorkspaceListParams {
-                scope: scope.clone(),
-                phases: None,
-                include_resources: projection.resources,
-                include_activity: true,
-                include_clients: projection.clients,
-            })
-            .await?;
-        sort_workspace_collection(&mut workspaces, sort);
-        let usage = workspace_usage_collection(client, scope.clone(), projection.usage).await?;
-        let quota = account_quota(client, projection.quota).await?;
+        let snapshot = query.read(client, scope.clone(), projection, false).await?;
         let frame = render_workspace_status_list_for_stdout(
-            &workspaces,
+            &snapshot.workspaces,
             include_repository,
             projection.resources,
-            usage.as_deref(),
-            quota.as_ref(),
+            snapshot.usage.as_deref(),
+            snapshot.quota.as_ref(),
             tree,
+            query.filtered(),
         );
         if previous_frame.as_deref() != Some(&frame) {
             output.write_frame(&frame)?;
@@ -263,6 +217,10 @@ const fn spinner_frames_per_poll() -> usize {
 }
 
 #[cfg(test)]
+#[path = "status/tests.rs"]
+mod query_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::domain::WorkspacePhase;
@@ -293,6 +251,7 @@ mod tests {
 
     #[test]
     fn state_order_puts_actionable_work_before_activity_and_idle_states() {
+        use super::sorting::state_order as state_priority;
         assert!(
             state_priority(WorkspacePhase::WaitingForInput)
                 < state_priority(WorkspacePhase::Failed)

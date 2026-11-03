@@ -1,11 +1,11 @@
 ---
 type: Working Document
-title: "main: repository foundation and first architecture"
-description: Tracks repository bootstrap, the Rust baseline, and early CoCo architecture decisions on main.
+title: "main: integration and releases"
+description: Tracks integrated product work, verified release handoffs and the repository's earlier architecture history.
 tags: [work, branch, bootstrap, rust, mcp, architecture]
 status: active
 branch: main
-updated: 2026-10-09
+updated: 2026-11-03
 ---
 
 # main — repository foundation
@@ -16,6 +16,39 @@ Establish the repository, documentation workflow, and first executable and
 architectural baseline for CoCo.
 
 ## Active work
+
+### Status, workspace creation and Codex 0.166.0 release — 2026-11-03
+
+- User authorizes finishing the reviewed slice, committing, merging onto main
+  and publishing through the existing GitHub CI release path. No manual Cargo
+  publication, alpha-switch changes, secret changes or live installation/service
+  changes are part of this handoff.
+- [x] Finish the provider-rejection finding and local verification; full
+  implementation/evidence is in [the branch record](feature/status-ordering.md).
+- [x] Integrate origin/main's generated 0.3.0 stamp (`6461d27`) and the
+  status/Codex branch without conflicts or Compose. Feature commits are
+  `fd25be5` (status/creation) and `8061922` (Codex compatibility/usage/rejection).
+- [ ] Require successful Rust and Pages checks on the exact pushed main SHA.
+- [ ] Run a non-publishing stable release rehearsal and verify its version.
+- [ ] Publish that tested revision through an explicit stable CI dispatch;
+  verify archives/checksums and the crates.io version, then sync local main.
+- Included behavior: explicit multi-key status sorting and state filters,
+  repository-prioritized global context selection, workspace-named default
+  branches, tested Codex 0.166.0 compatibility, optional reported USD with
+  separate estimates, and safe actionable provider rejection on first send.
+  Existing branch bindings are preserved. Compose remains solely on
+  `feature/compose` at `10e48d8`.
+- Local final gates: 598 ordinary tests plus seven explicit native Codex
+  0.166.0 cases pass, as do warning-denied Clippy, Rustfmt, Machete, cached
+  dependency policy, 19 release-tool tests and the 17-page static export.
+  Hosted exact-SHA packaging, Nix and Linux/macOS binary gates remain mandatory.
+  The staged-change credential-pattern scan reports no matches; this is not a
+  claim of a new full-history secret/security audit.
+- `COCO_RELEASE_ENABLED` is false and remains unchanged. The existing latest
+  normal release is `v0.3.0`; the two feature commits should request the next
+  minor normal release, subject to the guarded rehearsal result.
+
+Earlier checklist and implementation history:
 
 - [x] Record the user-approved follow-up order in canonical product knowledge:
   finish/review the current baseline and release-channel preparation; clarify

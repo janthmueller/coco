@@ -49,6 +49,7 @@ pub(in crate::cli) fn print_workspace_status_list(
     usage: Option<&[WorkspaceUsageItem]>,
     quota: Option<&AccountQuotaResult>,
     tree: bool,
+    filtered: bool,
 ) {
     print!(
         "{}",
@@ -59,6 +60,7 @@ pub(in crate::cli) fn print_workspace_status_list(
             usage,
             quota,
             tree,
+            filtered,
         )
     );
 }
@@ -70,10 +72,13 @@ pub(in crate::cli) fn render_workspace_status_list_for_stdout(
     usage: Option<&[WorkspaceUsageItem]>,
     quota: Option<&AccountQuotaResult>,
     tree: bool,
+    filtered: bool,
 ) -> String {
     let width = stdout_width();
     let palette = Palette::stdout();
-    let mut output = if tree {
+    let mut output = if workspaces.is_empty() && filtered {
+        format!("{}\n", palette.paint(Tone::Dim, "No matching workspaces."))
+    } else if tree {
         render_workspace_tree(
             workspaces,
             include_repository,

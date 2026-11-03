@@ -8,6 +8,45 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-11-03
+
+- **Proven turn rejection**: Handle the exact native provider mismatch before
+  uncertain-dispatch projection. Retain its prepared intent/fingerprint and
+  release its runtime guard only after a checked transaction; preserve genuine
+  uncertainty and accepted results. Unit and real CLI/native restart tests
+  verify actionable errors, safe explicit retry and unchanged profile identity.
+- **Codex 0.166.0 compatibility**: Select the installed stable release after
+  real isolated busy-source capture/restart/TUI, retirement/resources, MCP and
+  hook proofs. Record the native provider-match requirement, retain the
+  environment-routing and local parent-stdin lifetime limitations, and keep
+  queue/steer, attached forks and handoff sampling separate from this upgrade.
+- **Reported USD usage**: Preserve optional native dollar usage independently
+  of estimated USD and credits, prefer it for the existing status cost cell,
+  and distinguish reported/estimated detail. Public JSON schema version 16
+  retains all three raw values; missing remains unknown. No pricing table,
+  extra account call, history store or automatic resource policy is added.
+- **Workspace-named branches**: Newly allocated default branches use the exact
+  workspace name. Explicit overrides, adoption and detached mode retain their
+  behavior; collisions fail without fallback or implicit adoption. Existing
+  bindings retain actual names, including earlier `coco/` branches, without a
+  schema migration or rename.
+- **Cross-repository context selection**: Let the create context picker browse
+  eligible workspaces from every registered repository, prioritize the selected
+  repository by its resolved identity and disambiguate rows with repository
+  paths. Persist the exact chosen source ID and accept it across repositories
+  only for conversation context. Workspace names, code bases and operational
+  targets retain their explicit repository scoping.
+
+## 2026-11-02
+
+- **Explicit status ordering and filters**: Make ordered user sort keys primary
+  across repositories, with per-key direction, raw metric values, distinct
+  attention-ordered states and missing data last. Add view-only positive and
+  negative phase filters while retaining non-closed overview scope. One shared
+  query path composes filtered usage, JSON, tree pruning, account-global quota
+  and follow, including an empty filtered view. Preserve default list/context
+  ordering and keep this feature independent of the Compose branch.
+
 ## 2026-10-09
 
 - **Client-presence expiry correction**: Decoupled live client presentation

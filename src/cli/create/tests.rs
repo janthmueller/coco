@@ -55,6 +55,16 @@ async fn defaults_prepare_a_fresh_workspace_without_contacting_discovery() {
         ]
     );
     assert_default_walkthrough_copy(&interaction);
+    assert_eq!(
+        choices_for_title(&interaction, "Worktree")[0]
+            .detail
+            .as_deref(),
+        Some("review/api")
+    );
+    assert_eq!(
+        final_review_value(&interaction, "Worktree"),
+        "branch review/api"
+    );
     interaction.assert_consumed();
 
     let (params, message, jump) =
@@ -459,8 +469,11 @@ struct UnregisteredRepositoryHandler;
 
 #[async_trait]
 impl RpcHandler for UnregisteredRepositoryHandler {
-    async fn handle(&self, method: &str, _params: Value) -> Result<Value, RpcErrorPayload> {
-        assert_eq!(method, "workspace.list");
+    async fn handle(&self, method: &str, params: Value) -> Result<Value, RpcErrorPayload> {
+        if method == "workspace.list" && params["scope"]["kind"] == "allRepositories" {
+            return Ok(json!([]));
+        }
+        assert!(matches!(method, "workspace.list" | "repository.resolve"));
         Err(RpcErrorPayload::new(
             "REPOSITORY_NOT_REGISTERED",
             "repository is not registered",
@@ -471,6 +484,9 @@ impl RpcHandler for UnregisteredRepositoryHandler {
 #[async_trait]
 impl RpcHandler for WorkspaceListHandler {
     async fn handle(&self, method: &str, params: Value) -> Result<Value, RpcErrorPayload> {
+        if method == "repository.resolve" {
+            return Ok(serde_json::to_value(workspace_item().repository).unwrap());
+        }
         if method != "workspace.list" {
             return Err(RpcErrorPayload::new("METHOD_NOT_FOUND", method));
         }
@@ -625,3 +641,4 @@ impl Interaction for ScriptedInteraction {
 
 mod choices;
 mod context;
+mod repositories;

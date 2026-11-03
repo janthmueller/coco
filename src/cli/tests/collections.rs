@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{CommandFactory, Parser};
 
-use super::super::args::{Cli, Command, ModelCommand, RepoCommand, StatusSort};
+use super::super::args::{Cli, Command, ModelCommand, RepoCommand};
 use super::super::commands::validate_scope_selection;
 
 #[test]
@@ -138,7 +138,7 @@ fn help_assigns_all_repos_to_overviews_and_global_to_single_targets() {
     assert!(status_help.contains("--usage"));
     assert!(status_help.contains("-q, --quota"));
     assert!(status_help.contains("-t, --tree"));
-    assert!(status_help.contains("--sort <ORDER>"));
+    assert!(status_help.contains("--sort <KEYS>"));
     assert!(Cli::command().find_subcommand("usage").is_none());
     assert!(Cli::command().find_subcommand("quota").is_none());
 
@@ -267,7 +267,7 @@ fn status_supports_collection_overviews_and_explicit_workspace_details() {
     let parsed = Cli::try_parse_from(["coco", "status", "--sort", "state"]).unwrap();
     assert!(matches!(
         parsed.command,
-        Command::Status(args) if args.sort == Some(StatusSort::State)
+        Command::Status(args) if args.sort == vec!["state".parse().unwrap()]
     ));
 
     for arguments in [

@@ -30,7 +30,7 @@ coco model list --json
 Choose a model when you create the workspace:
 
 ```bash
-coco create refactor/cache --model gpt-5.6-sol
+coco create refactor/cache --model gpt-6.1-sol
 ```
 
 Without `--model`, Codex selects the model from its normal configuration.
@@ -72,7 +72,7 @@ profile setting still applies:
 ```bash
 coco create refactor/cache \
   --profile dev \
-  --model gpt-5.6-sol
+  --model gpt-6.1-sol
 ```
 
 ## Keep profile files stable
@@ -88,3 +88,14 @@ new workspace. CoCo checks the named profile file, not Codex's base
 configuration layer. If you change the base configuration, inherited settings
 can therefore change the next time a workspace is loaded. Put settings that
 must stay fixed explicitly in the named profile.
+
+## Keep the model provider consistent
+
+A model provider is the service supplying the model, such as OpenAI. All
+workspaces managed by one running `cocod` use the provider selected by
+`model_provider` in your main Codex configuration. A workspace profile must
+use that same provider; `--model` selects a model within it.
+
+If Codex reports a provider mismatch, stop active work, set the conversation's
+provider in the main Codex configuration, and restart `cocod`. Leave the
+workspace's saved profile unchanged.
