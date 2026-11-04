@@ -30,6 +30,7 @@ const WORKSPACES_SEND: &str = "workspaces.send";
 const MAX_ERROR_CHARS: usize = 1_024;
 
 mod signals;
+mod turns;
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -77,12 +78,17 @@ impl McpServer {
     fn new(
         repository: PathBuf,
         allow_send: bool,
+        allow_interrupt: bool,
         socket_path: PathBuf,
         allowed_signals: Vec<String>,
     ) -> Self {
-        let mut tool_router = Self::tool_router() + Self::signal_tool_router();
+        let mut tool_router =
+            Self::tool_router() + Self::signal_tool_router() + Self::turn_tool_router();
         if !allow_send {
             tool_router.disable_route(WORKSPACES_SEND);
+        }
+        if !allow_interrupt {
+            tool_router.disable_route("turns.interrupt");
         }
         if allowed_signals.is_empty() {
             tool_router.disable_route("signals.emit");
@@ -402,6 +408,7 @@ fn bounded(message: String) -> String {
 pub async fn run_from_env(
     repository: PathBuf,
     allow_send: bool,
+    allow_interrupt: bool,
     allowed_signals: Vec<String>,
     signal_catalog: Option<PathBuf>,
 ) -> anyhow::Result<()> {
@@ -409,6 +416,7 @@ pub async fn run_from_env(
     serve(
         repository,
         allow_send,
+        allow_interrupt,
         paths.socket_path,
         allowed_signals,
         signal_catalog,
@@ -419,6 +427,7 @@ pub async fn run_from_env(
 pub(crate) async fn serve(
     repository: PathBuf,
     allow_send: bool,
+    allow_interrupt: bool,
     socket_path: PathBuf,
     allowed_signals: Vec<String>,
     signal_catalog: Option<PathBuf>,
@@ -430,7 +439,13 @@ pub(crate) async fn serve(
     );
     let repository =
         std::path::absolute(repository).context("could not resolve repository path")?;
-    let mut server = McpServer::new(repository, allow_send, socket_path, allowed_signals);
+    let mut server = McpServer::new(
+        repository,
+        allow_send,
+        allow_interrupt,
+        socket_path,
+        allowed_signals,
+    );
     if let Some(directory) = signal_catalog {
         server.load_signal_catalog(directory).await?;
     }

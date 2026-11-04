@@ -165,16 +165,16 @@ impl Coordinator {
         workspace: &Workspace,
         params: &Value,
     ) -> Result<(), StoreError> {
-        let status = params
-            .pointer("/turn/status")
-            .and_then(Value::as_str)
-            .unwrap_or("failed");
+        let status = params.pointer("/turn/status").and_then(Value::as_str);
         let status = match status {
-            "completed" => TurnTerminalStatus::Completed,
-            "interrupted" => TurnTerminalStatus::Interrupted,
-            "failed" => TurnTerminalStatus::Failed,
+            Some("completed") => TurnTerminalStatus::Completed,
+            Some("interrupted") => TurnTerminalStatus::Interrupted,
+            Some("failed") => TurnTerminalStatus::Failed,
             _ => {
-                warn!(status, "ignoring non-terminal turn/completed payload");
+                warn!(
+                    ?status,
+                    "ignoring invalid or non-terminal turn/completed payload"
+                );
                 return Ok(());
             }
         };
@@ -189,8 +189,7 @@ impl Coordinator {
             warn!(workspace_id = %workspace.id, "ignoring turn completion without a native turn id");
             return Ok(());
         };
-        self.observe_native_turn_completed(thread_id, native_turn_id, status);
-        Ok(())
+        self.observe_native_turn_completed(thread_id, native_turn_id, status)
     }
 
     fn record_codex_server_request(

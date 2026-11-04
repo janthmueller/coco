@@ -29,9 +29,16 @@ coco status -f
 The display updates as agents work, become ready, or need your input.
 Press Ctrl+C to leave the display; their work continues.
 
-When a workspace needs approval or an answer, status shows a
-`coco decide <decision-id>` command. Run it in another terminal, or open
-the conversation as shown below.
+When a workspace needs approval or an answer, inspect that workspace in
+another terminal:
+
+```bash
+coco status fix/login
+```
+
+Its details show the pending request and, when supported, a
+`coco decide <decision-id>` command. Run that command, or open the
+conversation as shown below.
 
 ## Jump into a conversation
 

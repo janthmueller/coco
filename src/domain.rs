@@ -8,6 +8,7 @@ pub(crate) mod clients;
 pub(crate) mod hooks;
 pub(crate) mod runtime;
 pub(crate) mod signals;
+pub(crate) mod turns;
 pub(crate) mod usage;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -168,6 +169,9 @@ impl CodexThreadStatus {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadRuntimeSnapshot {
     pub status: CodexThreadStatus,
+    /// Codex's thread-recency timestamp, normalized to Unix milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recency_at_ms: Option<i64>,
     /// Current configured model reported by Codex, or the latest value Codex
     /// persisted while the thread is unloaded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -837,6 +841,7 @@ mod tests {
     #[test]
     fn derives_runtime_without_losing_native_flags_or_freshness() {
         let snapshot = ThreadRuntimeSnapshot {
+            recency_at_ms: None,
             status: CodexThreadStatus::Active {
                 active_flags: vec![
                     "waitingOnUserInput".to_owned(),

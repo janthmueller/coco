@@ -19,12 +19,16 @@ fn fixture() -> (Store, Operation) {
 #[test]
 fn proven_rejection_restores_exact_intent_and_can_be_explicitly_dispatched_again() {
     let (store, prepared) = fixture();
-    store.begin_operation_dispatch(&prepared.id).unwrap();
+    store
+        .begin_operation_dispatch(&prepared.id, "thread-test")
+        .unwrap();
     assert_eq!(
         store.reset_rejected_operation(&prepared.id).unwrap(),
         prepared
     );
-    let dispatched = store.begin_operation_dispatch(&prepared.id).unwrap();
+    let dispatched = store
+        .begin_operation_dispatch(&prepared.id, "thread-test")
+        .unwrap();
     assert_eq!(dispatched.state, OperationState::Dispatching);
     let accepted = store
         .accept_operation(&prepared.id, "accepted-after-retry")
@@ -44,11 +48,15 @@ fn rejection_cannot_reset_prepared_uncertain_or_accepted_operations() {
         let retained = match state {
             OperationState::Prepared => prepared,
             OperationState::Uncertain => {
-                store.begin_operation_dispatch(&prepared.id).unwrap();
+                store
+                    .begin_operation_dispatch(&prepared.id, "thread-test")
+                    .unwrap();
                 store.mark_operation_uncertain(&prepared.id).unwrap()
             }
             OperationState::Accepted => {
-                store.begin_operation_dispatch(&prepared.id).unwrap();
+                store
+                    .begin_operation_dispatch(&prepared.id, "thread-test")
+                    .unwrap();
                 store
                     .accept_operation(&prepared.id, "already-accepted")
                     .unwrap()

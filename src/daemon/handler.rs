@@ -14,10 +14,10 @@ use crate::protocol::{
     AccountQuotaGetParams, AuditRecordParams, DaemonMethod, DecisionGetParams,
     DecisionRespondParams, EventListParams, HealthParams, HealthResult, HookDeliveryListParams,
     HookListParams, HookReloadParams, ModelListParams, RepositoryRemoveParams,
-    RepositoryResolveParams, TurnResultParams, TurnStartParams, WorkspaceAttachAdoptParams,
-    WorkspaceAttachParams, WorkspaceAttachReleaseParams, WorkspaceAttachRenewParams,
-    WorkspaceCloseParams, WorkspaceCreateParams, WorkspaceDeleteParams, WorkspaceDiffParams,
-    WorkspaceGetParams, WorkspaceLimitsGetParams, WorkspaceLimitsResetParams,
+    RepositoryResolveParams, TurnGetParams, TurnInterruptParams, TurnResultParams, TurnStartParams,
+    WorkspaceAttachAdoptParams, WorkspaceAttachParams, WorkspaceAttachReleaseParams,
+    WorkspaceAttachRenewParams, WorkspaceCloseParams, WorkspaceCreateParams, WorkspaceDeleteParams,
+    WorkspaceDiffParams, WorkspaceGetParams, WorkspaceLimitsGetParams, WorkspaceLimitsResetParams,
     WorkspaceLimitsSetParams, WorkspaceListParams, WorkspaceReopenParams, WorkspaceUsageGetParams,
     WorkspaceUsageListParams,
 };
@@ -106,16 +106,10 @@ impl RpcHandler for DaemonHandler {
             | DaemonMethod::WorkspaceAttachAdopt
             | DaemonMethod::WorkspaceAttachRelease
             | DaemonMethod::WorkspaceDiff) => self.handle_workspace(method, params).await,
-            DaemonMethod::TurnStart => execute(
-                self.coordinator
-                    .start_turn(decode::<TurnStartParams>(params)?)
-                    .await,
-            ),
-            DaemonMethod::TurnResult => execute(self.coordinator.turn_result(decode::<
-                TurnResultParams,
-            >(
-                params
-            )?)),
+            method @ (DaemonMethod::TurnStart
+            | DaemonMethod::TurnResult
+            | DaemonMethod::TurnGet
+            | DaemonMethod::TurnInterrupt) => self.handle_turn(method, params).await,
             DaemonMethod::EventList => execute(
                 self.coordinator
                     .list_events(decode::<EventListParams>(params)?)
@@ -141,6 +135,36 @@ impl RpcHandler for DaemonHandler {
 }
 
 impl DaemonHandler {
+    async fn handle_turn(
+        &self,
+        method: DaemonMethod,
+        params: Value,
+    ) -> Result<Value, RpcErrorPayload> {
+        match method {
+            DaemonMethod::TurnStart => execute(
+                self.coordinator
+                    .start_turn(decode::<TurnStartParams>(params)?)
+                    .await,
+            ),
+            DaemonMethod::TurnResult => execute(self.coordinator.turn_result(decode::<
+                TurnResultParams,
+            >(
+                params
+            )?)),
+            DaemonMethod::TurnGet => execute(
+                self.coordinator
+                    .get_turn(decode::<TurnGetParams>(params)?)
+                    .await,
+            ),
+            DaemonMethod::TurnInterrupt => execute(
+                self.coordinator
+                    .interrupt_turn(decode::<TurnInterruptParams>(params)?)
+                    .await,
+            ),
+            _ => unreachable!("non-turn method routed to turn controls"),
+        }
+    }
+
     async fn handle_global_read(
         &self,
         method: DaemonMethod,
@@ -322,7 +346,14 @@ fn public_coordinator_message(source: &CoordinatorError) -> String {
 }
 
 fn public_worker_error(error: &WorkerError) -> String {
-    if matches!(error, WorkerError::ContextBoundaryUnsupported) {
+    if matches!(
+        error,
+        WorkerError::ContextBoundaryUnsupported
+            | WorkerError::ExactInterruptUnsupported
+            | WorkerError::BestEffortInterruptUnsupported
+            | WorkerError::TurnInterruptRejected
+            | WorkerError::TurnInterruptTimedOut
+    ) {
         return error.to_string();
     }
     if let WorkerError::ResourcePolicyUnsupported { fields } = error {

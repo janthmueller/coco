@@ -34,7 +34,7 @@ pub(super) struct StatusProjection {
     pub(super) clients: bool,
 }
 
-fn natural_cmp(left: &str, right: &str) -> Ordering {
+pub(super) fn natural_cmp(left: &str, right: &str) -> Ordering {
     let left = left.as_bytes();
     let right = right.as_bytes();
     let mut left_index = 0;

@@ -21,6 +21,7 @@ const requiredPages = [
   'guides/hooks/index.html',
   'reference/cli/index.html',
   'reference/automation/index.html',
+  'reference/turns/index.html',
   'reference/signals/index.html',
   'reference/resources/index.html',
   'reference/current-limitations/index.html',

@@ -13,7 +13,7 @@ use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
-pub(crate) const SUPPORTED_SCHEMA_VERSION: i64 = 15;
+pub(crate) const SUPPORTED_SCHEMA_VERSION: i64 = 17;
 
 use crate::domain::{
     AuditOutcome, ContextMode, EventKind, EventSource, ProfileSnapshot, Repository, WorktreeMode,
@@ -31,6 +31,7 @@ mod operations;
 mod resources;
 mod rows;
 mod signals;
+mod turn_control;
 mod usage;
 mod workspaces;
 
@@ -86,6 +87,10 @@ pub enum StoreError {
     },
     #[error("operation {operation_id} already resolved to another native result")]
     OperationResultConflict { operation_id: String },
+    #[error(
+        "operation {operation_id} already has an interrupt attempt in another mode; inspect that attempt instead"
+    )]
+    InterruptModeConflict { operation_id: String },
     #[error(
         "operation {operation_id} belongs to workspace {actual_workspace_id}, not {expected_workspace_id}"
     )]
@@ -236,6 +241,11 @@ pub struct Operation {
     pub created_at_ms: i64,
     pub dispatch_started_at_ms: Option<i64>,
     pub result_recorded_at_ms: Option<i64>,
+    pub native_thread_id: Option<String>,
+    pub terminal_status: Option<crate::domain::turns::TurnTerminalStatus>,
+    pub terminal_observed_at_ms: Option<i64>,
+    pub interrupt_requested_at_ms: Option<i64>,
+    pub interrupt_attempt: Option<crate::domain::turns::TurnInterruptAttempt>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

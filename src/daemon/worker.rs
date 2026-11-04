@@ -8,8 +8,8 @@ use serde_json::{Value, json};
 use crate::codex::{CodexClient, CodexError};
 use crate::coordinator::{
     LocatedNativeThread, NativeAccountQuota, NativeAccountQuotaBucket, NativeAccountQuotaRead,
-    NativeAccountQuotaWindow, NativeThread, StartedThread, StartedTurn, WorkerError,
-    WorkerExecutionEnvironment, WorkerRuntime,
+    NativeAccountQuotaWindow, NativeThread, NativeTurnOutcome, StartedThread, StartedTurn,
+    WorkerError, WorkerExecutionEnvironment, WorkerRuntime,
 };
 use crate::domain::runtime::{
     WorkspaceResourceCapabilities, WorkspaceResourceControllerStatus,
@@ -21,6 +21,7 @@ use crate::domain::{CodexModel, CodexThreadStatus};
 use super::execution::WorkspaceExecutors;
 
 mod context;
+mod turn_control;
 
 const MODEL_PAGE_LIMIT: u32 = 100;
 const MAX_MODEL_PAGES: usize = 100;
@@ -142,6 +143,9 @@ struct ThreadUsageGroupWire {
 #[serde(rename_all = "camelCase")]
 struct ThreadReadWire {
     id: String,
+    // Optional presentation metadata must not invalidate the thread's status.
+    #[serde(default)]
+    recency_at: Value,
     cwd: PathBuf,
     #[serde(default)]
     path: Option<PathBuf>,
@@ -193,6 +197,26 @@ impl CodexWorker {
 impl WorkerRuntime for CodexWorker {
     async fn last_completed_turn_id(&self, thread_id: &str) -> Result<Option<String>, WorkerError> {
         self.read_last_completed_turn_id(thread_id).await
+    }
+
+    async fn read_turn_outcome(
+        &self,
+        thread_id: &str,
+        turn_id: &str,
+    ) -> Result<NativeTurnOutcome, WorkerError> {
+        self.lookup_turn_outcome(thread_id, turn_id).await
+    }
+
+    fn supports_best_effort_turn_interrupt(&self) -> bool {
+        turn_control::supports_native_interrupt(self.client.server_version())
+    }
+
+    async fn interrupt_turn_best_effort(
+        &self,
+        thread_id: &str,
+        turn_id: &str,
+    ) -> Result<(), WorkerError> {
+        self.request_best_effort_interrupt(thread_id, turn_id).await
     }
 
     async fn list_models(&self) -> Result<Vec<CodexModel>, WorkerError> {
@@ -928,6 +952,12 @@ fn is_missing_thread_read(error: &CodexError, thread_id: &str) -> bool {
 fn decode_thread_wire(thread: ThreadReadWire) -> Result<NativeThread, WorkerError> {
     Ok(NativeThread {
         id: thread.id,
+        recency_at_ms: thread
+            .recency_at
+            .as_i64()
+            .filter(|seconds| *seconds >= 0)
+            .and_then(|seconds| seconds.checked_mul(1_000))
+            .filter(|millis| chrono::DateTime::from_timestamp_millis(*millis).is_some()),
         cwd: thread.cwd,
         name: thread.name,
         status: thread.status.canonicalized(),
@@ -939,6 +969,8 @@ fn decode_thread_wire(thread: ThreadReadWire) -> Result<NativeThread, WorkerErro
 
 #[cfg(test)]
 mod tests {
+    mod recency;
+
     use std::path::PathBuf;
 
     use serde_json::json;

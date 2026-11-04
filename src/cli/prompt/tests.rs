@@ -1,5 +1,7 @@
 use super::*;
 
+mod trailing;
+
 #[test]
 #[ignore = "manual terminal regression probe; requires an interactive PTY"]
 fn interactive_terminal_probe() {
@@ -8,7 +10,10 @@ fn interactive_terminal_probe() {
         eprintln!("history-{index:02}");
     }
     let choices = (1..=12)
-        .map(|index| Choice::new(format!("workspace-{index:02}"), Some("Ready".to_owned())))
+        .map(|index| {
+            Choice::new(format!("workspace-{index:02}"), Some("Ready".to_owned()))
+                .with_trailing_detail(Some(format!("{index}m ago")))
+        })
         .collect::<Vec<_>>();
     let outcome = run_picker("Choose a workspace", &choices);
     assert!(!crossterm::terminal::is_raw_mode_enabled().unwrap());

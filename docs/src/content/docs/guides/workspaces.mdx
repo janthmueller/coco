@@ -96,6 +96,10 @@ Use `/quit` or `/exit` to leave the Codex UI. Active work continues while
 
 Run `coco jump` without a name for a selector. Navigate with arrow keys or
 `j`/`k`, press Enter, or press a displayed number to choose immediately.
+Recently used conversations appear first, with a dim relative time when Codex
+reports one. Use `coco jump --sort name` for name order, or add `-g` to choose
+across repositories. The selector shows a branch only when it differs from
+the workspace name; detached worktrees remain marked `detached`.
 
 ### Find open terminals
 
@@ -171,7 +175,13 @@ scope options.
 
 ## Answer a request
 
-When status gives you a decision ID:
+Inspect the workspace to see its pending request and how to respond:
+
+```bash
+coco status fix/login
+```
+
+If a decision command is available, use the displayed ID:
 
 ```bash
 coco decide <decision-id>

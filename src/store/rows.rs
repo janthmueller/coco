@@ -28,7 +28,8 @@ pub(super) const TURN_SELECT: &str = "SELECT id, workspace_id, operation_id, cli
 
 pub(super) const OPERATION_SELECT: &str = "SELECT id, operation_id, workspace_id, kind,
     request_fingerprint, native_result_id, state, created_at_ms, dispatch_started_at_ms,
-    result_recorded_at_ms FROM operations";
+    result_recorded_at_ms, native_thread_id, terminal_status, terminal_observed_at_ms,
+    interrupt_requested_at_ms, interrupt_mode, interrupt_state FROM operations";
 
 pub(super) const EVENT_SELECT: &str = "SELECT sequence, id, workspace_id, turn_id, kind, source,
     source_method, occurred_at_ms, recorded_at_ms, payload_json FROM events";
@@ -120,6 +121,7 @@ fn map_thread_status(row: &Row<'_>) -> rusqlite::Result<Option<ThreadRuntimeSnap
         })?;
     Ok(Some(ThreadRuntimeSnapshot {
         status,
+        recency_at_ms: None,
         model: None,
         reasoning_effort: None,
         runtime_generation: row.get(9)?,
@@ -147,6 +149,7 @@ pub(super) fn map_turn(row: &Row<'_>) -> rusqlite::Result<Turn> {
 pub(super) fn map_operation(row: &Row<'_>) -> rusqlite::Result<Operation> {
     let kind: String = row.get(3)?;
     let state: String = row.get(6)?;
+    let terminal: Option<String> = row.get(11)?;
     Ok(Operation {
         id: row.get(0)?,
         operation_id: row.get(1)?,
@@ -160,7 +163,42 @@ pub(super) fn map_operation(row: &Row<'_>) -> rusqlite::Result<Operation> {
         created_at_ms: row.get(7)?,
         dispatch_started_at_ms: row.get(8)?,
         result_recorded_at_ms: row.get(9)?,
+        native_thread_id: row.get(10)?,
+        terminal_status: terminal
+            .map(|value| {
+                crate::domain::turns::TurnTerminalStatus::parse(&value)
+                    .ok_or_else(|| invalid_value(11, "terminal turn status", &value))
+            })
+            .transpose()?,
+        terminal_observed_at_ms: row.get(12)?,
+        interrupt_requested_at_ms: row.get(13)?,
+        interrupt_attempt: map_interrupt_attempt(row)?,
     })
+}
+
+fn map_interrupt_attempt(
+    row: &Row<'_>,
+) -> rusqlite::Result<Option<crate::domain::turns::TurnInterruptAttempt>> {
+    use crate::domain::turns::{
+        TurnInterruptAttempt, TurnInterruptAttemptState, TurnInterruptMode,
+    };
+    let timestamp: Option<i64> = row.get(13)?;
+    let mode: Option<String> = row.get(14)?;
+    let state: Option<String> = row.get(15)?;
+    match (timestamp, mode, state) {
+        (None, None, None) => Ok(None),
+        (Some(_), Some(mode), Some(state)) => Ok(Some(TurnInterruptAttempt {
+            mode: TurnInterruptMode::parse(&mode)
+                .ok_or_else(|| invalid_value(14, "interrupt mode", &mode))?,
+            state: TurnInterruptAttemptState::parse(&state)
+                .ok_or_else(|| invalid_value(15, "interrupt state", &state))?,
+        })),
+        _ => Err(invalid_value(
+            14,
+            "interrupt attempt",
+            "incomplete attempt metadata",
+        )),
+    }
 }
 
 pub(super) fn map_event(row: &Row<'_>) -> rusqlite::Result<NormalizedEvent> {

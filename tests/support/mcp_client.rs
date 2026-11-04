@@ -51,10 +51,19 @@ impl McpClient {
     }
 
     pub(crate) async fn request(&mut self, method: &str, params: Value) -> Result<Value> {
+        let id = self.send_request(method, params).await?;
+        self.receive_response(id, method).await
+    }
+
+    pub(crate) async fn send_request(&mut self, method: &str, params: Value) -> Result<u64> {
         self.next_id += 1;
         let id = self.next_id;
         self.send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))
             .await?;
+        Ok(id)
+    }
+
+    async fn receive_response(&mut self, id: u64, method: &str) -> Result<Value> {
         timeout(TIMEOUT, async {
             loop {
                 let line = self

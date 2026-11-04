@@ -6,19 +6,15 @@ description: Send agent updates to another tool or run a program after workspace
 A **hook** runs your program after an agent publishes a signal or a workspace
 is created, closed, reopened, or deleted.
 
-For example, send each review request to a notification service that accepts
-JSON webhooks.
+Start by saving a workspace update to a local file. You can then use the same
+hook setup to send agent signals to another tool.
 
-## Connect a review notification
+## Save a local update
 
-First follow [Publish agent updates](../signals/) to enable
-`review.requested@1`. For this example you also need `curl` and an HTTP
-endpoint that accepts CoCo's [event JSON](../../reference/automation/#hook-input).
-
-Find the full executable path:
+With `cocod` running, find `tee`, the command that will save the update:
 
 ```bash
-command -v curl
+command -v tee
 mkdir -p ~/.config/coco
 ```
 
@@ -30,26 +26,21 @@ its `hooks` array while preserving your other hooks and guards:
   "version": 1,
   "hooks": [
     {
-      "id": "notify-review",
-      "event": "signal.emitted",
-      "signal": "review.requested@1",
+      "id": "record-workspace",
+      "event": "workspace.created",
       "command": [
-        "/absolute/path/to/curl",
-        "--fail", "--silent", "--show-error",
-        "--header", "Content-Type: application/json",
-        "--data-binary", "@-",
-        "https://your-service.example/coco/review"
-      ],
-      "timeoutSeconds": 30,
-      "maxAttempts": 3
+        "/absolute/path/to/tee",
+        "/absolute/path/to/latest-workspace.json"
+      ]
     }
   ]
 }
 ```
 
-Replace the executable path and endpoint with your values. This sends the full
-event, including the workspace and signal payload, as the request body.
-Only use an endpoint you trust with those contents.
+Use the executable path from `command -v tee`. Set the output path to
+`latest-workspace.json` in your CoCo configuration folder, using its full
+absolute path. Keep it outside the worktrees your agents edit. CoCo passes
+the event to `tee`, which replaces that file with the latest workspace update.
 
 ## Load and check it
 
@@ -60,15 +51,66 @@ coco hook reload
 coco hook list
 ```
 
-After the agent emits a review request, your endpoint should receive it.
-Check the delivery result:
+Inside a Git repository with at least one commit, create a workspace:
+
+```bash
+coco create try/hooks
+```
+
+Hooks run in the background. Check for a successful `record-workspace`
+delivery:
 
 ```bash
 coco hook history
 ```
 
-Changes to the file take effect after `hook reload` or a coordinator
+Once it succeeds, read the file. Its JSON includes `workspace.name` set to
+`try/hooks`:
+
+```bash
+cat ~/.config/coco/latest-workspace.json
+```
+
+Changes to `hooks.json` take effect after `hook reload` or a coordinator
 restart. An invalid reload leaves the previous configuration active.
+
+## Connect a review notification
+
+To send agent updates to a webhook, follow [Publish agent updates](../signals/)
+to enable `review.requested@1`. You also need `curl` and an HTTP endpoint that
+accepts CoCo's [event JSON](../../reference/automation/#hook-input).
+
+Find your executable with `command -v curl`, then add this entry to the
+`hooks` array in the same configuration:
+
+```json
+{
+  "id": "notify-review",
+  "event": "signal.emitted",
+  "signal": "review.requested@1",
+  "command": [
+    "/absolute/path/to/curl",
+    "--fail", "--silent", "--show-error",
+    "--header", "Content-Type: application/json",
+    "--data-binary", "@-",
+    "https://your-service.example/coco/review"
+  ],
+  "timeoutSeconds": 30,
+  "maxAttempts": 3
+}
+```
+
+Replace the executable path and endpoint. This sends the full event, including
+the workspace and signal payload, so use an endpoint you trust with those
+contents. Validate and reload the configuration:
+
+```bash
+coco hook validate
+coco hook reload
+```
+
+After an agent emits `review.requested@1`, check `coco hook history` for the
+delivery result and confirm that your endpoint received it.
 
 ## Run your own program
 

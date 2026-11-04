@@ -62,6 +62,8 @@ pub(crate) enum CoordinatorError {
     },
     #[error("operation ID was already used with different parameters")]
     IdempotencyConflict,
+    #[error("turn operation not found in the selected workspace")]
+    TurnOperationNotFound,
     #[error(
         "operation {operation_id} may already have reached Codex and will not be retried automatically"
     )]
@@ -127,6 +129,7 @@ impl CoordinatorError {
             Self::WorkspaceReferenceAmbiguous { .. } => "WORKSPACE_REFERENCE_AMBIGUOUS",
             Self::ContextReferenceUnresolved { .. } => "CONTEXT_REFERENCE_UNRESOLVED",
             Self::IdempotencyConflict => "IDEMPOTENCY_CONFLICT",
+            Self::TurnOperationNotFound => "TURN_OPERATION_NOT_FOUND",
             Self::OperationUncertain { .. } => "OPERATION_UNCERTAIN",
             Self::InvalidWorkspaceState { .. } => "INVALID_WORKSPACE_STATE",
             Self::IncompleteWorkspace(_) => "INCOMPLETE_WORKSPACE",
@@ -152,10 +155,17 @@ impl CoordinatorError {
             Self::Store(StoreError::InvalidWorkspaceTransition { .. }) => "INVALID_WORKSPACE_STATE",
             Self::Store(StoreError::InvalidDecisionState { .. }) => "INVALID_DECISION_STATE",
             Self::Store(StoreError::DecisionGenerationMismatch { .. }) => "STALE_DECISION",
+            Self::Store(StoreError::InterruptModeConflict { .. }) => "TURN_INTERRUPT_MODE_CONFLICT",
             Self::Store(_) => "INTERNAL",
             Self::Profile(ProfileError::NotFound { .. }) => "PROFILE_NOT_FOUND",
             Self::Profile(_) => "INVALID_PROFILE",
             Self::Worker(WorkerError::ContextBoundaryUnsupported) => "CONTEXT_SOURCE_UNSUPPORTED",
+            Self::Worker(WorkerError::ExactInterruptUnsupported) => "TURN_INTERRUPT_UNSUPPORTED",
+            Self::Worker(WorkerError::BestEffortInterruptUnsupported) => {
+                "TURN_INTERRUPT_UNSUPPORTED"
+            }
+            Self::Worker(WorkerError::TurnInterruptRejected) => "TURN_INTERRUPT_REJECTED",
+            Self::Worker(WorkerError::TurnInterruptTimedOut) => "TURN_INTERRUPT_UNCERTAIN",
             Self::Worker(_) => "CODEX_ERROR",
         }
     }

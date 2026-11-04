@@ -84,13 +84,23 @@ pub(super) async fn exercise(paths: &TestPaths, root: &Path) -> Result<PathBuf> 
     command.arg("--allow-send");
     let mut writer = McpClient::spawn(&mut command).await?;
     let input = json!({"workspace": WORKSPACE_NAME, "message": "Continue through MCP", "operationId": MCP_SEND});
-    let accepted = writer.call("workspaces.send", input.clone()).await?;
+    // Deliberately never consume this client's start response. Another client
+    // must recover the accepted operation from the original caller key alone.
+    writer
+        .send_request(
+            "tools/call",
+            json!({"name": "workspaces.send", "arguments": input}),
+        )
+        .await?;
+    let observed = super::turn_control::wait_for_receipt(paths, &repository, MCP_SEND).await?;
+    writer.stop().await?;
+    let mut writer = McpClient::spawn(&mut command).await?;
     let repeated = writer.call("workspaces.send", input).await?;
-    assert_eq!(accepted["turnId"], repeated["turnId"]);
-    assert_eq!(accepted["codexTurnId"], repeated["codexTurnId"]);
-    assert_eq!(accepted["workspace"]["id"], repeated["workspace"]["id"]);
+    assert_eq!(observed["codexTurnId"], repeated["codexTurnId"]);
+    assert_eq!(observed["workspaceId"], repeated["workspace"]["id"]);
     writer.stop().await?;
     wait_for_workspace_phase(paths, &repository, "idle").await?;
+    super::turn_control::exercise(paths, &repository, &root.join("repository"), MCP_SEND).await?;
     super::signals::exercise(paths, &repository).await?;
     Ok(worktree)
 }
@@ -118,6 +128,7 @@ pub(super) async fn verify_replay(paths: &TestPaths, root: &Path) -> Result<()> 
     let list = cli_json(&run_cli(paths, root, &["list", "-a", "--json"]).await?)?;
     assert_eq!(list["workspaces"].as_array().map(Vec::len), Some(2));
     super::signals::verify_replay(paths, &repository).await?;
+    super::turn_control::verify_receipt(paths, &repository, MCP_SEND).await?;
     Ok(())
 }
 
@@ -176,6 +187,13 @@ impl SecondThread {
                 let turn_id = format!("second-turn-{}", self.turns);
                 send_result(socket, frame, json!({"turn": {"id": turn_id}})).await?;
                 send_json(socket, json!({"method": "turn/completed", "params": {"threadId": SECOND_THREAD, "turn": {"id": turn_id, "status": "completed"}}})).await?;
+            }
+            Some("thread/turns/list")
+                if frame.pointer("/params/threadId") == Some(&json!(SECOND_THREAD)) =>
+            {
+                ensure!(frame.pointer("/params/itemsView") == Some(&json!("notLoaded")));
+                let turns: Vec<_> = (1..=self.turns).rev().map(|n| json!({"id": format!("second-turn-{n}"), "status": "completed", "items": []})).collect();
+                send_result(socket, frame, json!({"data": turns, "nextCursor": null})).await?;
             }
             _ => return Ok(false),
         }

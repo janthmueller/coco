@@ -43,6 +43,14 @@ it concise, factual, and useful to the next maintainer.
 
 ## Current records
 
+- [`feature/jump-recency`](feature/jump-recency.md) - Native recent-first jump
+  selection, compact relative times and nonredundant branch details, without
+  changing status/list ordering or creating a local usage-history store.
+
+- [`feature/turn-control`](feature/turn-control.md) - Exact public send lookup,
+  separately granted strict/explicit best-effort interruption, durable one-shot
+  attempts, minimal receipts and a Palm handoff without Palm-specific execution.
+
 - [`feature/status-ordering`](feature/status-ordering.md) - Explicit multi-key
   status ordering/filters, cross-repository context selection, workspace-named
   branches and Codex 0.166.0 compatibility with reported USD usage.

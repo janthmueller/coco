@@ -21,9 +21,14 @@ mod clients_tests;
 mod doctor;
 mod hooks;
 mod signals;
+mod turns;
+pub(crate) use crate::domain::turns::{
+    TurnInterruptAttempt, TurnInterruptAttemptState, TurnInterruptMode, TurnTerminalStatus,
+};
 pub(crate) use doctor::*;
 pub(crate) use hooks::*;
 pub(crate) use signals::*;
+pub(crate) use turns::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DaemonMethod {
@@ -52,6 +57,8 @@ pub enum DaemonMethod {
     WorkspaceAttachRelease,
     TurnStart,
     TurnResult,
+    TurnGet,
+    TurnInterrupt,
     EventList,
     WorkspaceDiff,
     DecisionGet,
@@ -68,7 +75,7 @@ pub enum DaemonMethod {
 
 impl DaemonMethod {
     #[cfg(test)]
-    pub const ALL: [Self; 37] = [
+    pub const ALL: [Self; 39] = [
         Self::Health,
         Self::Doctor,
         Self::ModelList,
@@ -94,6 +101,8 @@ impl DaemonMethod {
         Self::WorkspaceAttachRelease,
         Self::TurnStart,
         Self::TurnResult,
+        Self::TurnGet,
+        Self::TurnInterrupt,
         Self::EventList,
         Self::WorkspaceDiff,
         Self::DecisionGet,
@@ -135,6 +144,8 @@ impl DaemonMethod {
             Self::WorkspaceAttachRelease => "workspace.attach.release",
             Self::TurnStart => "turn.start",
             Self::TurnResult => "turn.result",
+            Self::TurnGet => "turn.get",
+            Self::TurnInterrupt => "turn.interrupt",
             Self::EventList => "event.list",
             Self::WorkspaceDiff => "workspace.diff",
             Self::DecisionGet => "decision.get",
@@ -177,6 +188,8 @@ impl DaemonMethod {
             "workspace.attach.release" => Some(Self::WorkspaceAttachRelease),
             "turn.start" => Some(Self::TurnStart),
             "turn.result" => Some(Self::TurnResult),
+            "turn.get" => Some(Self::TurnGet),
+            "turn.interrupt" => Some(Self::TurnInterrupt),
             "event.list" => Some(Self::EventList),
             "workspace.diff" => Some(Self::WorkspaceDiff),
             "decision.get" => Some(Self::DecisionGet),
@@ -711,24 +724,6 @@ pub struct WorkspaceUsageItem {
     pub cost: WorkspaceCostEstimate,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum TurnTerminalStatus {
-    Completed,
-    Interrupted,
-    Failed,
-}
-
-impl TurnTerminalStatus {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Completed => "completed",
-            Self::Interrupted => "interrupted",
-            Self::Failed => "failed",
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "state",
@@ -1117,6 +1112,8 @@ mod tests {
                 "workspace.attach.release",
                 "turn.start",
                 "turn.result",
+                "turn.get",
+                "turn.interrupt",
                 "event.list",
                 "workspace.diff",
                 "decision.get",

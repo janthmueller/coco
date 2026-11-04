@@ -3,18 +3,35 @@ use rusqlite::Connection;
 use super::{SUPPORTED_SCHEMA_VERSION, StoreError};
 
 mod hooks;
+mod interrupt_attempts;
 mod repositories;
 mod resources;
 mod retirement;
 mod signals;
+mod turn_control;
 mod usage;
 
 pub(super) fn migrate(connection: &Connection) -> Result<(), StoreError> {
-    let mut version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if version > SUPPORTED_SCHEMA_VERSION {
         return Err(StoreError::UnsupportedSchema(version));
     }
     if version == SUPPORTED_SCHEMA_VERSION {
+        return Ok(());
+    }
+    if version < 16 {
+        migrate_before_turn_control(connection)?;
+        turn_control::migrate(connection)?;
+    }
+    interrupt_attempts::migrate(connection)
+}
+
+fn migrate_before_turn_control(connection: &Connection) -> Result<(), StoreError> {
+    let mut version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if version > SUPPORTED_SCHEMA_VERSION {
+        return Err(StoreError::UnsupportedSchema(version));
+    }
+    if version == 15 {
         return Ok(());
     }
     if version == 14 {

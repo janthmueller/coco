@@ -50,7 +50,11 @@ impl Store {
         Ok((operation, true))
     }
 
-    pub fn begin_operation_dispatch(&self, id: &str) -> Result<Operation, StoreError> {
+    pub fn begin_operation_dispatch(
+        &self,
+        id: &str,
+        thread_id: &str,
+    ) -> Result<Operation, StoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let operation = require_operation(&transaction, id)?;
@@ -63,9 +67,10 @@ impl Store {
         }
         let now = now_ms();
         transaction.execute(
-            "UPDATE operations SET state = 'dispatching', dispatch_started_at_ms = ?1
+            "UPDATE operations SET state = 'dispatching', dispatch_started_at_ms = ?1,
+                native_thread_id = ?3
              WHERE id = ?2 AND state = 'prepared'",
-            params![now, id],
+            params![now, id, thread_id],
         )?;
         let operation = require_operation(&transaction, id)?;
         transaction.commit()?;
@@ -87,7 +92,8 @@ impl Store {
         }
         transaction.execute(
             "UPDATE operations SET state = 'prepared', dispatch_started_at_ms = NULL,
-                result_recorded_at_ms = NULL WHERE id = ?1 AND state = 'dispatching'",
+                result_recorded_at_ms = NULL, native_thread_id = NULL
+             WHERE id = ?1 AND state = 'dispatching'",
             [id],
         )?;
         let operation = require_operation(&transaction, id)?;
@@ -304,7 +310,10 @@ fn get_operation_by_id(connection: &Connection, id: &str) -> Result<Option<Opera
         .map_err(StoreError::from)
 }
 
-fn require_operation(connection: &Connection, id: &str) -> Result<Operation, StoreError> {
+pub(super) fn require_operation(
+    connection: &Connection,
+    id: &str,
+) -> Result<Operation, StoreError> {
     get_operation_by_id(connection, id)?.ok_or_else(|| StoreError::NotFound {
         entity: "operation",
         id: id.to_owned(),

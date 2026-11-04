@@ -37,6 +37,10 @@ agents.
 - [MCP catalog and worker runtime boundary](mcp-runtime.md) - Separates CoCo's
   control MCP server from worker-facing MCP tools and records native Codex as
   the initial runtime with Agentgateway as a deferred optional adapter.
+- [Operation-scoped turn control](turn-control.md) - Defines exact send lookup,
+  durable technical receipts, bounded native recovery, repository isolation and
+  separately granted strict/best-effort interruption with one-shot durable
+  attempts, without conversation-history mirroring.
 - [Agent-emitted signals](signals.md) - Defines explicit opt-in publication,
   native thread attribution, validation, bounded retention, and independent replay.
 - [CoCo hooks and guards](hooks.md) - Separates native Codex lifecycle hooks

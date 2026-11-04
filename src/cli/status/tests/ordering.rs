@@ -133,6 +133,7 @@ fn model_uses_reported_identifiers_and_unknown_models_stay_last() {
         (2, "future-provider/model2"),
     ] {
         rows[index].workspace.thread_runtime = Some(ThreadRuntimeSnapshot {
+            recency_at_ms: None,
             status: CodexThreadStatus::Idle,
             model: Some(model.to_owned()),
             reasoning_effort: Some("custom-effort".to_owned()),

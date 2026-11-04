@@ -31,6 +31,9 @@ const HISTORY_COMMAND: &str = "sleep 1; printf coco-native-history";
 #[path = "support/codex_compat.rs"]
 mod codex_compat;
 
+#[path = "support/mcp_client.rs"]
+mod mcp_client;
+
 #[path = "real_codex_compat/mcp.rs"]
 mod mcp;
 
@@ -57,6 +60,9 @@ mod providers;
 
 #[path = "real_codex_compat/hooks.rs"]
 mod hooks;
+
+#[path = "real_codex_compat/turn_control.rs"]
+mod turn_control;
 
 struct TestPaths {
     home: PathBuf,
@@ -1290,7 +1296,7 @@ struct SelectedModel {
 
 fn select_default_model(response: &Value) -> Result<SelectedModel> {
     ensure!(
-        response["schemaVersion"] == 16,
+        response["schemaVersion"] == 17,
         "coco model list returned an unexpected schema version: {response}"
     );
     let models = response["models"]
@@ -1495,6 +1501,12 @@ fn assert_same_persisted_thread(first: &Value, passive: &Value, loaded: &Value) 
             "thread status was stale: {status}"
         );
         ensure!(
+            status["workspace"]["threadRuntime"]["recencyAtMs"]
+                .as_i64()
+                .is_some_and(|value| value >= 0 && value % 1_000 == 0),
+            "native recency was not projected as Unix milliseconds"
+        );
+        ensure!(
             status["workspace"]["activeTurnId"].is_null(),
             "compatibility smoke unexpectedly created a model turn: {status}"
         );
@@ -1510,6 +1522,13 @@ fn assert_same_persisted_thread(first: &Value, passive: &Value, loaded: &Value) 
             "status did not project Codex's current configured model: {status}"
         );
     }
+    ensure!(
+        first["workspace"]["threadRuntime"]["recencyAtMs"]
+            == passive["workspace"]["threadRuntime"]["recencyAtMs"]
+            && passive["workspace"]["threadRuntime"]["recencyAtMs"]
+                == loaded["workspace"]["threadRuntime"]["recencyAtMs"],
+        "passive inspection or quiet resume changed conversation recency"
+    );
     ensure!(
         first["workspace"]["threadRuntime"]["reasoningEffort"]
             .as_str()

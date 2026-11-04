@@ -179,9 +179,15 @@ Keep or merge commits that would lose their last branch or tag. For detached
 work, create a retaining branch or tag before closing. See
 [Review and clean up](../../guides/cleanup/) for retention and discard options.
 
-If another workspace or conversation depends on the thread, keep it with
-`--keep-thread` or finish the dependants first. For a prepared workspace
-that needs the context, start it first so its conversation can be copied.
+If another workspace or conversation depends on the thread, retain it with
+`coco delete <workspace> --keep-thread` or delete its dependent conversations
+first.
+
+Workspaces created with older CoCo versions may still be waiting to copy
+context from the source. If CoCo names a prepared workspace as a blocker,
+start or delete that workspace before retrying. `--keep-thread` does not
+remove a dependency on the workspace itself. New context copies are saved
+during `create` and need no first `send` or `jump` to capture them.
 
 If cleanup was interrupted, inspect the reported remaining resources and retry
 `delete`. If the workspace remains in `Deleting`, restart `cocod`

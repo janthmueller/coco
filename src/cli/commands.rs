@@ -18,8 +18,8 @@ use crate::protocol::{
 use crate::rpc::{RpcClient, RpcClientError};
 
 use super::args::{
-    Cli, CloseArgs, Command, CreateArgs, DeleteArgs, LimitField, LimitsCommand, LimitsSetArgs,
-    LimitsTargetArgs, McpCommand, ModelCommand, RepoCommand, StatusArgs,
+    Cli, CloseArgs, Command, CreateArgs, DeleteArgs, JumpArgs, JumpSort, LimitField, LimitsCommand,
+    LimitsSetArgs, LimitsTargetArgs, McpCommand, ModelCommand, RepoCommand, StatusArgs,
 };
 use super::decision::decide;
 use super::jump::jump;
@@ -42,6 +42,8 @@ mod resources_tests;
 #[cfg(test)]
 mod retirement_tests;
 use super::turn::wait_for_turn;
+
+mod jump_picker;
 
 pub(super) async fn run(cli: Cli) -> Result<()> {
     let mut interaction = TerminalInteraction::detect(cli.no_input);
@@ -109,7 +111,7 @@ async fn run_with_interaction(cli: Cli, interaction: &mut dyn Interaction) -> Re
         | Command::Reopen(_)
         | Command::Delete(_)
         | Command::Send { .. }
-        | Command::Jump { .. }
+        | Command::Jump(_)
         | Command::Diff { .. }) => {
             run_targeted_scoped(
                 command,
@@ -411,14 +413,14 @@ async fn run_targeted_scoped(
             )
             .await
         }
-        Command::Jump { workspace, .. } => {
+        Command::Jump(args) => {
             run_jump_scoped(
                 paths,
                 repository_path,
                 has_scope_path,
                 all_repos,
                 global,
-                workspace,
+                args,
                 interaction,
             )
             .await
@@ -518,12 +520,12 @@ async fn run_jump_scoped(
     has_scope_path: bool,
     all_repos: bool,
     global: bool,
-    workspace: Option<String>,
+    args: JumpArgs,
     interaction: &mut dyn Interaction,
 ) -> Result<()> {
     reject_all_repos_for_reference(all_repos, "jump")?;
-    let selection = workspace_selection(repository_path, has_scope_path, workspace, global);
-    run_jump(paths, selection, interaction).await
+    let selection = workspace_selection(repository_path, has_scope_path, args.workspace, global);
+    run_jump(paths, selection, args.sort, interaction).await
 }
 
 async fn run_diff_scoped(
@@ -786,6 +788,17 @@ async fn resolve_workspace_input_with_phases(
     phases: Option<Vec<String>>,
     interaction: &mut dyn Interaction,
 ) -> Result<ResolvedWorkspaceTarget> {
+    resolve_workspace_input_with_picker(paths, selection, title, phases, None, interaction).await
+}
+
+async fn resolve_workspace_input_with_picker(
+    paths: &CocoPaths,
+    selection: WorkspaceSelection,
+    title: &str,
+    phases: Option<Vec<String>>,
+    jump_sort: Option<JumpSort>,
+    interaction: &mut dyn Interaction,
+) -> Result<ResolvedWorkspaceTarget> {
     let WorkspaceSelection {
         repository_scope,
         has_explicit_path,
@@ -811,7 +824,7 @@ async fn resolve_workspace_input_with_phases(
             resolve_interactive_repository(paths, path, has_explicit_path, interaction).await?,
         )
     };
-    let workspaces = client
+    let mut workspaces = client
         .request(WorkspaceListParams {
             include_clients: false,
             scope,
@@ -828,10 +841,18 @@ async fn resolve_workspace_input_with_phases(
         };
         bail!("no workspaces are available {scope_hint}; create one with `coco create <NAME>`");
     }
-    let choices = workspaces
-        .iter()
-        .map(|workspace| workspace_choice(workspace, global))
-        .collect::<Vec<_>>();
+    let choices = match jump_sort {
+        Some(sort) => jump_picker::choices(
+            &mut workspaces,
+            sort,
+            global,
+            chrono::Utc::now().timestamp_millis(),
+        ),
+        None => workspaces
+            .iter()
+            .map(|workspace| workspace_choice(workspace, global))
+            .collect(),
+    };
     let selected = interaction.select(title, &choices)?;
     Ok(ResolvedWorkspaceTarget {
         scope: RepositoryScope::AllRepositories,
@@ -878,12 +899,14 @@ async fn run_mcp(command: McpCommand, paths: CocoPaths) -> Result<()> {
     let McpCommand::Serve {
         repository,
         allow_send,
+        allow_interrupt,
         allowed_signals,
         signal_catalog,
     } = command;
     crate::mcp::serve(
         repository,
         allow_send,
+        allow_interrupt,
         paths.socket_path,
         allowed_signals,
         signal_catalog,
@@ -1471,9 +1494,18 @@ async fn send(
 async fn run_jump(
     paths: &CocoPaths,
     selection: WorkspaceSelection,
+    sort: JumpSort,
     interaction: &mut dyn Interaction,
 ) -> Result<()> {
-    let target = resolve_workspace_input(paths, selection, "Open workspace", interaction).await?;
+    let target = resolve_workspace_input_with_picker(
+        paths,
+        selection,
+        "Open workspace · Last used",
+        None,
+        Some(sort),
+        interaction,
+    )
+    .await?;
     jump_to_workspace(paths, target.scope, target.workspace).await
 }
 

@@ -69,6 +69,7 @@ read-only tools:
 | `workspaces.list`   | List workspaces in the repository           |
 | `workspaces.status` | Show the current state of one workspace     |
 | `workspaces.diff`   | Show changes made by one workspace          |
+| `turns.get`         | Check the outcome of one specific send      |
 | `signals.types`     | Discover signal definitions and permissions |
 | `signals.list`      | Read retained updates from agents           |
 
@@ -95,6 +96,23 @@ Codex turn:
 This adds `workspaces.send`. Any connected host can then start the first or a
 later turn under that workspace's Codex permissions and account usage. Leave
 it disabled unless that is the access you intend to grant.
+
+## Track a specific send
+
+An application can supply an `operationId` to `workspaces.send`, then use
+`turns.get` with that same key and workspace to track its outcome, even if the
+start response was lost. A workspace becoming Ready alone does not tell you
+whether that send succeeded, failed, or was interrupted.
+
+Add `--allow-interrupt` to expose `turns.interrupt`. This permission is separate
+from `--allow-send`. Strict interruption is the default and remains unavailable
+with current Codex. A caller can explicitly choose `mode: "bestEffort"` to
+request a native interrupt, accepting that a concurrently started newer turn
+could be interrupted instead. Repeats inspect the saved attempt rather than
+sending again; only the original turn's `interrupted` outcome confirms its stop.
+
+See [Track a turn](../../reference/turns/) for exact inputs, responses,
+supported Codex version, and recovery guarantees.
 
 ## What this integration controls
 

@@ -1,0 +1,270 @@
+---
+title: Track a turn
+description: Track one send, explicitly request best-effort interruption, and handle uncertain outcomes.
+---
+
+Use these MCP tools when an application needs to find out what happened to a
+specific instruction, rather than whether its workspace is currently Ready.
+A turn is one execution started by sending an instruction to Codex.
+
+## Start and keep the operation ID
+
+Enable messages for one repository:
+
+```bash
+coco-mcp --repository /absolute/path/to/project --allow-send
+```
+
+Call `workspaces.send` with these arguments:
+
+```json
+{
+  "workspace": "fix/login",
+  "message": "Fix the redirect and run the tests.",
+  "operationId": "client-run-42"
+}
+```
+
+Generate a unique operation ID for each new instruction and save it before
+sending. IDs are unique across this CoCo installation, including repositories.
+An identical accepted retry returns the same turn; changing the workspace or
+message under an existing key fails with `IDEMPOTENCY_CONFLICT`.
+
+Keep the identities separate:
+
+| Field | Meaning |
+| --- | --- |
+| `operationId` | Your retry and lookup key, supplied to `workspaces.send` |
+| `workspaceId` | CoCo workspace ID; workspace names also work as tool inputs |
+| `codexThreadId` | The native Codex conversation used for this instruction |
+| `codexTurnId` | The native Codex execution within that conversation |
+| `turnId` in the send response | CoCo's internal correlation ID, not the lookup key |
+
+Every call is restricted to the MCP server's configured repository. Supplying
+a workspace UUID or operation ID from another repository does not grant access.
+
+## Check one instruction
+
+Call `turns.get` with exactly these arguments:
+
+```json
+{"workspace": "fix/login", "operationId": "client-run-42"}
+```
+
+Both fields are required. Extra arguments are rejected. A finished response in
+the MCP result's `structuredContent` looks like this:
+
+```json
+{
+  "workspaceId": "workspace-id",
+  "operationId": "client-run-42",
+  "codexThreadId": "native-thread-id",
+  "codexTurnId": "native-turn-id",
+  "dispatch": "accepted",
+  "state": "finished",
+  "outcome": "completed",
+  "outcomeObservedAtMs": 1793782800000,
+  "interruptRequestedAtMs": null,
+  "interruptAttempt": null,
+  "unavailableReason": null
+}
+```
+
+`dispatch` describes what is known about starting the instruction:
+
+| Value | Meaning |
+| --- | --- |
+| `prepared` | Intent is saved; no native start is outstanding |
+| `dispatching` | A start was dispatched, but acceptance is not yet confirmed |
+| `accepted` | Codex confirmed the exact native turn ID |
+| `uncertain` | Start confirmation was lost; the instruction may have started |
+
+`state` describes the execution evidence:
+
+| Value | Meaning |
+| --- | --- |
+| `notStarted` | Prepared, with no outstanding start |
+| `starting` | Waiting for confirmation of the native start |
+| `running` | The exact turn is observed in progress or is still tracked as in flight |
+| `finished` | A confirmed terminal `outcome` is available |
+| `unavailable` | There is insufficient evidence to report an execution outcome |
+
+Only `finished` has an `outcome`: `completed`, `failed`, or `interrupted`.
+`completed` means Codex finished its turn successfully. Your application still
+needs to check any requested tests, files, or other deliverables separately.
+Timestamps are Unix milliseconds when CoCo observed an outcome or recorded an
+interrupt attempt, not the native execution's exact start or finish time.
+
+For `unavailable`, `unavailableReason` explains the gap:
+
+| Reason | Meaning |
+| --- | --- |
+| `acceptanceUnconfirmed` | The start may have succeeded, but its native turn ID was not confirmed |
+| `legacyCorrelationMissing` | An older operation lacks a safely retained native thread binding |
+| `completionNotObserved` | Acceptance is known, but neither current running evidence nor a terminal outcome is available |
+| `nativeLookupFailed` | Codex could not supply the missing turn metadata |
+| `nativeHistoryUnavailable` | Safe metadata recovery is unavailable for this history format or Codex build |
+| `nativeLookupTimedOut` | The native lookup exceeded its two-second response budget |
+
+The lookup starts no model work and does not load the conversation transcript.
+It returns a technical outcome, not the assistant's answer text.
+
+## Request interruption
+
+Enable `turns.interrupt` with `--allow-interrupt`, independently of `--allow-send`:
+
+```bash
+coco-mcp --repository /absolute/path/to/project --allow-interrupt
+```
+
+The arguments are `workspace`, `operationId`, and optional `mode`. Extra
+arguments are rejected. Omit `mode` or set it to `"strict"` to require safe,
+exact-target cancellation. Current Codex `0.166.0` cannot provide that guarantee.
+An unfinished turn with no previous attempt returns this error without sending
+an interrupt or recording an attempt:
+
+```json
+{
+  "error": {
+    "code": "TURN_INTERRUPT_UNSUPPORTED",
+    "message": "the execution backend cannot guarantee atomic exact-turn interruption; no interrupt was sent"
+  }
+}
+```
+
+### Explicit best-effort mode
+
+To request Codex's native interrupt despite its targeting limitation, choose:
+
+```json
+{
+  "workspace": "fix/login",
+  "operationId": "client-run-42",
+  "mode": "bestEffort"
+}
+```
+
+Best-effort interruption is verified for Codex `0.166.0`. CoCo sends only the
+saved native thread and turn IDs. **If another client starts a new turn during
+the request, Codex may interrupt that newer turn instead.** Choose this mode
+only when you accept that risk. Do not start more work in that thread while
+the interruption remains unresolved; coordinate other clients too.
+
+A nonterminal acknowledged response has this shape in `structuredContent`:
+
+```json
+{
+  "turn": {
+    "workspaceId": "workspace-id",
+    "operationId": "client-run-42",
+    "codexThreadId": "native-thread-id",
+    "codexTurnId": "native-turn-id",
+    "dispatch": "accepted",
+    "state": "running",
+    "outcome": null,
+    "outcomeObservedAtMs": null,
+    "interruptRequestedAtMs": 1793782800000,
+    "interruptAttempt": {"mode": "bestEffort", "state": "requested"},
+    "unavailableReason": null
+  },
+  "interruption": "requested"
+}
+```
+
+An acknowledgement means requested, not stopped. If the original turn's
+terminal outcome is already known, the response can instead be `confirmed`
+or `alreadyFinished`. The `interruption` values are:
+
+| Value | Meaning |
+| --- | --- |
+| `requested` | Codex acknowledged the saved attempt; the original turn has no confirmed terminal outcome yet |
+| `uncertain` | A previous attempt may have been sent, but no acknowledgement or rejection is retained |
+| `rejected` | Codex explicitly rejected the saved target; no fallback was sent |
+| `confirmed` | This exact turn has a confirmed `interrupted` outcome |
+| `alreadyFinished` | This turn completed or failed before interruption was confirmed |
+| `notRequested` | There is no confirmed native target and no previous attempt; no interrupt was sent |
+
+Poll `turns.get` until `finished` to learn the original turn's actual outcome.
+Only its `interrupted` outcome confirms that it was interrupted. `completed`
+or `failed` remains its real outcome, even after an interrupt request. An
+interruption of another turn is never recorded as this operation's outcome.
+Neither Ready, an acknowledgement, nor a lost connection proves cancellation.
+An `interrupted` outcome does not undo files or other side effects and is not
+a guarantee that every spawned background process has stopped.
+
+### Inspect a saved attempt instead of sending again
+
+`turns.get` and `turns.interrupt` return `interruptAttempt` as null before any
+attempt. Afterwards it contains the saved `mode` and attempt `state`:
+
+| Attempt state | Meaning |
+| --- | --- |
+| `uncertain` | The attempt was recorded before dispatch; it may or may not have reached Codex |
+| `requested` | A native acknowledgement was received and saved |
+| `rejected` | A native rejection of the stored target was received and saved |
+
+`interruptRequestedAtMs` is the first attempt's recording time, not proof of
+delivery. A timeout or lost reply leaves it uncertain. The first failed call
+returns an error; an identical repeat returns the saved observation without
+another interrupt. Concurrent repeats and coordinator restarts do not grant
+another attempt. Changing the mode under an existing nonterminal attempt fails
+with `TURN_INTERRUPT_MODE_CONFLICT` rather than sending again.
+
+There is one automatic attempt per retained operation, not an exactly-once
+delivery guarantee. A crash after recording it but before dispatch can leave an
+uncertain attempt that was never sent. Polling never sends an interrupt, and
+this interface has no force-retry option.
+
+Execution and delivery remain separate: the original turn can be `finished`
+while its `interruptAttempt.state` is still `uncertain`. Do not infer that it
+is safe to start another turn in that thread solely from the first outcome.
+
+Already-confirmed terminal turns are no-ops in either mode. Missing or
+unconfirmed native IDs never fall back to the current turn, workspace closure,
+thread deletion or process termination.
+
+## Recover after a lost response or restart
+
+Look up the original operation ID after a lost start response. A saved native
+acceptance, terminal outcome or interrupt attempt remains available across coordinator restarts
+and response-cache eviction. Terminal outcomes already observed by CoCo can be
+returned even when Codex is unavailable. Closing a workspace retains them;
+deleting its CoCo workspace record removes them.
+
+If completion was missed, CoCo checks whether verified indexed turn metadata
+is available, currently for Codex `0.166.0` with paginated history. It never
+replays legacy conversation history to recover an outcome. Missing, legacy or
+unverified metadata can leave the outcome `unavailable`. Native inspection has
+a two-second response budget; a timeout remains unknown, not failed.
+CoCo does not guess success from Ready, absence of activity, or a lost connection.
+If execution updates cannot be reliably retained, the outcome stays
+`unavailable` until exact execution evidence can be recovered. This does not
+change an already-confirmed start into permission to send the instruction again.
+
+An `uncertain` start is never automatically sent again. Do not create a new
+operation ID just to bypass uncertainty: that could execute the instruction
+twice. If no safely confirmed native turn ID exists, interruption returns
+`notRequested`.
+
+Application failures use `isError: true` and
+`structuredContent.error: { "code": "…", "message": "…" }`.
+Malformed tool arguments or missing grants can instead be rejected as MCP
+protocol errors before dispatch.
+
+| Code | Action |
+| --- | --- |
+| `TURN_OPERATION_NOT_FOUND` | No retained operation matches this workspace and key; check both inputs |
+| `WORKSPACE_NOT_FOUND` | Check the workspace and the server's repository scope |
+| `INVALID_PARAMS` | Supply both fields and a nonempty operation ID of at most 256 bytes |
+| `TURN_INTERRUPT_UNSUPPORTED` | The backend does not support the requested mode; strict remains unavailable with current Codex |
+| `TURN_INTERRUPT_MODE_CONFLICT` | Inspect the saved attempt; a different mode cannot grant another interrupt |
+| `TURN_INTERRUPT_REJECTED` | Codex rejected the stored target; inspect its outcome, without retrying against the current turn |
+| `TURN_INTERRUPT_UNCERTAIN` | The native two-second reply budget expired; inspect the saved attempt, which is not automatically sent again |
+| `CODEX_ERROR` | Native interruption failed or its reply was lost; inspect the saved attempt and original outcome |
+| `DAEMON_UNAVAILABLE` | Restore the coordinator connection, then look up the same key |
+
+A missing operation is different from a retained operation with an unavailable
+outcome. Deleting the workspace or CoCo's saved data also removes attempt
+deduplication; a missing key cannot prove that no instruction or interrupt was
+sent. With no mutation grant,
+`turns.interrupt` is absent from the tool list and calls are rejected by MCP.

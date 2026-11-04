@@ -11,8 +11,11 @@ use crate::domain::{
 use crate::protocol::{TurnStartParams, TurnTerminalStatus, WorkspaceResult};
 use crate::store::{NewOperation, Operation, OperationKind, OperationState};
 
+mod control;
+mod pending;
 mod result;
 
+use pending::PendingTurnObservations;
 pub(super) use result::TurnResultRegistry;
 #[cfg(test)]
 pub(super) use result::{MAX_TURN_RESPONSE_BYTES, bounded_turn_response};
@@ -22,9 +25,11 @@ pub(super) struct RuntimeTurnOperation {
     pub(super) id: String,
     pub(super) operation_id: String,
     pub(super) workspace_id: String,
+    pub(super) native_thread_id: String,
     pub(super) native_result_id: Option<String>,
-    completed_before_response: Option<ObservedTurnCompletion>,
+    pending_observations: PendingTurnObservations,
     agent_output: Option<ObservedAgentOutput>,
+    pub(super) completion_tracking_lost: bool,
     pub(super) uncertain: bool,
 }
 
@@ -33,12 +38,6 @@ struct ObservedAgentOutput {
     native_turn_id: String,
     response: String,
     truncated: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ObservedTurnCompletion {
-    native_turn_id: String,
-    status: TurnTerminalStatus,
 }
 
 struct PreparedTurnTarget {
@@ -103,7 +102,9 @@ impl Coordinator {
             };
         }
 
-        let operation = self.store.begin_operation_dispatch(&operation.id)?;
+        let operation = self
+            .store
+            .begin_operation_dispatch(&operation.id, &thread_id)?;
         self.track_runtime_turn(&thread_id, &workspace.id, &operation);
         let additional_context = workspace_transition_context(&workspace);
         let started = self
@@ -141,7 +142,7 @@ impl Coordinator {
                     return Err(source);
                 }
             };
-        self.bind_runtime_turn_result(&thread_id, &operation.id, &started.id);
+        self.bind_runtime_turn_result(&thread_id, &operation.id, &started.id)?;
         Ok(operation_response(
             self.project_current_runtime_turn(workspace),
             &operation,
@@ -376,7 +377,7 @@ impl Coordinator {
             return workspace;
         };
         workspace.active_turn_id = Some(runtime.id);
-        if runtime.uncertain {
+        if runtime.uncertain || runtime.completion_tracking_lost {
             workspace.phase = WorkspacePhase::Unavailable;
             workspace.wait_reasons.clear();
         } else if workspace.thread_runtime.is_some() {
@@ -413,7 +414,11 @@ impl Coordinator {
             }
             return Err(CoordinatorError::InvalidWorkspaceState {
                 expected: "idle",
-                actual: WorkspacePhase::Active,
+                actual: if runtime.completion_tracking_lost {
+                    WorkspacePhase::Unavailable
+                } else {
+                    WorkspacePhase::Active
+                },
             });
         }
         if workspace.active_turn_id.is_some() {
@@ -436,9 +441,11 @@ impl Coordinator {
                     id: operation.id.clone(),
                     operation_id: operation.operation_id.clone(),
                     workspace_id: workspace_id.to_owned(),
+                    native_thread_id: thread_id.to_owned(),
                     native_result_id: operation.native_result_id.clone(),
-                    completed_before_response: None,
+                    pending_observations: PendingTurnObservations::default(),
                     agent_output: None,
+                    completion_tracking_lost: false,
                     uncertain: false,
                 },
             );

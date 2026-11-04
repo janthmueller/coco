@@ -103,13 +103,7 @@ pub(super) enum Command {
     },
     /// Open the workspace in the Codex terminal UI, creating fresh context on first action.
     /// Leaving with /quit or /exit does not cancel active work.
-    Jump {
-        /// Workspace name or ID. Omit it to choose interactively.
-        workspace: Option<String>,
-        /// Resolve or choose the workspace across every registered repository.
-        #[arg(long, short = 'g')]
-        global: bool,
-    },
+    Jump(JumpArgs),
     /// Answer a pending Codex approval or question.
     Decide {
         /// Decision ID shown by `coco status`.
@@ -169,7 +163,7 @@ impl Command {
             | Self::Reopen(_)
             | Self::Delete(_)
             | Self::Send { .. }
-            | Self::Jump { .. }
+            | Self::Jump(_)
             | Self::Decide { .. }
             | Self::Diff { .. }
             | Self::Mcp { .. }
@@ -182,9 +176,8 @@ impl Command {
             Self::Status(args) => args.global,
             Self::Limits { command } => command.global(),
             Self::Signal { command } => command.global(),
-            Self::Send { global, .. } | Self::Jump { global, .. } | Self::Diff { global, .. } => {
-                *global
-            }
+            Self::Send { global, .. } | Self::Diff { global, .. } => *global,
+            Self::Jump(args) => args.global,
             Self::Close(args) => args.global,
             Self::Reopen(args) => args.global,
             Self::Delete(args) => args.global,
@@ -199,6 +192,25 @@ impl Command {
             | Self::Hook { .. } => false,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+pub(super) enum JumpSort {
+    #[default]
+    Recent,
+    Name,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct JumpArgs {
+    /// Workspace name or ID. Omit it to choose interactively.
+    pub(super) workspace: Option<String>,
+    /// Resolve or choose the workspace across every registered repository.
+    #[arg(long, short = 'g')]
+    pub(super) global: bool,
+    /// Order the workspace picker by recent use or name.
+    #[arg(long, value_enum, default_value_t = JumpSort::Recent)]
+    pub(super) sort: JumpSort,
 }
 
 #[derive(Debug, Subcommand)]
@@ -617,6 +629,9 @@ pub(super) enum McpCommand {
         /// Advertise the mutating workspaces.send tool.
         #[arg(long)]
         allow_send: bool,
+        /// Expose turns.interrupt; clients can explicitly select bestEffort.
+        #[arg(long)]
+        allow_interrupt: bool,
         /// Grant NAME@VERSION; a bare NAME grants version 1. Repeat for each grant.
         #[arg(
             long = "allow-emit",

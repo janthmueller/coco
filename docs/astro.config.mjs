@@ -58,6 +58,7 @@ export default defineConfig({
           items: [
             { label: 'Command reference', slug: 'reference/cli' },
             { label: 'Automation reference', slug: 'reference/automation' },
+            { label: 'Track a turn', slug: 'reference/turns' },
             { label: 'Signal reference', slug: 'reference/signals' },
             { label: 'Resource accounting', slug: 'reference/resources' },
             {

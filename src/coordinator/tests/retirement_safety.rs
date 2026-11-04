@@ -149,6 +149,7 @@ async fn close_preserves_worktree_used_by_an_active_child_agent() {
     fixture.worker.set_descendants(parent_id, &["active-child"]);
     fixture.worker.remember_materialized_thread(NativeThread {
         id: "active-child".to_owned(),
+        recency_at_ms: None,
         cwd: workspace.worktree_path.clone().unwrap(),
         name: None,
         status: CodexThreadStatus::Active {
@@ -225,6 +226,7 @@ fn remember_child(
     fixture.worker.set_descendants(parent_id, &["child-thread"]);
     fixture.worker.remember_materialized_thread(NativeThread {
         id: "child-thread".to_owned(),
+        recency_at_ms: None,
         cwd,
         name: None,
         status,

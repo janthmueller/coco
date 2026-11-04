@@ -89,14 +89,18 @@ peer-response routing remain separate, unimplemented capabilities.
 - That observed protocol is version-specific. Narrow consumed fields and the
   real behavior test are authoritative; generated schemas remain an upgrade
   review aid and additive schema drift alone is not a compatibility failure.
-- Schema v15 retains schema v6's minimal turn-start operation ledger, schema
+- Schema v17 retains schema v6's minimal turn-start operation ledger, schema
   v7's typed worktree binding, and schema v8/v9's recoverable workspace
   retirement state and deletion intent. Schema v10 adds bounded signals and
   schema v11 adds the narrow durable hook outbox. Schema v12 adds open-delete
   origin and explicit commit-discard intent. Schema v13 adds revisioned
   workspace resource policies, schema v14 adds one compact native token-usage
   checkpoint per workspace, and schema v15 adds reversible repository
-  enrollment. It also retains the old
+  enrollment. Schema v16 adds exact native thread correlation and a minimal
+  terminal receipt/interrupt-attempt marker to the existing operation ledger.
+  Schema v17 retains one interrupt attempt's mode and reply state, allowing
+  explicit best-effort cancellation without automatic replay after uncertainty.
+  It also retains the old
   native-status columns, local turns, normalized events, completed messages,
   MCP audit events, and decisions as a reversible compatibility bridge. The
   retained shapes are not evidence of long-term CoCo ownership.
@@ -109,9 +113,10 @@ peer-response routing remain separate, unimplemented capabilities.
   stores sent prompt bodies, completed agent messages, status/plan/diff/error
   notifications, unsupported server requests, live decisions, local turn
   rows, `active_turn_id`, start/resume status snapshots, or turn
-  start/completion events. It retains only operation dispatch/idempotency
-  facts, provisioning evidence, and MCP audit records until their separate
-  removal gates pass.
+  start/completion events. Operation dispatch/idempotency correlation and
+  minimal terminal receipts support exact public turn lookup independently of
+  volatile answer text; provisioning evidence and MCP audit remain separate.
+  See [Operation-scoped turn control](../engineering/turn-control.md).
 - Codex 0.153.4 first established, and the 0.154.0 gate confirms, that a fresh
   persistent thread is not resumable merely because
   `thread/start` returned an ID. CoCo therefore prepares only Git state, binds
@@ -538,8 +543,8 @@ coco [<repository-path>] limits reset [<workspace>] [--json]
 coco limits reset [<workspace>] --global [--json]
 coco [<repository-path>] send [<workspace>] [<message>] [--wait]
 coco send [<workspace>] [<message>] --global [--wait]
-coco [<repository-path>] jump [<workspace>]
-coco jump [<workspace>] --global
+coco [<repository-path>] jump [<workspace>] [--sort recent|name]
+coco jump [<workspace>] --global [--sort recent|name]
 coco decide <decision-id> [--choice <number>]
 coco [<repository-path>] diff [<workspace>]
 coco diff [<workspace>] --global
@@ -891,7 +896,7 @@ automatically. No storage-schema migration is required for these descriptors.
   `thread/read`; do not resume a thread merely to list it. An unbound ready
   workspace projects `prepared`; a missing or invalid existing binding projects
   unavailable instead of falling back to stored status.
-- `--json` emits one schema-version-15 JSON document and no decorative stdout
+- `--json` emits one schema-version-17 JSON document and no decorative stdout
   text. Every row includes a compact repository identity.
 
 ### `coco status`
@@ -903,7 +908,7 @@ automatically. No storage-schema migration is required for these descriptors.
   broken, or slow tmux never blocks workspace control. Labels can become stale
   after pane/session changes until the next jump. Multiple clients coexist;
   release/expiry removes only its own presence. No metadata is durable.
-  Target/collection/tree/follow support this projection; schema-version-15
+  Target/collection/tree/follow support this projection; schema-version-17
   status JSON always includes structured `clients` (empty array if none).
 
 - With no workspace reference, return the same compact workspace collection as
@@ -1141,6 +1146,15 @@ automatically. No storage-schema migration is required for these descriptors.
 
 ### `coco jump`
 
+- The omitted-target picker defaults to descending native `recencyAt`, not
+  CoCo's general workspace mutation time. `--sort name` selects natural name
+  order. Global selection orders recency across repositories, then uses name,
+  repository path and workspace ID for ties. Missing dates come last and do
+  not borrow mutation/observation/creation timestamps. This policy is jump-only.
+- Dim right-aligned relative times are frozen when the choices are built,
+  omitted when unknown and hidden before shortening ordinary row content.
+  Show an actual branch only when it differs exactly from the workspace name;
+  retain detached and global repository details. Other pickers are unchanged.
 - Require the workspace's managed worktree. A human terminal may select an
   omitted workspace locally or with `--global`; deterministic callers must
   provide one.
@@ -1626,6 +1640,24 @@ The following are intentionally outside v0:
   `uncertain` operation that the same ID never redispatches. An accepted replay
   returns the same native turn ID, and a different payload under any existing
   operation ID returns `IDEMPOTENCY_CONFLICT`.
+- Public `turns.get` distinguishes dispatch certainty, exact execution evidence
+  and completed/failed/interrupted outcomes within repository/workspace scope.
+  Minimal observed receipts survive restart and answer-cache eviction, but not
+  workspace-record deletion. Missing evidence is never inferred success.
+  Separately opted-in `turns.interrupt` defaults to strict mode requiring
+  atomic native targeting. Explicit best-effort mode accepts that a native
+  check/queue race can interrupt a newer turn, using only saved nonempty IDs.
+  Codex 0.166.0's check followed by an untargeted queued interrupt does not
+  establish that guarantee. Current Codex therefore returns
+  `TURN_INTERRUPT_UNSUPPORTED` for a first strict attempt; terminal no-ops remain
+  available in either mode. Durable one-shot claims retain mode and
+  uncertain/requested/rejected attempt state. Repeats, mode changes and restart
+  never blindly authorize another native interrupt; only the original turn's
+  actual `interrupted` outcome confirms its stop. Native rejection does not
+  trigger a fallback, and unknown reply is not success. Palm scheduling stays
+  outside CoCo. Outcome recovery skips legacy/non-indexed history and applies a
+  two-second native-response budget. Exact recovered receipts release their
+  own guard while late bounded answer delivery remains independent.
 - Explicit `status --follow` can attach during a turn, reflects native phase
   and bounded activity changes until Ctrl-C, prints no user or assistant
   messages, and can detach without affecting the turn. Targetless follow observes a local or all-repository

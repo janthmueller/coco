@@ -5,7 +5,7 @@ description: Tracks integrated product work, verified release handoffs and the r
 tags: [work, branch, bootstrap, rust, mcp, architecture]
 status: active
 branch: main
-updated: 2026-11-03
+updated: 2026-11-05
 ---
 
 # main — repository foundation
@@ -16,6 +16,154 @@ Establish the repository, documentation workflow, and first executable and
 architectural baseline for CoCo.
 
 ## Active work
+
+### Local turn-control and jump-picker integration — 2026-11-05
+
+- User authorizes merging `feature/jump-recency` into local `main` only.
+  Both checkouts were clean; `main` at `fc5f7d6` is an ancestor of the feature
+  tip, with no diverged main commits or merge conflicts.
+- Integrate `eba9630` (durable operation-scoped turn tracking), `0946f64`
+  (explicit best-effort interruption and recovery hardening) and `ff44785`
+  (native recent-first jump selection and relative times). The picker branch
+  directly includes all turn-control/Palm work; nothing is cherry-picked away.
+- Preserve a merge checkpoint with the reviewed feature contents and these
+  internal integration notes. The Palm handoff now points to local main or
+  the known feature checkpoint rather than saying the slice is unmerged.
+- Verification: product sources, tests, public docs and build/dependency inputs
+  match reviewed `ff44785` exactly; only this record and the internal handoff
+  status differ. Reuse that slice's passing 670 library, six process, eleven
+  status-query, ten model-free native and three PTY scenarios, plus lint,
+  dependency and static docs checks. No inference or heavy rebuild is needed
+  for an identical product tree and internal notes alone.
+- Keep existing feature branches and other worktrees intact. No push, release,
+  deployment, installation or user daemon/workspace change is authorized.
+
+### Palm execution-boundary assessment — 2026-11-04
+
+- Historical assessment; the subsequent authorized implementation, reviews and
+  handoff are recorded in [`feature/turn-control`](feature/turn-control.md).
+- User supersedes the implementation request with discussion first: checkpoint
+  the finished docs, inspect Palm and assess whether/how the generic turn API
+  belongs in CoCo. No turn API, Palm adapter or publication is authorized yet.
+- Documentation checkpoint is `fc5f7d6` (`docs: clarify workspace lifecycle and
+  automation guides`), committed locally before the Palm review; no push.
+- Palm's main checkout has only an empty README. Read its actual implementation
+  in the existing `coco/init-palm` worktree at `4ed4632`, including its guidance,
+  domain/execution concepts, uncommitted CoCo integration proposal, provider
+  port, bootstrap, dispatch, cancellation and result-finalization paths. All
+  Palm files and existing edits were left untouched.
+- Verified fit: Palm owns Work/Run/Artifact semantics and already separates
+  uncertain execution and requested-versus-confirmed cancellation. Its provider
+  port expects start/get/lookup/cancel; only mock/manual are registered. CoCo
+  should expose generic exact-operation lifecycle/control, not adopt Palm's DAG,
+  scheduling, output validation or result selection.
+- CoCo evidence: caller-selected send IDs and accepted native-turn correlation
+  are durable; completion/output is a bounded generation-local cache. Existing
+  private `turn.result` accepts only an operation ID, so simply publishing it
+  would neither provide scoped ownership checks nor restart-safe completion.
+- Installed Codex remains 0.166.0. Official App Server docs and the previously
+  generated exact-version schema expose `turn/interrupt` with threadId/turnId
+  and paginated turn metadata with itemsView=notLoaded. Schema shape alone does
+  not prove late-interrupt race safety or exact historical outcome recovery.
+  No native process/model/interrupt test was run during this discussion review.
+- Recommended sequence, pending agreement: prove native stale-turn targeting
+  and bounded outcome lookup first; design repository/workspace/operation-bound
+  read and separately opted-in interrupt methods; reuse the operation ledger
+  and assess a minimal durable technical completion receipt, keeping response
+  text volatile and unknown outcomes explicit. Do not infer completion from idle
+  or fall back to interrupting whichever turn is current.
+- Palm follow-up remains a separate slice: initially dedicate an existing
+  workspace to one Run, reuse one frozen start key across retries and reconcile
+  execution independently of result proposals. Its current submit method
+  finalizes Run and Work immediately, so a real worker's early signal must not
+  be fed directly into it. The inspected proposal already identifies this gap.
+- Handoff: discuss these boundaries and the initial dedicated-workspace scope
+  with the user before implementation. This review only changes this working
+  record; the source/public docs remain at the local documentation checkpoint.
+
+### Public documentation corrections — 2026-11-04
+
+- User authorizes fixing the public-documentation review findings and its two
+  practical onboarding gaps. Keep this a documentation-only maintenance slice
+  on main; preserve prior review notes and make no commit, push or publication.
+- [x] Correct approval lookup, close/delete confirmation semantics, legacy-only
+  deferred-context advice and reported-versus-estimated cost wording.
+- [x] Put a self-contained local hook example before the webhook integration.
+- [x] Explain a safe review/commit/merge handoff before workspace cleanup.
+- [x] Verify examples without touching live workspaces, then run Astro checks,
+  the static export and internal page/fragment checks; record final results.
+- Corrected the quickstart, workspace guide, cleanup guide, hooks guide, CLI
+  reference and troubleshooting. Preserve supported-request fallbacks to jump,
+  real native thread dependencies and the distinction between scripts and
+  interactive discard consent. README and the site layout remain unchanged.
+- The local hook uses `tee` to save the latest `workspace.created` event before
+  introducing a signal/webhook integration. The example explains asynchronous
+  delivery and waits for history success before reading the output.
+- The Git handoff explicitly reviews tracked/staged changes, stages selected
+  files, commits only when needed, and fast-forwards into a clean integration
+  checkout. Diverged histories are left to the project's own workflow.
+- Verification: extracted both hook JSON examples into an owner-only temporary
+  configuration and validated it with installed CoCo 0.4.0. The local command
+  receives compact no-newline event JSON with only PATH inherited and correctly
+  saves/replaces the output. Sandbox child-pipe tests timed out; the same scoped
+  fixture passed with approved normal process execution. No timeout or product
+  behavior was changed.
+- Executed the exact documented Git handoff blocks, substituting only fixture
+  paths and the selected file, in an isolated temporary worktree/repository;
+  confirmed clean main, retained branch history and the expected merged file.
+  No live daemon, Codex inference, webhook request or user workspace was used.
+- Final Astro check: zero errors/warnings/hints. `/coco` static export: 17
+  pages, 62 files, Pagefind and public-boundary verification pass. All 433
+  checked page/fragment and README site targets resolve; `git diff --check`
+  passes. No Rust test run was needed for this documentation-only correction.
+- Complete and ready for user review; no commit, push, release or deployment.
+- Follow-up authorization: checkpoint these documentation corrections and the
+  preceding review records locally before inspecting Palm. No push or release
+  is requested; turn API implementation remains deferred for discussion.
+
+### Public documentation review — 2026-11-04
+
+- Reviewed README and all 17 public pages against the public/internal boundary,
+  current CLI help, status renderers, retirement confirmation code and context
+  capture/dependency tests. Review only; public content and product code stay
+  unchanged, with no commit, push, publication or live workspace action.
+- Findings: quickstart's collection `status -f` does not print the decision
+  command it promises; targeted status does. Close/delete prose needs to
+  distinguish interactive discard approval from noninteractive discard flags,
+  and must not promise separate prompts when deletion uses one combined question.
+- Prepared-context dependency advice remains valid for legacy records, but
+  should be qualified rather than suggesting newly created context copies
+  still wait for first send/jump. Preserve actual native thread-dependency
+  safety guidance.
+- CLI reference still describes all cost values as estimates, unlike the
+  resource reference's reported/estimated distinction. Align the explanation
+  without promising availability or introducing local pricing.
+- Editorial recommendations: keep the improved outcome-led README/overview;
+  offer a self-contained local hook example before the webhook setup and add
+  a short safe commit/merge handoff example to cleanup. No broad rewrite needed.
+- Verification: Astro check has zero errors, warnings or hints; `/coco` static
+  build succeeds; export verification passes 17 pages/62 files, Pagefind and
+  public-only routing checks. An additional read-only check finds no broken
+  page/fragment target across 426 local anchors and README site links. Installed
+  status/create/delete help was inspected. No native-model calls, destructive
+  commands or new Rust test run were used. Next action requires authorization
+  for the focused public-content corrections.
+
+### Cost-column availability review — 2026-11-03
+
+- Read-only review of the native cost request/decoder, coordinator cache,
+  status projection, formatter, existing tests and public usage guidance.
+- Confirmed against the selected 0.166.0 schema that per-thread billing is
+  optional. Available values prefer reported USD, estimated USD, then credits;
+  missing cost is not inferred from token counters or displayed as zero.
+- Queried the running 0.4.0 daemon without loading a thread or changing any
+  service/configuration. Only aggregate availability reasons were emitted:
+  missing costs were `notReported` or `noThread`, not `readFailed`.
+- The collection deliberately collapses these reasons to a dash; targeted
+  human status and JSON distinguish them. A null native result does not explain
+  which backend/account condition prevented billing attribution.
+- No product fix, new test run, commit or push in this review. Existing
+  formatter/decoder/cache tests were inspected, not re-executed.
 
 ### Status, workspace creation and Codex 0.166.0 release — 2026-11-03
 

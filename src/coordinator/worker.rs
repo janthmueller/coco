@@ -9,8 +9,17 @@ use crate::domain::runtime::{
     WorkspaceResourceCapabilities, WorkspaceResourceControllerStatus,
     WorkspaceResourcePolicySnapshot, WorkspaceRuntimeResources, WorkspaceRuntimeState,
 };
+use crate::domain::turns::TurnTerminalStatus;
 use crate::domain::usage::NativeThreadCostEstimate;
 use crate::domain::{CodexModel, CodexThreadStatus};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NativeTurnOutcome {
+    InProgress,
+    Finished(TurnTerminalStatus),
+    Unavailable,
+    HistoryUnavailable,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NativeAccountQuota {
@@ -75,6 +84,7 @@ pub(crate) struct WorkerExecutionEnvironment {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NativeThread {
     pub(crate) id: String,
+    pub(crate) recency_at_ms: Option<i64>,
     pub(crate) cwd: PathBuf,
     pub(crate) name: Option<String>,
     pub(crate) status: CodexThreadStatus,
@@ -109,6 +119,20 @@ pub(crate) enum WorkerError {
         "This conversation has older Codex history without a usable fork boundary. Finish a new turn in the source with current Codex, then retry"
     )]
     ContextBoundaryUnsupported,
+    #[error(
+        "the execution backend cannot guarantee atomic exact-turn interruption; no interrupt was sent"
+    )]
+    ExactInterruptUnsupported,
+    #[error(
+        "the execution backend does not support verified best-effort interruption; no interrupt was sent"
+    )]
+    BestEffortInterruptUnsupported,
+    #[error("Codex rejected the stored interrupt target; no fallback interrupt was sent")]
+    TurnInterruptRejected,
+    #[error(
+        "the interrupt reply timed out; its outcome is unknown; inspect the same operation before retrying"
+    )]
+    TurnInterruptTimedOut,
     #[error("Codex returned an invalid thread usage response: {0}")]
     InvalidThreadUsage(String),
     #[error("Codex returned an invalid account quota response: {0}")]
@@ -150,6 +174,40 @@ pub(crate) trait WorkerRuntime: Send + Sync + 'static {
     /// Returns the latest terminal native turn boundary without loading the
     /// source or exposing its conversation items to the coordinator.
     async fn last_completed_turn_id(&self, thread_id: &str) -> Result<Option<String>, WorkerError>;
+
+    /// Metadata-only lookup. Unavailable is not proof of absence. Do not scan
+    /// legacy transcripts: return HistoryUnavailable without a history read.
+    /// The application supplies the total native-response deadline.
+    async fn read_turn_outcome(
+        &self,
+        _thread_id: &str,
+        _turn_id: &str,
+    ) -> Result<NativeTurnOutcome, WorkerError> {
+        Ok(NativeTurnOutcome::Unavailable)
+    }
+
+    /// The native implementation must atomically target this exact turn;
+    /// checking and then interrupting the current turn is not equivalent.
+    fn supports_exact_turn_interrupt(&self) -> bool {
+        false
+    }
+
+    async fn interrupt_turn(&self, _thread_id: &str, _turn_id: &str) -> Result<(), WorkerError> {
+        Err(WorkerError::ExactInterruptUnsupported)
+    }
+
+    /// Best-effort support does NOT imply atomic exact-target cancellation.
+    fn supports_best_effort_turn_interrupt(&self) -> bool {
+        false
+    }
+
+    async fn interrupt_turn_best_effort(
+        &self,
+        _thread_id: &str,
+        _turn_id: &str,
+    ) -> Result<(), WorkerError> {
+        Err(WorkerError::BestEffortInterruptUnsupported)
+    }
 
     /// Reads an optional backend-owned billing estimate without loading the
     /// native thread or starting its workspace executor.

@@ -14,8 +14,56 @@ coco diff fix/login
 
 This shows tracked changes since the workspace's original base, including
 committed and uncommitted edits, and lists new untracked files. Large patches
-may be truncated with a notice. Use Git to review the complete changes,
-commit, and merge the branch.
+may be truncated with a notice.
+
+### Commit and bring changes back
+
+Wait until the agent is ready and leave its Codex UI before changing files.
+Find the checkout path and branch with:
+
+```bash
+coco status fix/login
+```
+
+In a separate shell, open that path and review the files and recent commits:
+
+```bash
+cd /absolute/path/to/worktree
+git status --short
+git log --oneline -5
+git diff
+git diff --cached
+```
+
+The agent may already have committed its work. If you still need to commit
+changes, stage only the files you intend to include and review the staged diff:
+
+```bash
+git add path/to/changed-file
+git diff --cached
+git commit -m "Fix the login redirect"
+```
+
+Run your project's checks before integrating the change. For a local merge,
+return to your original checkout and check that it has no uncommitted changes:
+
+```bash
+cd /absolute/path/to/project
+git status --short
+```
+
+Once it is clean, a fast-forward merge into `main` looks like this. Replace
+`main` with your integration branch and `fix/login` with the branch shown by
+CoCo:
+
+```bash
+git switch main
+git merge --ff-only fix/login
+```
+
+If the branches have diverged, use your project's normal merge, rebase, or
+pull-request workflow. Keep the workspace branch until its work is retained
+where you need it.
 
 ## Close work for later
 
@@ -27,9 +75,12 @@ coco close fix/login
 Closing frees the worktree and stops its execution processes. The branch
 and conversation remain available.
 
-Commit, stash, or move files you need before closing. Tracked changes,
-untracked files, and ignored files all prevent an ordinary close. CoCo also
-blocks close while work, a pending decision, an attached Codex UI, or
+Commit, stash, or move files you need before closing. If tracked, untracked,
+or ignored files remain, an interactive close lists them and asks whether to
+discard them. Press Enter to cancel and keep them. A clean close needs no
+confirmation.
+
+CoCo blocks close while work, a pending decision, an attached Codex UI, or
 background commands still use the workspace.
 
 Find and restore closed work:
@@ -73,12 +124,14 @@ The deletion plan lists local files and commits that would lose their last
 retaining branch, tag, or remote-tracking branch. Commit, move, or merge work
 you want to keep, or use `--keep-branch` to retain the branch's commits.
 
-In a terminal, CoCo asks separately before discarding files or unretained
-commits. If you explicitly want to discard files during close, use
-`coco close fix/login --discard-changes`.
+In a terminal, deletion uses one confirmation covering the whole plan,
+explicitly including any files or unretained commits it would discard.
+Press Enter to cancel. Interactive close also asks before discarding files.
 
 For scripts, `--yes` skips confirmation but never grants permission to
-discard files or commits. See the [lifecycle options](../../reference/cli/#close-reopen-and-delete)
+discard files or commits. Add `--discard-changes` for files and, on deletion,
+`--discard-unretained-commits` for commits only when you intend that loss.
+See the [lifecycle options](../../reference/cli/#close-reopen-and-delete)
 for explicit discard flags and conversation archiving.
 
 If cleanup is blocked or interrupted, follow

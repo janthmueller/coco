@@ -133,6 +133,7 @@ async fn forks_context_from_an_exact_native_thread_id_without_a_coco_workspace()
     fs::create_dir(&native_cwd).unwrap();
     fixture.worker.remember_native_thread(NativeThread {
         id: "native-thread-id".to_owned(),
+        recency_at_ms: None,
         cwd: native_cwd.clone(),
         name: Some("external".to_owned()),
         status: CodexThreadStatus::NotLoaded,
@@ -205,6 +206,7 @@ async fn explicit_context_prefixes_disambiguate_a_workspace_shaped_thread_id() {
     fs::create_dir(&native_cwd).unwrap();
     fixture.worker.remember_native_thread(NativeThread {
         id: source.name.clone(),
+        recency_at_ms: None,
         cwd: native_cwd.clone(),
         name: Some("external".to_owned()),
         status: CodexThreadStatus::NotLoaded,

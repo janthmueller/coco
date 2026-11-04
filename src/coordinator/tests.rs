@@ -46,6 +46,7 @@ mod guards;
 mod jump;
 mod operations;
 mod quota;
+mod recency;
 mod repositories;
 mod resources;
 mod retirement;
@@ -54,6 +55,7 @@ mod retirement_deletion;
 mod retirement_deletion_recovery;
 mod retirement_dependencies;
 mod retirement_safety;
+mod turn_control;
 mod usage;
 mod workspace;
 
@@ -144,6 +146,7 @@ enum WorkerCall {
 
 #[derive(Default)]
 struct FakeWorker {
+    turn_control: turn_control::WorkerState,
     calls: StdMutex<Vec<WorkerCall>>,
     native_threads: StdMutex<BTreeMap<String, NativeThread>>,
     context_boundaries: StdMutex<BTreeMap<String, Option<String>>>,
@@ -284,6 +287,7 @@ impl FakeWorker {
         let thread_id = workspace.codex_thread_id.clone().unwrap();
         self.remember_native_thread(NativeThread {
             id: thread_id.clone(),
+            recency_at_ms: None,
             cwd: workspace.worktree_path.clone().unwrap(),
             name: Some(workspace.name.clone()),
             status,
@@ -354,6 +358,34 @@ impl FakeWorker {
 
 #[async_trait]
 impl WorkerRuntime for FakeWorker {
+    fn supports_exact_turn_interrupt(&self) -> bool {
+        self.turn_control.supports_interrupt()
+    }
+
+    fn supports_best_effort_turn_interrupt(&self) -> bool {
+        self.turn_control.supports_best_effort()
+    }
+
+    async fn interrupt_turn_best_effort(
+        &self,
+        thread: &str,
+        turn: &str,
+    ) -> Result<(), WorkerError> {
+        self.turn_control.interrupt(thread, turn).await
+    }
+
+    async fn read_turn_outcome(
+        &self,
+        thread_id: &str,
+        turn_id: &str,
+    ) -> Result<NativeTurnOutcome, WorkerError> {
+        self.turn_control.read(thread_id, turn_id).await
+    }
+
+    async fn interrupt_turn(&self, thread_id: &str, turn_id: &str) -> Result<(), WorkerError> {
+        self.turn_control.interrupt(thread_id, turn_id).await
+    }
+
     async fn last_completed_turn_id(&self, thread_id: &str) -> Result<Option<String>, WorkerError> {
         Ok(self
             .context_boundaries
@@ -702,6 +734,7 @@ impl WorkerRuntime for FakeWorker {
         drop(calls);
         self.remember_native_thread(NativeThread {
             id: id.clone(),
+            recency_at_ms: None,
             cwd: cwd.to_owned(),
             name: Some(name.to_owned()),
             status: CodexThreadStatus::Idle,
@@ -756,6 +789,7 @@ impl WorkerRuntime for FakeWorker {
             .unwrap_or(CodexThreadStatus::Idle);
         self.remember_native_thread(NativeThread {
             id: resumed_thread_id.clone(),
+            recency_at_ms: None,
             cwd: resumed_cwd.clone(),
             name: None,
             status: resumed_status.clone(),
@@ -811,6 +845,7 @@ impl WorkerRuntime for FakeWorker {
         }
         self.remember_native_thread(NativeThread {
             id: id.clone(),
+            recency_at_ms: None,
             cwd: cwd.to_owned(),
             name: Some(name.to_owned()),
             status: CodexThreadStatus::Idle,
@@ -937,6 +972,14 @@ impl Fixture {
     }
 
     fn new_with_hooks(worker: FakeWorker, hooks: HookRegistry) -> Self {
+        Self::new_with_storage(worker, hooks, false)
+    }
+
+    fn new_persistent(worker: FakeWorker) -> Self {
+        Self::new_with_storage(worker, HookRegistry::empty(), true)
+    }
+
+    fn new_with_storage(worker: FakeWorker, hooks: HookRegistry, persistent: bool) -> Self {
         let temp = tempfile::tempdir().unwrap();
         let source = temp.path().join("source");
         run_git(
@@ -951,7 +994,11 @@ impl Fixture {
 
         let worktrees = temp.path().join("worktrees");
         let codex_home = temp.path().join("codex-home");
-        let store = Arc::new(Store::in_memory().unwrap());
+        let store = Arc::new(if persistent {
+            Store::open(temp.path().join("coordinator.db")).unwrap()
+        } else {
+            Store::in_memory().unwrap()
+        });
         let worker = Arc::new(worker);
         let coordinator = Coordinator::new(
             Arc::clone(&store),

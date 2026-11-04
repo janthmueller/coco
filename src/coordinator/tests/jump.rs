@@ -40,15 +40,17 @@ async fn adopts_only_the_exact_materialized_thread_from_a_fresh_jump() {
     ));
 
     let worktree = prepared.worktree_path.clone().unwrap();
-    fixture.worker.remember_native_thread(NativeThread {
+    let native_thread = NativeThread {
         id: "tui-thread".to_owned(),
+        recency_at_ms: None,
         cwd: worktree.clone(),
         name: None,
         status: CodexThreadStatus::Idle,
         model: None,
         reasoning_effort: None,
         forked_from_id: None,
-    });
+    };
+    fixture.worker.remember_native_thread(native_thread.clone());
     let params = WorkspaceAttachAdoptParams {
         workspace_id: prepared.id.clone(),
         lease_id: lease_id.clone(),
@@ -72,15 +74,7 @@ async fn adopts_only_the_exact_materialized_thread_from_a_fresh_jump() {
             .is_none()
     );
 
-    fixture.worker.remember_materialized_thread(NativeThread {
-        id: "tui-thread".to_owned(),
-        cwd: worktree,
-        name: None,
-        status: CodexThreadStatus::Idle,
-        model: None,
-        reasoning_effort: None,
-        forked_from_id: None,
-    });
+    fixture.worker.remember_materialized_thread(native_thread);
     let WorkspaceAttachAdoptResult::Bound { workspace } = fixture
         .coordinator
         .adopt_workspace_thread(params)
@@ -145,6 +139,7 @@ async fn slow_adoption_cannot_expire_its_own_valid_lease() {
     };
     fixture.worker.remember_materialized_thread(NativeThread {
         id: "slow-tui-thread".to_owned(),
+        recency_at_ms: None,
         cwd: prepared.worktree_path.clone().unwrap(),
         name: None,
         status: CodexThreadStatus::Idle,
@@ -214,6 +209,7 @@ async fn releasing_a_slow_adoption_does_not_cancel_its_durable_binding() {
     };
     fixture.worker.remember_materialized_thread(NativeThread {
         id: "released-slow-thread".to_owned(),
+        recency_at_ms: None,
         cwd: prepared.worktree_path.clone().unwrap(),
         name: None,
         status: CodexThreadStatus::Idle,

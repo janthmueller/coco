@@ -25,7 +25,7 @@ pub(super) use collections::{
     render_workspace_status_list_for_stdout,
 };
 
-const PUBLIC_SCHEMA_VERSION: u64 = 16;
+const PUBLIC_SCHEMA_VERSION: u64 = 17;
 
 pub(super) fn phase_label(phase: &str) -> &'static str {
     match phase {
@@ -923,6 +923,7 @@ mod tests {
                 lifecycle: WorkspaceLifecycle::Ready,
                 availability: WorkspaceAvailability::Open,
                 thread_runtime: Some(crate::domain::ThreadRuntimeSnapshot {
+                    recency_at_ms: None,
                     status: crate::domain::CodexThreadStatus::Active {
                         active_flags: Vec::new(),
                     },

@@ -859,6 +859,7 @@ mod tests {
     fn status_shows_native_model_and_effort_without_expanding_plain_list() {
         let mut workspace = workspace_item("repo", "project", "feat/login", WorkspacePhase::Idle);
         workspace.workspace.thread_runtime = Some(crate::domain::ThreadRuntimeSnapshot {
+            recency_at_ms: None,
             status: crate::domain::CodexThreadStatus::Idle,
             model: Some("gpt-5.6-sol".to_owned()),
             reasoning_effort: Some("max".to_owned()),

@@ -1172,6 +1172,7 @@ impl Coordinator {
             native.status,
             native.model,
             native.reasoning_effort,
+            native.recency_at_ms,
         )
     }
 
@@ -1180,7 +1181,7 @@ impl Coordinator {
         workspace: Workspace,
         status: crate::domain::CodexThreadStatus,
     ) -> Workspace {
-        self.project_native_thread_runtime_with_settings(workspace, status, None, None)
+        self.project_native_thread_runtime_with_settings(workspace, status, None, None, None)
     }
 
     fn project_native_thread_runtime_with_settings(
@@ -1189,6 +1190,7 @@ impl Coordinator {
         status: crate::domain::CodexThreadStatus,
         model: Option<String>,
         reasoning_effort: Option<String>,
+        recency_at_ms: Option<i64>,
     ) -> Workspace {
         let status = status.canonicalized();
         let runtime = self.runtime_turn_for_workspace(&workspace);
@@ -1206,6 +1208,7 @@ impl Coordinator {
         }
         workspace.thread_runtime = Some(ThreadRuntimeSnapshot {
             status,
+            recency_at_ms,
             model,
             reasoning_effort,
             runtime_generation: self.runtime_generation.clone(),
@@ -1222,7 +1225,7 @@ impl Coordinator {
             has_accepted_turn,
             workspace.codex_thread_id.is_some(),
         );
-        if runtime.is_some_and(|runtime| runtime.uncertain) {
+        if runtime.is_some_and(|runtime| runtime.uncertain || runtime.completion_tracking_lost) {
             workspace.phase = WorkspacePhase::Unavailable;
             workspace.wait_reasons.clear();
         }

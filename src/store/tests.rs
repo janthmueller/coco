@@ -1,8 +1,10 @@
 use serde_json::json;
 
 mod context_capture;
+mod interrupt_attempts;
 mod operations;
 mod retirement;
+mod turn_control;
 
 use super::*;
 use crate::domain::{
@@ -85,18 +87,15 @@ fn repository_unregistration_is_blocked_by_every_workspace_record() {
 
 #[test]
 fn migrates_v14_repositories_as_registered() {
-    let connection = Connection::open_in_memory().unwrap();
+    let store = Store::in_memory().unwrap();
+    let connection = store.lock().unwrap();
     connection
         .execute_batch(
-            "CREATE TABLE repositories (
-                id TEXT PRIMARY KEY,
-                root_path TEXT NOT NULL UNIQUE,
-                git_common_dir TEXT NOT NULL UNIQUE,
-                display_name TEXT NOT NULL,
-                is_linked_worktree INTEGER NOT NULL CHECK (is_linked_worktree IN (0, 1)),
-                created_at_ms INTEGER NOT NULL,
-                updated_at_ms INTEGER NOT NULL
-             );
+            "ALTER TABLE repositories DROP COLUMN is_registered;
+             ALTER TABLE operations DROP COLUMN native_thread_id;
+             ALTER TABLE operations DROP COLUMN terminal_status;
+             ALTER TABLE operations DROP COLUMN terminal_observed_at_ms;
+             ALTER TABLE operations DROP COLUMN interrupt_requested_at_ms;
              INSERT INTO repositories VALUES (
                 'repo-v14', '/tmp/v14', '/tmp/v14/.git', 'v14', 0, 1, 1
              );
@@ -104,14 +103,15 @@ fn migrates_v14_repositories_as_registered() {
         )
         .unwrap();
 
-    let store = Store::from_connection(connection).unwrap();
+    crate::store::migrations::migrate(&connection).unwrap();
+    drop(connection);
     assert_eq!(store.list_repositories().unwrap().len(), 1);
     let connection = store.lock().unwrap();
     assert_eq!(
         connection
             .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        15
+        17
     );
 }
 
@@ -387,7 +387,7 @@ fn migrates_v1_tasks_to_workspaces_without_losing_data() {
     let version: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 15);
+    assert_eq!(version, 17);
     assert_eq!(workspace.lifecycle, WorkspaceLifecycle::Ready);
     assert_eq!(workspace.phase, WorkspacePhase::Unavailable);
     assert_eq!(
@@ -873,7 +873,9 @@ fn operation_ledger_separates_intent_dispatch_and_proven_acceptance() {
     assert!(!inserted);
     assert_eq!(replayed, prepared);
 
-    let dispatching = store.begin_operation_dispatch(&prepared.id).unwrap();
+    let dispatching = store
+        .begin_operation_dispatch(&prepared.id, "thread-operations")
+        .unwrap();
     assert_eq!(dispatching.state, OperationState::Dispatching);
     assert!(dispatching.dispatch_started_at_ms.is_some());
     assert_eq!(store.mark_unconfirmed_operations_uncertain().unwrap(), 1);
@@ -935,7 +937,7 @@ fn migrates_v5_turn_idempotency_into_the_operation_ledger() {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 15);
+        assert_eq!(version, 17);
     }
 
     let operation = store
@@ -1041,7 +1043,9 @@ fn restart_reconciliation_marks_dispatch_uncertain_without_failing_the_workspace
             })
             .unwrap();
         assert!(inserted);
-        let operation = store.begin_operation_dispatch(&operation.id).unwrap();
+        let operation = store
+            .begin_operation_dispatch(&operation.id, "thread-restart")
+            .unwrap();
         workspace_id = workspace.id;
         operation_id = operation.id;
     }

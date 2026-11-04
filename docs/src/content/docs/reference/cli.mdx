@@ -213,7 +213,7 @@ In the forms below, `<WORKSPACE>` may be a repository-local name or full ID.
 | `coco limits set [WORKSPACE] [-g] [OPTIONS]`                        | Change selected workspace limits                |
 | `coco limits reset [WORKSPACE] [-g] [--json]`                       | Remove all configured workspace limits          |
 | `coco send [WORKSPACE] [MESSAGE] [-g] [--operation-id ID] [--wait]` | Choose a workspace and start its next turn      |
-| `coco jump [WORKSPACE] [-g]`                                        | Choose and open the workspace in the Codex TUI  |
+| `coco jump [WORKSPACE] [-g] [--sort recent\|name]`                  | Choose and open the workspace in the Codex TUI  |
 | `coco diff [WORKSPACE] [-g]`                                        | Choose or print its bounded change summary      |
 | `coco close [WORKSPACE] [-g] [-t] [-n] [-y]`                        | Remove a safe worktree and retain its workspace |
 | `coco reopen [WORKSPACE] [-g]`                                      | Restore a closed workspace                      |
@@ -227,6 +227,14 @@ response. `status --follow` watches until Ctrl+C and never prints conversation
 messages.
 `list` and `status` inspect without creating or loading conversation context;
 `send` and `jump` activate it when needed.
+
+The `jump` selector defaults to recently used conversations first, including
+across repositories with `-g`. Use `--sort name` for name order. Dim relative
+times show last use as reported by Codex, not time spent in the current state.
+Missing times are omitted and sort after known times; ties use workspace name
+and repository. Times and order stay fixed while choosing, and the time hides
+on narrow terminals. A branch is shown only when it differs from the workspace
+name; detached worktrees remain marked `detached`.
 
 `status` also shows the model currently configured for each Codex conversation,
 together with its reasoning effort when available, such as
@@ -352,9 +360,11 @@ context window. A saved value is marked `last seen` after a CoCo restart until
 Codex reports a newer value. A dash means CoCo has not observed that value; it
 does not mean zero.
 
-Cost appears only when Codex supplies a per-conversation estimate. CoCo shows
-USD when available and otherwise credits. This is an estimate rather than an
-invoice, and an unavailable cost never prevents token reporting.
+Cost appears only when Codex supplies it for the conversation. CoCo prefers
+reported USD, then estimated USD, then estimated credits. The detailed view
+labels the amount `reported` or `estimate`. A dash means unavailable, not zero;
+missing cost never prevents token reporting. See [Resource accounting](../resources/#cost)
+for interpretation; these values are not an invoice.
 
 `status --usage` only inspects saved and currently available Codex data; it
 does not start a prepared workspace or load an unloaded conversation. Add
@@ -444,11 +454,12 @@ coco [REPOSITORY_PATH] delete [WORKSPACE]
 ```
 
 `close` stops workspace execution and removes the managed worktree while
-retaining the workspace record, branch, and thread. `-t` also archives the
-thread until `reopen`. Uncommitted state belongs to the removed worktree, not
-the retained branch. Local tracked, untracked, or ignored files therefore require
-`--discard-changes`; without `-y`, CoCo asks before discarding them. `--yes`
-never implies `--discard-changes`.
+retaining the workspace, branch, and thread. `-t` also archives the thread
+until `reopen`. Commit, stash, or move files you need first: removing the
+worktree also removes its uncommitted state. In a terminal, `close` asks before
+discarding tracked, untracked, or ignored files. A clean close proceeds without
+confirmation. For non-interactive close with local files, explicitly pass
+`--discard-changes --yes`; `--yes` alone never permits that loss.
 
 `reopen` restores the retained checkout and conversation. Continue with `send`
 or `jump`.
@@ -458,10 +469,12 @@ workspace, Codex conversation, and branch created by CoCo. `--keep-thread` and
 `--keep-branch` retain the selected resources and print their IDs or names.
 Branches adopted with `--checkout` are always retained.
 
-Local files require explicit discard approval; commits that would lose their
-last retaining branch or tag require a separate approval. In scripts, use
-`--discard-changes` and/or `--discard-unretained-commits` for the loss you intend. `--yes`
-skips confirmation but grants neither discard policy. The earlier delete
+Interactive deletion prints the plan and asks once to confirm it, explicitly
+including any files or unretained commits it would discard. Commits need
+discard permission when deletion removes their last branch, tag, or
+remote-tracking reference. In scripts, use `--discard-changes` and/or
+`--discard-unretained-commits` for the loss you intend. `--yes` skips confirmation
+but grants neither discard permission. The earlier delete
 options `-t`/`--delete-thread` and `-b`/`--delete-branch` have been removed;
 review existing scripts before using the new defaults.
 
@@ -472,8 +485,11 @@ Both destructive commands support a checked `--dry-run`. No close or delete
 command accepts `--all-repos`.
 
 Closing also checks agents and background terminals using the worktree.
-Deletion stops if a prepared workspace still needs the selected workspace as
-its context source. Changes to the previewed plan require a new review.
+Deleting a thread is blocked while other conversations depend on it; use
+`--keep-thread` to retain it. An older prepared workspace may still need its
+source before its context has been copied. Start or delete that dependent
+workspace first. New context copies are saved during `create`.
+Changes to the previewed plan require a new review.
 
 ## Answer a request
 
@@ -482,7 +498,8 @@ coco decide <DECISION_ID> [--choice <NUMBER>]
 ```
 
 When CoCo can present a pending request to run a command, send terminal input,
-change files, or answer a question, `status` prints its decision ID. `decide`
+change files, or answer a question, `coco status <workspace>` prints its decision
+ID and command. The collection overview shows the state, not decision IDs. `decide`
 uses the interactive selector and may accept text for an ordinary question.
 For scripts, `--choice` submits one displayed approval option by its one-based
 number; structured questions still require interactive input. Secret answers
@@ -511,7 +528,7 @@ coco limits show feat/first --json
 ```
 
 These commands emit one JSON value to standard output. Human-oriented follow
-mode is intentionally excluded. The current top-level schema version is `16`.
+mode is intentionally excluded. The current top-level schema version is `17`.
 Status JSON always includes a `clients` array. Each entry has a temporary
 `id` and `metadata.kind`, plus optional `metadata.integration` with `kind`,
 an opaque `scope`, a `locator`, and an optional readable `label`. An empty
@@ -527,6 +544,8 @@ restart.
 When Codex reports them, `workspace.threadRuntime` includes the current
 configured `model` and `reasoningEffort`. They are omitted when no native
 conversation value is available.
+It also includes `recencyAtMs` when Codex reports a usable last-use timestamp.
+This is Unix time in milliseconds, independent of the status observation time.
 
 With `--usage`, status JSON adds a nested `usage` object containing the complete
 native token breakdown, its observation and freshness fields, and available
@@ -544,12 +563,18 @@ printed unchanged so they remain safe to redirect.
 ## MCP commands
 
 ```text
-coco mcp serve --repository <PATH> [--allow-send] [--signal-catalog <DIR>] [--allow-emit <SIGNAL>]...
-coco-mcp --repository <PATH> [--allow-send] [--signal-catalog <DIR>] [--allow-emit <SIGNAL>]...
+coco mcp serve --repository <PATH> [--allow-send] [--allow-interrupt] [--signal-catalog <DIR>] [--allow-emit <SIGNAL>]...
+coco-mcp --repository <PATH> [--allow-send] [--allow-interrupt] [--signal-catalog <DIR>] [--allow-emit <SIGNAL>]...
 ```
 
 Both forms expose the same repository-scoped standard input/output server.
 See [Use CoCo through MCP](../../guides/mcp/) before enabling `--allow-send`.
+`turns.get` is read-only and available by default. Independently,
+`--allow-interrupt` exposes `turns.interrupt`. Its default strict mode remains
+unsupported with current Codex. Callers may explicitly select `bestEffort`,
+accepting that native cancellation can hit a concurrently started newer turn.
+Repeated calls do not automatically send another interrupt. See
+[Track a turn](../turns/) for the contract and limitations.
 `--allow-emit NAME@VERSION` grants only that signal version; a bare name grants
 version `1`. It requires `--signal-catalog DIR` and a matching
 `NAME@VERSION.json` schema file. The directory is read at MCP startup; files

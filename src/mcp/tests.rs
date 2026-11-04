@@ -5,20 +5,20 @@ use super::*;
 use crate::protocol::DaemonMethod;
 
 #[derive(Clone, Default)]
-struct RecordingDaemon {
+pub(super) struct RecordingDaemon {
     calls: Arc<Mutex<Vec<(String, Value)>>>,
     failures: Arc<Mutex<HashMap<String, DaemonFailure>>>,
 }
 
 impl RecordingDaemon {
-    fn fail(&self, method: &str, error: DaemonFailure) {
+    pub(super) fn fail(&self, method: &str, error: DaemonFailure) {
         self.failures
             .lock()
             .unwrap()
             .insert(method.to_owned(), error);
     }
 
-    fn calls(&self) -> Vec<(String, Value)> {
+    pub(super) fn calls(&self) -> Vec<(String, Value)> {
         self.calls.lock().unwrap().clone()
     }
 }
@@ -120,6 +120,10 @@ fn fake_response(method: DaemonMethod) -> Value {
             "state": "pending",
             "codexTurnId": "codex-turn-test",
         }),
+        DaemonMethod::TurnGet => fake_turn_observation(),
+        DaemonMethod::TurnInterrupt => {
+            json!({"turn": fake_turn_observation(), "interruption": "requested"})
+        }
         DaemonMethod::EventList => json!({
             "workspace": fake_workspace(),
             "events": [],
@@ -132,7 +136,12 @@ fn fake_response(method: DaemonMethod) -> Value {
             "untrackedPaths": [],
         }),
         DaemonMethod::DecisionGet | DaemonMethod::DecisionRespond => json!(null),
-        DaemonMethod::AuditRecord => json!({
+        DaemonMethod::AuditRecord => fake_audit(),
+    }
+}
+
+fn fake_audit() -> Value {
+    json!({
             "sequence": 1,
             "id": "audit-test",
             "source": "mcp",
@@ -142,8 +151,17 @@ fn fake_response(method: DaemonMethod) -> Value {
             "outcome": "succeeded",
             "details": {},
             "occurredAtMs": 1,
-        }),
-    }
+    })
+}
+
+fn fake_turn_observation() -> Value {
+    json!({
+        "workspaceId": "workspace-test", "operationId": "operation-test",
+        "codexThreadId": "thread-test", "codexTurnId": "codex-turn-test",
+        "dispatch": "accepted", "state": "running", "outcome": null,
+        "outcomeObservedAtMs": null, "interruptRequestedAtMs": null,
+        "unavailableReason": null
+    })
 }
 
 fn fake_usage_response() -> Value {
@@ -242,8 +260,8 @@ fn fake_retirement_plan() -> Value {
 #[test]
 fn workspaces_send_is_only_exposed_when_enabled() {
     let socket = PathBuf::from("/tmp/cocod-test.sock");
-    let read_only = McpServer::new(PathBuf::from("/repo"), false, socket.clone(), vec![]);
-    let writable = McpServer::new(PathBuf::from("/repo"), true, socket, vec![]);
+    let read_only = McpServer::new(PathBuf::from("/repo"), false, false, socket.clone(), vec![]);
+    let writable = McpServer::new(PathBuf::from("/repo"), true, false, socket, vec![]);
 
     let read_only_names: Vec<_> = read_only
         .tool_router
@@ -256,6 +274,7 @@ fn workspaces_send_is_only_exposed_when_enabled() {
         vec![
             "signals.list",
             "signals.types",
+            "turns.get",
             WORKSPACES_DIFF,
             WORKSPACES_LIST,
             WORKSPACES_STATUS
@@ -276,6 +295,7 @@ fn workspaces_send_is_only_exposed_when_enabled() {
         vec![
             "signals.list",
             "signals.types",
+            "turns.get",
             WORKSPACES_DIFF,
             WORKSPACES_LIST,
             WORKSPACES_SEND,

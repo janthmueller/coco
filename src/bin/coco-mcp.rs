@@ -12,6 +12,9 @@ struct Args {
     /// Advertise the mutating workspaces.send tool.
     #[arg(long)]
     allow_send: bool,
+    /// Expose turns.interrupt; clients can explicitly select bestEffort.
+    #[arg(long)]
+    allow_interrupt: bool,
     /// Grant NAME@VERSION; a bare NAME grants version 1. Repeat for each grant.
     #[arg(
         long = "allow-emit",
@@ -36,6 +39,7 @@ async fn main() -> anyhow::Result<()> {
     coco::run_mcp_from_env(
         args.repository,
         args.allow_send,
+        args.allow_interrupt,
         args.allowed_signals,
         args.signal_catalog,
     )

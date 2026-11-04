@@ -20,6 +20,7 @@ const MIN_LABEL_WITH_DEFAULT: usize = 4;
 pub(super) struct Choice {
     pub(super) label: String,
     pub(super) detail: Option<String>,
+    pub(super) trailing_detail: Option<String>,
     pub(super) is_default: bool,
 }
 
@@ -28,12 +29,18 @@ impl Choice {
         Self {
             label: label.into(),
             detail,
+            trailing_detail: None,
             is_default: false,
         }
     }
 
     pub(super) fn with_default_marker(mut self) -> Self {
         self.is_default = true;
+        self
+    }
+
+    pub(super) fn with_trailing_detail(mut self, detail: Option<String>) -> Self {
+        self.trailing_detail = detail;
         self
     }
 }
@@ -381,6 +388,17 @@ fn picker_row(
     let prefix = truncate_line(&format!("{marker} {:>2}  ", index + 1), width);
     let available = width.saturating_sub(prefix.width());
     let label = single_line(&choice.label);
+    let trailing = choice
+        .trailing_detail
+        .as_deref()
+        .map(|text| single_line(text).trim().to_owned())
+        .filter(|text| !text.is_empty())
+        .filter(|text| {
+            // Optional time yields before any primary or existing detail text.
+            label.width() + picker_detail(choice, usize::MAX).width() + 2 + text.width()
+                <= available
+        });
+    let available = available.saturating_sub(trailing.as_ref().map_or(0, |text| text.width() + 2));
     let default_width = DEFAULT_DETAIL.width();
     let label_width =
         if choice.is_default && available >= default_width.saturating_add(MIN_LABEL_WITH_DEFAULT) {
@@ -394,9 +412,20 @@ fn picker_row(
     let primary = if selected {
         palette.paint(Tone::CyanBold, format!("{prefix}{label}"))
     } else {
-        format!("{}{}", palette.paint(Tone::Dim, prefix), label,)
+        format!("{}{}", palette.paint(Tone::Dim, &prefix), label,)
     };
-    format!("{primary}{}", palette.paint(Tone::Dim, detail))
+    let secondary = palette.paint(Tone::Dim, &detail);
+    match trailing {
+        Some(trailing) => {
+            let padding = width
+                .saturating_sub(prefix.width() + label.width() + detail.width() + trailing.width());
+            format!(
+                "{primary}{secondary}{}",
+                palette.paint(Tone::Dim, format!("{}{trailing}", " ".repeat(padding)))
+            )
+        }
+        None => format!("{primary}{secondary}"),
+    }
 }
 
 fn picker_detail(choice: &Choice, width: usize) -> String {

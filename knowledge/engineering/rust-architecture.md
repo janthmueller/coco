@@ -81,6 +81,31 @@ leaks above remain as the historical pre-refactor baseline.
 
 ## Target dependency direction
 
+Jump picker policy lives in the private `cli/commands/jump_picker` child.
+Native optional recency crosses the worker port and typed runtime projection,
+without history/storage coupling. The prompt adapter owns an optional dim
+trailing field and responsive layout; sorting freezes before input starts.
+The natural text comparator is shared only within CLI, not exposed as an SDK.
+Focused children separate selection/RPC, ordering, native decoding and terminal
+rendering proofs. No crate or domain-to-presentation dependency is introduced.
+
+The operation-scoped turn-control slice preserves these boundaries: terminal
+values live in `domain/turns.rs`, wire DTOs in `protocol/turns.rs`, application
+policy in `coordinator/turn/control.rs`, native pagination in
+`daemon/worker/turn_control.rs`, and narrow receipts/migration in Store children.
+`mcp/turns.rs` only supplies fixed repository scope and dispatches typed calls.
+Private test children separate inspection, interruption and recovery fixtures;
+the new native proof is a child of the existing compatibility target. No crate
+split or Rust SDK visibility expansion is introduced.
+
+Interruption-mode orchestration lives in `coordinator/turn/control/interrupt.rs`;
+domain enums and the typed protocol remain independent of MCP. A custom schema
+at the MCP edge describes the same enum without adding an MCP dependency to
+domain types. The Store's schema-v17 attempt migration and atomic claim/reply
+methods reuse the existing operation row. Best-effort and exact-target worker
+capabilities are deliberately separate. Focused tests keep race/recovery
+scenarios in private children rather than expanding shared fixtures.
+
 ```text
 domain <---------------- store
    ^  <---------------- git

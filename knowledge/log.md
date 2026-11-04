@@ -8,6 +8,56 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-11-05
+
+- **Recent-first jump selection**: Reuse optional native Codex recency in
+  passive summaries, sort jump choices across repository boundaries, and add
+  name-order override. Show frozen dim relative times and exceptional branch
+  details; preserve other pickers and status/list views. Public JSON version
+  17 exposes optional `threadRuntime.recencyAtMs`; SQLite is unchanged.
+
+## 2026-11-04
+
+- **Delayed terminal receipts**: Reuse accepted native thread/turn correlation
+  when completion notifications arrive after runtime/answer-cache loss. Keep
+  newer guards and existing pre-ack conflict handling intact; never infer
+  acceptance from an uncorrelated event. Add real DB-reopen, exact-pair and
+  guard-preservation regressions without schema or native-history changes.
+
+- **Explicit best-effort interruption**: Revise the atomic-only policy at the
+  user's request. Keep strict as default/unsupported on native Codex 0.166.0;
+  explicitly selected best-effort uses the regular native interrupt with its
+  known wrong-newer-turn race. Schema 17 claims one durable mode-bound attempt
+  before dispatch and records acknowledgement/rejection separately from exact
+  execution receipts. Replays/restart do not grant another send. Document
+  residual risk and Palm-owned scheduling, with isolated race/reopen proofs.
+
+- **Pre-confirmation turn evidence**: Keep bounded early completion/output
+  candidates by exact native turn ID until start confirmation, including after
+  old response-cache eviction. Overflow or conflicting evidence cannot justify
+  a running state; exact native evidence repairs uncertainty. Add permanent
+  event-order, cache-eviction, bounds and acceptance/binding race regressions.
+
+- **Turn-control review hardening**: Withdraw the incorrect atomic-interrupt
+  claim for Codex 0.166.0 after exact-source review; capability-gate mutation
+  and reject current native interruption without a request or marker. Preflight
+  indexed history instead of replaying legacy transcripts, bound native waits,
+  reconcile exact recovered execution guards and keep late bounded output
+  separate. Add permanent race/timeout/history-mode regressions and correct
+  public contracts plus the Palm handoff. Fully cancellable native execution
+  remains unavailable pending an upstream-safe primitive.
+
+- **Exact turn control**: Add generic repository/workspace/operation-scoped
+  `turns.get` and separately granted `turns.interrupt`. Reuse send idempotency,
+  snapshot exact native IDs and retain minimal confirmed terminal receipts in
+  migration 16, independently of volatile response text. Define explicit
+  uncertain/unavailable outcomes, bounded item-free native recovery, deletion
+  boundaries and explicit backend limitations. A model-free
+  real Codex 0.166.0 stale-ID/restart proof checks static targeting, not atomic
+  safety; the review correction above supersedes the earlier inference. Isolated
+  tests cover lifecycle races, grants and repository isolation. Palm owns its
+  independent provider adapter and domain result handling.
+
 ## 2026-11-03
 
 - **Normal release 0.4.0**: Integrate verified status/creation and Codex 0.166.0

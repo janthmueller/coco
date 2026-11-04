@@ -102,8 +102,9 @@ status: draft
 - Native values may be cached in memory for projection, but a persisted copy
   must not become an independent source of truth. Decision projection and the
   active-send output correlation and concurrency guard are generation-local.
-  The operation ledger retains only dispatch/idempotency facts that Codex
-  cannot reconstruct; no Codex conversation text is persisted by CoCo.
+  The operation ledger retains dispatch/idempotency correlation and minimal
+  exact terminal receipts for public turn control; no Codex conversation text
+  is persisted by CoCo. See [Operation-scoped turn control](turn-control.md).
 - Account quota is a global native projection read through the shared control
   App Server. It is cached only briefly in memory, appears once beside scoped
   workspace status when requested, and never becomes repository or workspace
@@ -353,6 +354,18 @@ results within an 8 MiB total response budget for the current daemon
 generation. This avoids both unbounded native history reads and persisted
 copies of Codex output.
 
+`turns.get` separately answers an exact caller operation using a durable
+technical receipt or bounded item-free native metadata. It does not use the
+answer cache. Recovery preflights verified indexed history and has a native
+response deadline; legacy transcripts are not scanned. `turns.interrupt` is
+separately granted. Default/explicit strict mode still requires atomic native
+targeting and remains unsupported on current Codex. Explicit best-effort mode
+accepts the native targeting race. One durable attempt per operation prevents
+replay/restart from silently re-sending; request acknowledgement and exact
+terminal outcome remain separate.
+See [Operation-scoped turn control](turn-control.md) for restart, scope,
+version-verification and uncertainty guarantees.
+
 Methods for the handed-off commands are:
 
 | Daemon method | CLI | MCP tool |
@@ -376,6 +389,8 @@ Methods for the handed-off commands are:
 | `workspace.attach.release` | release only this TUI client's lease | not exposed in v0 |
 | `turn.start` | `coco send` | `workspaces.send` when explicitly enabled |
 | `turn.result` | `coco send --wait` polling | not exposed in v0 |
+| `turn.get` | no new CLI command | `turns.get` |
+| `turn.interrupt` | no new CLI command | `turns.interrupt` with `--allow-interrupt`; default strict or explicit best-effort |
 | `event.list` | compatibility method with no current CLI consumer | not exposed in v0 |
 | `workspace.diff` | `coco diff` | `workspaces.diff` |
 | `decision.get` | request lookup for `coco decide <decision-id>` | not exposed in v0 |
@@ -761,6 +776,10 @@ Git state and model context remain independent dimensions.
 | `kind` | currently only `turn_start` |
 | `request_fingerprint` | unique one-way hash of operation/workspace/message; prompt text is never retained |
 | `native_result_id` | unique Codex turn ID, present only after proven acceptance |
+| `native_thread_id` | exact thread snapshot committed at dispatch; nullable for pre-v16 records |
+| `terminal_status`, `terminal_observed_at_ms` | minimal confirmed outcome and its first CoCo observation, independent of the volatile answer cache |
+| `interrupt_requested_at_ms` | first attempt time; not proof of native acknowledgement or termination |
+| `interrupt_mode`, `interrupt_state` | schema v17 one-shot strict/best-effort attempt and uncertain/requested/rejected reply observation; no automatic redispatch |
 | `state` | `prepared`, `dispatching`, `accepted`, or `uncertain` |
 | `created_at_ms`, `dispatch_started_at_ms`, `result_recorded_at_ms` | state-machine timestamps |
 
@@ -1007,6 +1026,18 @@ authority. Passive `list`/`ls`, `status`, and `event.list` perform a fresh,
 non-loading read, validate the returned thread ID and canonical `cwd`, and
 derive the public projection in memory. Failure to obtain or validate native
 truth projects `unavailable`, never the last SQLite value as current.
+
+The same summary carries optional native `recencyAt`, normalized from seconds
+to `ThreadRuntimeSnapshot.recency_at_ms`. Invalid, missing or overflowing dates
+remain absent without invalidating thread status; general `updatedAt`, CoCo
+mutation time and observation time are not substitutes. The value is an
+in-memory passive projection, not a second usage-history store or a new SQLite
+column. Public JSON schema 17 exposes optional `recencyAtMs`. Only jump picker
+policy uses it: recent-first across the requested scope, missing values last,
+natural-name/repository/ID ties and `--sort name` override. Choice times/order
+freeze before input. The prompt renderer owns responsive dim trailing metadata
+and drops it before truncating existing main content. Other command ordering,
+resource collection and native thread-loading behavior stay unchanged.
 
 Legacy snapshots retain their old App Server generation and receipt time only
 as migration data. Startup or connection loss can mark such rows stale, but
@@ -1445,7 +1476,7 @@ outcome.
 | `item/reasoning/summaryTextDelta` | derive one bounded, sanitized generation-local activity headline for the exact turn/item; no persistence or policy meaning |
 | context-compaction `item/started` / `item/completed` | temporarily override prose activity with structured `Compacting context`, then clear it; existing compact-fork synchronization remains separate |
 | completed agent `item/completed` | retain only the last bounded response on the matching generation-local turn operation; no durable event |
-| `turn/completed` | clear matching transient activity, finish the matching generation-local result, and clear its guard after the direct response has bound the native turn ID; no durable event |
+| `turn/completed` | clear matching activity, finish the generation-local result and save a minimal operation receipt after the direct start response binds the exact native turn ID; no durable event or answer text |
 | non-retrying `error` | no event persistence; native status remains separate |
 | command/terminal-input/file-change approval or `requestUserInput` | register bounded presentation and private native correlation in memory; distinguish the native command action kind, and never infer status from its method |
 | `serverRequest/resolved` | transition the matching runtime decision to `resolved` in memory |
