@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.5.0 (2026-11-05)
+
+### Documentation
+
+- Record verified 0.4.0 release
+  ([`71e14c3`](https://github.com/janthmueller/coco/commit/71e14c389a395647baea3199f29eaa6662129582))
+
+### Features
+
+- Add durable turn control and recent workspace selection
+  ([`80c5165`](https://github.com/janthmueller/coco/commit/80c5165890d60f93a373e8a2c31f1855e5960f96))
+
+
 ## v0.4.0 (2026-11-03)
 
 ### Bug Fixes
