@@ -11,15 +11,14 @@ updated: 2026-11-05
 
 ## Status and responsibility
 
-Generic turn lookup/receipts are checkpointed at `eba9630` on branch
-`feature/turn-control`. The additional local checkpoint
-`feat(mcp): add explicit best-effort turn interruption` includes the extension
-described here and the delayed-completion recovery fix. Use that checkpoint or
-a later build containing it, not just `eba9630` or the published release.
-These checkpoints and the recent-first jump picker are now integrated into
-local `main`. Nothing has been pushed or published. CoCo's manifest still says
-`0.4.0`; that version string does not prove this API is present. Check that
-`turns.interrupt` advertises `mode: strict | bestEffort`.
+Generic turn lookup, durable receipts, explicit best-effort interruption and
+the delayed-completion recovery fix ship in
+[CoCo 0.5.0](https://github.com/janthmueller/coco/releases/tag/v0.5.0).
+The source is integrated into `main`; the `v0.5.0` tag is release commit
+`daaa9dd`. Registry availability of `codex-coordinator 0.5.0` is verified.
+Use matching release builds or build that source, rather than installed
+`0.4.0` binaries, which predate this API. Check that `turns.interrupt`
+advertises `mode: strict | bestEffort`.
 
 **Capability boundary:** start/lookup and durable technical receipts work.
 Default/explicit strict cancellation remains **unavailable with native Codex
@@ -42,16 +41,16 @@ The internal implementation rationale is
 
 ## Process setup
 
-Use matching `cocod` and `coco-mcp` builds from local `main` or the cited
-best-effort checkpoint, and the selected Codex `0.166.0`:
+Use matching `cocod` and `coco-mcp` builds from release `0.5.0` and the selected
+Codex `0.166.0`. To build the released source locally:
 
 ```sh
 cargo build --locked --bins --jobs 2
 ```
 
 The matching binaries are then under `target/debug/`. For adapter development,
-point explicitly to those binaries; an installed `0.4.0` binary may predate
-this slice. Use the same configuration/state paths for both processes, and do
+point explicitly to those binaries; installed `0.4.0` binaries predate this
+slice. Use the same configuration/state paths for both processes, and do
 not silently replace an operator's existing coordinator. Start the matching
 coordinator normally. For each repository Palm is allowed to control,
 configure a standard-input/output MCP server:

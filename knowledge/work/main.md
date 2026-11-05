@@ -17,6 +17,51 @@ architectural baseline for CoCo.
 
 ## Active work
 
+### Turn-control and picker release — 2026-11-05
+
+- User authorizes pushing local `main` and publishing the next regular release
+  through the existing GitHub Actions process. Keep `feature/compose`, other
+  branches, installed binaries and user runtimes unchanged. Do not enable the
+  optional automatic-alpha switch.
+- Source revision: `80c5165890d60f93a373e8a2c31f1855e5960f96`, pushed normally
+  on `main`; remote was `71e14c3`. GitHub confirms
+  `COCO_RELEASE_ENABLED=false`. Expected stable version is `0.5.0`, subject to
+  the guarded semantic-release rehearsal.
+- Fresh local preflight passes: 670 library, six process/MCP, eleven status
+  and ten isolated model-free Codex 0.166.0 tests; 19 release-script tests;
+  formatting, all-target/all-feature warning-denied Clippy, actionlint,
+  dependency usage and the dependency policy with updated advisory data.
+  The actual Cargo publish dry-run packages and verifies successfully without
+  uploading. Package listing contains 239 entries and no top-level internal
+  knowledge, site, external tests or automation. Static docs typecheck/build
+  verifies 18 pages/64 files, Pagefind and `/coco` routes. Nix evaluation without
+  builds passes; full Nix and native Linux/macOS builds remain hosted gates.
+- Exact-source hosted runs pass: Rust `42082868126`, including the full Nix
+  check and native Linux/macOS smoke builds, and Documentation `42082867971`,
+  including the successful GitHub Pages deployment.
+- Stable non-publishing rehearsal `42084953428` succeeds and verifies version
+  `0.5.0`, tag `v0.5.0`, and synchronized Cargo metadata. Recheck confirms
+  remote main remains the exact tested source. Publication is explicitly
+  dispatched through run `42085385536` with `channel=stable,publish=true`.
+- Publication creates regular GitHub release `v0.5.0` at generated commit
+  `daaa9dd`; local main fast-forwards normally, retaining only this task's
+  internal notes. Production sources, tests, docs, workflow and Nix inputs
+  match tested `80c5165`; the release commit changes only version stamps and
+  the changelog. The crates.io job succeeds, and the public registry API
+  confirms `codex-coordinator 0.5.0` is available and not yanked. The Palm
+  handoff now identifies the released API rather than unreleased checkpoints.
+- Publication workflow `42085385536` completes successfully, including
+  crates.io and both tagged native archive builds. The GitHub release is
+  regular (not draft/prerelease) and contains the lockfile, Linux x86-64 and
+  macOS arm64 archives, and their SHA-256 files. Downloaded copies pass both
+  checksum checks, contain all three executables plus license/README, and the
+  released lockfile matches the local tagged lockfile byte-for-byte.
+- Complete: preserve the updated release record and Palm availability handoff
+  as a documentation-only checkpoint on main. Source, runtime and public docs
+  remain identical to the verified release. No inference, manual tag, direct
+  registry upload, release-guard bypass, installation change or user-runtime
+  change was performed; Compose remains on its separate branch.
+
 ### Local turn-control and jump-picker integration — 2026-11-05
 
 - User authorizes merging `feature/jump-recency` into local `main` only.
