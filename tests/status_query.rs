@@ -45,7 +45,7 @@ async fn real_cli_obeys_explicit_cross_repo_keys_and_keeps_default_list_order() 
         (vec!["list", "-a", "--json"], vec!["z-ready", "a-waiting"]),
     ] {
         let result = fixture.json(&args).await?;
-        assert_eq!(result["schemaVersion"], 17);
+        assert_eq!(result["schemaVersion"], 18);
         assert_eq!(names(&result), expected);
     }
     assert!(

@@ -16,7 +16,7 @@ coco create
 ```
 
 The walkthrough lets you choose the name, code and conversation starting
-points, profile, model, and what to do after creation. Press Enter to keep the
+points, profile, model, cleanup, and what to do after creation. Press Enter to keep the
 highlighted default. Existing workspaces appear when you choose one as the
 conversation source. When you run it inside a reusable CoCo workspace, that
 current workspace is offered directly. You can also enter an exact Codex
@@ -45,6 +45,37 @@ The first `create` also adds that repository to CoCo.
 CoCo normally starts from your current commit on a new branch named after
 the workspace, such as `fix/login`. See [Choose code and context](../context/)
 to select another base, reuse a conversation, or bring local changes.
+
+## Use a temporary workspace
+
+For a short review or exploration, request safe cleanup when you leave the
+Codex UI:
+
+```bash
+coco create scratch/review --temporary -j
+```
+
+After the last open CoCo-launched UI exits normally, CoCo tries to remove the
+workspace, its worktree, owned branch and conversation. Add `--keep-thread`
+to keep the conversation.
+
+You can prepare it first and open it later:
+
+```bash
+coco create scratch/later --temporary
+coco jump scratch/later
+```
+
+In the walkthrough, choose **Clean up after a TUI session**. Opening Codex
+becomes the highlighted next action; returning to the shell remains available.
+
+Running work, changed files, commits that would be lost, and other deletion
+safeguards can block cleanup. CoCo then keeps the workspace, explains why, and disables
+automatic cleanup. Review it and use [manual cleanup](../cleanup/) when ready.
+Opening another conversation in that UI also disables automatic cleanup and
+keeps the workspace available.
+Sending a message alone does not trigger cleanup. A failed UI start or abnormal
+exit leaves the workspace available for a later session.
 
 ## See who needs attention
 

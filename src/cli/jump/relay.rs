@@ -25,6 +25,9 @@ use crate::protocol::{
 };
 use crate::rpc::RpcClient;
 
+mod temporary;
+use temporary::CleanupGuard;
+
 const ADOPTION_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const LEASE_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 const FINAL_ADOPTION_TIMEOUT: Duration = Duration::from_secs(5);
@@ -38,13 +41,12 @@ pub(super) struct PreparedRelay {
     endpoint_url: String,
     capability_token: String,
     shutdown: watch::Sender<bool>,
-    task: JoinHandle<Result<()>>,
+    task: JoinHandle<Result<bool>>,
 }
 
-#[derive(Clone, Copy)]
-pub(super) enum ThreadBinding {
-    AwaitFresh,
-    AlreadyBound,
+pub(super) struct ThreadBinding {
+    pub(super) thread_id: Option<String>,
+    pub(super) temporary: bool,
 }
 
 impl PreparedRelay {
@@ -101,7 +103,7 @@ impl PreparedRelay {
         &self.capability_token
     }
 
-    pub(super) async fn finish(self) -> Result<()> {
+    pub(super) async fn finish(self) -> Result<bool> {
         let Self {
             mut task, shutdown, ..
         } = self;
@@ -259,6 +261,7 @@ struct Relay {
     execution_environment: Option<WorkspaceExecutionEnvironment>,
     control: RelayControl,
     adoption: Option<AdoptionState>,
+    cleanup: CleanupGuard,
     adoption_task: Option<JoinHandle<Result<bool>>>,
     generation: u64,
     last_disconnect: Option<TransportFailure>,
@@ -286,17 +289,19 @@ impl Relay {
                 heartbeat,
                 shutdown: config.shutdown,
             },
-            adoption: match config.thread_binding {
-                ThreadBinding::AwaitFresh => Some(AdoptionState::default()),
-                ThreadBinding::AlreadyBound => None,
-            },
+            adoption: config
+                .thread_binding
+                .thread_id
+                .is_none()
+                .then(AdoptionState::default),
+            cleanup: CleanupGuard::new(config.thread_binding),
             adoption_task: None,
             generation: 0,
             last_disconnect: None,
         }
     }
 
-    async fn run(mut self) -> Result<()> {
+    async fn run(mut self) -> Result<bool> {
         loop {
             self.harvest_ready_adoption().await?;
             let Some(mut downstream) = self.accept_authenticated().await? else {
@@ -322,7 +327,7 @@ impl Relay {
             {
                 SessionEnd::ClientClosed => {
                     self.complete_adoption().await?;
-                    return Ok(());
+                    return Ok(self.cleanup.disarmed());
                 }
                 SessionEnd::Shutdown => return self.finish().await,
                 SessionEnd::Reconnect(failure) => {
@@ -438,6 +443,8 @@ impl Relay {
                         upstream,
                         self.adoption.as_mut(),
                         self.execution_environment.as_ref(),
+                        &mut self.cleanup,
+                        &self.control,
                     ).await?
                 }
                 message = upstream.next() => {
@@ -475,7 +482,7 @@ impl Relay {
         }
     }
 
-    async fn finish(&mut self) -> Result<()> {
+    async fn finish(&mut self) -> Result<bool> {
         self.complete_adoption().await?;
         if let Some(failure) = self.last_disconnect.take() {
             bail!(
@@ -484,7 +491,7 @@ impl Relay {
                 failure.reason
             );
         }
-        Ok(())
+        Ok(self.cleanup.disarmed())
     }
 
     fn schedule_adoption(&mut self) {
@@ -609,6 +616,8 @@ async fn forward_downstream(
     upstream: &mut WebSocketStream<TcpStream>,
     adoption: Option<&mut AdoptionState>,
     execution_environment: Option<&WorkspaceExecutionEnvironment>,
+    cleanup: &mut CleanupGuard,
+    control: &RelayControl,
 ) -> Result<ForwardOutcome> {
     let Some(message) = message else {
         return Ok(ForwardOutcome::Reconnect(TransportFailure::new(
@@ -625,6 +634,15 @@ async fn forward_downstream(
             )));
         }
     };
+    cleanup
+        .before_forward(
+            &message,
+            adoption
+                .as_deref()
+                .and_then(|state| state.candidate_thread_id.as_deref()),
+            control,
+        )
+        .await?;
     inject_execution_environment(&mut message, execution_environment)
         .map_err(anyhow::Error::msg)?;
     if let Some(adoption) = adoption {
@@ -882,13 +900,22 @@ mod tests {
 
     struct LeaseOnlyRpc {
         adoption_attempts: Arc<AtomicUsize>,
+        cleanup_disarms: Arc<AtomicUsize>,
     }
 
     #[async_trait]
     impl RpcHandler for LeaseOnlyRpc {
-        async fn handle(&self, method: &str, _params: Value) -> Result<Value, RpcErrorPayload> {
+        async fn handle(&self, method: &str, params: Value) -> Result<Value, RpcErrorPayload> {
             match method {
                 "workspace.attach.renew" => Ok(json!({})),
+                "workspace.attach.disarmCleanup" => {
+                    assert_eq!(
+                        params,
+                        json!({"workspaceId": "bound-workspace", "leaseId": "bound-lease"})
+                    );
+                    self.cleanup_disarms.fetch_add(1, Ordering::SeqCst);
+                    Ok(json!({}))
+                }
                 "workspace.attach.adopt" => {
                     self.adoption_attempts.fetch_add(1, Ordering::SeqCst);
                     Err(RpcErrorPayload::new(
@@ -940,14 +967,25 @@ mod tests {
 
     #[tokio::test]
     async fn bound_relay_never_adopts_an_auxiliary_thread_start() {
+        prove_bound_relay_does_not_adopt(false).await;
+    }
+
+    #[tokio::test]
+    async fn temporary_bound_relay_disarms_cleanup_without_adopting_the_auxiliary_thread() {
+        prove_bound_relay_does_not_adopt(true).await;
+    }
+
+    async fn prove_bound_relay_does_not_adopt(temporary_cleanup: bool) {
         let (upstream_endpoint, upstream) = start_bound_relay_test_server().await;
         let temporary = tempdir().unwrap();
         let socket = temporary.path().join("cocod.sock");
         let adoption_attempts = Arc::new(AtomicUsize::new(0));
+        let cleanup_disarms = Arc::new(AtomicUsize::new(0));
         let rpc_server = RpcServer::bind(
             &socket,
             Arc::new(LeaseOnlyRpc {
                 adoption_attempts: Arc::clone(&adoption_attempts),
+                cleanup_disarms: Arc::clone(&cleanup_disarms),
             }),
         )
         .await
@@ -958,7 +996,10 @@ mod tests {
             RpcClient::new(&socket),
             "bound-workspace".to_owned(),
             "bound-lease".to_owned(),
-            ThreadBinding::AlreadyBound,
+            ThreadBinding {
+                thread_id: Some("bound-thread".to_owned()),
+                temporary: temporary_cleanup,
+            },
             &upstream_endpoint,
             "upstream-token",
             None,
@@ -1017,7 +1058,11 @@ mod tests {
         );
         client.close(None).await.unwrap();
 
-        relay.finish().await.unwrap();
+        assert_eq!(relay.finish().await.unwrap(), temporary_cleanup);
+        assert_eq!(
+            cleanup_disarms.load(Ordering::SeqCst),
+            usize::from(temporary_cleanup)
+        );
         upstream.await.unwrap();
         assert_eq!(
             adoption_attempts.load(Ordering::SeqCst),

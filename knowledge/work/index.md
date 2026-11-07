@@ -43,6 +43,10 @@ it concise, factual, and useful to the next maintainer.
 
 ## Current records
 
+- [`feature/temporary-workspaces`](feature/temporary-workspaces.md) - Opt-in
+  successful-session cleanup with durable one-shot policy, existing delete
+  safeguards, deferred opening and guided creation.
+
 - [`feature/jump-recency`](feature/jump-recency.md) - Native recent-first jump
   selection, compact relative times and nonredundant branch details, without
   changing status/list ordering or creating a local usage-history store.

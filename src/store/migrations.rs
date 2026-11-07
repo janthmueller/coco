@@ -8,6 +8,7 @@ mod repositories;
 mod resources;
 mod retirement;
 mod signals;
+mod temporary;
 mod turn_control;
 mod usage;
 
@@ -23,7 +24,10 @@ pub(super) fn migrate(connection: &Connection) -> Result<(), StoreError> {
         migrate_before_turn_control(connection)?;
         turn_control::migrate(connection)?;
     }
-    interrupt_attempts::migrate(connection)
+    if version < 17 {
+        interrupt_attempts::migrate(connection)?;
+    }
+    temporary::migrate(connection)
 }
 
 fn migrate_before_turn_control(connection: &Connection) -> Result<(), StoreError> {

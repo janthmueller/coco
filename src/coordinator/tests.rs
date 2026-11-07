@@ -55,6 +55,7 @@ mod retirement_deletion;
 mod retirement_deletion_recovery;
 mod retirement_dependencies;
 mod retirement_safety;
+mod temporary;
 mod turn_control;
 mod usage;
 mod workspace;
@@ -1061,6 +1062,7 @@ impl Fixture {
     fn fork_params(&self, source: &Workspace, name: &str, compact: bool) -> WorkspaceCreateParams {
         WorkspaceCreateParams {
             repository_path: self.source.clone(),
+            temporary: None,
             name: name.to_owned(),
             context: WorkspaceContextRequest::Fork {
                 source: WorkspaceContextSource::Workspace {
@@ -1105,6 +1107,7 @@ fn fresh_create_params(
 ) -> WorkspaceCreateParams {
     WorkspaceCreateParams {
         repository_path,
+        temporary: None,
         name: name.to_owned(),
         context: WorkspaceContextRequest::Fresh,
         worktree: WorkspaceWorktreeRequest::NewBranch {

@@ -520,6 +520,12 @@ pub(super) struct CreateArgs {
     /// Walk through workspace creation interactively, using flags as preset values.
     #[arg(long, short = 'i')]
     pub(super) interactive: bool,
+    /// Try safe cleanup after the first regular exit of the last Codex TUI.
+    #[arg(long)]
+    pub(super) temporary: bool,
+    /// Keep the conversation when a temporary workspace is cleaned up.
+    #[arg(long, requires = "temporary")]
+    pub(super) keep_thread: bool,
     /// Git revision from which to prepare a new branch or detached worktree.
     #[arg(long, value_name = "REVISION", conflicts_with_all = ["base_workspace", "checkout"])]
     pub(super) base: Option<String>,

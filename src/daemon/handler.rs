@@ -94,6 +94,8 @@ impl RpcHandler for DaemonHandler {
             | DaemonMethod::WorkspaceClose
             | DaemonMethod::WorkspaceReopen
             | DaemonMethod::WorkspaceDelete
+            | DaemonMethod::WorkspaceAttachFinish
+            | DaemonMethod::WorkspaceAttachDisarmCleanup
             | DaemonMethod::WorkspaceList
             | DaemonMethod::WorkspaceGet
             | DaemonMethod::WorkspaceUsageList
@@ -269,6 +271,18 @@ impl DaemonHandler {
                 self.coordinator
                     .release_workspace_attach(decode::<WorkspaceAttachReleaseParams>(params)?),
             ),
+            DaemonMethod::WorkspaceAttachFinish => execute(
+                self.coordinator
+                    .finish_workspace_attach(
+                        decode::<crate::protocol::WorkspaceAttachFinishParams>(params)?,
+                    )
+                    .await,
+            ),
+            DaemonMethod::WorkspaceAttachDisarmCleanup => {
+                execute(self.coordinator.disarm_workspace_cleanup(decode::<
+                    crate::protocol::WorkspaceAttachDisarmCleanupParams,
+                >(params)?))
+            }
             DaemonMethod::WorkspaceDiff => execute(self.coordinator.workspace_diff(decode::<
                 WorkspaceDiffParams,
             >(

@@ -18,6 +18,8 @@ use crate::protocol::{
 };
 use crate::store::{EventDraft, NewThreadBinding};
 
+mod temporary;
+
 const JUMP_LEASE_TTL: Duration = Duration::from_secs(30);
 
 #[cfg(test)]

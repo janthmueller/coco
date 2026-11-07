@@ -8,6 +8,24 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-11-07
+
+- **Temporary cleanup safety**: Before forwarding additional-conversation
+  traffic, permanently disarm automatic cleanup using the exact live attachment
+  capability. Observe temporary shared-mode resumes through the relay too.
+  Retain the original binding and worktree across clients/restarts; an
+  unconfirmed durable disarm prevents forwarding. Explain retention after
+  normal TUI exit rather than trusting only the original thread's idle state.
+
+## 2026-11-06
+
+- **Temporary workspaces**: Persist explicit create-time cleanup and optional
+  conversation retention. A distinct validated successful-last-session finish
+  reuses guarded deletion; ordinary release/expiry never deletes. Consume the
+  permission before effects so blocked cleanup or claim-before-effect crashes
+  cannot become deferred destructive retries. SQLite/public JSON advance to 18;
+  existing workspaces stay persistent. Add walkthrough and model-free tests.
+
 ## 2026-11-05
 
 - **Recent-first jump selection**: Reuse optional native Codex recency in

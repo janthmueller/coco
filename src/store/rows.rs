@@ -21,7 +21,8 @@ pub(super) const WORKSPACE_SELECT: &str = "SELECT id, create_operation_id, repos
     thread_status_generation, thread_status_observed_at_ms, thread_status_is_fresh,
     worktree_mode, branch_name, base_sha, worktree_path, codex_thread_id, parent_thread_id,
     active_turn_id, last_error_code, last_error_message, created_at_ms, updated_at_ms,
-    completed_at_ms, availability, thread_archived, closed_head_sha, closed_at_ms FROM workspaces";
+    completed_at_ms, availability, thread_archived, closed_head_sha, closed_at_ms,
+    temporary_cleanup_json FROM workspaces";
 
 pub(super) const TURN_SELECT: &str = "SELECT id, workspace_id, operation_id, client_message_id,
     codex_turn_id, phase, requested_at_ms, started_at_ms, completed_at_ms, error_json FROM turns";
@@ -79,6 +80,7 @@ pub(super) fn map_workspace(row: &Row<'_>) -> rusqlite::Result<Workspace> {
     Ok(Workspace {
         id: row.get(0)?,
         create_operation_id: row.get(1)?,
+        temporary: optional_json_from_column(row, 28)?,
         repository_id: row.get(2)?,
         name: row.get(3)?,
         context_mode: ContextMode::parse(&context_mode)
@@ -261,6 +263,19 @@ pub(super) fn map_audit(row: &Row<'_>) -> rusqlite::Result<Audit> {
         details: json_from_column(row, 7)?,
         occurred_at_ms: row.get(8)?,
     })
+}
+
+fn optional_json_from_column<T: serde::de::DeserializeOwned>(
+    row: &Row<'_>,
+    column: usize,
+) -> rusqlite::Result<Option<T>> {
+    row.get::<_, Option<String>>(column)?
+        .map(|value| {
+            serde_json::from_str(&value).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(column, Type::Text, Box::new(error))
+            })
+        })
+        .transpose()
 }
 
 fn json_from_column<T: serde::de::DeserializeOwned>(

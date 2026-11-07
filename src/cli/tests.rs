@@ -363,6 +363,7 @@ fn builds_authenticated_resume_and_fresh_jump_commands() {
     let worktree = directory.path().join("worktree");
     std::fs::create_dir(&worktree).unwrap();
     let target = JumpTarget {
+        temporary: false,
         workspace_id: "workspace-123".to_owned(),
         worktree,
         profile: "dev".to_owned(),

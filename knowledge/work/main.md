@@ -5,7 +5,7 @@ description: Tracks integrated product work, verified release handoffs and the r
 tags: [work, branch, bootstrap, rust, mcp, architecture]
 status: active
 branch: main
-updated: 2026-11-05
+updated: 2026-11-07
 ---
 
 # main — repository foundation
@@ -16,6 +16,26 @@ Establish the repository, documentation workflow, and first executable and
 architectural baseline for CoCo.
 
 ## Active work
+
+### Temporary-workspace integration and release — 2026-11-07
+
+- User authorizes committing the reviewed `feature/temporary-workspaces`
+  slice, merging it into `main`, pushing and publishing the next regular
+  release through GitHub Actions. Keep Compose, other branches, installed
+  binaries and user runtimes unchanged; do not enable automatic alpha.
+- Local source baseline is released main `4c59eb9`; the feature has no diverged
+  commits. Latest full review has no outstanding findings. Verification passes
+  709 library, seven process and eleven status tests, 39 focused temporary
+  cases, ten model-free Codex 0.166.0 checks, formatting, warning-denied Clippy,
+  dependency use/policy and static docs (18 pages/64 files). Cargo package
+  listing includes all new production modules. Refresh advisory data and
+  require exact-SHA hosted Rust/native/package and documentation gates before
+  any release. No real inference is authorized or needed.
+- Plan: Conventional Commit checkpoint, fast-forward integration/push, wait
+  for exact-source CI, run a stable non-publishing rehearsal, confirm expected
+  version 0.6.0 and synchronized Cargo metadata, then dispatch publication and
+  verify registry/release/archive availability. Record actual revisions and
+  workflow results below as they become available.
 
 ### Turn-control and picker release — 2026-11-05
 

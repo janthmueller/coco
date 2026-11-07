@@ -11,6 +11,7 @@ use crate::protocol::{
 use crate::rpc::RpcClient;
 
 mod relay;
+mod temporary;
 
 const REMOTE_TOKEN_ENV: &str = "COCO_CODEX_REMOTE_CAPABILITY_TOKEN";
 
@@ -19,6 +20,8 @@ pub(super) async fn jump(
     client: &RpcClient,
     result: WorkspaceAttachResult,
 ) -> Result<()> {
+    let is_temporary = result.workspace.temporary.is_some();
+    let workspace_name = result.workspace.name.clone();
     let lease_id = match &result.launch {
         WorkspaceAttachLaunch::Start { lease_id }
         | WorkspaceAttachLaunch::Resume { lease_id, .. } => lease_id.clone(),
@@ -26,6 +29,10 @@ pub(super) async fn jump(
     let release = (result.workspace.id.clone(), lease_id);
     let outcome = jump_inner(paths, client, result).await;
     let (workspace_id, lease_id) = release;
+    if is_temporary && outcome.is_ok() {
+        temporary::finish(client, &workspace_id, &lease_id, &workspace_name).await;
+        return Ok(());
+    }
     let release_outcome = client
         .request(WorkspaceAttachReleaseParams {
             workspace_id,
@@ -57,7 +64,7 @@ async fn jump_inner(
             thread_id,
             lease_id,
         } => {
-            if target.execution_environment.is_some() {
+            if target.temporary || target.execution_environment.is_some() {
                 run_relayed_resume(target, thread_id, lease_id, codex_binary, client.clone()).await
             } else {
                 run_resume_command(
@@ -85,7 +92,10 @@ async fn run_fresh_jump(
         client,
         target.workspace_id.clone(),
         lease_id,
-        relay::ThreadBinding::AwaitFresh,
+        relay::ThreadBinding {
+            thread_id: None,
+            temporary: target.temporary,
+        },
         &target.endpoint_url,
         &target.capability_token,
         target.execution_environment.clone(),
@@ -119,7 +129,10 @@ async fn run_relayed_resume(
         client,
         target.workspace_id.clone(),
         lease_id,
-        relay::ThreadBinding::AlreadyBound,
+        relay::ThreadBinding {
+            thread_id: Some(thread_id.clone()),
+            temporary: target.temporary,
+        },
         &target.endpoint_url,
         &target.capability_token,
         target.execution_environment.clone(),
@@ -143,10 +156,16 @@ async fn run_relayed_resume(
     finish_relayed_tui(status, relay_outcome)
 }
 
-fn finish_relayed_tui(status: ExitStatus, relay_outcome: Result<()>) -> Result<()> {
+fn finish_relayed_tui(status: ExitStatus, relay_outcome: Result<bool>) -> Result<()> {
     match (status.success(), relay_outcome) {
-        (true, outcome) => outcome,
-        (false, Ok(())) => bail!("Codex terminal UI exited with {status}"),
+        (true, Ok(disarmed)) => {
+            if disarmed {
+                temporary::notify_preserved();
+            }
+            Ok(())
+        }
+        (true, Err(error)) => Err(error),
+        (false, Ok(_)) => bail!("Codex terminal UI exited with {status}"),
         (false, Err(relay_error)) => Err(relay_error).context(format!(
             "Codex terminal UI exited with {status} after its relay failed"
         )),
@@ -195,6 +214,7 @@ pub(super) struct JumpTarget {
     pub(super) capability_token: String,
     pub(super) codex_home: PathBuf,
     pub(super) execution_environment: Option<WorkspaceExecutionEnvironment>,
+    pub(super) temporary: bool,
 }
 
 pub(super) async fn load_jump_target(
@@ -209,6 +229,7 @@ pub(super) async fn load_jump_target(
         .context("workspace has no managed worktree yet")?;
     let (endpoint_url, capability_token) = load_app_server_endpoint(paths).await?;
     Ok(JumpTarget {
+        temporary: result.workspace.temporary.is_some(),
         workspace_id: result.workspace.id,
         worktree,
         profile: result.workspace.profile.name,

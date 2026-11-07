@@ -751,6 +751,7 @@ mod tests {
             workspace: Workspace {
                 id: format!("{repository}-{name}"),
                 create_operation_id: None,
+                temporary: None,
                 repository_id: repository.to_owned(),
                 name: name.to_owned(),
                 context_mode: ContextMode::Fresh,

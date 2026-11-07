@@ -387,6 +387,8 @@ Methods for the handed-off commands are:
 | `workspace.attach.renew` | renew this TUI client's presence or pending-adoption lease | not exposed in v0 |
 | `workspace.attach.adopt` | correlate and adopt the exact materialized fresh-TUI thread | not exposed in v0 |
 | `workspace.attach.release` | release only this TUI client's lease | not exposed in v0 |
+| `workspace.attach.finish` | successful last temporary TUI completion and one-shot checked cleanup | not exposed |
+| `workspace.attach.disarmCleanup` | permanently preserve a temporary workspace before additional-conversation traffic | not exposed |
 | `turn.start` | `coco send` | `workspaces.send` when explicitly enabled |
 | `turn.result` | `coco send --wait` polling | not exposed in v0 |
 | `turn.get` | no new CLI command | `turns.get` |
@@ -1032,7 +1034,7 @@ to `ThreadRuntimeSnapshot.recency_at_ms`. Invalid, missing or overflowing dates
 remain absent without invalidating thread status; general `updatedAt`, CoCo
 mutation time and observation time are not substitutes. The value is an
 in-memory passive projection, not a second usage-history store or a new SQLite
-column. Public JSON schema 17 exposes optional `recencyAtMs`. Only jump picker
+column. Public JSON schema 18 exposes optional `recencyAtMs`. Only jump picker
 policy uses it: recent-first across the requested scope, missing values last,
 natural-name/repository/ID ties and `--sort name` override. Choice times/order
 freeze before input. The prompt renderer owns responsive dim trailing metadata

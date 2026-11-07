@@ -25,7 +25,7 @@ pub(super) use collections::{
     render_workspace_status_list_for_stdout,
 };
 
-const PUBLIC_SCHEMA_VERSION: u64 = 17;
+const PUBLIC_SCHEMA_VERSION: u64 = 18;
 
 pub(super) fn phase_label(phase: &str) -> &'static str {
     match phase {
@@ -545,8 +545,25 @@ fn render_workspace_success(
 ) -> String {
     let workspace = &result.workspace;
     let phase = phase_presentation(workspace.phase);
+    let cleanup = if action == "Created" {
+        workspace
+            .temporary
+            .map(|policy| {
+                palette.paint(
+                    Tone::Dim,
+                    if policy.keep_thread {
+                        " · cleanup after TUI · keep conversation"
+                    } else {
+                        " · cleanup after TUI"
+                    },
+                )
+            })
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
     let mut output = format!(
-        "{} {action} {} {} {}\n",
+        "{} {action} {} {} {}{cleanup}\n",
         palette.paint(Tone::GreenBold, "✓"),
         palette.paint(Tone::Bold, safe_line(&workspace.name)),
         palette.paint(Tone::Dim, "·"),
@@ -909,6 +926,7 @@ mod tests {
             workspace: Workspace {
                 id: "workspace-1".to_owned(),
                 create_operation_id: None,
+                temporary: None,
                 repository_id: "repo-1".to_owned(),
                 name: "feat/login".to_owned(),
                 context_mode: ContextMode::Fresh,

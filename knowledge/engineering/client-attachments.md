@@ -92,6 +92,45 @@ The ordinary attachment lease already prevents workspace retirement while its
 client is live. Adding presentation metadata must not alter adoption,
 reconnect, close, delete, or thread-ownership rules.
 
+## Explicit temporary-session completion
+
+An optional typed `Workspace.temporary` policy belongs to the workspace, not
+to presence metadata. SQLite schema 18 persists it across daemon generations;
+new create requests retain the original policy in their immutable request
+snapshot, including after cleanup permission has been consumed. Persistent
+and legacy workspaces omit it. Public CLI JSON is schema 18.
+
+Only a successful temporary CLI jump calls `workspace.attach.finish`. That
+application method requires an existing exact workspace/lease capability,
+releases it, and requires no other lease or pinned adoption before claiming
+the policy once in an immediate transaction. It then calls ordinary checked
+deletion with both discard policies false and thread retention as selected.
+A new client admitted during the gap is handled by deletion's existing checks.
+Blocked cleanup consumes the policy and retains the workspace; it is never a
+delayed idle/restart job. A claim-before-effect crash similarly leaves an
+ordinary workspace. Existing admitted deletion intents remain recoverable.
+
+Independent conversations inside a TUI are not adopted into its original
+workspace binding. To avoid deleting their worktree or executor, temporary
+TUIs always use the relay, including bound shared-mode resumes. Before
+forwarding a further `thread/start`, any `thread/fork`, or traffic targeting a
+different/unknown native `threadId`, the relay calls capability-checked
+`workspace.attach.disarmCleanup` and waits for the durable policy claim to
+commit. An unconfirmed disarm prevents that native request from being sent.
+The initial fresh start and correlated candidate remain supported; unanswered
+starts cannot regain first-start privilege after reconnect. Catalog requests
+do not disarm. The binding is unchanged, and the opt-out covers every client
+and daemon generation. On normal exit the detecting relay explains retention.
+Persistent/shared workspaces keep their existing direct-resume path.
+
+Lease expiry, release, failed launch, abnormal TUI/relay exit, send, polling
+and generation changes are not successful-session evidence. The existing
+idempotent release and its wire shape stay unchanged. Lost finish replies are
+reported as unknown without retrying the destructive request. Native cleanup
+can be incomplete after worktree removal, so its dedicated result must not
+claim all resources were retained. No terminal ownership or runtime model
+changes, extra MCP grant, scheduler or native ephemeral-thread mode is added.
+
 ## tmux adapter
 
 When `coco jump` runs inside tmux, it detects the current pane from

@@ -65,5 +65,7 @@ mod retirement;
 mod signals;
 #[path = "process_smoke/support.rs"]
 mod support;
+#[path = "process_smoke/temporary.rs"]
+mod temporary;
 #[path = "process_smoke/turn_control.rs"]
 mod turn_control;

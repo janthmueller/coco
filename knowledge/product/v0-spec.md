@@ -89,7 +89,7 @@ peer-response routing remain separate, unimplemented capabilities.
 - That observed protocol is version-specific. Narrow consumed fields and the
   real behavior test are authoritative; generated schemas remain an upgrade
   review aid and additive schema drift alone is not a compatibility failure.
-- Schema v17 retains schema v6's minimal turn-start operation ledger, schema
+- Schema v18 retains schema v6's minimal turn-start operation ledger, schema
   v7's typed worktree binding, and schema v8/v9's recoverable workspace
   retirement state and deletion intent. Schema v10 adds bounded signals and
   schema v11 adds the narrow durable hook outbox. Schema v12 adds open-delete
@@ -100,6 +100,8 @@ peer-response routing remain separate, unimplemented capabilities.
   terminal receipt/interrupt-attempt marker to the existing operation ledger.
   Schema v17 retains one interrupt attempt's mode and reply state, allowing
   explicit best-effort cancellation without automatic replay after uncertainty.
+  Schema v18 adds one nullable typed workspace cleanup policy, consumed before
+  a normal-session cleanup attempt; legacy workspaces remain persistent.
   It also retains the old
   native-status columns, local turns, normalized events, completed messages,
   MCP audit events, and decisions as a reversible compatibility bridge. The
@@ -249,6 +251,14 @@ peer-response routing remain separate, unimplemented capabilities.
   CoCo-created branch. `--keep-thread` and `--keep-branch` opt into retention;
   an adopted branch is always retained. No lifecycle action has a
   destructive collection scope, and `--yes` never implies a discard policy.
+- `create --temporary` persists a one-session cleanup policy, independently
+  of immediate jump or send. After the last tracked TUI finishes regularly,
+  try ordinary guarded deletion without file/commit discard; `--keep-thread`
+  retains the conversation. Consume the policy before attempting deletion,
+  so a blocked attempt retains an ordinary workspace, not a deferred delete.
+- Additional conversations used through a temporary TUI permanently disarm
+  cleanup before their native requests are forwarded. Retain the worktree and
+  original binding across clients and restarts; report this on normal exit.
 - Native worktrees intentionally share their repository's Git object and ref
   storage. CoCo does not proxy ordinary worker commits or allocate a separate
   Git database per workspace.
@@ -896,7 +906,7 @@ automatically. No storage-schema migration is required for these descriptors.
   `thread/read`; do not resume a thread merely to list it. An unbound ready
   workspace projects `prepared`; a missing or invalid existing binding projects
   unavailable instead of falling back to stored status.
-- `--json` emits one schema-version-17 JSON document and no decorative stdout
+- `--json` emits one schema-version-18 JSON document and no decorative stdout
   text. Every row includes a compact repository identity.
 
 ### `coco status`
@@ -908,7 +918,7 @@ automatically. No storage-schema migration is required for these descriptors.
   broken, or slow tmux never blocks workspace control. Labels can become stale
   after pane/session changes until the next jump. Multiple clients coexist;
   release/expiry removes only its own presence. No metadata is durable.
-  Target/collection/tree/follow support this projection; schema-version-17
+  Target/collection/tree/follow support this projection; schema-version-18
   status JSON always includes structured `clients` (empty array if none).
 
 - With no workspace reference, return the same compact workspace collection as
@@ -1187,9 +1197,31 @@ automatically. No storage-schema migration is required for these descriptors.
   an argument or persisted workspace metadata.
 - Turns started in the TUI must appear in the same native workspace projection
   as turns started with `coco send`; exiting the TUI does not delete the
-  workspace.
+  workspace unless its explicit temporary cleanup policy safely permits it.
 - A normal `/quit` or `/exit` detaches the remote TUI without interrupting an
   active turn. Explicit interruption remains the separate cancel action.
+- A successful temporary jump calls distinct `workspace.attach.finish` with
+  the exact live workspace/lease pair. Ordinary release remains unchanged and
+  never cleans up. Expired, released, mismatched or old-generation completion
+  capabilities cannot initiate cleanup. Another lease or pinned adoption
+  postpones the attempt until a later normal last-client completion.
+- Claim temporary permission atomically before calling the existing delete
+  use case. A native busy state, local files (including ignored files),
+  unretained commits, context dependencies or guards retain the workspace and
+  disarm cleanup. Do not retry because of idle events, another jump, restart
+  or polling. A crash after claim can retain the workspace without deletion.
+  Already-admitted deletion intents retain existing recovery rules.
+- Temporary TUIs always traverse the relay, even when resuming in shared
+  execution. Before a second native start, any fork, or a request for another
+  native thread, consume cleanup permission durably under the exact live
+  workspace/lease capability. Fail closed before forwarding when persistence
+  is unconfirmed. Original-thread traffic and passive thread catalogs retain
+  the policy. Do not infer safety from the idle original thread when another
+  independent conversation may still be using its worktree/runtime.
+- Unknown cleanup replies are not re-sent and do not turn a successful UI
+  session into a launch failure. Report uncertainty separately from retained,
+  deleted and partially completed cleanup. Names are never re-resolved as
+  a replacement target after completion.
 - Codex's `!command` shortcut is host-local and is not a supported workspace
   shell path with the default remote executor. Review or compaction immediately
   after a newly loaded resume may also use Codex's local default until the next

@@ -133,6 +133,7 @@ not repository-scoped.
 ```text
 coco [REPOSITORY_PATH] create [NAME]
   [-i, --interactive]
+  [--temporary [--keep-thread]]
   [--base <GIT_REF> | --base-workspace <WORKSPACE>]
   [-c, --context <CONTEXT>]
   [-C, --compact-context]
@@ -154,6 +155,27 @@ the current repository comes first, then the others by repository path and
 workspace name. Entries show their repository, including when names match.
 It does not create anything until you accept the final
 summary. `--interactive` cannot be combined with `--no-input`.
+
+`--temporary` requests a single safe cleanup attempt after the first regular
+exit of the last CoCo-launched Codex UI. It works without `--jump`; the
+workspace waits for a later session. Send, observation, lost connections and
+coordinator restarts do not initiate cleanup.
+
+Cleanup uses the same protections as `delete` and removes the worktree, owned
+branch, conversation and workspace record. `--keep-thread` retains the
+conversation and requires `--temporary`. Existing branches remain intact.
+If a safety check blocks cleanup, the workspace stays and automatic cleanup
+is disabled, including after a restart. Use `delete` explicitly when ready.
+If removal starts but cannot finish, inspect the reported incomplete cleanup
+before retrying `delete`.
+Starting, forking, or opening another conversation in the UI disables automatic
+cleanup permanently. CoCo keeps the workspace and tells you when the UI exits.
+
+The walkthrough defaults to keeping the workspace. Choosing automatic cleanup
+offers conversation retention and highlights opening Codex as the next action;
+you can still choose to return to the shell. Creation output marks pending
+cleanup. JSON workspace details include `temporary: {"keepThread": false}`
+while automatic cleanup is enabled; persistent workspaces omit that field.
 
 `--base` defaults to `HEAD`. Names are 1–63 bytes and contain lowercase ASCII
 letters, numbers, and hyphens, with optional single slashes between

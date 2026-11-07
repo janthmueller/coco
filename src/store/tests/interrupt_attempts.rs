@@ -128,7 +128,7 @@ fn v16_markers_migrate_to_strict_uncertainty_never_an_invented_ack() {
         connection
             .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        17
+        18
     );
     drop(connection);
     let migrated = store

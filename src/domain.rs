@@ -408,11 +408,20 @@ pub struct Repository {
     pub updated_at_ms: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TemporaryWorkspacePolicy {
+    #[serde(default)]
+    pub keep_thread: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Workspace {
     pub id: String,
     pub create_operation_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temporary: Option<TemporaryWorkspacePolicy>,
     pub repository_id: String,
     pub name: String,
     pub context_mode: ContextMode,

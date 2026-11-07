@@ -50,6 +50,7 @@ async fn defaults_prepare_a_fresh_workspace_without_contacting_discovery() {
             "Context",
             "Profile",
             "Model",
+            "Cleanup",
             "After create",
             "Create workspace",
         ]
@@ -163,7 +164,7 @@ async fn explicit_flags_seed_the_walkthrough_and_skip_resolved_steps() {
     .await
     .unwrap();
 
-    assert_eq!(interaction.titles, ["Create workspace"]);
+    assert_eq!(interaction.titles, ["Cleanup", "Create workspace"]);
     let confirmation = final_create_choice(&interaction);
     assert_eq!(confirmation, &Choice::new("Create", None));
     assert_eq!(final_review_value(&interaction, "Workspace"), "review/api");
@@ -524,6 +525,7 @@ fn workspace_item_at(id: &str, name: &str, worktree_path: &Path) -> WorkspaceLis
         workspace: Workspace {
             id: id.to_owned(),
             create_operation_id: None,
+            temporary: None,
             repository_id: "repository-1".to_owned(),
             name: name.to_owned(),
             context_mode: ContextMode::Fresh,
@@ -568,6 +570,7 @@ fn workspace_item_at(id: &str, name: &str, worktree_path: &Path) -> WorkspaceLis
 
 #[derive(Default)]
 struct ScriptedInteraction {
+    cleanup_choice: Option<usize>,
     choices: VecDeque<usize>,
     texts: VecDeque<String>,
     titles: Vec<String>,
@@ -582,6 +585,7 @@ impl ScriptedInteraction {
         texts: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
         Self {
+            cleanup_choice: Some(0),
             choices: choices.into_iter().collect(),
             texts: texts.into_iter().map(Into::into).collect(),
             titles: Vec::new(),
@@ -606,6 +610,12 @@ impl Interaction for ScriptedInteraction {
         self.titles.push(title.to_owned());
         self.seen_choices.push(choices.to_vec());
         self.seen_review_fields.push(Vec::new());
+        if title == "Cleanup" {
+            return self
+                .cleanup_choice
+                .take()
+                .context("cleanup was already selected");
+        }
         self.choices
             .pop_front()
             .context("test did not provide a selection")
@@ -642,3 +652,4 @@ impl Interaction for ScriptedInteraction {
 mod choices;
 mod context;
 mod repositories;
+mod temporary;

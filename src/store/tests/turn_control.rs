@@ -125,7 +125,7 @@ fn v15_operations_keep_acceptance_but_gain_no_invented_thread_or_outcome() {
         connection
             .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        17
+        18
     );
     drop(connection);
     let migrated = store

@@ -98,6 +98,8 @@ fn fake_response(method: DaemonMethod) -> Value {
             },
         }),
         DaemonMethod::WorkspaceAttachRenew => json!({}),
+        DaemonMethod::WorkspaceAttachFinish => json!({"cleanup": null}),
+        DaemonMethod::WorkspaceAttachDisarmCleanup => json!({}),
         DaemonMethod::WorkspaceAttachAdopt => json!({"state": "pending"}),
         DaemonMethod::WorkspaceAttachRelease => json!({}),
         DaemonMethod::WorkspaceGet => json!({

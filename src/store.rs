@@ -13,7 +13,7 @@ use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
-pub(crate) const SUPPORTED_SCHEMA_VERSION: i64 = 17;
+pub(crate) const SUPPORTED_SCHEMA_VERSION: i64 = 18;
 
 use crate::domain::{
     AuditOutcome, ContextMode, EventKind, EventSource, ProfileSnapshot, Repository, WorktreeMode,
@@ -120,6 +120,7 @@ pub enum StoreError {
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewWorkspace {
     pub create_operation_id: Option<String>,
+    pub temporary: Option<crate::domain::TemporaryWorkspacePolicy>,
     pub repository_id: String,
     pub name: String,
     pub context_mode: ContextMode,

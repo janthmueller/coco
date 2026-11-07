@@ -81,6 +81,18 @@ leaks above remain as the historical pre-refactor baseline.
 
 ## Target dependency direction
 
+Temporary workspace policy is a typed domain value and nullable Store column.
+Its schema-18 migration and one-shot transaction have focused private children.
+`protocol/temporary.rs` supplies a distinct successful-session completion DTO;
+`coordinator/jump/temporary.rs` validates that capability and reuses checked
+retirement. CLI walkthrough/completion and focused test children own their
+presentation and process seams. Ordinary lease release, worker MCP and native
+thread creation stay unchanged; no crate or external library API is added.
+The relay's private `temporary` child performs pre-forward durable disarm for
+additional conversation traffic, using a capability-checked application method
+and the existing Store claim. It does not introduce native-thread ownership
+tracking; focused auxiliary and transport tests exercise that safety boundary.
+
 Jump picker policy lives in the private `cli/commands/jump_picker` child.
 Native optional recency crosses the worker port and typed runtime projection,
 without history/storage coupling. The prompt adapter owns an optional dim

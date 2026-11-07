@@ -22,6 +22,7 @@ use crate::domain::{
 };
 
 mod context;
+mod temporary;
 
 impl Store {
     pub fn create_workspace_with_event(
@@ -35,6 +36,12 @@ impl Store {
         let workspace_id = new_id();
         let profile_json = serde_json::to_string(&input.profile).map_err(json_to_sql_error)?;
         let context_json = serde_json::to_string(&input.context).map_err(json_to_sql_error)?;
+        let temporary_json = input
+            .temporary
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(json_to_sql_error)?;
         let worktree_path = input
             .worktree_path
             .as_deref()
@@ -48,10 +55,11 @@ impl Store {
                 thread_status_generation, thread_status_observed_at_ms,
                 thread_status_is_fresh, worktree_mode, branch_name, base_sha, worktree_path,
                 codex_thread_id, parent_thread_id, active_turn_id, last_error_code,
-                last_error_message, created_at_ms, updated_at_ms, completed_at_ms
+                last_error_message, created_at_ms, updated_at_ms, completed_at_ms,
+                temporary_cleanup_json
              ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, 'provisioning', NULL, NULL, NULL, 0,
-                ?8, ?9, ?10, ?11, NULL, NULL, NULL, NULL, NULL, ?12, ?12, NULL
+                ?8, ?9, ?10, ?11, NULL, NULL, NULL, NULL, NULL, ?12, ?12, NULL, ?13
              )",
             params![
                 workspace_id,
@@ -66,6 +74,7 @@ impl Store {
                 input.base_sha,
                 worktree_path,
                 now,
+                temporary_json,
             ],
         )?;
         event.workspace_id = Some(workspace_id.clone());

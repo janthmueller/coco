@@ -593,6 +593,7 @@ mod tests {
             workspace: Workspace {
                 id: "workspace-1".to_owned(),
                 create_operation_id: None,
+                temporary: None,
                 repository_id: "repo-1".to_owned(),
                 name: "fix/test".to_owned(),
                 context_mode: ContextMode::Fresh,

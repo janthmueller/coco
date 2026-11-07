@@ -930,11 +930,7 @@ impl Coordinator {
         });
         let context_descriptor = json!({
             "version": 4,
-            "request": {
-                "context": params.context,
-                "worktree": params.worktree,
-                "changes": params.changes,
-            },
+            "request": creation_request(params),
             "resolved": {
                 "base": {
                     "requested": base.requested,
@@ -961,6 +957,7 @@ impl Coordinator {
         let (workspace, _) = self.store.create_workspace_with_event(
             NewWorkspace {
                 create_operation_id: Some(params.operation_id.clone()),
+                temporary: params.temporary,
                 repository_id: repository.id.clone(),
                 name: params.name.clone(),
                 context_mode,
@@ -1417,11 +1414,7 @@ fn ensure_create_replay_matches(
     params: &WorkspaceCreateParams,
     repository_id: &str,
 ) -> Result<(), CoordinatorError> {
-    let request = json!({
-        "context": params.context,
-        "worktree": params.worktree,
-        "changes": params.changes,
-    });
+    let request = creation_request(params);
     let matches = existing.repository_id == repository_id
         && existing.name == params.name
         && existing.context_mode == params.context.mode()
@@ -1433,6 +1426,18 @@ fn ensure_create_replay_matches(
     } else {
         Err(CoordinatorError::IdempotencyConflict)
     }
+}
+
+fn creation_request(params: &WorkspaceCreateParams) -> Value {
+    let mut request = json!({
+        "context": params.context,
+        "worktree": params.worktree,
+        "changes": params.changes,
+    });
+    if let Some(policy) = params.temporary {
+        request["temporary"] = json!(policy);
+    }
+    request
 }
 
 fn validate_create_request(params: &WorkspaceCreateParams) -> Result<(), CoordinatorError> {

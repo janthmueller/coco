@@ -24,6 +24,7 @@ fn workspace(root: &Path) -> Workspace {
     Workspace {
         id: "workspace-id".into(),
         create_operation_id: None,
+        temporary: None,
         repository_id: "repo-id".into(),
         name: "review/widget".into(),
         context_mode: ContextMode::Fresh,

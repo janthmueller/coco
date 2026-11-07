@@ -21,6 +21,7 @@ mod clients_tests;
 mod doctor;
 mod hooks;
 mod signals;
+mod temporary;
 mod turns;
 pub(crate) use crate::domain::turns::{
     TurnInterruptAttempt, TurnInterruptAttemptState, TurnInterruptMode, TurnTerminalStatus,
@@ -28,6 +29,7 @@ pub(crate) use crate::domain::turns::{
 pub(crate) use doctor::*;
 pub(crate) use hooks::*;
 pub(crate) use signals::*;
+pub(crate) use temporary::*;
 pub(crate) use turns::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -55,6 +57,8 @@ pub enum DaemonMethod {
     WorkspaceAttachRenew,
     WorkspaceAttachAdopt,
     WorkspaceAttachRelease,
+    WorkspaceAttachFinish,
+    WorkspaceAttachDisarmCleanup,
     TurnStart,
     TurnResult,
     TurnGet,
@@ -75,7 +79,7 @@ pub enum DaemonMethod {
 
 impl DaemonMethod {
     #[cfg(test)]
-    pub const ALL: [Self; 39] = [
+    pub const ALL: [Self; 41] = [
         Self::Health,
         Self::Doctor,
         Self::ModelList,
@@ -99,6 +103,8 @@ impl DaemonMethod {
         Self::WorkspaceAttachRenew,
         Self::WorkspaceAttachAdopt,
         Self::WorkspaceAttachRelease,
+        Self::WorkspaceAttachFinish,
+        Self::WorkspaceAttachDisarmCleanup,
         Self::TurnStart,
         Self::TurnResult,
         Self::TurnGet,
@@ -142,6 +148,8 @@ impl DaemonMethod {
             Self::WorkspaceAttachRenew => "workspace.attach.renew",
             Self::WorkspaceAttachAdopt => "workspace.attach.adopt",
             Self::WorkspaceAttachRelease => "workspace.attach.release",
+            Self::WorkspaceAttachFinish => "workspace.attach.finish",
+            Self::WorkspaceAttachDisarmCleanup => "workspace.attach.disarmCleanup",
             Self::TurnStart => "turn.start",
             Self::TurnResult => "turn.result",
             Self::TurnGet => "turn.get",
@@ -186,6 +194,8 @@ impl DaemonMethod {
             "workspace.attach.renew" => Some(Self::WorkspaceAttachRenew),
             "workspace.attach.adopt" => Some(Self::WorkspaceAttachAdopt),
             "workspace.attach.release" => Some(Self::WorkspaceAttachRelease),
+            "workspace.attach.finish" => Some(Self::WorkspaceAttachFinish),
+            "workspace.attach.disarmCleanup" => Some(Self::WorkspaceAttachDisarmCleanup),
             "turn.start" => Some(Self::TurnStart),
             "turn.result" => Some(Self::TurnResult),
             "turn.get" => Some(Self::TurnGet),
@@ -342,6 +352,8 @@ pub enum WorkspaceChangesRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkspaceCreateParams {
     pub repository_path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temporary: Option<crate::domain::TemporaryWorkspacePolicy>,
     pub name: String,
     pub context: WorkspaceContextRequest,
     pub worktree: WorkspaceWorktreeRequest,
@@ -1110,6 +1122,8 @@ mod tests {
                 "workspace.attach.renew",
                 "workspace.attach.adopt",
                 "workspace.attach.release",
+                "workspace.attach.finish",
+                "workspace.attach.disarmCleanup",
                 "turn.start",
                 "turn.result",
                 "turn.get",
@@ -1169,6 +1183,7 @@ mod tests {
         assert_request(
             WorkspaceCreateParams {
                 repository_path: PathBuf::from("/repo"),
+                temporary: None,
                 name: "workspace".to_owned(),
                 context: WorkspaceContextRequest::Fresh,
                 worktree: WorkspaceWorktreeRequest::NewBranch {
@@ -1200,6 +1215,7 @@ mod tests {
         assert_request(
             WorkspaceCreateParams {
                 repository_path: PathBuf::from("/repo"),
+                temporary: None,
                 name: "child".to_owned(),
                 context: WorkspaceContextRequest::Fork {
                     source: WorkspaceContextSource::Reference {

@@ -163,6 +163,9 @@ if [ "$kind" = "resume" ]; then
   exit "${COCO_TEST_JUMP_EXIT:-0}"
 fi
 if [ "$kind" = "fresh" ]; then
+  if [ -n "${COCO_TEST_EMPTY_TUI_EXIT:-}" ]; then
+    exit "$COCO_TEST_EMPTY_TUI_EXIT"
+  fi
   : "${COCO_TEST_FAKE_TUI_BINARY:?}"
   remote_endpoint="${2:?missing fresh --remote endpoint}"
   export COCO_TEST_FRESH_REMOTE="$remote_endpoint"

@@ -14,7 +14,7 @@ async fn recency_is_available_in_json_without_changing_status_or_list_order_and_
     let fixture = Fixture::new(vec![vec![recent, old]], vec![]).await?;
     for command in ["status", "list"] {
         let result = fixture.json(&[command, "-a", "--json"]).await?;
-        assert_eq!(result["schemaVersion"], 17);
+        assert_eq!(result["schemaVersion"], 18);
         assert_eq!(names(&result), ["old", "recent"]);
         assert_eq!(
             result["workspaces"][1]["threadRuntime"]["recencyAtMs"],
@@ -46,7 +46,7 @@ async fn reported_dollars_are_rendered_and_keep_estimate_provenance_in_json() ->
     });
     let fixture = Fixture::new(vec![vec![workspace]], vec![observation]).await?;
     let result = fixture.json(&["status", "-au", "--json"]).await?;
-    assert_eq!(result["schemaVersion"], 17);
+    assert_eq!(result["schemaVersion"], 18);
     let cost = &result["workspaces"][0]["usage"]["cost"];
     assert_eq!(cost["nativeUsageUsdMicros"], 310_000);
     assert_eq!(cost["estimatedUsageUsdMicros"], 420_000);

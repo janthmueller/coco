@@ -1030,6 +1030,8 @@ pub(super) fn normalize_create_args(
     let CreateArgs {
         name,
         interactive: _,
+        temporary,
+        keep_thread,
         base,
         base_workspace,
         context,
@@ -1096,6 +1098,7 @@ pub(super) fn normalize_create_args(
     Ok((
         WorkspaceCreateParams {
             repository_path,
+            temporary: temporary.then_some(crate::domain::TemporaryWorkspacePolicy { keep_thread }),
             name: name.clone(),
             context,
             worktree,

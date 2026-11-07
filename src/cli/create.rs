@@ -13,6 +13,7 @@ use super::prompt::{Choice, Interaction, ReviewField};
 use super::status::sort_workspace_collection;
 
 mod context;
+mod temporary;
 
 pub(super) fn walkthrough_requested(args: &CreateArgs) -> bool {
     args.interactive || args.name.is_none()
@@ -96,6 +97,7 @@ impl CreateWalkthrough<'_> {
         self.prompt_context().await?;
         self.prompt_profile()?;
         self.prompt_model().await?;
+        self.prompt_temporary()?;
         self.prompt_post_action()?;
         self.confirm_creation()?;
         Ok(self.args)
@@ -342,13 +344,30 @@ impl CreateWalkthrough<'_> {
         if self.args.send.is_some() || self.args.jump {
             return Ok(());
         }
-        let choices = [
-            Choice::new("Return to shell", None).with_default_marker(),
-            Choice::new("Send message", None),
-            Choice::new("Open Codex", None),
-            Choice::new("Send, then open Codex", None),
+        let labels = [
+            "Return to shell",
+            "Send message",
+            "Open Codex",
+            "Send, then open Codex",
         ];
-        match self.interaction.select("After create", &choices)? {
+        let actions = if self.args.temporary {
+            [2, 0, 1, 3]
+        } else {
+            [0, 1, 2, 3]
+        };
+        let choices: Vec<_> = actions
+            .iter()
+            .enumerate()
+            .map(|(position, action)| {
+                let choice = Choice::new(labels[*action], None);
+                if position == 0 {
+                    choice.with_default_marker()
+                } else {
+                    choice
+                }
+            })
+            .collect();
+        match actions[self.interaction.select("After create", &choices)?] {
             0 => {}
             1 => self.args.send = Some(self.interaction.text("Message")?),
             2 => self.args.jump = true,
@@ -600,7 +619,7 @@ fn create_review_fields(
         (false, true) => "open Codex",
         (true, true) => "send, then open Codex",
     };
-    vec![
+    let mut fields = vec![
         ReviewField::new("Workspace", name),
         ReviewField::new("Worktree", binding),
         ReviewField::new("Code", code),
@@ -609,7 +628,19 @@ fn create_review_fields(
         ReviewField::new("Profile", profile),
         ReviewField::new("Model", model),
         ReviewField::new("After create", action),
-    ]
+    ];
+    if args.temporary {
+        fields.push(ReviewField::new("Cleanup", "after TUI, when safe"));
+        fields.push(ReviewField::new(
+            "Conversation",
+            if args.keep_thread {
+                "keep"
+            } else {
+                "delete with workspace"
+            },
+        ));
+    }
+    fields
 }
 
 #[cfg(test)]
