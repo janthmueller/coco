@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.6.0 (2026-11-07)
+
+### Documentation
+
+- Record verified 0.5.0 release
+  ([`4c59eb9`](https://github.com/janthmueller/coco/commit/4c59eb9c98d18590572a3cea02b5302843eef6de))
+
+### Features
+
+- Add temporary workspaces with safe automatic cleanup
+  ([`1a71545`](https://github.com/janthmueller/coco/commit/1a71545394ffe17f5af5cfd4db934ed5f6ba1da0))
+
+
 ## v0.5.0 (2026-11-05)
 
 ### Documentation
