@@ -15,8 +15,9 @@ updated: 2026-11-07
 Create an explicitly temporary workspace, with or without opening its TUI.
 After the first regular exit of the last tracked TUI, attempt safe cleanup
 using the existing delete policy. Include the create walkthrough and focused
-public documentation. No commit, push, release, installation or user-runtime
-change is part of this implementation request.
+public documentation. The initial implementation excluded commit/push/release;
+the subsequent 2026-11-07 delivery authorization is completed below. No
+installation or user-runtime change is part of this work.
 
 ## Active work
 
@@ -146,20 +147,23 @@ change is part of this implementation request.
 
 ## Open questions and handoff
 
-- 2026-11-07 — User now authorizes committing this reviewed slice, integrating
+- 2026-11-07 — User authorized committing this reviewed slice, integrating
   it into `main`, pushing, and publishing the next regular release through
   guarded GitHub Actions. This supersedes the earlier no-publication boundary
   for delivery only; keep Compose/other branches and installed runtimes
   unchanged. Latest read-only review finds no remaining blockers: 709 library,
   seven process and eleven status-query tests pass, as do all 39 focused
-  cases, formatting and warning-denied Clippy. Delivery continues in main's
-  working document; expected version is 0.6.0, subject to the CI rehearsal.
-- Complete and ready for user review on `feature/temporary-workspaces`.
-  Main remains `4c59eb9`; Compose and other branch refs are unchanged. No
-  commit, push, release, deployment, installation or user-runtime change.
-- Use matching CLI and daemon builds from this branch when testing. The
-  package version remains `0.5.0` pending a separately authorized release;
-  installed/published 0.5.0 does not contain the new flag. Existing workspaces
-  migrate as persistent and ordinary release behavior is unchanged.
+  cases, formatting and warning-denied Clippy. Delivery is recorded in main's
+  working document.
+- Complete and released as stable `0.6.0`. Feature commit `1a71545` was
+  integrated and pushed by fast-forward; release automation produced tag
+  `v0.6.0` at `ea0c70f`. Exact-source Rust and Pages gates, stable rehearsal
+  and publishing workflow passed, including native Linux/macOS and crates.io.
+  Public registry availability, both archive checksums/content and the tagged
+  lockfile were independently verified. Compose/other branches are unchanged.
+- Use matching CLI and daemon builds; published 0.6.0 includes the new flags
+  and schema-18 policy. Existing workspaces migrate as persistent and ordinary
+  release behavior is unchanged. No installation or live-runtime change was
+  made by this delivery.
 - Headless turn-completion cleanup, TTL expiration and forced automatic file
   or commit discard are intentionally outside this feature.

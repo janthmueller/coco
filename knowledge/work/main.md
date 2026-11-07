@@ -36,6 +36,43 @@ architectural baseline for CoCo.
   version 0.6.0 and synchronized Cargo metadata, then dispatch publication and
   verify registry/release/archive availability. Record actual revisions and
   workflow results below as they become available.
+- Integrated and pushed source `1a71545394ffe17f5af5cfd4db934ed5f6ba1da0`
+  (`feat: add temporary workspaces with safe automatic cleanup`) by ordinary
+  fast-forward from `4c59eb9`; main was clean and synchronized after push.
+  GitHub confirms automatic alpha remains disabled. A freshly updated local
+  advisory/policy check passes without suppressions. Exact-source Rust run
+  `42365731006` is in progress. Documentation run `42365730961` has passed,
+  including static export validation and the GitHub Pages deployment. No
+  publishing dispatch has been made yet.
+- Rust's format/lint/test/dependency/package and full Nix checks have passed.
+  Exact-source Rust run `42365731006` now passes completely, including native
+  Ubuntu 22.04 x86-64 and macOS 15 arm64 builds, help/version smoke checks and
+  archive assembly. Remote main is rechecked unchanged at the tested source.
+- Stable non-publishing rehearsal `42366691418` was dispatched with
+  `channel=stable,publish=false` and passed. Logs explicitly confirm version
+  `0.6.0`, tag `v0.6.0`, stable channel and synchronized Cargo metadata. Remote
+  main was checked unchanged again before publication. Authorized publishing
+  run `42366886612` is dispatched with `channel=stable,publish=true`; monitor
+  its version/release, crates.io and native archive jobs before claiming success.
+- Publishing has created regular GitHub release `v0.6.0` (not draft or
+  prerelease) at generated commit `ea0c70facc87e9aaa453c1d2b98a3f59cd2027e0`.
+  Local main fast-forwards normally to that commit, retaining these internal
+  notes. The tag differs from tested source only in Cargo.toml/Cargo.lock and
+  CHANGELOG.md; production, tests, site, workflows and Nix inputs match exactly.
+  The crates.io publishing job passes. The public registry API and Cargo
+  sparse index independently confirm available, non-yanked 0.6.0. An anonymous
+  API request returned 403; a descriptive release-verification User-Agent
+  succeeds, without authentication. Publishing run `42366886612` completes
+  successfully, including both tagged native builds and their version/help
+  smoke tests. GitHub contains the lockfile, both platform archives and their
+  SHA-256 files. Independently downloaded Linux x86-64 and macOS arm64 copies
+  pass checksum verification and contain all three executables plus license
+  and README; the released lockfile matches the tagged lockfile byte-for-byte.
+- Complete: record the verified 0.6.0 delivery in a documentation-only
+  checkpoint. Keep product source, version stamps and public docs identical
+  to the verified tag. No real inference, manual tag, direct registry upload,
+  guard bypass, release-policy change, installation or user-runtime change was
+  performed. Compose and all other branch refs remain untouched.
 
 ### Turn-control and picker release — 2026-11-05
 

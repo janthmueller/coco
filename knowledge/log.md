@@ -10,6 +10,12 @@ status: stable
 
 ## 2026-11-07
 
+- **Normal release 0.6.0**: Integrate the reviewed temporary-workspace slice
+  and publish through the guarded stable GitHub Actions path after exact-SHA
+  Rust/Nix/package/Linux/macOS and Pages gates plus a non-publishing rehearsal.
+  Verify public non-yanked Cargo availability, release lockfile and both native
+  archives/checksums. Keep automatic alpha off and installed runtimes unchanged.
+
 - **Temporary cleanup safety**: Before forwarding additional-conversation
   traffic, permanently disarm automatic cleanup using the exact live attachment
   capability. Observe temporary shared-mode resumes through the relay too.
