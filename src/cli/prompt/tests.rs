@@ -3,6 +3,65 @@ use super::*;
 mod trailing;
 
 #[test]
+fn tab_applies_defaults_only_in_setup_pickers() {
+    let mut state = PickerState::new();
+    state.selected = 1;
+    assert_eq!(
+        state.handle_step_key(key(KeyCode::Tab), 3, true),
+        PickerAction::UseDefaults
+    );
+    assert_eq!(state.selected, 1);
+    assert_eq!(
+        state.handle_step_key(key(KeyCode::Tab), 3, false),
+        PickerAction::Continue
+    );
+    assert_eq!(
+        state.handle_step_key(key(KeyCode::BackTab), 3, true),
+        PickerAction::Continue
+    );
+    assert_eq!(
+        state.handle_step_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::CONTROL), 3, true),
+        PickerAction::Continue
+    );
+    assert_eq!(
+        state.handle_step_key(
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            3,
+            true
+        ),
+        PickerAction::Interrupted
+    );
+}
+
+#[test]
+fn setup_hint_is_bounded_and_does_not_change_regular_picker_rows() {
+    let choices = [Choice::new("Fresh", None).with_default_marker()];
+    for width in [11, 23, 79] {
+        let lines = step_picker_lines(
+            "Context",
+            &choices,
+            &PickerState::new(),
+            width,
+            Palette::plain(),
+        );
+        assert_eq!(lines.len(), 3);
+        assert!(lines[2].starts_with("Tab:"));
+        assert!(lines.iter().all(|line| line.width() <= width));
+        assert_eq!(
+            picker_lines(
+                "Context",
+                &choices,
+                &PickerState::new(),
+                width,
+                Palette::plain()
+            )
+            .len(),
+            2
+        );
+    }
+}
+
+#[test]
 #[ignore = "manual terminal regression probe; requires an interactive PTY"]
 fn interactive_terminal_probe() {
     assert!(io::stdin().is_terminal() && io::stderr().is_terminal());

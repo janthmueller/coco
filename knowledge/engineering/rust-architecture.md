@@ -109,6 +109,14 @@ The natural text comparator is shared only within CLI, not exposed as an SDK.
 Private command tests exercise selection/RPC dispatch; picker children cover
 ordering and presentation, with separate native decoding and terminal proofs. No crate or domain-to-presentation dependency is introduced.
 
+Creation's private `defaults` child wraps the interaction adapter for one
+walkthrough. Only setup selection offers the typed `StepSelection::UseDefaults`
+outcome and its bounded Tab hint; ordinary selectors and review/confirmation
+methods keep their original contract. The wrapper applies marked defaults,
+delegates required values and final review, and does not persist skip state or
+change creation DTOs. Setup hint space is reserved inside the existing inline
+frame, preserving terminal restoration and the staged CLI boundary.
+
 The operation-scoped turn-control slice preserves these boundaries: terminal
 values live in `domain/turns.rs`, wire DTOs in `protocol/turns.rs`, application
 policy in `coordinator/turn/control.rs`, native pagination in

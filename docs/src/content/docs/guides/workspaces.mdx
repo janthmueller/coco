@@ -16,8 +16,11 @@ coco create
 ```
 
 The walkthrough lets you choose the name, code and conversation starting
-points, profile, model, cleanup, and what to do after creation. Press Enter to keep the
-highlighted default. Existing workspaces appear when you choose one as the
+points, profile, model, cleanup, and what to do after creation. Press Enter to
+keep the highlighted choice, or press Tab in a selection step to accept the
+remaining defaults and go to the final review. Your previous choices and flags
+are kept. Required values still need an answer, and creation waits for you to
+confirm the review. Existing workspaces appear when you choose one as the
 conversation source. When you run it inside a reusable CoCo workspace, that
 current workspace is offered directly. You can also enter an exact Codex
 thread ID.
@@ -194,6 +197,10 @@ coco ../api jump fix/login
 Use `coco repo add /absolute/path/to/api` when you want a repository to appear
 in lists and selectors before creating a workspace. `coco repo list` shows all
 currently added repositories.
+
+From a directory outside Git, run `coco create` in a terminal to choose an
+added repository before setup. If none are added yet, start with
+`coco repo add /absolute/path/to/api`.
 
 For an overview of every repository, use `-a`:
 

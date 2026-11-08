@@ -102,7 +102,7 @@ def check_picker(terminal: Terminal) -> None:
     assert terminal.flags() == "0:0", "picker did not hide the hardware cursor"
     colored = terminal.screen(colored=True)
     assert "\x1b[" in colored and "[workspace-01]" not in colored
-    terminal.keys("j")
+    terminal.keys("Tab", "j")
     screen = terminal.wait("Choose a workspace (2/12)")
     assert_selection(screen, 2, 9)
     assert screen.count("workspace-09") == 1, "last row was duplicated"
@@ -156,6 +156,40 @@ def check_confirmations(terminal: Terminal) -> None:
     print("confirmation: Enter defaults to No; y/n, retries, and EOF pass")
 
 
+def check_creation_defaults(terminal: Terminal) -> None:
+    terminal.tmux("resize-window", "-t", "probe", "-x", "80", "-y", "14")
+    for cancel in (False, True):
+        terminal.start_test("cli::create::tests::defaults::interactive_defaults_walkthrough_probe")
+        for title in ("Worktree", "Code", "Git changes"):
+            terminal.wait(f"{title} (1/")
+            terminal.wait("Tab: remaining defaults")
+            terminal.keys("Enter")
+        terminal.wait("Context (1/")
+        terminal.keys("3")
+        terminal.wait("Codex thread ID:")
+        terminal.keys("probe-context", "Enter")
+        terminal.wait("Context size (1/2)")
+        terminal.tmux("resize-window", "-t", "probe", "-x", "24", "-y", "5")
+        terminal.wait("Tab: remaining defaults")
+        terminal.keys("Down")
+        terminal.wait("Context size (2/2)")
+        terminal.tmux("resize-window", "-t", "probe", "-x", "80", "-y", "14")
+        terminal.wait("Full context")
+        terminal.keys("Tab")
+        screen = terminal.wait("Create workspace (1/2)")
+        assert "thread probe-context" in screen, screen
+        assert "Tab: remaining defaults" not in screen, screen
+        terminal.keys("Tab", "Down")
+        terminal.wait("Create workspace (2/2)")
+        if not cancel:
+            terminal.keys("Home")
+        terminal.keys("Enter")
+        terminal.wait("defaults-result=Err(" if cancel else "defaults-result=Ok(")
+        terminal.wait("test result: ok.")
+        assert terminal.flags() == "1:1", "creation did not restore the terminal"
+    print("create: Tab applies remaining defaults, keeps context, and requires final approval")
+
+
 def check_follow(terminal: Terminal) -> None:
     terminal.start_test("cli::follow::tests::interactive_follow_terminal_probe")
     terminal.wait("follow-result=ok")
@@ -181,6 +215,7 @@ def main() -> None:
         )
         try:
             check_picker(terminal)
+            check_creation_defaults(terminal)
             check_confirmations(terminal)
             check_follow(terminal)
         finally:

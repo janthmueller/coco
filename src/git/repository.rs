@@ -14,7 +14,15 @@ impl Git {
             &requested_path,
             "discover-root",
             ["rev-parse", "--show-toplevel"],
-        )?;
+        );
+        let root = root.map_err(|error| match &error {
+            GitError::CommandFailed {
+                status: Some(128),
+                stderr,
+                ..
+            } if is_missing_worktree(stderr) => GitError::NotAWorktree(requested_path.clone()),
+            _ => error,
+        })?;
         let common_dir = self.canonical_git_path(
             &root,
             "discover-common-dir",
@@ -93,6 +101,18 @@ impl Git {
         }
         canonicalize(Path::new(&value))
     }
+}
+
+fn is_missing_worktree(stderr: &str) -> bool {
+    // Git runs with LC_ALL=C. Other discovery failures must keep their diagnostics.
+    matches!(
+        stderr,
+        "fatal: not a git repository (or any of the parent directories): .git"
+            | "fatal: this operation must be run in a work tree"
+    ) || (stderr.starts_with("fatal: not a git repository (or any parent up to mount point ")
+        && stderr.ends_with(
+            ")\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).",
+        ))
 }
 
 pub(super) fn validate_object_id(value: &str) -> Result<(), GitError> {

@@ -2,6 +2,29 @@ use super::*;
 use crate::protocol::{RepositoryListParams, RepositoryRemoveParams, RepositoryResolveParams};
 
 #[tokio::test]
+async fn resolving_outside_git_reports_the_repository_picker_error_code() {
+    let fixture = Fixture::new(FakeWorker::default());
+    fixture.register().await;
+    let outside = fixture._temp.path().join("outside");
+    fs::create_dir(&outside).unwrap();
+
+    let error = fixture
+        .coordinator
+        .resolve_repository(RepositoryResolveParams { path: outside })
+        .unwrap_err();
+    assert_eq!(error.code(), "NOT_A_GIT_REPOSITORY");
+    assert_eq!(
+        fixture
+            .coordinator
+            .list_repositories(RepositoryListParams {})
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(fixture.worker.calls().is_empty());
+}
+
+#[tokio::test]
 async fn workspace_creation_enrolls_an_unregistered_repository() {
     let fixture = Fixture::new(FakeWorker::default());
     assert!(

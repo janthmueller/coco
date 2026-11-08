@@ -1,7 +1,7 @@
 ---
 type: Working Document
 title: "review/new-version: Temporary cleanup and recent workspace selection"
-description: Approved plan, implemented behavior and verification for temporary TUI cleanup and shared recent-first pickers.
+description: Implementation and verification of temporary cleanup, shared recent-first pickers, remaining creation defaults and repository selection outside Git.
 tags: [work, review, cli, workspaces, cleanup, recency]
 status: complete
 branch: review/new-version
@@ -16,6 +16,10 @@ Investigate the latest release and reported temporary-workspace retention,
 fix the verified failure path, and share recent-first workspace selection
 across guided creation and all discussed target commands. Keep code sources
 repository-local and conversation context available across registered repositories.
+Extend guided creation so a user can keep chosen values and accept the remaining
+defaults with Tab, then review and explicitly confirm the complete result.
+Restore the registered-repository picker when interactive creation starts
+outside Git, as demonstrated by the user's installed 0.6.0 failure.
 
 ## Approved plan and completion
 
@@ -117,16 +121,17 @@ No paid inference or real user workspace deletion was performed.
 | Failing worker regression before fix | Exact empty-rollout RPC error reproduced |
 | Failing process regression before fix | Successful TUI exit prevented cleanup through adoption failure |
 | Three focused materialization cases | Pass, including delayed-valid metadata and unrelated/identity/path error preservation |
-| CLI subset | 220 pass; four existing manual probes ignored |
-| `cargo test --locked --offline --all-targets -- --quiet` | 719 library, seven process and eleven status tests pass; seven manual library probes, paid inference and twelve native opt-ins excluded |
-| Native compatibility, explicit opt-in, `--ignored --test-threads=1` | All twelve pass with Codex 0.166.0 in 116.42 s, including fresh/forked temporary exits, original-source preservation and archived closed metadata |
+| Initial CLI subset, before the defaults feature | 220 pass; four existing manual probes ignored |
+| `cargo test --locked --offline --all-targets -- --quiet` | 730 library, seven process and eleven status tests pass; eight manual library probes, paid inference and twelve native opt-ins excluded |
+| Native compatibility at `42e8f93`, explicit opt-in, `--ignored --test-threads=1` | All twelve pass with Codex 0.166.0 in 116.42 s, including fresh/forked temporary exits, original-source preservation and archived closed metadata; not repeated for the creation-only defaults feature |
+| Remaining creation defaults | Prior choices, presets, non-first default markers, required sources/text, conditional temporary defaults and final cancellation pass |
 | Fork cleanup regression before fix | Normal exit retained the workspace after passive foreign metadata/history lookup |
 | Real temporary TUI regressions | Fresh and create-time inherited context both clean up after Ctrl+D, `/quit` and Ctrl+C; original workspace, branch, commit, tracked changes, untracked file and native history preserved |
 | Read-only exception safety | Unit and transport proofs retain cleanup for metadata/history reads; foreign resume still requires durable disarm and cannot forward if that acknowledgement fails |
 | `cargo clippy --locked --offline --all-targets --all-features -- -D warnings` | Pass |
 | `cargo fmt --all -- --check` | Pass |
 | `cargo-machete` | No unused dependencies |
-| `python3 tests/terminal_smoke.py <library-test-executable>` | Navigation, resize/narrow display, colors, cancellation, confirmations and terminal restoration pass |
+| `python3 tests/terminal_smoke.py <library-test-executable>` | Navigation, narrow resize, colors, Tab defaults through real creation, explicit final approval/cancellation, confirmations and terminal restoration pass |
 | `nix flake check --no-build --offline --no-update-lock-file` | Pass for the local system |
 | Astro `check` | Zero errors, warnings or hints |
 | Astro static `build`, `DOCS_BASE_PATH=/coco` | Eighteen pages built |
@@ -154,10 +159,10 @@ No paid inference or real user workspace deletion was performed.
 
 ## Open questions and handoff
 
-- Full diff review and the confirmed P2 recency fix are complete. Changes remain
-  in this checkout and are approved for a local commit; installed CLI/daemon
-  builds and services have not been replaced or restarted. No outstanding
-  implementation finding remains.
+- The reviewed cleanup/recency work is committed as `42e8f93`. The subsequent
+  Tab-defaults feature is implemented, reviewed and verified in this checkout;
+  it is not committed or installed. CLI/daemon services remain unchanged, and
+  no outstanding implementation finding remains.
 - The original exact create command and final CLI exit message remain unknown.
   Narrow read-only attempts to associate the logged thread with a live SQLite
   row failed with `unable to open database file`. Do not claim that this log
@@ -313,3 +318,176 @@ No paid inference or real user workspace deletion was performed.
 - The latest code gates remain unchanged. Final staging must contain the
   reviewed source/documentation paths only and pass `git diff --cached --check`.
   Commit identity and delivery are recorded by Git history.
+
+## Feature: accept remaining creation defaults
+
+- 2026-11-08 — Previous reviewed work is committed as `42e8f93`. User now
+  requests completing a partially configured walkthrough with its remaining
+  defaults and explicitly selects Tab as the shortcut.
+- Preserve supplied flags and committed selections. Apply only marked semantic
+  defaults; still collect required text/source choices with no such default.
+  Final Create/Cancel review remains explicit and does not accept Tab.
+- Keep the behavior scoped to creation setup. Ordinary workspace/decision
+  selectors and destructive confirmations retain their interaction contracts.
+- [x] Add an opt-in typed setup selection and visible Tab hint to the shared
+  terminal adapter, with terminal restoration and ordinary selectors preserved.
+- [x] Apply remaining defaults in a private creation interaction wrapper,
+  avoiding unnecessary discovery and preserving conditional/preset defaults.
+- [x] Cover shortcuts, required values, previous choices, presets, temporary
+  actions and cancellation with behavior tests and real terminal probes.
+- [x] Update public guidance and canonical knowledge, verify and review.
+- Implemented a private creation wrapper around `Interaction`. The terminal
+  returns a typed defaults action only for setup, with a bounded footer and
+  reserved display row. Ordinary selectors, confirmations and final review use
+  their existing key behavior. Skip state belongs to one walkthrough only.
+- Defaults use the actual `is_default` marker, including a model default after
+  the first row. Required source picks do not adopt the most recent/first row;
+  they explain the requirement and retain explicit selection. Optional current
+  context discovery is skipped when an early shortcut already selects Fresh.
+- Terminal proof selects code/context, highlights Compact context, then presses
+  Tab and verifies the marked Full default is applied. It resizes to 24x5 and
+  back, verifies the remaining summary, proves Tab does not submit that review,
+  exercises both Create and Cancel, and checks cursor/wrap/raw-mode restoration.
+  Existing ordinary-picker Tab, cancellation and destructive-confirmation
+  behavior remain covered by the same isolated tmux suite.
+- Final verification: 730 library, seven process and eleven status tests pass;
+  eight manual library probes are excluded from that command. All-target,
+  all-feature Clippy, formatting, unused-dependency check, extended terminal
+  smoke, local Flake evaluation and diff checks pass. Astro check reports zero
+  errors/warnings/hints; static build and export verification pass for eighteen
+  pages and sixty-four files. No dependency, schema or protocol DTO changed.
+- Reviewed the complete feature diff with no outstanding finding. Runtime
+  cleanup/native adapter behavior is unchanged from `42e8f93`; its previous
+  twelve-test native compatibility proof was not repeated. No inference,
+  installation, push or new commit was performed for this feature.
+
+## Full review: remaining creation defaults
+
+- 2026-11-08 — User requests a full review of the uncommitted Tab feature.
+- [x] Review every production change and its effect on required values,
+  preset/conditional defaults, later safety prompts and terminal behavior.
+- [x] Review tests and public/internal documentation against actual behavior.
+- [x] Reproduce any actionable concerns and record the final review outcome.
+- Outcome: no confirmed findings across all fourteen changed files. The typed
+  setup action and its state remain local to creation; normal selectors,
+  no-input checks, required values and final review retain explicit interaction.
+- Rechecked every creation step and nested source/model choice against its
+  semantic default. Flags and prior values remain intact, conditional temporary
+  actions use their existing defaults, and no required source is guessed from
+  the first/recent row. The wrapper is dropped before creation/turn/jump work;
+  cancellation returns before a create request is submitted.
+- Reviewed hint layout, resize bounds, key modifiers/repeats and terminal
+  restoration against the state/controller and isolated PTY proof. The footer
+  stays inside the frame, ordinary Tab remains inactive, and the final summary
+  requires its own key decision. Public documentation describes this scope and
+  its required-value exception without implementation details.
+- No product/test changes or new executable probes were needed during review.
+  `git diff --check` passes again, with no staged contents. The preceding
+  unchanged-code verification remains 730 library, seven process, eleven status
+  tests, extended terminal smoke, Clippy/formatting, dependency-use, local Flake
+  evaluation and static documentation check/build/export; these were not rerun.
+  The feature remains uncommitted and uninstalled.
+
+## Fix: creation outside Git
+
+- 2026-11-08 — User proposes selecting a registered repository when running
+  `coco create` outside Git and supplies the actual 0.6.0 `GIT_ERROR` from
+  `discover-root`. The earlier chat claim that this already works was based
+  only on the intended CLI selection branch and was incorrect.
+- Git's failed `rev-parse --show-toplevel` exits 128 before the empty-output
+  check can return `NotAWorktree`. The generic command error becomes
+  `GIT_ERROR`, while the CLI requires `NOT_A_GIT_REPOSITORY` for its fallback.
+- [x] Reproduce with native Git and verify the resulting repository RPC code.
+- [x] Translate only recognized non-worktree root-discovery failures into the
+  existing typed error; preserve configuration, corrupt metadata and I/O errors.
+- [x] Prove interactive selection through a real Git/daemon path, including
+  empty inventory, explicit scope and noninteractive boundaries.
+- [x] Update canonical knowledge/public usage guidance as needed and verify.
+- Scope remains local source and isolated test fixtures. Do not install,
+  restart the user's daemon or mutate registered user repositories.
+- Before the fix, native non-Git and bare-repository tests fail with the
+  original exit-128 diagnostics; the coordinator test reports `GIT_ERROR`
+  instead of `NOT_A_GIT_REPOSITORY`. These pass after the narrow translation.
+- Added five automated regressions covering native discovery, canonical error
+  paths, coordinator classification, broken metadata/configuration, missing
+  paths, known filesystem-boundary diagnostics and unrelated/truncated errors.
+- Real PTY proof (`python3 target/repository_picker_check.py`, ignored local
+  probe) uses built coco/cocod, native Codex 0.166.0, a localhost-only dummy
+  provider and temporary HOME/data/socket/worktree directories. No model call
+  or access to the user's daemon/repositories is involved.
+- The proof runs plain `coco create` outside Git, chooses the second of two
+  registered repositories, accepts setup defaults and explicitly creates.
+  JSON and filesystem checks confirm the exact selected repository and worktree.
+  A second walkthrough cancels without creating another workspace. Empty
+  inventory explains registration; explicit invalid scope and no-input do not
+  fall back; malformed Git metadata still fails; valid unregistered Git still
+  enrolls automatically. The temporary daemon exits cleanly and terminal flags
+  are restored.
+- Final Rust verification: 735 library, seven process and eleven status
+  tests pass; eight manual library probes, twelve native compatibility opt-ins
+  and one live-inference proof are excluded. All-target/all-feature Clippy
+  and formatting pass. Astro check reports zero errors/warnings/hints; static
+  build and export verification pass for eighteen pages and sixty-four files.
+  Diff checks pass, with no staged contents. No module/public API, dependency,
+  schema or protocol DTO changed in this fix.
+- Handoff: the Tab feature and this discovery fix are implemented, verified,
+  uncommitted and uninstalled. The last commit remains `42e8f93`. The user's
+  installed 0.6.0 daemon still has its previous behavior; the fix must also be
+  present in cocod, where Git discovery runs. No outstanding implementation
+  finding remains in the current scope. Do not infer authorization to install,
+  restart services, commit again or push from this completed source fix.
+
+## Review: remaining defaults and repository discovery
+
+- 2026-11-08 — User requests another review after the outside-Git fix.
+- Scope: the complete uncommitted diff since `42e8f93`, including the Tab
+  walkthrough, native Git error translation, tests and documentation.
+- [x] Trace production changes and callers, including required values, preset
+  defaults, final confirmation and all consumers of repository discovery.
+- [x] Review regression coverage and reproduce actionable concerns in isolation.
+- [x] Check public/internal contracts and record findings plus verification.
+- Review does not authorize installation, daemon restart, publication or a new
+  commit. Preserve current product changes while assessing them.
+- Outcome: no confirmed findings across all eighteen changed files. Reviewed
+  the complete production/test/documentation diff and the surrounding creation,
+  terminal, Git command, coordinator and RPC paths. Required choices retain
+  explicit input; presets and committed decisions survive Tab; final review and
+  post-walkthrough operations use the original interaction contract.
+- Git translation is confined to root discovery and recognized exit-128
+  diagnostics. Checked its effects on registration, removal, scoped/ID lookup,
+  workspace provisioning, worktree verification and audit resolution. Errors
+  still propagate through those paths; the interactive fallback remains gated
+  by implicit scope and terminal input, and create still enrolls valid Git.
+- New isolated native probe creates a temporary directory on the separate
+  `/dev/shm` filesystem and invokes `git rev-parse --show-toplevel` with C locale
+  and filesystem discovery disabled. Actual exit 128 and both diagnostic lines
+  match the new boundary classifier, supplementing the synthetic regression.
+- Reviewed the five Git/coordinator regressions, Tab semantic/required-value
+  coverage, scripted adapter and real terminal checks against the contracts.
+  Existing native Git and real coco/cocod picker proof cover the original
+  reported failure; no additional actionable concern remained to reproduce.
+- Verification: the new native filesystem-boundary probe and `git diff --check`
+  pass; staged contents remain empty. Product and test code were unchanged by
+  this review. The previous 735 library, seven process and eleven status test
+  passes, all-target/all-feature Clippy, formatting, PTY proof and static docs
+  check/build/export remain the latest full verification and were not repeated.
+- Handoff remains: Tab and repository-discovery changes are uncommitted and
+  uninstalled; no outstanding review finding or required implementation work
+  remains in the current scope.
+- Commit-readiness check after the review: the expected eighteen paths remain
+  in the working diff, `git diff --check` passes and staged contents are empty.
+  The reviewed product code is unchanged; the recorded tests and Clippy remain
+  the latest verification. The changes are ready for a local commit; none was
+  created by this readiness check.
+
+## Delivery: creation defaults and repository selection
+
+- 2026-11-08 — After the full review and readiness check, the user explicitly
+  authorizes the local commit. This supersedes the earlier no-new-commit
+  boundary for the reviewed Tab feature and outside-Git discovery fix.
+- Include the eighteen reviewed source, test and documentation paths only.
+  Product code is unchanged since the recorded successful checks and review.
+- Commit message: `feat(cli): add create defaults shortcut and fix repo selection`.
+  Git history records the resulting commit identity. Verify the staged diff
+  before committing and the clean worktree afterward.
+- Installation, daemon restart, push and publication remain unrequested.

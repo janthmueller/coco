@@ -10,6 +10,18 @@ status: stable
 
 ## 2026-11-08
 
+- **Creation outside Git**: Correct native root-discovery error classification
+  so the existing interactive registered-repository selector is reached.
+  Preserve unrelated Git errors, explicit scope and noninteractive boundaries.
+  Verify the original failure with native Git and the coordinator, then prove
+  real CLI/daemon selection, exact target creation and cancellation in isolation.
+
+- **Remaining creation defaults**: Tab in creation setup accepts the current
+  and remaining marked defaults, preserves chosen values and flags, and moves
+  to explicit final review. Required values still prompt; ordinary selectors
+  and destructive confirmations retain their contracts. The behavior stays
+  local to one walkthrough and avoids unneeded default-context discovery.
+
 - **Closed workspace recency**: Include stable closed workspaces in passive
   native metadata reads for reopen/delete/limits sorting. Keep their closed
   phase, archive ownership, worktree absence and stored identity unchanged;

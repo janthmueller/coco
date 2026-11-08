@@ -612,8 +612,10 @@ Human terminal commands share one interactive input contract. Plain
 the deterministic fast path unless `--interactive`/`-i` is present. Existing
 flags seed the walkthrough and skip the choices they already resolve. When
 implicit `.` is not inside a Git repository, interactive creation first offers
-the registered repositories. A valid unregistered Git scope continues
-directly to daemon-owned enrollment. `--interactive` is incompatible with
+the registered repositories. An empty inventory explains `coco repo add`.
+An explicit invalid path, noninteractive invocation or unrelated Git discovery
+failure must not silently select another repository. A valid unregistered Git
+scope continues directly to daemon-owned enrollment. `--interactive` is incompatible with
 `--no-input`. `send`, `jump`, and `diff` may
 select an omitted workspace from the local scope or the daemon-wide `--global`
 scope; `send` then prompts for an omitted message. Targetless `status` is
@@ -629,8 +631,9 @@ metadata leaves their time unknown and does not reopen or hide them. The picker
 uses arrow keys or `j`/`k` for immediate cursor movement, Enter to confirm, direct
 one-key selection for options 1 through 9, and Escape, `q`, or Ctrl-C to cancel.
 It is also the single option-selection implementation for `decide`. The
-picker keeps only its title and choices on screen: successful selection and a
-single available choice do not add redundant confirmation lines.
+picker keeps its title and choices on screen; creation setup adds a compact Tab
+hint for remaining defaults. Successful selection and a single available choice
+do not add redundant confirmation lines.
 Only the selected row starts with `›`; its marker, number, and primary label
 use cyan/bold styling. Inactive rows reserve the same marker column as blank
 space so labels remain aligned. Secondary detail stays dim on every row,
@@ -749,8 +752,15 @@ supplied invalid path fails directly instead of silently falling back.
 In a human terminal, omitting the name starts a linear walkthrough;
 `--interactive`/`-i` starts the same walkthrough with an optional supplied name
 and flags as presets. Every unresolved selection with a product default begins
-on and marks that default so Enter advances without changing it. A required
-source choice and the final `Create`/`Cancel` decision deliberately claim no
+on and marks that default so Enter advances without changing it. Creation
+selection steps show a bounded Tab hint. Tab accepts the current semantic
+default and enables the remaining semantic defaults, keeping flags and earlier
+committed selections. The final review still requires an explicit Create or
+Cancel; Tab never submits it. Required text and choices without a marked default
+still ask for a value, rather than silently choosing their first row. Defaults
+follow the current configuration, including Open Codex for temporary creation.
+An early default-fresh context does not query optional workspace discovery.
+A required source choice and the final `Create`/`Cancel` decision deliberately claim no
 semantic default; the cursor alone shows what Enter would select. The
 walkthrough covers Git binding, code base, applicable Git-change carry,
 conversation context, profile, model, and the post-create action. Context

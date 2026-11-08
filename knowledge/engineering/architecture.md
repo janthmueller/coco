@@ -1093,6 +1093,13 @@ category, not shell-expanded commands.
 ### Registration and validation
 
 - Obtain the top level and common Git directory from Git, then canonicalize.
+- Root discovery maps only Git's recognized exit-128 diagnostics for absent
+  repository discovery or a bare repository into `GitError::NotAWorktree` and
+  the existing `NOT_A_GIT_REPOSITORY` RPC code. This enables interactive
+  implicit-scope repository selection. Keep invalid configuration, broken Git
+  metadata, ownership, I/O and other command errors visible; do not interpret
+  every failed `rev-parse` as an absent repository. Git diagnostics run in the
+  C locale, including the filesystem-boundary discovery form.
 - Record whether the supplied checkout is itself a linked worktree.
 - Source cleanliness checks use porcelain status including ordinary untracked
   files. The CLI initially requests the strict check so it can warn before a

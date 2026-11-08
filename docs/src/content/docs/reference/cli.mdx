@@ -154,7 +154,11 @@ coco [REPOSITORY_PATH] create [NAME]
 Omit `NAME` in a terminal to start the creation walkthrough. A named command
 uses the defaults immediately unless `--interactive`/`-i` is present. Existing
 flags prefill and skip those decisions, and Enter accepts the highlighted
-default at each remaining step. The walkthrough offers the current workspace
+default at each remaining step. Press Tab in a selection step to accept its
+marked default and the remaining defaults, then review the result. Earlier
+choices and flags stay in place. A required source or text value still needs
+an answer; the final Create/Cancel decision always waits for you.
+The walkthrough offers the current workspace
 when its conversation is reusable, another workspace with saved context, or an
 exact Codex thread ID. The context picker includes eligible workspaces from
 every registered repository, ordered by recent use across the whole list.

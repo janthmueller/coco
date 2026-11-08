@@ -12,6 +12,7 @@ use super::prompt::{Choice, Interaction, ReviewField};
 use super::workspace_picker;
 
 mod context;
+mod defaults;
 mod temporary;
 
 pub(super) fn walkthrough_requested(args: &CreateArgs) -> bool {
@@ -33,7 +34,7 @@ pub(super) async fn walkthrough(
         repository_path,
         worktrees_root: paths.worktrees_dir.clone(),
         client,
-        interaction,
+        interaction: defaults::DefaultsInteraction::new(interaction),
         selected_code_workspace: None,
         selected_context_source,
     }
@@ -82,7 +83,7 @@ struct CreateWalkthrough<'a> {
     repository_path: PathBuf,
     worktrees_root: PathBuf,
     client: RpcClient,
-    interaction: &'a mut dyn Interaction,
+    interaction: defaults::DefaultsInteraction<'a>,
     selected_code_workspace: Option<String>,
     selected_context_source: Option<String>,
 }
@@ -170,7 +171,7 @@ impl CreateWalkthrough<'_> {
                         continue;
                     }
                     let selected = select_workspace(
-                        self.interaction,
+                        &mut self.interaction,
                         "Code from workspace",
                         &mut workspaces,
                         self.args.sort,
@@ -219,6 +220,9 @@ impl CreateWalkthrough<'_> {
             return Ok(());
         }
         let compact_was_requested = self.args.compact_context;
+        if self.interaction.using_defaults() && !compact_was_requested {
+            return Ok(());
+        }
         let workspaces = if path_is_within(&self.repository_path, &self.worktrees_root) {
             self.list_workspaces(Some(reusable_context_phases()))
                 .await?
@@ -274,7 +278,7 @@ impl CreateWalkthrough<'_> {
                         continue;
                     }
                     let selected = context::select_workspace(
-                        self.interaction,
+                        &mut self.interaction,
                         &mut workspaces,
                         self.args.sort,
                     )?;

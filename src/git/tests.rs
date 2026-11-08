@@ -42,6 +42,113 @@ impl Fixture {
 }
 
 #[test]
+fn discovery_outside_git_returns_the_typed_non_worktree_error() {
+    let directory = tempfile::tempdir().unwrap();
+    let nested = directory.path().join("nested");
+    fs::create_dir(&nested).unwrap();
+
+    let error = Git::default().discover(&nested).unwrap_err();
+    assert!(
+        matches!(&error, GitError::NotAWorktree(path) if *path == fs::canonicalize(nested).unwrap()),
+        "unexpected discovery error: {error}"
+    );
+}
+
+#[test]
+fn discovery_of_a_bare_repository_returns_the_typed_non_worktree_error() {
+    let directory = tempfile::tempdir().unwrap();
+    run(directory.path(), ["init", "--bare"]);
+
+    let error = Git::default().discover(directory.path()).unwrap_err();
+    assert!(
+        matches!(error, GitError::NotAWorktree(_)),
+        "unexpected discovery error: {error}"
+    );
+}
+
+#[test]
+fn discovery_preserves_broken_git_metadata_and_missing_path_errors() {
+    let directory = tempfile::tempdir().unwrap();
+    for metadata in ["invalid gitfile\n", "gitdir: nonexistent\n"] {
+        fs::write(directory.path().join(".git"), metadata).unwrap();
+        assert!(matches!(
+            Git::default().discover(directory.path()),
+            Err(GitError::CommandFailed {
+                category: "discover-root",
+                status: Some(128),
+                ..
+            })
+        ));
+    }
+    assert!(matches!(
+        Git::default().discover(directory.path().join("missing")),
+        Err(GitError::Io { .. })
+    ));
+
+    let fixture = Fixture::new();
+    fs::write(fixture.source.join(".git/config"), "[invalid\n").unwrap();
+    assert!(matches!(
+        Git::default().discover(fixture.source),
+        Err(GitError::CommandFailed {
+            category: "discover-root",
+            ..
+        })
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn discovery_diagnostic_translation_is_limited_to_known_root_failures() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = tempfile::tempdir().unwrap();
+    let executable = directory.path().join("git-probe");
+    for (status, stderr, missing_worktree) in [
+        (
+            128,
+            "fatal: not a git repository (or any parent up to mount point /mnt)\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).",
+            true,
+        ),
+        (128, "fatal: not a git repository: /broken/worktree", false),
+        (
+            128,
+            "fatal: detected dubious ownership in repository",
+            false,
+        ),
+        (128, "fatal: bad config line 1 in file .git/config", false),
+        (
+            128,
+            "fatal: not a git repository (or any of the parent directories): .git [truncated]",
+            false,
+        ),
+        (
+            1,
+            "fatal: not a git repository (or any of the parent directories): .git",
+            false,
+        ),
+    ] {
+        fs::write(
+            &executable,
+            format!("#!/bin/sh\ncat <<'DIAGNOSTIC' >&2\n{stderr}\nDIAGNOSTIC\nexit {status}\n"),
+        )
+        .unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        let error = Git::new(&executable)
+            .discover(directory.path())
+            .unwrap_err();
+        if missing_worktree {
+            assert!(matches!(error, GitError::NotAWorktree(_)), "{error}");
+        } else {
+            assert!(
+                matches!(&error, GitError::CommandFailed { status: actual, stderr: actual_stderr, .. }
+                    if *actual == Some(status) && actual_stderr == stderr),
+                "unexpected discovery error: {error}"
+            );
+        }
+    }
+}
+
+#[test]
 fn repository_identity_is_stable_across_worktrees() {
     let fixture = Fixture::new();
     let git = Git::default();

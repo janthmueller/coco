@@ -23,6 +23,7 @@ use crate::rpc::{RpcErrorPayload, RpcHandler, RpcServer};
 use super::*;
 use crate::cli::args::{Cli, Command};
 use crate::cli::commands::normalize_create_args;
+use crate::cli::prompt::StepSelection;
 
 static RPC_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -570,6 +571,7 @@ fn workspace_item_at(id: &str, name: &str, worktree_path: &Path) -> WorkspaceLis
 
 #[derive(Default)]
 struct ScriptedInteraction {
+    defaults_at: Option<String>,
     cleanup_choice: Option<usize>,
     choices: VecDeque<usize>,
     texts: VecDeque<String>,
@@ -585,6 +587,7 @@ impl ScriptedInteraction {
         texts: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
         Self {
+            defaults_at: None,
             cleanup_choice: Some(0),
             choices: choices.into_iter().collect(),
             texts: texts.into_iter().map(Into::into).collect(),
@@ -596,6 +599,10 @@ impl ScriptedInteraction {
     }
 
     fn assert_consumed(&self) {
+        assert!(
+            self.defaults_at.is_none(),
+            "defaults shortcut was never requested"
+        );
         assert!(self.choices.is_empty(), "unused scripted choices");
         assert!(self.texts.is_empty(), "unused scripted text inputs");
     }
@@ -619,6 +626,17 @@ impl Interaction for ScriptedInteraction {
         self.choices
             .pop_front()
             .context("test did not provide a selection")
+    }
+
+    fn select_step(&mut self, title: &str, choices: &[Choice]) -> Result<StepSelection> {
+        if self.defaults_at.as_deref() == Some(title) {
+            self.defaults_at = None;
+            self.titles.push(title.to_owned());
+            self.seen_choices.push(choices.to_vec());
+            self.seen_review_fields.push(Vec::new());
+            return Ok(StepSelection::UseDefaults);
+        }
+        self.select(title, choices).map(StepSelection::Selected)
     }
 
     fn select_with_review(
@@ -651,5 +669,6 @@ impl Interaction for ScriptedInteraction {
 
 mod choices;
 mod context;
+mod defaults;
 mod repositories;
 mod temporary;

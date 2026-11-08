@@ -51,6 +51,12 @@ pub(super) struct ReviewField {
     pub(super) value: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum StepSelection {
+    Selected(usize),
+    UseDefaults,
+}
+
 impl ReviewField {
     pub(super) fn new(label: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
@@ -63,6 +69,9 @@ impl ReviewField {
 pub(super) trait Interaction {
     fn is_interactive(&self) -> bool;
     fn select(&mut self, title: &str, choices: &[Choice]) -> Result<usize>;
+    fn select_step(&mut self, title: &str, choices: &[Choice]) -> Result<StepSelection> {
+        self.select(title, choices).map(StepSelection::Selected)
+    }
     fn select_with_review(
         &mut self,
         title: &str,
@@ -98,6 +107,16 @@ impl Interaction for TerminalInteraction {
         match choices {
             [] => bail!("{title} has no available choices"),
             _ => run_picker(title, choices),
+        }
+    }
+
+    fn select_step(&mut self, title: &str, choices: &[Choice]) -> Result<StepSelection> {
+        if !self.interactive {
+            bail!("interactive selection is unavailable");
+        }
+        match choices {
+            [] => bail!("{title} has no available choices"),
+            _ => run_picker_options(title, &[], choices, true),
         }
     }
 
@@ -166,19 +185,34 @@ fn run_picker_with_review(
     fields: &[ReviewField],
     choices: &[Choice],
 ) -> Result<usize> {
+    match run_picker_options(title, fields, choices, false)? {
+        StepSelection::Selected(index) => Ok(index),
+        StepSelection::UseDefaults => unreachable!("ordinary pickers do not accept defaults"),
+    }
+}
+
+fn run_picker_options(
+    title: &str,
+    fields: &[ReviewField],
+    choices: &[Choice],
+    allow_defaults: bool,
+) -> Result<StepSelection> {
     let mut terminal = PickerTerminal::enter(io::stderr().lock())
         .context("could not enter terminal selection mode")?;
     let mut state = PickerState::from_choices(choices);
     let palette = Palette::stderr();
     let outcome = loop {
         let (columns, rows) = size().unwrap_or((100, 24));
+        let choice_rows = rows.saturating_sub(u16::from(allow_defaults));
         let layout = if fields.is_empty() {
-            PickerLayout::new(columns, rows)?
+            PickerLayout::new(columns, choice_rows)?
         } else {
-            PickerLayout::with_review(columns, rows, fields.len())?
+            PickerLayout::with_review(columns, choice_rows, fields.len())?
         };
         state.visible_rows = layout.visible_rows;
-        let lines = if fields.is_empty() {
+        let lines = if allow_defaults {
+            step_picker_lines(title, choices, &state, layout.width, palette)
+        } else if fields.is_empty() {
             picker_lines(title, choices, &state, layout.width, palette)
         } else {
             picker_lines_with_review(title, fields, choices, &state, layout.width, palette)
@@ -186,7 +220,7 @@ fn run_picker_with_review(
         terminal.draw(&lines, rows)?;
         match event::read().context("could not read terminal input")? {
             Event::Key(key) if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
-                match state.handle_key(key, choices.len()) {
+                match state.handle_step_key(key, choices.len(), allow_defaults) {
                     PickerAction::Continue => {}
                     action => break action,
                 }
@@ -199,7 +233,8 @@ fn run_picker_with_review(
         .finish()
         .context("could not restore the terminal")?;
     match outcome {
-        PickerAction::Selected(index) => Ok(index),
+        PickerAction::Selected(index) => Ok(StepSelection::Selected(index)),
+        PickerAction::UseDefaults => Ok(StepSelection::UseDefaults),
         PickerAction::Cancelled => bail!("selection cancelled"),
         PickerAction::Interrupted => bail!("interrupted"),
         PickerAction::Continue => unreachable!("the picker loop only exits with a terminal action"),
@@ -238,6 +273,7 @@ impl PickerLayout {
 enum PickerAction {
     Continue,
     Selected(usize),
+    UseDefaults,
     Cancelled,
     Interrupted,
 }
@@ -264,6 +300,18 @@ impl PickerState {
                 .unwrap_or(0),
             ..Self::new()
         }
+    }
+
+    fn handle_step_key(
+        &mut self,
+        key: KeyEvent,
+        choice_count: usize,
+        allow_defaults: bool,
+    ) -> PickerAction {
+        if allow_defaults && key.code == KeyCode::Tab && key.modifiers.is_empty() {
+            return PickerAction::UseDefaults;
+        }
+        self.handle_key(key, choice_count)
     }
 
     fn handle_key(&mut self, key: KeyEvent, choice_count: usize) -> PickerAction {
@@ -318,6 +366,18 @@ fn picker_lines(
     palette: Palette,
 ) -> Vec<String> {
     picker_lines_with_review(title, &[], choices, state, width, palette)
+}
+
+fn step_picker_lines(
+    title: &str,
+    choices: &[Choice],
+    state: &PickerState,
+    width: usize,
+    palette: Palette,
+) -> Vec<String> {
+    let mut lines = picker_lines(title, choices, state, width, palette);
+    lines.push(palette.paint(Tone::Dim, truncate_line("Tab: remaining defaults", width)));
+    lines
 }
 
 fn picker_lines_with_review(

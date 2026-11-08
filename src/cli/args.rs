@@ -539,6 +539,7 @@ pub(super) struct CreateArgs {
     /// Workspace name, such as fix/login. Omit it to start guided creation.
     pub(super) name: Option<String>,
     /// Walk through workspace creation interactively, using flags as preset values.
+    /// Press Tab during setup to accept the remaining defaults and review.
     #[arg(long, short = 'i')]
     pub(super) interactive: bool,
     /// Order the code and context workspace pickers by recent use or name.
