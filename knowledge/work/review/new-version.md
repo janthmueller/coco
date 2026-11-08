@@ -523,12 +523,12 @@ No paid inference or real user workspace deletion was performed.
   push, exact-source CI, stable rehearsal and regular publication. This
   supersedes the preceding no-merge/push/publication boundary. Installation
   and restarting the user's daemon remain outside scope.
-- [ ] Confirm the automatic-release switch, then commit this task record and
+- [x] Confirm the automatic-release switch, then commit this task record and
   fast-forward the clean main worktree; continue release tracking in
   `knowledge/work/main.md`.
-- [ ] Require exact-current-main Rust/native/package and documentation success.
-- [ ] Inspect a stable non-publishing rehearsal for expected version 0.7.0.
-- [ ] Publish stable and verify registry, tag and checksummed native archives.
+- [x] Require exact-current-main Rust/native/package and documentation success.
+- [x] Inspect a stable non-publishing rehearsal for expected version 0.7.0.
+- [x] Publish stable and verify registry, tag and checksummed native archives.
 - Repository-variable reads are unavailable through the connector and local
   gh authentication. The browser attempt also had no access and changed no
   settings. Continue through Git and the authenticated Actions tools.
@@ -543,3 +543,10 @@ No paid inference or real user workspace deletion was performed.
 - Branch implementation and review are complete. Commit this integration
   handoff, then track the executing release and remaining checklist under
   main's existing working document.
+- Delivered: main integrated the reviewed commits by fast-forward. Exact
+  source `9a65042` passed Rust `42511759589` and docs `42511759449`; stable
+  rehearsal `42512900893` passed before publishing run `42513240741` completed
+  successfully. Normal v0.7.0 is published at `7edc75f`, with independently
+  verified registry/package identity, both native archive checksums and lockfile.
+  `knowledge/work/main.md` records the release details. No installation or
+  user-daemon restart was performed; no required follow-up remains here.

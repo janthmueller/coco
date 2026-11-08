@@ -10,6 +10,14 @@ status: stable
 
 ## 2026-11-08
 
+- **Normal release 0.7.0**: Integrate the reviewed temporary cleanup fixes,
+  shared recent workspace selection, remaining-defaults shortcut and outside-
+  Git creation picker. Publish through the guarded stable path after exact-SHA
+  Rust/native/package/Nix and docs success plus a stable rehearsal. Independently
+  verify non-yanked Cargo availability, exact tagged crate, release lockfile
+  and both native archive checksums. Keep automatic alpha and installed user
+  runtimes unchanged.
+
 - **Creation outside Git**: Correct native root-discovery error classification
   so the existing interactive registered-repository selector is reached.
   Preserve unrelated Git errors, explicit scope and noninteractive boundaries.

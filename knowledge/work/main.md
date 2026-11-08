@@ -37,16 +37,69 @@ architectural baseline for CoCo.
   (`42511577321`) confirms `COCO_RELEASE_ENABLED=false` in current Actions
   logs. It stops at the old documentation tip's guarded verification, before
   versioning/publication. No repository setting or credential changed.
-- [ ] Push this source checkpoint and require the exact current main revision
+- [x] Push this source checkpoint and require the exact current main revision
   to pass Rust (fresh advisory/policy, package, Nix and Linux/macOS smoke) and
   documentation workflows. Record exact SHA and run IDs below.
-- [ ] Run stable with `publish=false`, inspect version/changelog and matching
+- [x] Run stable with `publish=false`, inspect version/changelog and matching
   Cargo/lock/tag metadata, expecting 0.7.0.
-- [ ] Recheck unchanged tested main, dispatch stable with `publish=true`, then
+- [x] Recheck unchanged tested main, dispatch stable with `publish=true`, then
   verify the public tag/release, non-yanked registry version and checksummed
   native archives before reporting completion.
 - Continue release tracking here; branch implementation details and complete
   review history remain in `knowledge/work/review/new-version.md`.
+- Integrated source checkpoint `9a65042db3f7ba1a1ac38d3df638067362190795`
+  is pushed to main. Exact-source Rust run `42511759589` and documentation
+  run `42511759449` are in progress. Local `nix run .#policy` is refreshing
+  advisory evidence while hosted verification runs. Do not commit/push these
+  progress notes until publication is verified, so the tested remote main tip
+  remains unchanged throughout rehearsal and publication.
+- Documentation run `42511759449` passes, including the static export and
+  deployment. Fresh local `nix run .#policy` passes advisories, bans, licenses
+  and sources without suppressions; only the existing permitted duplicate-
+  version warnings remain. Hosted Rust verification is still in progress.
+- Rust run `42511759589` now completes successfully for exact source
+  `9a65042db3f7ba1a1ac38d3df638067362190795`, including full Nix/package gates
+  and both native Ubuntu 22.04 x86-64/macOS 15 arm64 version/help/archive smoke
+  jobs. GitHub main is rechecked unchanged at that SHA before dispatching the
+  authorized stable rehearsal with `channel=stable,publish=false`.
+- Stable rehearsal `42512900893` is in progress. Its exact-source guard has
+  passed and its release job is preparing the pinned Semantic Release action;
+  no publishing dispatch has been made for 0.7.0 yet.
+- Stable rehearsal `42512900893` passes completely. Pinned Semantic Release
+  logs calculate `0.7.0`, classify the reviewed CLI feature and temporary/
+  picker fix into their expected unreleased changelog groups, and validate
+  `RELEASE_CHANNEL=stable`, `RELEASE_VERSION=0.7.0`, `RELEASE_TAG=v0.7.0` with
+  synchronized Cargo metadata. Binary/registry publication jobs are skipped.
+  GitHub main is rechecked unchanged at the tested `9a65042` before the
+  user-authorized publishing dispatch with `channel=stable,publish=true`.
+- Publishing run `42513240741` is executing for tested source `9a65042` with
+  `channel=stable,publish=true`; its guard passes. Monitor version/release,
+  registry and native archive jobs to completion, then independently verify
+  public availability and download checksums before claiming success.
+- Regular GitHub release `v0.7.0` now exists (not draft/prerelease) at
+  generated commit `7edc75f2238a8091dcf29ca7b2c87a49e635b09b`. Its commit differs
+  from tested source only in Cargo.toml, Cargo.lock and CHANGELOG.md; production,
+  tests, workflows and documentation are identical. Local main fast-forwards
+  normally to it while retaining these uncommitted progress notes.
+- The registry job passes. Public crates.io API and Cargo sparse index both
+  independently confirm available, non-yanked `codex-coordinator` 0.7.0.
+  Release notes/changelog contain the expected reviewed cleanup/picker fix and
+  CLI defaults/repository-selection feature. Tagged native archive builds are
+  still running; do not report the complete release before verifying them.
+- Complete: publishing run `42513240741` passes all jobs, including both
+  tagged native builds and version/help smoke. GitHub contains the lockfile,
+  Linux x86-64/macOS arm64 archives and their SHA-256 files. Independent public
+  downloads pass both checksums and contain coco, cocod, coco-mcp, license and
+  README; the released lockfile matches the tag byte-for-byte.
+- Public crate download checksum matches the Cargo sparse index and registry
+  API. Its VCS metadata identifies exact tagged commit `7edc75f`; the new CLI
+  defaults, Git discovery and shared picker modules are present, while root
+  tests, knowledge and site sources are excluded as intended. Verification
+  command: `python3 target/release-verification/verify.py` (ignored local probe).
+- Record this completed delivery in a documentation-only checkpoint and push
+  it normally. No product, tests, workflows, dependencies or installed runtime
+  changed after the tested source other than the generated release metadata.
+  Automatic alpha remains disabled; no user service or TUI was restarted.
 
 ### Temporary-workspace integration and release — 2026-11-07
 
