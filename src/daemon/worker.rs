@@ -316,14 +316,21 @@ impl WorkerRuntime for CodexWorker {
         thread_id: &str,
         _cwd: &Path,
     ) -> Result<Option<NativeThread>, WorkerError> {
-        let response = self
+        let response = match self
             .client
             .request(
                 "thread/read",
                 json!({"threadId": thread_id, "includeTurns": false}),
             )
             .await
-            .map_err(WorkerError::runtime)?;
+        {
+            Ok(response) => response,
+            // Native Codex can create the rollout before writing its metadata.
+            // Only fresh-candidate adoption may treat that exact condition as
+            // pending; retirement must still fail closed on unreadable history.
+            Err(error) if is_empty_rollout_read(&error, thread_id) => return Ok(None),
+            Err(error) => return Err(WorkerError::runtime(error)),
+        };
         let response = serde_json::from_value::<ThreadReadResponse>(response)
             .map_err(|error| WorkerError::InvalidThreadRead(error.to_string()))?;
         let Some(rollout_path) = response
@@ -949,6 +956,39 @@ fn is_missing_thread_read(error: &CodexError, thread_id: &str) -> bool {
     )
 }
 
+fn is_empty_rollout_read(error: &CodexError, thread_id: &str) -> bool {
+    let CodexError::Rpc {
+        code: -32603,
+        message,
+        data: None,
+    } = error
+    else {
+        return false;
+    };
+    let Some((metadata_path, empty_path)) = message
+        .strip_prefix(
+            "failed to read thread: thread-store internal error: failed to read session metadata ",
+        )
+        .and_then(|message| message.rsplit_once(": rollout at "))
+        .and_then(|(metadata, rollout)| {
+            rollout
+                .strip_suffix(" is empty")
+                .map(|path| (metadata, path))
+        })
+    else {
+        return false;
+    };
+    let path = Path::new(metadata_path);
+    metadata_path == empty_path
+        && path.is_absolute()
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                name.starts_with("rollout-") && name.ends_with(&format!("-{thread_id}.jsonl"))
+            })
+}
+
 fn decode_thread_wire(thread: ThreadReadWire) -> Result<NativeThread, WorkerError> {
     Ok(NativeThread {
         id: thread.id,
@@ -969,6 +1009,7 @@ fn decode_thread_wire(thread: ThreadReadWire) -> Result<NativeThread, WorkerErro
 
 #[cfg(test)]
 mod tests {
+    mod materialization;
     mod recency;
 
     use std::path::PathBuf;

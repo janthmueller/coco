@@ -91,6 +91,9 @@ pub(super) enum Command {
         /// Resolve or choose the workspace across every registered repository.
         #[arg(long, short = 'g')]
         global: bool,
+        /// Order the workspace picker by recent use or name.
+        #[arg(long, value_enum, default_value_t = WorkspaceSort::Recent)]
+        sort: WorkspaceSort,
         /// Instruction to send to Codex. Omit it to enter one interactively.
         #[arg(value_parser = non_empty_message)]
         message: Option<String>,
@@ -119,6 +122,9 @@ pub(super) enum Command {
         /// Resolve or choose the workspace across every registered repository.
         #[arg(long, short = 'g')]
         global: bool,
+        /// Order the workspace picker by recent use or name.
+        #[arg(long, value_enum, default_value_t = WorkspaceSort::Recent)]
+        sort: WorkspaceSort,
     },
     /// Run CoCo as a local MCP server.
     Mcp {
@@ -195,7 +201,7 @@ impl Command {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
-pub(super) enum JumpSort {
+pub(super) enum WorkspaceSort {
     #[default]
     Recent,
     Name,
@@ -209,8 +215,8 @@ pub(super) struct JumpArgs {
     #[arg(long, short = 'g')]
     pub(super) global: bool,
     /// Order the workspace picker by recent use or name.
-    #[arg(long, value_enum, default_value_t = JumpSort::Recent)]
-    pub(super) sort: JumpSort,
+    #[arg(long, value_enum, default_value_t = WorkspaceSort::Recent)]
+    pub(super) sort: WorkspaceSort,
 }
 
 #[derive(Debug, Subcommand)]
@@ -239,6 +245,9 @@ pub(super) struct LimitsTargetArgs {
     /// Resolve or choose the workspace across every registered repository.
     #[arg(long, short = 'g')]
     pub(super) global: bool,
+    /// Order the workspace picker by recent use or name.
+    #[arg(long, value_enum, default_value_t = WorkspaceSort::Recent)]
+    pub(super) sort: WorkspaceSort,
     /// Emit stable, machine-readable JSON.
     #[arg(long)]
     pub(super) json: bool,
@@ -251,6 +260,9 @@ pub(super) struct LimitsSetArgs {
     /// Resolve or choose the workspace across every registered repository.
     #[arg(long, short = 'g')]
     pub(super) global: bool,
+    /// Order the workspace picker by recent use or name.
+    #[arg(long, value_enum, default_value_t = WorkspaceSort::Recent)]
+    pub(super) sort: WorkspaceSort,
     /// Start reclaim and throttle allocation above SIZE, such as 2GiB.
     #[arg(long, value_name = "SIZE", value_parser = parse_byte_size)]
     pub(super) memory_high: Option<u64>,
@@ -363,6 +375,9 @@ pub(super) struct CloseArgs {
     /// Resolve or choose the workspace across every registered repository.
     #[arg(long, short = 'g')]
     pub(super) global: bool,
+    /// Order the workspace picker by recent use or name.
+    #[arg(long, value_enum, default_value_t = WorkspaceSort::Recent)]
+    pub(super) sort: WorkspaceSort,
     /// Archive the native Codex thread after closing the worktree.
     #[arg(long, short = 't')]
     pub(super) archive_thread: bool,
@@ -384,6 +399,9 @@ pub(super) struct ReopenArgs {
     /// Resolve or choose the workspace across every registered repository.
     #[arg(long, short = 'g')]
     pub(super) global: bool,
+    /// Order the workspace picker by recent use or name.
+    #[arg(long, value_enum, default_value_t = WorkspaceSort::Recent)]
+    pub(super) sort: WorkspaceSort,
 }
 
 #[derive(Debug, Args)]
@@ -393,6 +411,9 @@ pub(super) struct DeleteArgs {
     /// Resolve or choose the workspace across every registered repository.
     #[arg(long, short = 'g')]
     pub(super) global: bool,
+    /// Order the workspace picker by recent use or name.
+    #[arg(long, value_enum, default_value_t = WorkspaceSort::Recent)]
+    pub(super) sort: WorkspaceSort,
     /// Keep the Codex conversation after deleting the workspace.
     #[arg(long)]
     pub(super) keep_thread: bool,
@@ -520,6 +541,9 @@ pub(super) struct CreateArgs {
     /// Walk through workspace creation interactively, using flags as preset values.
     #[arg(long, short = 'i')]
     pub(super) interactive: bool,
+    /// Order the code and context workspace pickers by recent use or name.
+    #[arg(long, value_enum, default_value_t = WorkspaceSort::Recent)]
+    pub(super) sort: WorkspaceSort,
     /// Try safe cleanup after the first regular exit of the last Codex TUI.
     #[arg(long)]
     pub(super) temporary: bool,

@@ -56,6 +56,10 @@ impl CleanupGuard {
     fn uses_additional_conversation(&mut self, frame: &Value, candidate: Option<&str>) -> bool {
         let original = self.original_thread.as_deref().or(candidate);
         match frame.get("method").and_then(Value::as_str) {
+            // The TUI reads other threads' metadata and inherited history.
+            // These lookups do not run that conversation; a later resume,
+            // start, fork or action still disarms cleanup.
+            Some("thread/read" | "thread/turns/list" | "thread/items/list") => false,
             Some("thread/start") => {
                 if original.is_some() || self.fresh_start_seen || frame.get("id").is_none() {
                     return true;

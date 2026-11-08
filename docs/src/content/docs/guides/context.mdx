@@ -34,9 +34,12 @@ New workspaces start with a fresh conversation by default. Use
 coco create review/login --base main --context investigate/login
 ```
 
-In the walkthrough, the workspace picker includes registered repositories,
-with the current repository first. Each entry shows its repository so you can
-distinguish matching names. You can also pass a full workspace ID to
+In the walkthrough, **Context from workspace** includes eligible conversations
+from every registered repository. Recently used conversations appear first
+across the whole list, with relative times when available. Each entry shows its
+repository so you can distinguish matching names. **Code from workspace**
+offers code from the selected repository. Add `--sort name` to `create` to
+order both workspace pickers by name. You can also pass a full workspace ID to
 `--context` to copy a conversation from another repository; names refer to the
 selected repository.
 

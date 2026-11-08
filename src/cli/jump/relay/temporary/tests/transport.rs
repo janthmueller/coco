@@ -280,3 +280,46 @@ async fn persistent_relays_forward_without_cleanup_rpc() {
     assert!(!guard.disarmed());
     transport.stop().await;
 }
+
+#[tokio::test]
+async fn passive_foreign_read_forwards_without_disarm_but_switching_still_requires_it() {
+    let mut transport = Transport::new(true).await;
+    let mut guard = guard(Some("original"), true);
+    for method in ["thread/read", "thread/turns/list", "thread/items/list"] {
+        let request =
+            json!({"id": method, "method": method, "params": {"threadId": "context-source"}});
+        let outcome = forward_downstream(
+            Some(Ok(Message::Text(request.to_string().into()))),
+            &mut transport.upstream,
+            None,
+            None,
+            &mut guard,
+            &transport.control,
+        )
+        .await
+        .unwrap();
+        assert!(matches!(outcome, ForwardOutcome::Continue));
+        assert_eq!(transport.received().await, request);
+    }
+    assert_eq!(transport.calls.load(Ordering::SeqCst), 0);
+    assert!(!guard.disarmed());
+    let resume =
+        json!({"id": 2, "method": "thread/resume", "params": {"threadId": "context-source"}});
+    let result = forward_downstream(
+        Some(Ok(Message::Text(resume.to_string().into()))),
+        &mut transport.upstream,
+        None,
+        None,
+        &mut guard,
+        &transport.control,
+    )
+    .await;
+    assert!(result.is_err());
+    assert_eq!(transport.calls.load(Ordering::SeqCst), 1);
+    assert!(
+        timeout(Duration::from_millis(50), transport.native.next())
+            .await
+            .is_err()
+    );
+    transport.stop().await;
+}

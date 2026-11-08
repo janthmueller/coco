@@ -164,6 +164,10 @@ if [ "$kind" = "resume" ]; then
 fi
 if [ "$kind" = "fresh" ]; then
   if [ -n "${COCO_TEST_EMPTY_TUI_EXIT:-}" ]; then
+    if [ -n "${COCO_TEST_FAKE_TUI_BINARY:-}" ]; then
+      export COCO_TEST_FRESH_REMOTE="${2:?missing fresh --remote endpoint}"
+      "$COCO_TEST_FAKE_TUI_BINARY" --exact fresh_jump::fake_tui_process --nocapture
+    fi
     exit "$COCO_TEST_EMPTY_TUI_EXIT"
   fi
   : "${COCO_TEST_FAKE_TUI_BINARY:?}"

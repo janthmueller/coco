@@ -90,16 +90,24 @@ presentation and process seams. Ordinary lease release, worker MCP and native
 thread creation stay unchanged; no crate or external library API is added.
 The relay's private `temporary` child performs pre-forward durable disarm for
 additional conversation traffic, using a capability-checked application method
-and the existing Store claim. It does not introduce native-thread ownership
-tracking; focused auxiliary and transport tests exercise that safety boundary.
+and the existing Store claim. Passive `thread/read`, `thread/turns/list` and
+`thread/items/list` requests are exempt, including foreign metadata/history
+reads during fork resume; a later resume or action on that foreign thread still
+passes through the same durable-disarm gate. It does not introduce native-thread
+ownership tracking; focused auxiliary and transport tests exercise that safety
+boundary.
 
-Jump picker policy lives in the private `cli/commands/jump_picker` child.
+Workspace picker policy lives in the private `cli/workspace_picker` module,
+shared by guided create and target commands. `WorkspaceSort` is a CLI-only enum;
+scoped target selection carries its policy without changing protocol DTOs.
+Create context stays cross-repository and code stays local; lifecycle target
+filters and confirmation contracts remain in their command adapters.
 Native optional recency crosses the worker port and typed runtime projection,
 without history/storage coupling. The prompt adapter owns an optional dim
 trailing field and responsive layout; sorting freezes before input starts.
 The natural text comparator is shared only within CLI, not exposed as an SDK.
-Focused children separate selection/RPC, ordering, native decoding and terminal
-rendering proofs. No crate or domain-to-presentation dependency is introduced.
+Private command tests exercise selection/RPC dispatch; picker children cover
+ordering and presentation, with separate native decoding and terminal proofs. No crate or domain-to-presentation dependency is introduced.
 
 The operation-scoped turn-control slice preserves these boundaries: terminal
 values live in `domain/turns.rs`, wire DTOs in `protocol/turns.rs`, application

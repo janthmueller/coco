@@ -7,10 +7,9 @@ use crate::paths::CocoPaths;
 use crate::protocol::{ModelListParams, RepositoryScope, WorkspaceListItem, WorkspaceListParams};
 use crate::rpc::{RpcClient, RpcClientError};
 
-use super::args::CreateArgs;
-use super::output::phase_label;
+use super::args::{CreateArgs, WorkspaceSort};
 use super::prompt::{Choice, Interaction, ReviewField};
-use super::status::sort_workspace_collection;
+use super::workspace_picker;
 
 mod context;
 mod temporary;
@@ -170,8 +169,12 @@ impl CreateWalkthrough<'_> {
                             .notice("No workspace with reusable code found.")?;
                         continue;
                     }
-                    let selected =
-                        select_workspace(self.interaction, "Code from workspace", &workspaces)?;
+                    let selected = select_workspace(
+                        self.interaction,
+                        "Code from workspace",
+                        &mut workspaces,
+                        self.args.sort,
+                    )?;
                     self.args.base_workspace = Some(selected.id);
                     self.selected_code_workspace = Some(selected.name);
                     return Ok(());
@@ -257,8 +260,7 @@ impl CreateWalkthrough<'_> {
                     break;
                 }
                 ContextChoice::Existing => {
-                    let mut workspaces =
-                        context::list_workspaces(&self.client, &self.repository_path).await?;
+                    let mut workspaces = context::list_workspaces(&self.client).await?;
                     if let Some(current) = workspace_owning_path(&workspaces, &self.repository_path)
                     {
                         let current_id = current.workspace.id.clone();
@@ -271,7 +273,11 @@ impl CreateWalkthrough<'_> {
                         ))?;
                         continue;
                     }
-                    let selected = context::select_workspace(self.interaction, &workspaces)?;
+                    let selected = context::select_workspace(
+                        self.interaction,
+                        &mut workspaces,
+                        self.args.sort,
+                    )?;
                     self.args.context = Some(format!("workspace:{}", selected.workspace.id));
                     self.selected_context_source = Some(context::source_label(selected));
                     break;
@@ -399,20 +405,23 @@ impl CreateWalkthrough<'_> {
     }
 
     async fn list_workspaces(&self, phases: Option<Vec<String>>) -> Result<Vec<WorkspaceListItem>> {
-        let mut workspaces =
-            list_repository_workspaces(&self.client, &self.repository_path, phases).await?;
-        sort_workspace_collection(&mut workspaces);
-        Ok(workspaces)
+        list_repository_workspaces(&self.client, &self.repository_path, phases).await
     }
 }
 
 fn select_workspace(
     interaction: &mut dyn Interaction,
     title: &str,
-    workspaces: &[WorkspaceListItem],
+    workspaces: &mut [WorkspaceListItem],
+    sort: WorkspaceSort,
 ) -> Result<SelectedWorkspace> {
     debug_assert!(!workspaces.is_empty());
-    let choices = workspaces.iter().map(workspace_choice).collect::<Vec<_>>();
+    let choices = workspace_picker::choices(
+        workspaces,
+        sort,
+        false,
+        chrono::Utc::now().timestamp_millis(),
+    );
     let selected = interaction.select(title, &choices)?;
     Ok(SelectedWorkspace {
         id: workspaces[selected].workspace.id.clone(),
@@ -522,17 +531,6 @@ fn path_is_within(path: &Path, parent: &Path) -> bool {
 
 fn normalize_path(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
-}
-
-fn workspace_choice(item: &WorkspaceListItem) -> Choice {
-    let branch = item.workspace.branch_name.as_deref().unwrap_or("detached");
-    Choice::new(
-        item.workspace.name.clone(),
-        Some(format!(
-            "{} · {branch}",
-            phase_label(item.workspace.phase.as_str())
-        )),
-    )
 }
 
 fn model_choice(model: &CodexModel) -> Choice {

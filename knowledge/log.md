@@ -8,6 +8,31 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-11-08
+
+- **Closed workspace recency**: Include stable closed workspaces in passive
+  native metadata reads for reopen/delete/limits sorting. Keep their closed
+  phase, archive ownership, worktree absence and stored identity unchanged;
+  unknown or invalid metadata remains unknown. Add actual closed coordinator
+  regressions and extend the native archive/retirement proof.
+
+- **Inherited-context temporary cleanup**: Native TUIs read metadata and history
+  for other threads. Exempt passive `thread/read`, `thread/turns/list` and
+  `thread/items/list` from the relay's additional-conversation disarm rule
+  while retaining its gate for actual
+  starts, forks, resumes and other foreign-thread actions. Add a real create
+  with context plus TUI-exit regression, including preservation of the source.
+
+- **Workspace selection consistency**: Share native recent-first ordering, name
+  override and relative times between both create source pickers and all
+  interactive workspace target commands. Keep code sources local, context
+  sources cross-repository, and lifecycle filters/confirmations intact. This
+  intentionally supersedes the former jump-only and local-first-context rules.
+- **Fresh temporary TUI completion**: Treat only the exact native empty-rollout
+  error for the leased fresh candidate as pending persistence. Keep bounded
+  adoption and checked one-shot cleanup; do not weaken bound-thread retirement
+  verification or swallow unrelated storage failures.
+
 ## 2026-11-07
 
 - **Normal release 0.6.0**: Integrate the reviewed temporary-workspace slice

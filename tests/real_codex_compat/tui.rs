@@ -16,6 +16,9 @@ const INHERITED_HISTORY_MARKER: &str = "coco-native-history";
 #[path = "tui/clients.rs"]
 mod clients;
 
+#[path = "tui/temporary.rs"]
+mod temporary;
+
 pub(super) async fn verify_inherited_context_resume(
     paths: &TestPaths,
     codex_binary: &Path,

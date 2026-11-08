@@ -1,8 +1,6 @@
 use super::*;
 use serde_json::json;
 
-mod selection;
-
 const NOW: i64 = 1_800_000_000_000;
 
 fn row(repo: &str, name: &str, time: Option<i64>) -> WorkspaceListItem {
@@ -32,7 +30,7 @@ fn recent_use_is_primary_across_repositories_not_workspace_mutation_or_name() {
         row("alpha", "a-unknown", None),
     ];
     rows[0].workspace.updated_at_ms = i64::MAX;
-    let result = choices(&mut rows, JumpSort::Recent, true, NOW);
+    let result = choices(&mut rows, WorkspaceSort::Recent, true, NOW);
     assert_eq!(names(&result), ["z-recent", "a-old", "a-unknown"]);
     assert_eq!(result[0].trailing_detail.as_deref(), Some("5m ago"));
     assert_eq!(result[1].trailing_detail.as_deref(), Some("2h ago"));
@@ -50,7 +48,7 @@ fn ties_and_missing_dates_use_natural_name_then_repository_and_id() {
         row("alpha", "unknown/10", None),
         row("zeta", "unknown/2", None),
     ];
-    choices(&mut rows, JumpSort::Recent, true, NOW);
+    choices(&mut rows, WorkspaceSort::Recent, true, NOW);
     assert_eq!(
         rows.iter()
             .map(|row| row.workspace.id.as_str())
@@ -66,7 +64,7 @@ fn ties_and_missing_dates_use_natural_name_then_repository_and_id() {
     let mut duplicate = rows[0].clone();
     duplicate.workspace.id = "a-tie".into();
     rows.push(duplicate);
-    choices(&mut rows, JumpSort::Recent, true, NOW);
+    choices(&mut rows, WorkspaceSort::Recent, true, NOW);
     assert_eq!(rows[0].workspace.id, "a-tie");
 }
 
@@ -76,22 +74,16 @@ fn name_order_ignores_recency_without_removing_time_or_scope_details() {
         row("alpha", "work/10", Some(NOW)),
         row("zeta", "work/2", None),
     ];
-    let result = choices(&mut rows, JumpSort::Name, true, NOW);
+    let result = choices(&mut rows, WorkspaceSort::Name, true, NOW);
     assert_eq!(names(&result), ["work/2", "work/10"]);
     assert!(result[0].detail.as_ref().unwrap().contains("/repos/zeta"));
     assert_eq!(result[1].trailing_detail.as_deref(), Some("just now"));
 }
 
 #[test]
-fn branches_are_exception_details_only_for_jump_and_detached_stays_explicit() {
+fn branches_are_exception_details_and_detached_stays_explicit() {
     let mut item = row("repo", "feat/login", Some(NOW));
     assert_eq!(choice(&item, false, NOW).detail.as_deref(), Some("Ready"));
-    assert!(
-        super::super::workspace_choice(&item, false)
-            .detail
-            .unwrap()
-            .contains("feat/login")
-    );
     for branch in ["main", "coco/feat/login", "Feat/login"] {
         item.workspace.branch_name = Some(branch.into());
         assert_eq!(

@@ -1034,12 +1034,23 @@ to `ThreadRuntimeSnapshot.recency_at_ms`. Invalid, missing or overflowing dates
 remain absent without invalidating thread status; general `updatedAt`, CoCo
 mutation time and observation time are not substitutes. The value is an
 in-memory passive projection, not a second usage-history store or a new SQLite
-column. Public JSON schema 18 exposes optional `recencyAtMs`. Only jump picker
-policy uses it: recent-first across the requested scope, missing values last,
-natural-name/repository/ID ties and `--sort name` override. Choice times/order
-freeze before input. The prompt renderer owns responsive dim trailing metadata
-and drops it before truncating existing main content. Other command ordering,
-resource collection and native thread-loading behavior stay unchanged.
+column. Public JSON schema 18 exposes optional `recencyAtMs`. The shared private
+CLI workspace picker uses it for create code/context and all interactive target
+commands: recent-first across the eligible scope, missing values last, natural
+name/repository/ID ties and `--sort name` override. Create code remains local;
+context spans registered repositories without a current-repository priority.
+Stable closed/ready workspaces use the same validated passive read, including
+archived native threads, so reopen/delete/limits candidates retain their native
+recency. Their public phase remains `closed`; no read recreates the worktree,
+unarchives/resumes the conversation, or persists a second recency value. Missing
+or invalid native metadata clears the optional projection while retaining the
+closed candidate and its lifecycle identity.
+Lists that do not request the closed phase exclude those rows before native
+inspection, so open/context pickers do not query unrelated retired threads.
+Choice times/order freeze before input. The prompt renderer owns responsive dim
+trailing metadata and drops it before truncating existing main content.
+Collection status/list ordering, resource collection and native thread-loading
+behavior retain their existing contracts.
 
 Legacy snapshots retain their old App Server generation and receipt time only
 as migration data. Startup or connection loss can mark such rows stale, but
@@ -1351,6 +1362,15 @@ adoption. The native TUI may issue additional `thread/start` requests for its
 own auxiliary and navigation workflows; CoCo forwards and environment-routes
 those requests without replacing the workspace's existing thread binding.
 
+For temporary sessions, the cleanup guard treats `thread/read`,
+`thread/turns/list` and `thread/items/list` as passive even when targeting another
+thread. The pinned native TUI reads other metadata and inherited history;
+these lookups do not execute that conversation and must not consume the
+one-shot cleanup policy. Start, fork,
+resume and other requests targeting a different conversation still require
+acknowledged durable disarm before forwarding. An inherited context selected
+at create time therefore retains normal temporary-session cleanup.
+
 For an unbound fresh workspace, `workspace.attach` acquires one expiring
 generation-local lease and returns no invented thread ID. The CLI starts a
 session-scoped authenticated loopback WebSocket relay to the daemon's App
@@ -1366,6 +1386,16 @@ and binds that thread and resumes it on the daemon connection so background
 observation survives TUI exit. Candidate substitution, concurrent first
 activation, and stale leases are rejected. Relay startup failure and an
 unrecovered App Server disconnect release or clear the lease.
+
+Fresh-candidate verification alone recognizes Codex 0.166.0's exact `-32603`
+empty-rollout metadata error as pending materialization. It requires absent
+structured error data, identical repeated absolute paths, and a rollout filename
+matching the requested candidate. This handles the interval between file
+creation and metadata persistence, including reads after native unsubscribe,
+without aborting the relay. The existing bounded final adoption wait still
+applies after an action; a normal no-action exit can finish temporary cleanup.
+Bound-thread lookup and retirement never use this exception, and all unrelated
+storage or identity failures continue to block cleanup.
 The relay keeps its listener alive across the native TUI's sequential
 reconnect attempts and opens a fresh authenticated App Server connection for
 each generation. Adoption state survives those generations, but outstanding

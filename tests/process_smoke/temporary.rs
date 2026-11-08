@@ -1,6 +1,9 @@
 use super::support::*;
 use super::*;
 
+#[path = "temporary/native.rs"]
+mod native;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn temporary_workspaces_cleanup_only_after_successful_jump_and_survive_restart() -> Result<()>
 {
@@ -139,6 +142,8 @@ async fn tui(
         .args(args)
         .current_dir(repository)
         .env("COCO_TEST_EMPTY_TUI_EXIT", code.to_string())
+        .env("COCO_TEST_FAKE_TUI_BINARY", std::env::current_exe()?)
+        .env("COCO_TEST_FRESH_TUI_MODE", "empty")
         .kill_on_drop(true);
     if missing {
         command.env("COCO_CODEX_BINARY", paths.home.join("missing-codex"));
@@ -164,7 +169,7 @@ async fn start(
         .context("invalid endpoint")?
         .parse()?;
     let listener = TcpListener::bind(address).await?;
-    let server = tokio::spawn(empty_server(listener));
+    let server = tokio::spawn(empty_server(listener, paths.codex_home.join("sessions")));
     wait_for_file(&paths.socket, &mut daemon, log).await?;
     Ok((daemon, server))
 }
@@ -176,9 +181,10 @@ async fn stop(daemon: &mut Child, server: tokio::task::JoinHandle<Result<()>>) -
     Ok(())
 }
 
-async fn empty_server(listener: TcpListener) -> Result<()> {
+async fn empty_server(listener: TcpListener, sessions: PathBuf) -> Result<()> {
+    let threads = Arc::new(native::EmptyThreads::new(sessions));
     let (socket, _) = listener.accept().await?;
-    let control = empty_connection(socket);
+    let control = empty_connection(socket, Arc::clone(&threads));
     tokio::pin!(control);
     let mut relays = tokio::task::JoinSet::new();
     loop {
@@ -186,7 +192,7 @@ async fn empty_server(listener: TcpListener) -> Result<()> {
             result = &mut control => return result,
             accepted = listener.accept() => {
                 let (socket, _) = accepted?;
-                relays.spawn(empty_connection(socket));
+                relays.spawn(empty_connection(socket, Arc::clone(&threads)));
             }
             finished = relays.join_next(), if !relays.is_empty() => {
                 finished.context("missing relay fixture")???;
@@ -195,7 +201,10 @@ async fn empty_server(listener: TcpListener) -> Result<()> {
     }
 }
 
-async fn empty_connection(socket: tokio::net::TcpStream) -> Result<()> {
+async fn empty_connection(
+    socket: tokio::net::TcpStream,
+    threads: Arc<native::EmptyThreads>,
+) -> Result<()> {
     let mut websocket = tokio_tungstenite::accept_async(socket).await?;
     while let Some(frame) = websocket.next().await {
         let frame = match frame {
@@ -208,21 +217,10 @@ async fn empty_connection(socket: tokio::net::TcpStream) -> Result<()> {
         match frame {
             Message::Text(text) => {
                 let request: Value = serde_json::from_str(&text)?;
-                match request["method"].as_str() {
-                    Some("initialize") => {
-                        websocket
-                            .send(Message::Text(
-                                json!({"id": request["id"], "result": {}})
-                                    .to_string()
-                                    .into(),
-                            ))
-                            .await?
-                    }
-                    Some("initialized") => {}
-                    _ => bail!(
-                        "unexpected native work in empty TUI fixture: {}",
-                        request["method"]
-                    ),
+                if let Some(response) = threads.reply(&request)? {
+                    websocket
+                        .send(Message::Text(response.to_string().into()))
+                        .await?;
                 }
             }
             Message::Close(_) => return Ok(()),

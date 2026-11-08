@@ -114,6 +114,11 @@ Use `↑`/`↓` or `j`/`k` to move and Enter to confirm. Keys `1` through `9`
 select the corresponding option immediately. Press Escape, `q`, or Ctrl+C to
 cancel.
 
+Workspace selectors put recently used conversations first and show a dim
+relative time when available. Use `--sort name` on `create`, `send`, `jump`, `diff`,
+`limits`, `close`, `reopen`, or `delete` for name order. `--sort recent` selects
+the default order.
+
 CoCo never opens a selector when its input or prompt stream is not attached to
 a terminal, or when `--no-input` is present. In those cases, pass every required
 value explicitly. Collection commands, including targetless `status`, remain
@@ -133,6 +138,7 @@ not repository-scoped.
 ```text
 coco [REPOSITORY_PATH] create [NAME]
   [-i, --interactive]
+  [--sort recent|name]
   [--temporary [--keep-thread]]
   [--base <GIT_REF> | --base-workspace <WORKSPACE>]
   [-c, --context <CONTEXT>]
@@ -150,9 +156,11 @@ uses the defaults immediately unless `--interactive`/`-i` is present. Existing
 flags prefill and skip those decisions, and Enter accepts the highlighted
 default at each remaining step. The walkthrough offers the current workspace
 when its conversation is reusable, another workspace with saved context, or an
-exact Codex thread ID. The context picker includes registered repositories:
-the current repository comes first, then the others by repository path and
-workspace name. Entries show their repository, including when names match.
+exact Codex thread ID. The context picker includes eligible workspaces from
+every registered repository, ordered by recent use across the whole list.
+Entries show their repository, including when names match. The code-source
+picker stays within the selected repository. `--sort name` applies to both
+workspace pickers.
 It does not create anything until you accept the final
 summary. `--interactive` cannot be combined with `--no-input`.
 
@@ -160,6 +168,8 @@ summary. `--interactive` cannot be combined with `--no-input`.
 exit of the last CoCo-launched Codex UI. It works without `--jump`; the
 workspace waits for a later session. Send, observation, lost connections and
 coordinator restarts do not initiate cleanup.
+Choosing an existing context with `--context` during creation also supports
+temporary cleanup; the source conversation is kept.
 
 Cleanup uses the same protections as `delete` and removes the worktree, owned
 branch, conversation and workspace record. `--keep-thread` retains the
@@ -231,15 +241,15 @@ In the forms below, `<WORKSPACE>` may be a repository-local name or full ID.
 | `coco status [-a] [-t \| --sort KEYS] [-r] [-u] [-q] [-c] [--json]` | Show an ordered workspace overview    |
 | `coco status [-a] [-t \| --sort KEYS] [-r] [-u] [-q] [-c] -f`       | Follow that collection view           |
 | `coco status WORKSPACE [-g] [-r] [-u] [-q] [-c] [--json] [--follow]`        | Show or follow one workspace           |
-| `coco limits show [WORKSPACE] [-g] [--json]`                        | Show desired and currently applied limits       |
-| `coco limits set [WORKSPACE] [-g] [OPTIONS]`                        | Change selected workspace limits                |
-| `coco limits reset [WORKSPACE] [-g] [--json]`                       | Remove all configured workspace limits          |
-| `coco send [WORKSPACE] [MESSAGE] [-g] [--operation-id ID] [--wait]` | Choose a workspace and start its next turn      |
+| `coco limits show [WORKSPACE] [-g] [--json] [--sort recent\|name]`                        | Show desired and currently applied limits       |
+| `coco limits set [WORKSPACE] [-g] [OPTIONS] [--sort recent\|name]`                        | Change selected workspace limits                |
+| `coco limits reset [WORKSPACE] [-g] [--json] [--sort recent\|name]`                       | Remove all configured workspace limits          |
+| `coco send [WORKSPACE] [MESSAGE] [-g] [--operation-id ID] [--wait] [--sort recent\|name]` | Choose a workspace and start its next turn      |
 | `coco jump [WORKSPACE] [-g] [--sort recent\|name]`                  | Choose and open the workspace in the Codex TUI  |
-| `coco diff [WORKSPACE] [-g]`                                        | Choose or print its bounded change summary      |
-| `coco close [WORKSPACE] [-g] [-t] [-n] [-y]`                        | Remove a safe worktree and retain its workspace |
-| `coco reopen [WORKSPACE] [-g]`                                      | Restore a closed workspace                      |
-| `coco delete [WORKSPACE] [-g] [-n] [-y]`                            | Delete the workspace and its owned resources    |
+| `coco diff [WORKSPACE] [-g] [--sort recent\|name]`                                        | Choose or print its bounded change summary      |
+| `coco close [WORKSPACE] [-g] [-t] [-n] [-y] [--sort recent\|name]`                        | Remove a safe worktree and retain its workspace |
+| `coco reopen [WORKSPACE] [-g] [--sort recent\|name]`                                      | Restore a closed workspace                      |
+| `coco delete [WORKSPACE] [-g] [-n] [-y] [--sort recent\|name]`                            | Delete the workspace and its owned resources    |
 
 Omitted values use interactive input only as described above. A targetless
 `status` is an overview rather than a selector. `status --follow` cannot be
@@ -250,9 +260,10 @@ messages.
 `list` and `status` inspect without creating or loading conversation context;
 `send` and `jump` activate it when needed.
 
-The `jump` selector defaults to recently used conversations first, including
-across repositories with `-g`. Use `--sort name` for name order. Dim relative
-times show last use as reported by Codex, not time spent in the current state.
+Workspace selectors default to recently used conversations first, including
+across repositories with `-g` and across all sources in the create context
+picker. Use `--sort name` for name order. Dim relative times show last use as
+reported by Codex, not time spent in the current state.
 Missing times are omitted and sort after known times; ties use workspace name
 and repository. Times and order stay fixed while choosing, and the time hides
 on narrow terminals. A branch is shown only when it differs from the workspace

@@ -3,21 +3,21 @@ use std::cmp::Ordering;
 use crate::domain::WorktreeMode;
 use crate::protocol::WorkspaceListItem;
 
-use super::super::args::JumpSort;
-use super::super::output::phase_label;
-use super::super::prompt::Choice;
-use super::super::status::natural_cmp;
+use super::args::WorkspaceSort;
+use super::output::phase_label;
+use super::prompt::Choice;
+use super::status::natural_cmp;
 
 pub(super) fn choices(
     rows: &mut [WorkspaceListItem],
-    sort: JumpSort,
+    sort: WorkspaceSort,
     global: bool,
     now_ms: i64,
 ) -> Vec<Choice> {
     rows.sort_by(|left, right| {
         let order = match sort {
-            JumpSort::Recent => recency(right).cmp(&recency(left)),
-            JumpSort::Name => Ordering::Equal,
+            WorkspaceSort::Recent => recency(right).cmp(&recency(left)),
+            WorkspaceSort::Name => Ordering::Equal,
         };
         order
             .then_with(|| natural_cmp(&left.workspace.name, &right.workspace.name))

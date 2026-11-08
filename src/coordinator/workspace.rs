@@ -1010,7 +1010,10 @@ impl Coordinator {
                     .collect::<Result<Vec<_>, _>>()
             })
             .transpose()?;
-        if phases.is_none() {
+        if phases
+            .as_ref()
+            .is_none_or(|phases| !phases.contains(&WorkspacePhase::Closed))
+        {
             workspaces.retain(|workspace| workspace.availability != WorkspaceAvailability::Closed);
         }
         let mut hydrated = Vec::with_capacity(workspaces.len());
@@ -1140,13 +1143,19 @@ impl Coordinator {
         mut workspace: Workspace,
     ) -> Workspace {
         if workspace.lifecycle != WorkspaceLifecycle::Ready
-            || workspace.availability != WorkspaceAvailability::Open
+            || !matches!(
+                workspace.availability,
+                WorkspaceAvailability::Open | WorkspaceAvailability::Closed
+            )
         {
             return workspace;
         }
 
         if workspace.codex_thread_id.is_none() {
             clear_native_thread_projection(&mut workspace);
+            if workspace.availability == WorkspaceAvailability::Closed {
+                return workspace;
+            }
             return self.project_current_runtime_turn(workspace);
         }
 
@@ -1161,6 +1170,9 @@ impl Coordinator {
                     "Codex thread state is unavailable"
                 );
                 clear_native_thread_projection(&mut workspace);
+                if workspace.availability == WorkspaceAvailability::Closed {
+                    return workspace;
+                }
                 return self.project_current_runtime_turn(workspace);
             }
         };
@@ -1189,13 +1201,27 @@ impl Coordinator {
         reasoning_effort: Option<String>,
         recency_at_ms: Option<i64>,
     ) -> Workspace {
-        let status = status.canonicalized();
+        let snapshot = ThreadRuntimeSnapshot {
+            status: status.canonicalized(),
+            recency_at_ms,
+            model,
+            reasoning_effort,
+            runtime_generation: self.runtime_generation.clone(),
+            observed_at_ms: Utc::now().timestamp_millis(),
+            is_fresh: true,
+        };
+        // Closed workspaces still expose passive metadata for selection, but
+        // never project native or locally correlated work as an open phase.
+        if workspace.availability == WorkspaceAvailability::Closed {
+            workspace.thread_runtime = Some(snapshot);
+            return workspace;
+        }
         let runtime = self.runtime_turn_for_workspace(&workspace);
         let has_accepted_turn = runtime.is_some() || workspace.active_turn_id.is_some();
         if let Some(runtime) = &runtime {
             workspace.active_turn_id = Some(runtime.id.clone());
         } else if !matches!(
-            &status,
+            &snapshot.status,
             crate::domain::CodexThreadStatus::Active { .. }
                 | crate::domain::CodexThreadStatus::Idle
         ) {
@@ -1203,15 +1229,7 @@ impl Coordinator {
             // unloaded or errored native thread.
             workspace.active_turn_id = None;
         }
-        workspace.thread_runtime = Some(ThreadRuntimeSnapshot {
-            status,
-            recency_at_ms,
-            model,
-            reasoning_effort,
-            runtime_generation: self.runtime_generation.clone(),
-            observed_at_ms: Utc::now().timestamp_millis(),
-            is_fresh: true,
-        });
+        workspace.thread_runtime = Some(snapshot);
         // A locally accepted current-generation turn closes the short race in
         // which thread/read still says idle before native turn/status events
         // arrive. The same guard is used by send and fork mutations.

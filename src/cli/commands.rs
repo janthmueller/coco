@@ -11,15 +11,16 @@ use crate::protocol::{
     TurnStartParams, WorkspaceAttachParams, WorkspaceBaseRequest, WorkspaceChangesRequest,
     WorkspaceCloseParams, WorkspaceContextRequest, WorkspaceContextSource, WorkspaceCreateParams,
     WorkspaceDeleteParams, WorkspaceDiffParams, WorkspaceGetParams, WorkspaceLimitsGetParams,
-    WorkspaceLimitsResetParams, WorkspaceLimitsResult, WorkspaceLimitsSetParams, WorkspaceListItem,
+    WorkspaceLimitsResetParams, WorkspaceLimitsResult, WorkspaceLimitsSetParams,
     WorkspaceListParams, WorkspaceReopenParams, WorkspaceResourcePolicyPatch, WorkspaceResult,
     WorkspaceWorktreeRequest,
 };
 use crate::rpc::{RpcClient, RpcClientError};
 
 use super::args::{
-    Cli, CloseArgs, Command, CreateArgs, DeleteArgs, JumpArgs, JumpSort, LimitField, LimitsCommand,
+    Cli, CloseArgs, Command, CreateArgs, DeleteArgs, JumpArgs, LimitField, LimitsCommand,
     LimitsSetArgs, LimitsTargetArgs, McpCommand, ModelCommand, RepoCommand, StatusArgs,
+    WorkspaceSort,
 };
 use super::decision::decide;
 use super::jump::jump;
@@ -43,7 +44,10 @@ mod resources_tests;
 mod retirement_tests;
 use super::turn::wait_for_turn;
 
-mod jump_picker;
+use super::workspace_picker;
+
+#[cfg(test)]
+mod picker_tests;
 
 pub(super) async fn run(cli: Cli) -> Result<()> {
     let mut interaction = TerminalInteraction::detect(cli.no_input);
@@ -211,6 +215,7 @@ async fn run_limits_scoped(
             let target_args = LimitsTargetArgs {
                 workspace: args.workspace.clone(),
                 global: args.global,
+                sort: args.sort,
                 json: args.json,
             };
             let target = resolve_limits_target(
@@ -271,6 +276,7 @@ async fn resolve_limits_target(
             has_scope_path,
             args.workspace.clone(),
             global,
+            args.sort,
         ),
         title,
         Some(
@@ -397,6 +403,7 @@ async fn run_targeted_scoped(
             message,
             operation_id,
             wait,
+            sort,
             ..
         } => {
             run_send_scoped(
@@ -406,6 +413,7 @@ async fn run_targeted_scoped(
                 all_repos,
                 global,
                 workspace,
+                sort,
                 message,
                 operation_id,
                 wait,
@@ -425,17 +433,13 @@ async fn run_targeted_scoped(
             )
             .await
         }
-        Command::Diff { workspace, .. } => {
-            run_diff_scoped(
-                paths,
-                repository_path,
-                has_scope_path,
-                all_repos,
-                global,
-                workspace,
-                interaction,
-            )
-            .await
+        Command::Diff {
+            workspace, sort, ..
+        } => {
+            reject_all_repos_for_reference(all_repos, "diff")?;
+            let selection =
+                workspace_selection(repository_path, has_scope_path, workspace, global, sort);
+            run_diff(paths, selection, interaction).await
         }
         _ => unreachable!("non-targeted command routed to targeted dispatcher"),
     }
@@ -456,6 +460,7 @@ async fn run_close_scoped(
         has_scope_path,
         args.workspace.clone(),
         global,
+        args.sort,
     );
     run_close(paths, selection, args, interaction).await
 }
@@ -470,7 +475,13 @@ async fn run_reopen_scoped(
     interaction: &mut dyn Interaction,
 ) -> Result<()> {
     reject_all_repos_for_reference(all_repos, "reopen")?;
-    let selection = workspace_selection(repository_path, has_scope_path, args.workspace, global);
+    let selection = workspace_selection(
+        repository_path,
+        has_scope_path,
+        args.workspace,
+        global,
+        args.sort,
+    );
     run_reopen(paths, selection, interaction).await
 }
 
@@ -489,6 +500,7 @@ async fn run_delete_scoped(
         has_scope_path,
         args.workspace.clone(),
         global,
+        args.sort,
     );
     run_delete(paths, selection, args, interaction).await
 }
@@ -504,13 +516,14 @@ async fn run_send_scoped(
     all_repos: bool,
     global: bool,
     workspace: Option<String>,
+    sort: WorkspaceSort,
     message: Option<String>,
     operation_id: Option<String>,
     wait: bool,
     interaction: &mut dyn Interaction,
 ) -> Result<()> {
     reject_all_repos_for_reference(all_repos, "send")?;
-    let selection = workspace_selection(repository_path, has_scope_path, workspace, global);
+    let selection = workspace_selection(repository_path, has_scope_path, workspace, global, sort);
     run_send(paths, selection, message, operation_id, wait, interaction).await
 }
 
@@ -524,22 +537,14 @@ async fn run_jump_scoped(
     interaction: &mut dyn Interaction,
 ) -> Result<()> {
     reject_all_repos_for_reference(all_repos, "jump")?;
-    let selection = workspace_selection(repository_path, has_scope_path, args.workspace, global);
-    run_jump(paths, selection, args.sort, interaction).await
-}
-
-async fn run_diff_scoped(
-    paths: &CocoPaths,
-    repository_path: &Path,
-    has_scope_path: bool,
-    all_repos: bool,
-    global: bool,
-    workspace: Option<String>,
-    interaction: &mut dyn Interaction,
-) -> Result<()> {
-    reject_all_repos_for_reference(all_repos, "diff")?;
-    let selection = workspace_selection(repository_path, has_scope_path, workspace, global);
-    run_diff(paths, selection, interaction).await
+    let selection = workspace_selection(
+        repository_path,
+        has_scope_path,
+        args.workspace,
+        global,
+        args.sort,
+    );
+    run_jump(paths, selection, interaction).await
 }
 
 async fn run_model(command: ModelCommand, paths: &CocoPaths) -> Result<()> {
@@ -646,6 +651,7 @@ struct WorkspaceSelection {
     has_explicit_path: bool,
     workspace: Option<String>,
     global: bool,
+    sort: WorkspaceSort,
 }
 
 struct ResolvedWorkspaceTarget {
@@ -659,12 +665,14 @@ fn workspace_selection(
     has_explicit_path: bool,
     workspace: Option<String>,
     global: bool,
+    sort: WorkspaceSort,
 ) -> WorkspaceSelection {
     WorkspaceSelection {
         repository_scope: RepositoryScope::repository(repository_path.to_path_buf()),
         has_explicit_path,
         workspace,
         global,
+        sort,
     }
 }
 
@@ -788,22 +796,12 @@ async fn resolve_workspace_input_with_phases(
     phases: Option<Vec<String>>,
     interaction: &mut dyn Interaction,
 ) -> Result<ResolvedWorkspaceTarget> {
-    resolve_workspace_input_with_picker(paths, selection, title, phases, None, interaction).await
-}
-
-async fn resolve_workspace_input_with_picker(
-    paths: &CocoPaths,
-    selection: WorkspaceSelection,
-    title: &str,
-    phases: Option<Vec<String>>,
-    jump_sort: Option<JumpSort>,
-    interaction: &mut dyn Interaction,
-) -> Result<ResolvedWorkspaceTarget> {
     let WorkspaceSelection {
         repository_scope,
         has_explicit_path,
         workspace,
         global,
+        sort,
     } = selection;
     if let Some(workspace) = workspace {
         return Ok(ResolvedWorkspaceTarget {
@@ -841,35 +839,18 @@ async fn resolve_workspace_input_with_picker(
         };
         bail!("no workspaces are available {scope_hint}; create one with `coco create <NAME>`");
     }
-    let choices = match jump_sort {
-        Some(sort) => jump_picker::choices(
-            &mut workspaces,
-            sort,
-            global,
-            chrono::Utc::now().timestamp_millis(),
-        ),
-        None => workspaces
-            .iter()
-            .map(|workspace| workspace_choice(workspace, global))
-            .collect(),
-    };
+    let choices = workspace_picker::choices(
+        &mut workspaces,
+        sort,
+        global,
+        chrono::Utc::now().timestamp_millis(),
+    );
     let selected = interaction.select(title, &choices)?;
     Ok(ResolvedWorkspaceTarget {
         scope: RepositoryScope::AllRepositories,
         workspace: workspaces[selected].workspace.id.clone(),
         verified: true,
     })
-}
-
-fn workspace_choice(item: &WorkspaceListItem, include_repository: bool) -> Choice {
-    let branch = item.workspace.branch_name.as_deref().unwrap_or("detached");
-    let mut detail = Vec::with_capacity(3);
-    if include_repository {
-        detail.push(item.repository.root_path.display().to_string());
-    }
-    detail.push(super::output::phase_label(item.workspace.phase.as_str()).to_owned());
-    detail.push(branch.to_owned());
-    Choice::new(item.workspace.name.clone(), Some(detail.join(" · ")))
 }
 
 fn require_interactive(interaction: &dyn Interaction, field: &str) -> Result<()> {
@@ -1030,6 +1011,7 @@ pub(super) fn normalize_create_args(
     let CreateArgs {
         name,
         interactive: _,
+        sort: _,
         temporary,
         keep_thread,
         base,
@@ -1497,18 +1479,9 @@ async fn send(
 async fn run_jump(
     paths: &CocoPaths,
     selection: WorkspaceSelection,
-    sort: JumpSort,
     interaction: &mut dyn Interaction,
 ) -> Result<()> {
-    let target = resolve_workspace_input_with_picker(
-        paths,
-        selection,
-        "Open workspace · Last used",
-        None,
-        Some(sort),
-        interaction,
-    )
-    .await?;
+    let target = resolve_workspace_input(paths, selection, "Open workspace", interaction).await?;
     jump_to_workspace(paths, target.scope, target.workspace).await
 }
 

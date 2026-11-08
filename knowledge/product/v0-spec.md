@@ -617,8 +617,16 @@ directly to daemon-owned enrollment. `--interactive` is incompatible with
 `--no-input`. `send`, `jump`, and `diff` may
 select an omitted workspace from the local scope or the daemon-wide `--global`
 scope; `send` then prompts for an omitted message. Targetless `status` is
-always a non-interactive collection view. The picker uses
-arrow keys or `j`/`k` for immediate cursor movement, Enter to confirm, direct
+always a non-interactive collection view. All workspace-source and target
+pickers default to descending native recency across their eligible scope, with
+`--sort name` as the natural-name override and optional dim relative times.
+Unknown times come last; ties use natural name, repository path and exact ID.
+The same policy covers both create source pickers and the send, jump, diff,
+limits, close, reopen and delete target pickers; collection status/list retain
+their existing sort contracts. Closed candidates read native recency passively,
+including archived conversations, while remaining closed. Unreadable or invalid
+metadata leaves their time unknown and does not reopen or hide them. The picker
+uses arrow keys or `j`/`k` for immediate cursor movement, Enter to confirm, direct
 one-key selection for options 1 through 9, and Escape, `q`, or Ctrl-C to cancel.
 It is also the single option-selection implementation for `decide`. The
 picker keeps only its title and choices on screen: successful selection and a
@@ -751,11 +759,10 @@ the selected path belongs to a workspace with reusable context, the guide offers
 that current workspace directly, records its stable ID at selection time, and
 omits it from the generic workspace picker. It may otherwise select an eligible
 workspace from any registered repository by name/number in the picker or accept
-an exact native thread ID. Context discovery resolves the selected repository's
-identity with `repository.resolve`, including nested paths and worktrees,
-then lists eligible sources across all registered repositories. Stable sorting
-puts that repository first and naturally orders the remaining repositories by
-visible path and workspace name. Repository paths distinguish same-named
+an exact native thread ID. Context discovery lists eligible sources across all
+registered repositories. Native recent-first ordering spans the full source
+list without prioritizing the current repository; `--sort name` selects natural
+name order across that same list. Repository paths distinguish same-named
 sources in both picker details and the final review. Selection records an exact
 workspace ID; code-base discovery remains repository-scoped. It may
 then choose full or compact history. If `-C` preselects compaction without a
@@ -1160,11 +1167,12 @@ automatically. No storage-schema migration is required for these descriptors.
   CoCo's general workspace mutation time. `--sort name` selects natural name
   order. Global selection orders recency across repositories, then uses name,
   repository path and workspace ID for ties. Missing dates come last and do
-  not borrow mutation/observation/creation timestamps. This policy is jump-only.
+  not borrow mutation/observation/creation timestamps. This is the shared
+  workspace-picker policy described under interactive input.
 - Dim right-aligned relative times are frozen when the choices are built,
   omitted when unknown and hidden before shortening ordinary row content.
   Show an actual branch only when it differs exactly from the workspace name;
-  retain detached and global repository details. Other pickers are unchanged.
+  retain detached and global repository details across workspace pickers.
 - Require the workspace's managed worktree. A human terminal may select an
   omitted workspace locally or with `--global`; deterministic callers must
   provide one.
@@ -1179,6 +1187,13 @@ automatically. No storage-schema migration is required for these descriptors.
   relay. Correlate the exact `thread/start` response, but bind it only after its
   first action creates a durable rollout. Empty exit leaves the workspace
   prepared.
+- During fresh-candidate adoption, the verified native empty-rollout metadata
+  error means pending persistence rather than failed relay completion. Only the
+  exact requested candidate, repeated matching absolute rollout path, native
+  error code/message and absent structured error data qualify. Existing bounded
+  adoption waits remain; bound-thread lookup and unrelated storage failures
+  still fail closed. A successful empty temporary session may reach its normal
+  checked cleanup; an ordinary workspace remains prepared.
 - Renew the lease while that relay is alive so the TUI may remain open before
   its first action. Keep the listener and lease alive across sequential native
   TUI reconnects, opening a fresh App Server leg for each connection. A missing
@@ -1215,8 +1230,12 @@ automatically. No storage-schema migration is required for these descriptors.
   execution. Before a second native start, any fork, or a request for another
   native thread, consume cleanup permission durably under the exact live
   workspace/lease capability. Fail closed before forwarding when persistence
-  is unconfirmed. Original-thread traffic and passive thread catalogs retain
-  the policy. Do not infer safety from the idle original thread when another
+  is unconfirmed. Original-thread traffic, passive thread catalogs and read-only
+  `thread/read`, `thread/turns/list` and `thread/items/list` calls retain the
+  policy, including reads of another thread's history/metadata while rendering
+  inherited context. A subsequent resume or
+  action targeting that other thread must still disarm cleanup before forwarding.
+  Do not infer safety from the idle original thread when another
   independent conversation may still be using its worktree/runtime.
 - Unknown cleanup replies are not re-sent and do not turn a successful UI
   session into a launch failure. Report uncertainty separately from retained,

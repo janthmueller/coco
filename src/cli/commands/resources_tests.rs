@@ -6,6 +6,7 @@ fn set_args() -> LimitsSetArgs {
     LimitsSetArgs {
         workspace: Some("review/api".to_owned()),
         global: false,
+        sort: WorkspaceSort::Recent,
         memory_high: None,
         memory_max: None,
         cpu_max: None,

@@ -69,6 +69,27 @@ async fn close_source(
             .is_some_and(|items| items.iter().any(|item| item["name"] == WORKSPACE_NAME)),
         "closed list did not expose the retired source workspace: {closed}"
     );
+    let source = closed["workspaces"]
+        .as_array()
+        .and_then(|items| items.iter().find(|item| item["name"] == WORKSPACE_NAME))
+        .context("closed source metadata missing")?;
+    ensure!(
+        source["phase"] == "closed"
+            && source["availability"] == "closed"
+            && source["threadArchived"] == true
+            && source["codexThreadId"] == source_status["workspace"]["codexThreadId"],
+        "passive closed listing changed the workspace binding or lifecycle: {source}"
+    );
+    ensure!(
+        source["threadRuntime"]["recencyAtMs"]
+            .as_i64()
+            .is_some_and(|value| value >= 0),
+        "archived conversation recency was not available to the picker: {source}"
+    );
+    ensure!(
+        !worktree.exists(),
+        "passive listing recreated the closed worktree"
+    );
     Ok(())
 }
 

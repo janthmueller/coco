@@ -57,7 +57,17 @@ coco create scratch/review --temporary -j
 
 After the last open CoCo-launched UI exits normally, CoCo tries to remove the
 workspace, its worktree, owned branch and conversation. Add `--keep-thread`
-to keep the conversation.
+to keep the conversation. Leaving normally without sending a message also
+attempts cleanup.
+Wait for the `Removed` or `Kept` message before sending another interrupt.
+
+To start with an existing conversation, choose a context source during creation:
+
+```bash
+coco create scratch/review --temporary -c fix/login -j
+```
+
+The source conversation remains available when the temporary workspace is removed.
 
 You can prepare it first and open it later:
 
@@ -130,7 +140,9 @@ Run `coco jump` without a name for a selector. Navigate with arrow keys or
 Recently used conversations appear first, with a dim relative time when Codex
 reports one. Use `coco jump --sort name` for name order, or add `-g` to choose
 across repositories. The selector shows a branch only when it differs from
-the workspace name; detached worktrees remain marked `detached`.
+the workspace name; detached worktrees remain marked `detached`. The workspace
+selectors in guided creation, `send`, `diff`, `limits`, `close`, `reopen`, and
+`delete` use the same ordering and time display.
 
 ### Find open terminals
 

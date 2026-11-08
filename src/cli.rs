@@ -16,6 +16,7 @@ mod signals;
 mod status;
 mod style;
 mod turn;
+mod workspace_picker;
 
 #[cfg(test)]
 mod tests;

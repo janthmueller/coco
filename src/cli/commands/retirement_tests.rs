@@ -133,10 +133,12 @@ async fn exercise_deletion(
             has_explicit_path: false,
             workspace: Some("reused-name".to_owned()),
             global: false,
+            sort: WorkspaceSort::Recent,
         },
         DeleteArgs {
             workspace: Some("reused-name".to_owned()),
             global: false,
+            sort: WorkspaceSort::Recent,
             keep_thread: false,
             keep_branch: false,
             discard_changes: false,

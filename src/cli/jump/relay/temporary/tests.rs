@@ -32,13 +32,7 @@ fn original_conversation_and_catalog_requests_do_not_disarm_cleanup() {
 
 #[test]
 fn starting_forking_or_using_another_conversation_requires_durable_disarm() {
-    for method in [
-        "thread/start",
-        "thread/fork",
-        "thread/read",
-        "thread/resume",
-        "turn/start",
-    ] {
+    for method in ["thread/start", "thread/fork", "thread/resume", "turn/start"] {
         let mut guard = guard(Some("original"), true);
         assert!(guard.uses_additional_conversation(
             &json!({"id": 1, "method": method, "params": {"threadId": "other"}}),
@@ -75,6 +69,38 @@ fn missing_first_start_identity_is_not_cleanup_authority() {
     assert!(guard.uses_additional_conversation(&json!({"method": "thread/start"}), None));
     assert!(guard.uses_additional_conversation(
         &json!({"method": "thread/resume", "params": {"threadId": "unknown"}}),
+        None
+    ));
+}
+
+#[test]
+fn passive_lookup_of_another_threads_history_keeps_cleanup_armed() {
+    for original in [None, Some("original")] {
+        for (method, extra) in [
+            ("thread/read", json!({"includeTurns": false})),
+            ("thread/read", json!({"includeTurns": true})),
+            ("thread/turns/list", json!({"itemsView": "notLoaded"})),
+            ("thread/turns/list", json!({"itemsView": "full"})),
+            ("thread/items/list", json!({"turnId": "turn"})),
+        ] {
+            let mut guard = guard(original, true);
+            let mut params = extra;
+            params["threadId"] = json!("context-source");
+            assert!(!guard.uses_additional_conversation(
+                &json!({"id": 1, "method": method, "params": params}),
+                original
+            ));
+            // Reading history never authorizes running that conversation.
+            assert!(guard.uses_additional_conversation(
+                &json!({
+                    "id": 2, "method": "thread/resume", "params": {"threadId": "context-source"}
+                }),
+                original
+            ));
+        }
+    }
+    assert!(guard(Some("original"), true).uses_additional_conversation(
+        &json!({"id": 1, "method": "thread/unknown", "params": {"threadId": "other"}}),
         None
     ));
 }
