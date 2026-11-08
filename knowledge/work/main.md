@@ -5,7 +5,7 @@ description: Tracks integrated product work, verified release handoffs and the r
 tags: [work, branch, bootstrap, rust, mcp, architecture]
 status: active
 branch: main
-updated: 2026-11-07
+updated: 2026-11-08
 ---
 
 # main — repository foundation
@@ -16,6 +16,37 @@ Establish the repository, documentation workflow, and first executable and
 architectural baseline for CoCo.
 
 ## Active work
+
+### Reviewed workspace creation and cleanup release — 2026-11-08
+
+- User explicitly authorizes main integration, push, exact-source CI, stable
+  rehearsal and normal publication of the reviewed `review/new-version` work.
+  Keep installed binaries and running user daemons unchanged. The expected
+  normal version is 0.7.0 because the slice includes a creation feature.
+- Fast-forwarded clean main from `1d87f15` to `7500333`, preserving reviewed
+  product commits `42e8f93` and `128d6de`. This integrates temporary cleanup,
+  shared native-recency pickers, Tab for remaining creation defaults and the
+  outside-Git repository-selection fix. No conflict resolution or product
+  changes were required during integration.
+- Latest product verification is 735 library, seven process and eleven status
+  tests plus all-target/all-feature Clippy, formatting, isolated PTY/native Git
+  checks and static docs (18 pages/64 files). The cleanup implementation also
+  passed twelve isolated native Codex compatibility checks before the later
+  CLI/discovery additions; no paid inference or real workspace deletion.
+- A safe `channel=stable,publish=false` preflight on previous main
+  (`42511577321`) confirms `COCO_RELEASE_ENABLED=false` in current Actions
+  logs. It stops at the old documentation tip's guarded verification, before
+  versioning/publication. No repository setting or credential changed.
+- [ ] Push this source checkpoint and require the exact current main revision
+  to pass Rust (fresh advisory/policy, package, Nix and Linux/macOS smoke) and
+  documentation workflows. Record exact SHA and run IDs below.
+- [ ] Run stable with `publish=false`, inspect version/changelog and matching
+  Cargo/lock/tag metadata, expecting 0.7.0.
+- [ ] Recheck unchanged tested main, dispatch stable with `publish=true`, then
+  verify the public tag/release, non-yanked registry version and checksummed
+  native archives before reporting completion.
+- Continue release tracking here; branch implementation details and complete
+  review history remain in `knowledge/work/review/new-version.md`.
 
 ### Temporary-workspace integration and release — 2026-11-07
 
