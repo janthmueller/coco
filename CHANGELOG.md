@@ -2,6 +2,30 @@
 
 <!-- version list -->
 
+## v0.7.0 (2026-11-08)
+
+### Bug Fixes
+
+- Restore temporary cleanup and unify recent workspace pickers
+  ([`42e8f93`](https://github.com/janthmueller/coco/commit/42e8f930d13461a85411206acc125e0156b76f88))
+
+### Documentation
+
+- Record authorized 0.7.0 integration and release plan
+  ([`7500333`](https://github.com/janthmueller/coco/commit/7500333511f4dab0712d5f2fac8ad3b8ac9c6762))
+
+- Record verified 0.6.0 release
+  ([`1d87f15`](https://github.com/janthmueller/coco/commit/1d87f152556e1ae7a0650113098266b273ef21fe))
+
+- Track reviewed workspace release on main
+  ([`9a65042`](https://github.com/janthmueller/coco/commit/9a65042db3f7ba1a1ac38d3df638067362190795))
+
+### Features
+
+- **cli**: Add create defaults shortcut and fix repo selection
+  ([`128d6de`](https://github.com/janthmueller/coco/commit/128d6de72dccadf491e558e2cf5c4a2d1b66b3dc))
+
+
 ## v0.6.0 (2026-11-07)
 
 ### Documentation
