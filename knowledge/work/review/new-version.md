@@ -491,3 +491,55 @@ No paid inference or real user workspace deletion was performed.
   Git history records the resulting commit identity. Verify the staged diff
   before committing and the clean worktree afterward.
 - Installation, daemon restart, push and publication remain unrequested.
+
+## Merge and release assessment
+
+- 2026-11-08 — User asks for an opinion on merging into main and releasing.
+  This assessment does not perform a merge, push or publishing dispatch.
+- Reviewed `knowledge/engineering/release.md`, actual release/Rust workflows
+  and `releaserc.toml`. Current local HEAD is `128d6de`; GitHub and local main
+  both remain at `1d87f15`, exactly two commits behind. Both worktrees were
+  clean before recording this assessment, and main is an ancestor of HEAD, so
+  the present integration can use a fast-forward without conflict resolution.
+- GitHub's latest normal release is still v0.6.0. The reviewed `feat` commit
+  makes v0.7.0 the expected next normal version under the configured pre-1.0
+  policy; the hosted rehearsal must confirm the actual calculated version.
+- Recommend merging/pushing the reviewed source, requiring successful Rust
+  and documentation workflows on the exact new main tip, then running the
+  stable channel with `publish=false`. Inspect its version/changelog before a
+  separately authorized `publish=true` dispatch on that same tested main tip.
+  Hosted gates include current dependency advisories, package verification,
+  Nix checks and native Linux/macOS smoke; local checks do not replace them.
+- The current automatic-release variable could not be verified: the GitHub
+  connector does not expose repository variables and local `gh` is not logged
+  in. The documented policy keeps `COCO_RELEASE_ENABLED=false`; verify its
+  actual value before any push that could otherwise trigger automatic alpha.
+- No source, workflow, version or release setting changed. Only this working
+  document records the assessment; no merge/release operation was performed.
+
+## Authorized integration and publication
+
+- 2026-11-08 — User explicitly says to execute the proposed main integration,
+  push, exact-source CI, stable rehearsal and regular publication. This
+  supersedes the preceding no-merge/push/publication boundary. Installation
+  and restarting the user's daemon remain outside scope.
+- [ ] Confirm the automatic-release switch, then commit this task record and
+  fast-forward the clean main worktree; continue release tracking in
+  `knowledge/work/main.md`.
+- [ ] Require exact-current-main Rust/native/package and documentation success.
+- [ ] Inspect a stable non-publishing rehearsal for expected version 0.7.0.
+- [ ] Publish stable and verify registry, tag and checksummed native archives.
+- Repository-variable reads are unavailable through the connector and local
+  gh authentication. The browser attempt also had no access and changed no
+  settings. Continue through Git and the authenticated Actions tools.
+- A non-publishing stable preflight was dispatched on the existing main tip
+  with `publish=false` to inspect guard diagnostics and current release
+  configuration before pushing. It cannot publish; its exact-tip CI guard is
+  expected to stop on the prior documentation-only main commit.
+- Preflight `42511577321` confirms the current environment has
+  `COCO_RELEASE_ENABLED=false`, `RELEASE_CHANNEL=stable` and
+  `PUBLISH_REQUESTED=false`. Guarded verification stops on the old main tip;
+  no versioning or publication step runs. Configuration is unchanged.
+- Branch implementation and review are complete. Commit this integration
+  handoff, then track the executing release and remaining checklist under
+  main's existing working document.
