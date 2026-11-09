@@ -17,6 +17,29 @@ architectural baseline for CoCo.
 
 ## Active work
 
+### Authorized workspace setup and navigation release — 2026-11-09
+
+- User authorizes correcting the Palm source reference, committing/pushing
+  main, exact-source hosted verification and normal stable publication through
+  GitHub Actions. The source checkpoint is `7878ccd`; the expected next normal
+  version is 0.8.0. Keep automatic alpha disabled, credentials/settings and
+  installed user binaries/runtimes unchanged. No real-model calls.
+- [x] Correct the integration handoff to the complete matching implementation.
+- [ ] Commit/push the documentation correction with unchanged product sources;
+  require exact-current-main Rust and documentation workflows to succeed.
+- [ ] Refresh advisory evidence, dispatch stable with `publish=false`, and
+  inspect the proposed version/changelog plus synchronized Cargo metadata.
+- [ ] Recheck unchanged tested main and dispatch stable with `publish=true`;
+  verify normal release, non-yanked registry package and native archives.
+- [ ] Integrate generated release metadata locally, finish the Palm/release
+  record and return on clean main. Do not advance remote main between its
+  successful verification, rehearsal and authorized publishing dispatch.
+- Prior verification remains applicable because implementation, tests and
+  rendered docs are unchanged: 810 ordinary tests, 15 native model-free checks,
+  terminal/all-shell probes, lints and static export; the repeat review passes
+  another 169 focused tests, 11 process cases and three native setup fixtures.
+  Hosted fresh advisories, packaging, Nix and Linux/macOS smoke remain mandatory.
+
 ### Post-integration review — 2026-11-09
 
 - Review local `f984d93` against remote 0.7.0 and the pre-merge setup/navigation

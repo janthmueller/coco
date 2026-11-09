@@ -13,23 +13,16 @@ updated: 2026-11-09
 
 Implemented in **CoCo only**, integrated on local `main`:
 
-- Matching integration commit: `0402f02e35b7b24f2b704e4c2d10f80d4ad60309`
-  (`merge: reconcile workspace setup and navigation with released 0.7.0`).
+- Matching implementation commit: `7878ccd72a2b66d2b52cbf27564cc8bbeb27680a`
+  (`feat: add recoverable MCP workspace setup and shell navigation`).
   It preserves remote main `3451d27` and all published 0.7.0 behavior/tests
   alongside the local navigation and reviewed workspace-setup additions.
   Use this source checkpoint or a later documentation-only descendant for the
   matching builds below. The setup API and its guarantees are unchanged by
-  integration; the feature branch remains available as historical context.
-- Baseline implementation commit: `8cee678774ecb5ec74efa2462d2da3cb089e0c29`
-  (`feat: expose recoverable MCP workspace setup`).
-- Based on navigation checkpoint `a47f368e347459b1407812fcd8e1762465ecbab1`,
-  which is retained in the integration history. No Palm files were changed.
-- Corrected implementation commit: `8c2e3aebaa20e84b9c480726ad5d05d232fe0578`
-  (`fix: preserve workspace setup ownership and worker thread evidence`).
-  It includes the baseline and both reviewed corrections: atomic public/private
+  integration. No Palm files were changed.
+- The checkpoint includes both reviewed corrections: atomic public/private
   claim ownership and durable exclusion of known unconfirmed worker threads.
-  Both corrections are retained in the matching integration checkpoint; the
-  baseline alone is insufficient. This update is documentation-only.
+  Use the complete implementation, not an earlier partial setup prototype.
 - No push, release, installation change, user service restart or real model call.
 
 Matching **local debug builds**, Linux x86_64, Rust 1.98.1, all reporting 0.7.0:
