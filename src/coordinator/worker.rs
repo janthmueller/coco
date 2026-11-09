@@ -155,6 +155,18 @@ impl WorkerError {
 pub(crate) trait WorkerRuntime: Send + Sync + 'static {
     async fn list_models(&self) -> Result<Vec<CodexModel>, WorkerError>;
 
+    /// Must reject any preexisting effective native server slot. Codex merges
+    /// tables recursively, so replacing a partial entry is not safe.
+    async fn verify_worker_mcp_slots(
+        &self,
+        _cwd: &Path,
+        _slots: &[String],
+    ) -> Result<(), WorkerError> {
+        Err(WorkerError::InvalidResponse(
+            "verified worker MCP base config",
+        ))
+    }
+
     /// Reads account-global Codex quota without loading a native thread or
     /// starting a workspace executor.
     async fn read_account_quota(&self) -> Result<NativeAccountQuotaRead, WorkerError> {

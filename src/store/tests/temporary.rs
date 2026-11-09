@@ -60,7 +60,7 @@ fn released_v17_workspaces_migrate_as_persistent() {
             connection
                 .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            18
+            SUPPORTED_SCHEMA_VERSION
         );
     }
     assert_eq!(

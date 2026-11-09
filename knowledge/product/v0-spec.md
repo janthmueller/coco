@@ -555,6 +555,9 @@ coco [<repository-path>] send [<workspace>] [<message>] [--wait]
 coco send [<workspace>] [<message>] --global [--wait]
 coco [<repository-path>] jump [<workspace>] [--sort recent|name]
 coco jump [<workspace>] --global [--sort recent|name]
+coco [<repository-path>] path [<workspace>] [--global]
+coco [<repository-path>] cd [<workspace>] [--global]
+coco shell init <bash|zsh|fish>
 coco decide <decision-id> [--choice <number>]
 coco [<repository-path>] diff [<workspace>]
 coco diff [<workspace>] --global
@@ -1170,6 +1173,34 @@ automatically. No storage-schema migration is required for these descriptors.
   dispatch returns `OPERATION_UNCERTAIN` and is never sent again under that ID.
 - After a successful completed turn and fresh native `idle` status, another
   `send` is permitted.
+
+### Workspace directory navigation
+
+- `path` resolves a saved open, ready-lifecycle worktree by the existing scoped
+  name/UUID rules and prints only its absolute UTF-8 path plus one newline.
+  Reject control characters rather than truncating or rewriting filenames.
+- Use only saved CoCo metadata and filesystem existence checks; do not hydrate
+  native state, read conversation history, activate an executor, open a TUI,
+  acquire a client lease or consume temporary cleanup permission.
+- With no target, use the shared terminal interaction adapter and natural name
+  ordering, retaining exceptional branch/detached and global repository details.
+  Do not claim fresh native recency. Exclude closed, transitional, incomplete
+  and missing worktrees. Revalidate the selected UUID in the original scope
+  before printing; no fallback to a reused name.
+- `cd` requires explicit shell initialization. Bash/Zsh/Fish functions rewrite
+  only the top-level `cd` command to `path` and invoke the shell's own `cd` on
+  successful lookup. Preserve quoted arguments, cancellation/failure status and
+  the directory on lookup failure. Every other command is delegated unchanged.
+  Match command names, aliases and options case-sensitively regardless of Bash
+  `nocasematch`, without changing caller options. Fish uses its ordinary `cd`
+  function so `cd -`, `prevd` and `nextd` retain native history behavior.
+- `shell init` is offline, has an explicit supported-shell argument, prints
+  code without changing user files, and rejects repository scope. Bare binary
+  `cd` prints actionable setup instructions, never a fake successful directory
+  change. No registration, reopening or cleanup is implicit in navigation.
+- `path` and `cd` accept `-g` for one global target or selector, not `-a`.
+  Like ordinary shell navigation, they do not reserve the worktree against a
+  concurrent deletion after lookup.
 
 ### `coco jump`
 

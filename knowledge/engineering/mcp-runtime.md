@@ -8,6 +8,15 @@ status: stable
 
 # MCP catalog and worker runtime boundary
 
+## Implemented source-binding slice
+
+The current small worker-facing API is an immutable local source/hash binding
+on public fresh-workspace creation. See [Public workspace setup](workspace-setup.md)
+for durable receipt/idempotency rules, bounded recipes, native collision
+rejection, approval proofs and missing-evidence protection. It does not
+implement the broader catalog/capability-profile model described below.
+Agentgateway remains deferred and is not introduced by that API.
+
 ## Decision summary
 
 CoCo owns the control-plane concepts needed to select MCP capabilities for a
@@ -39,7 +48,9 @@ CoCo uses MCP in two independent directions:
    client of `cocod` and is part of v0.
 2. **Worker tool MCP:** A Codex thread receives a selected set of external MCP
    servers and tools. The catalog and per-thread selection described here
-   concern this direction and are not part of the v0 control-MCP adapter.
+   concern this direction. Current source bindings are supplied through the
+   separately granted control create tool, but are loaded by native Codex;
+   CoCo's control server never proxies their worker protocol traffic.
 
 No protocol payload is blindly proxied between these directions, and their
 authorization models must remain separate in code and documentation.

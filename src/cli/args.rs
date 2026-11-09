@@ -107,6 +107,15 @@ pub(super) enum Command {
     /// Open the workspace in the Codex terminal UI, creating fresh context on first action.
     /// Leaving with /quit or /exit does not cancel active work.
     Jump(JumpArgs),
+    /// Print a workspace's absolute worktree path.
+    Path(NavigationArgs),
+    /// Change to a workspace directory after enabling shell integration.
+    Cd(NavigationArgs),
+    /// Set up optional shell integration.
+    Shell {
+        #[command(subcommand)]
+        command: ShellCommand,
+    },
     /// Answer a pending Codex approval or question.
     Decide {
         /// Decision ID shown by `coco status`.
@@ -170,6 +179,9 @@ impl Command {
             | Self::Delete(_)
             | Self::Send { .. }
             | Self::Jump(_)
+            | Self::Path(_)
+            | Self::Cd(_)
+            | Self::Shell { .. }
             | Self::Decide { .. }
             | Self::Diff { .. }
             | Self::Mcp { .. }
@@ -184,6 +196,7 @@ impl Command {
             Self::Signal { command } => command.global(),
             Self::Send { global, .. } | Self::Diff { global, .. } => *global,
             Self::Jump(args) => args.global,
+            Self::Path(args) | Self::Cd(args) => args.global,
             Self::Close(args) => args.global,
             Self::Reopen(args) => args.global,
             Self::Delete(args) => args.global,
@@ -191,6 +204,7 @@ impl Command {
             | Self::Doctor { .. }
             | Self::Model { .. }
             | Self::Models { .. }
+            | Self::Shell { .. }
             | Self::Create(_)
             | Self::List { .. }
             | Self::Decide { .. }
@@ -217,6 +231,31 @@ pub(super) struct JumpArgs {
     /// Order the workspace picker by recent use or name.
     #[arg(long, value_enum, default_value_t = WorkspaceSort::Recent)]
     pub(super) sort: WorkspaceSort,
+}
+
+#[derive(Debug, Args)]
+pub(super) struct NavigationArgs {
+    /// Workspace name or ID. Omit it to choose interactively.
+    pub(super) workspace: Option<String>,
+    /// Resolve or choose the workspace across every registered repository.
+    #[arg(long, short = 'g')]
+    pub(super) global: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub(super) enum ShellCommand {
+    /// Print initialization code to add to your shell configuration.
+    Init {
+        #[arg(value_enum)]
+        shell: ShellKind,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(super) enum ShellKind {
+    Bash,
+    Zsh,
+    Fish,
 }
 
 #[derive(Debug, Subcommand)]
@@ -657,6 +696,9 @@ pub(super) enum McpCommand {
     Serve {
         #[arg(long)]
         repository: PathBuf,
+        /// Allow workspace creation and executable worker MCP configuration.
+        #[arg(long)]
+        allow_create: bool,
         /// Advertise the mutating workspaces.send tool.
         #[arg(long)]
         allow_send: bool,

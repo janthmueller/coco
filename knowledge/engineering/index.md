@@ -41,6 +41,8 @@ agents.
   durable technical receipts, bounded native recovery, repository isolation and
   separately granted strict/best-effort interruption with one-shot durable
   attempts, without conversation-history mirroring.
+- [Public workspace setup](workspace-setup.md) - Separately granted idempotent
+  creation, deletion-safe receipts, immutable worker sources and native proofs.
 - [Agent-emitted signals](signals.md) - Defines explicit opt-in publication,
   native thread attribution, validation, bounded retention, and independent replay.
 - [CoCo hooks and guards](hooks.md) - Separates native Codex lifecycle hooks

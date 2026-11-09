@@ -20,6 +20,8 @@ use crate::domain::{
 mod clients_tests;
 mod doctor;
 mod hooks;
+mod navigation;
+mod setup;
 mod signals;
 mod temporary;
 mod turns;
@@ -28,6 +30,8 @@ pub(crate) use crate::domain::turns::{
 };
 pub(crate) use doctor::*;
 pub(crate) use hooks::*;
+pub(crate) use navigation::*;
+pub(crate) use setup::*;
 pub(crate) use signals::*;
 pub(crate) use temporary::*;
 pub(crate) use turns::*;
@@ -43,11 +47,15 @@ pub enum DaemonMethod {
     RepositoryResolve,
     RepositoryList,
     WorkspaceCreate,
+    WorkspaceSetup,
+    WorkspaceCreationGet,
     WorkspaceClose,
     WorkspaceReopen,
     WorkspaceDelete,
     WorkspaceList,
     WorkspaceGet,
+    WorkspacePathGet,
+    WorkspacePathList,
     WorkspaceUsageList,
     WorkspaceUsageGet,
     WorkspaceLimitsGet,
@@ -79,7 +87,7 @@ pub enum DaemonMethod {
 
 impl DaemonMethod {
     #[cfg(test)]
-    pub const ALL: [Self; 41] = [
+    pub const ALL: [Self; 45] = [
         Self::Health,
         Self::Doctor,
         Self::ModelList,
@@ -89,11 +97,15 @@ impl DaemonMethod {
         Self::RepositoryResolve,
         Self::RepositoryList,
         Self::WorkspaceCreate,
+        Self::WorkspaceSetup,
+        Self::WorkspaceCreationGet,
         Self::WorkspaceClose,
         Self::WorkspaceReopen,
         Self::WorkspaceDelete,
         Self::WorkspaceList,
         Self::WorkspaceGet,
+        Self::WorkspacePathGet,
+        Self::WorkspacePathList,
         Self::WorkspaceUsageList,
         Self::WorkspaceUsageGet,
         Self::WorkspaceLimitsGet,
@@ -134,11 +146,15 @@ impl DaemonMethod {
             Self::RepositoryResolve => "repository.resolve",
             Self::RepositoryList => "repository.list",
             Self::WorkspaceCreate => "workspace.create",
+            Self::WorkspaceSetup => "workspace.setup",
+            Self::WorkspaceCreationGet => "workspaceCreation.get",
             Self::WorkspaceClose => "workspace.close",
             Self::WorkspaceReopen => "workspace.reopen",
             Self::WorkspaceDelete => "workspace.delete",
             Self::WorkspaceList => "workspace.list",
             Self::WorkspaceGet => "workspace.get",
+            Self::WorkspacePathGet => "workspace.path.get",
+            Self::WorkspacePathList => "workspace.path.list",
             Self::WorkspaceUsageList => "workspace.usage.list",
             Self::WorkspaceUsageGet => "workspace.usage.get",
             Self::WorkspaceLimitsGet => "workspace.limits.get",
@@ -180,11 +196,15 @@ impl DaemonMethod {
             "repository.resolve" => Some(Self::RepositoryResolve),
             "repository.list" => Some(Self::RepositoryList),
             "workspace.create" => Some(Self::WorkspaceCreate),
+            "workspace.setup" => Some(Self::WorkspaceSetup),
+            "workspaceCreation.get" => Some(Self::WorkspaceCreationGet),
             "workspace.close" => Some(Self::WorkspaceClose),
             "workspace.reopen" => Some(Self::WorkspaceReopen),
             "workspace.delete" => Some(Self::WorkspaceDelete),
             "workspace.list" => Some(Self::WorkspaceList),
             "workspace.get" => Some(Self::WorkspaceGet),
+            "workspace.path.get" => Some(Self::WorkspacePathGet),
+            "workspace.path.list" => Some(Self::WorkspacePathList),
             "workspace.usage.list" => Some(Self::WorkspaceUsageList),
             "workspace.usage.get" => Some(Self::WorkspaceUsageGet),
             "workspace.limits.get" => Some(Self::WorkspaceLimitsGet),
@@ -1108,11 +1128,15 @@ mod tests {
                 "repository.resolve",
                 "repository.list",
                 "workspace.create",
+                "workspace.setup",
+                "workspaceCreation.get",
                 "workspace.close",
                 "workspace.reopen",
                 "workspace.delete",
                 "workspace.list",
                 "workspace.get",
+                "workspace.path.get",
+                "workspace.path.list",
                 "workspace.usage.list",
                 "workspace.usage.get",
                 "workspace.limits.get",

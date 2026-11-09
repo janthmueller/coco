@@ -72,6 +72,11 @@ impl Store {
              WHERE id = ?2 AND state = 'prepared'",
             params![now, id, thread_id],
         )?;
+        super::workspace_creations::remember_worker_thread(
+            &transaction,
+            &operation.workspace_id,
+            thread_id,
+        )?;
         let operation = require_operation(&transaction, id)?;
         transaction.commit()?;
         Ok(operation)
@@ -201,6 +206,7 @@ impl Store {
         let event = insert_event(&transaction, acceptance.event)?;
         let workspace = require_workspace(&transaction, &acceptance.workspace_id)?;
         let operation = require_operation(&transaction, &acceptance.operation_id)?;
+        super::workspace_creations::observe_workspace(&transaction, &workspace, false)?;
         transaction.commit()?;
         Ok((workspace, operation, event))
     }

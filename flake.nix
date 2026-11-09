@@ -84,9 +84,13 @@
 
         cargoRuntimeInputs = [
           rustToolchain
+          pkgs.bash
           pkgs.cargo-deny
           pkgs.cargo-machete
           pkgs.git
+          # Exercise directory navigation in every supported shell.
+          pkgs.fish
+          pkgs.zsh
           pkgs.procps
           pkgs.stdenv.cc
           pkgs.pkg-config
@@ -346,10 +350,13 @@
         devShells.default = pkgs.mkShell {
           packages = [
             rustToolchain
+            pkgs.bash
             pkgs.actionlint
             pkgs.cargo-deny
             pkgs.cargo-machete
             pkgs.git
+            pkgs.fish
+            pkgs.zsh
             pkgs.jq
             pkgs.nixfmt
             pkgs.nodejs_24

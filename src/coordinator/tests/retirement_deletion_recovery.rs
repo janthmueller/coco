@@ -126,6 +126,7 @@ async fn delete_cleans_failed_provisioning_without_claiming_an_unverified_branch
             .create_workspace_with_event(
                 crate::store::NewWorkspace {
                     create_operation_id: Some("failed-create-operation".into()),
+                    creation_request_sha256: None,
                     temporary: None,
                     repository_id: template.repository_id.clone(),
                     name: "failed-create".into(),

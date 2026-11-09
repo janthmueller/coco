@@ -230,6 +230,7 @@ mod tests {
             "/repo".into(),
             false,
             false,
+            false,
             "/tmp/cocod.sock".into(),
             vec!["review.requested@2".into(), "tests.finished".into()],
         );

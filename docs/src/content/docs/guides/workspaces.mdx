@@ -147,7 +147,42 @@ the workspace name; detached worktrees remain marked `detached`. The workspace
 selectors in guided creation, `send`, `diff`, `limits`, `close`, `reopen`, and
 `delete` use the same ordering and time display.
 
-### Find open terminals
+## Open the workspace folder
+
+Use `coco cd` to enter a workspace's checkout in your current shell:
+
+```bash
+coco cd fix/login
+coco cd                 # Choose a workspace
+coco cd -g              # Choose across repositories
+```
+
+First, enable the integration for your shell. Add the matching line to your
+shell configuration, then reload it or open a new terminal:
+
+| Shell | Configuration file | Initialization |
+| --- | --- | --- |
+| Bash | `~/.bashrc` | `eval "$(coco shell init bash)"` |
+| Zsh | `~/.zshrc` | `eval "$(coco shell init zsh)"` |
+| Fish | `~/.config/fish/config.fish` | `coco shell init fish \| source` |
+
+This opens the folder only; use `coco jump` to enter the conversation.
+Closed workspaces need `coco reopen` first. A cancelled selection or failed
+lookup leaves your current directory unchanged.
+
+To get the path for an editor or script, use `coco path`:
+
+```bash
+coco path fix/login
+code "$(coco path fix/login)"
+```
+
+`path` works without shell integration. It prints only the absolute path;
+selectors and errors use the terminal's error stream. It accepts the same
+workspace names, IDs, leading repository path, and `-g` scope as `cd`.
+Both selectors use name order.
+
+## Find open terminals
 
 ```bash
 coco status -a --clients

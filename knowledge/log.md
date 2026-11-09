@@ -8,6 +8,30 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-11-09
+
+- **Local 0.7.0 integration**: Preserve released remote history, features and
+  regressions alongside local directory navigation and recoverable MCP setup.
+  Keep recent-first execution/lifecycle selection and metadata-only name-ordered
+  navigation distinct. Retain schema-20 worker-thread evidence and refresh the
+  Palm matching-build handoff after merged-tree verification. No publication.
+
+- **Recoverable workspace setup**: Add separately granted public MCP creation,
+  scoped durable lookup and deletion-safe retired keys. Keep worker MCP
+  source/hash bindings separate from execution profiles; reject native slot
+  collisions and known bound-context forks instead of inheriting old grants.
+  Preserve native approval modes and fail closed on missing source/evidence.
+  Record minimal receipts and binding-required markers in schema 19 without
+  conversation mirroring, Palm workflows or an MCP gateway.
+
+- **Workspace directory navigation**: Add scoped `coco path` and shell-integrated
+  `coco cd`, with offline explicit Bash/Zsh/Fish initialization. Keep the
+  name-ordered selector and exact UUID revalidation independent of native
+  status/history, runtime activation and temporary cleanup. Preserve paths and
+  failure/cancellation semantics; closed or missing worktrees are not reopened.
+  Respect Fish's directory history and match shell commands exactly even when
+  Bash `nocasematch` is enabled, without modifying caller options.
+
 ## 2026-11-08
 
 - **Normal release 0.7.0**: Integrate the reviewed temporary cleanup fixes,

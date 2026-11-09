@@ -258,6 +258,7 @@ dependencies = [
  "futures-util",
  "hex",
  "jsonschema",
+ "libc",
  "rmcp",
  "rpassword",
  "rusqlite",

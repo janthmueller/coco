@@ -14,8 +14,8 @@ version.
 | `cocod`    | Keep threads and active Codex work reachable            |
 | `coco-mcp` | Expose repository-scoped workspace tools to an MCP host |
 
-Start `cocod` before managing workspaces or using MCP. `coco doctor` can also
-run before the coordinator is started.
+Start `cocod` before managing workspaces or using MCP. `coco doctor` and
+`coco shell init` can run before the coordinator is started.
 
 ## Command shape
 
@@ -49,7 +49,7 @@ coco status fix/login --global
 coco jump -g
 ```
 
-`create` always needs one repository. `doctor`, `repo`, `model`, `decide`, and `mcp` do
+`create` always needs one repository. `doctor`, `repo`, `model`, `decide`, `shell`, and `mcp` do
 not accept a leading path or either scope flag. A full workspace ID resolves
 globally without `-g`.
 
@@ -104,7 +104,7 @@ may omit some values:
 - `create` runs a guided setup when its name is omitted or `-i` is present,
   and lets you choose a registered repository when the current directory is
   not inside a Git repository;
-- `send`, `jump`, `diff`, `close`, and `limits` let you choose a missing
+- `send`, `jump`, `path`, `cd`, `diff`, `close`, and `limits` let you choose a missing
   workspace;
 - `reopen` offers closed workspaces; `delete` offers open and closed workspaces;
 - `send` asks for a missing message after the workspace is known; and
@@ -123,6 +123,29 @@ CoCo never opens a selector when its input or prompt stream is not attached to
 a terminal, or when `--no-input` is present. In those cases, pass every required
 value explicitly. Collection commands, including targetless `status`, remain
 non-interactive.
+
+## Workspace directories
+
+```text
+coco [REPOSITORY_PATH] path [WORKSPACE] [-g]
+coco [REPOSITORY_PATH] cd [WORKSPACE] [-g]
+coco shell init <bash|zsh|fish>
+```
+
+`path` prints one absolute worktree path followed by a newline. An omitted
+workspace opens a name-ordered selector in an interactive terminal. `-g`
+searches or selects across repositories; `-a` is not accepted. Full workspace
+IDs work from any directory. A closed or missing worktree produces an error
+instead of a path.
+
+`cd` changes your current shell directory after you enable the
+[shell integration](../../guides/workspaces/#open-the-workspace-folder).
+Without it, CoCo shows setup instructions. Other CoCo commands keep their
+usual behavior. Failed or cancelled navigation leaves your directory unchanged.
+
+Neither command opens Codex or starts work. Paths must be valid UTF-8 without
+control characters. `shell init` prints initialization code for the selected
+shell, accepts no repository scope, and does not modify your configuration.
 
 ## Model commands
 
@@ -600,12 +623,17 @@ printed unchanged so they remain safe to redirect.
 ## MCP commands
 
 ```text
-coco mcp serve --repository <PATH> [--allow-send] [--allow-interrupt] [--signal-catalog <DIR>] [--allow-emit <SIGNAL>]...
-coco-mcp --repository <PATH> [--allow-send] [--allow-interrupt] [--signal-catalog <DIR>] [--allow-emit <SIGNAL>]...
+coco mcp serve --repository <PATH> [--allow-create] [--allow-send] [--allow-interrupt] [--signal-catalog <DIR>] [--allow-emit <SIGNAL>]...
+coco-mcp --repository <PATH> [--allow-create] [--allow-send] [--allow-interrupt] [--signal-catalog <DIR>] [--allow-emit <SIGNAL>]...
 ```
 
 Both forms expose the same repository-scoped standard input/output server.
 See [Use CoCo through MCP](../../guides/mcp/) before enabling `--allow-send`.
+
+`--allow-create` independently exposes `workspaces.create` and grants local
+checkout creation and executable worker MCP configuration. See
+[Create workspaces from an application](../workspace-setup/) for the exact
+request and recovery contract. `workspaceCreations.get` is read-only.
 `turns.get` is read-only and available by default. Independently,
 `--allow-interrupt` exposes `turns.interrupt`. Its default strict mode remains
 unsupported with current Codex. Callers may explicitly select `bestEffort`,

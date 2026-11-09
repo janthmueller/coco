@@ -1,0 +1,220 @@
+---
+title: Create workspaces from an application
+description: Create a workspace once, recover a lost response, and supply a fixed worker MCP configuration.
+---
+
+Use `workspaces.create` when your application needs to prepare a named checkout
+before sending instructions. Save a unique creation `operationId` before calling
+the tool. Creation prepares a permanent workspace with a fresh conversation;
+it opens no terminal UI and starts no model turn.
+
+## Enable creation
+
+```bash
+coco-mcp --repository /absolute/path/to/project --allow-create
+```
+
+`coco mcp serve` accepts the same options. The repository is fixed at startup;
+tool arguments cannot change it. Creation registers the repository if needed.
+
+`--allow-create` grants checkout creation and the ability to configure local
+executables as worker tools. Grant it only to a trusted application. It does
+not grant `workspaces.send` or `turns.interrupt`; those still need their own
+`--allow-send` and `--allow-interrupt` options. Without `--allow-create`, the
+create tool is not advertised and calls to it are rejected. Creation lookup
+is available by default.
+
+## Create once
+
+Call `workspaces.create` with:
+
+```json
+{
+  "operationId": "client-setup-42",
+  "name": "fix/login",
+  "worktree": {
+    "kind": "newBranch",
+    "base": {"kind": "revision", "revision": "HEAD"}
+  },
+  "changes": "reject",
+  "profile": "default"
+}
+```
+
+Required fields are `operationId`, `name`, `worktree`, `changes`, and `profile`.
+`model` and `workerMcp` are optional. Unknown fields are rejected, including
+conversation-fork and temporary-workspace options.
+
+Worktree choices are:
+
+| `worktree` | Checkout |
+| --- | --- |
+| `{"kind":"newBranch","base":{"kind":"revision","revision":"main"}}` | New branch named after the workspace |
+| `{"kind":"newBranch","branch":"review-login","base":{"kind":"revision","revision":"main"}}` | New branch with an explicit name |
+| `{"kind":"detached","base":{"kind":"revision","revision":"main"}}` | Detached checkout |
+| `{"kind":"existingBranch","branch":"fix/login"}` | Existing local branch, if it is free |
+
+A `base` can instead be `{"kind":"workspace","workspace":"review/base"}`
+to use another workspace's committed checkout in this repository. This selects
+code only; the new conversation is still fresh.
+
+`changes` must explicitly be `reject`, `ignore`, `carryTracked`, or
+`carryTrackedAndUntracked`. These use the same safety rules as
+[command-line creation](../cli/#create). `profile: "default"` selects no extra
+profile file; a named profile and an optional `model` work as described in
+[Models and profiles](../../guides/execution-profiles/).
+
+An identical retry returns the original workspace's receipt. It does not
+capture a moving branch again. Changing any request field, including the
+worker source or hash, fails with `IDEMPOTENCY_CONFLICT`. A different operation
+cannot adopt an existing same-named workspace.
+
+## Recover a response
+
+Call the read-only `workspaceCreations.get` tool:
+
+```json
+{"operationId": "client-setup-42"}
+```
+
+Both tools return a receipt in the MCP result's `structuredContent`:
+
+```json
+{
+  "operationId": "client-setup-42",
+  "requestSha256": "<request-hash>",
+  "state": "configured",
+  "repositoryId": "repository-id",
+  "repositoryPath": "/absolute/path/to/project",
+  "workspaceId": "workspace-id",
+  "workspaceName": "fix/login",
+  "baseSha": "<captured-commit>",
+  "worktreePath": "/absolute/path/to/worktree",
+  "branchName": "fix/login",
+  "profile": {
+    "name": "default",
+    "sourcePath": null,
+    "sourceSha256": "<profile-hash>",
+    "model": null
+  },
+  "workerMcp": null,
+  "codexThreadId": null,
+  "errorCode": null,
+  "createdAtMs": 1794220800000,
+  "updatedAtMs": 1794220800000
+}
+```
+
+`requestSha256` is an opaque hash identifying the creation request. Creation
+and send operation IDs are separate retry keys. Neither is a workspace ID or
+a native thread/turn ID. A fresh workspace can have `codexThreadId: null`
+until it is first used. Later lookups can include that confirmed thread ID.
+Timestamps are Unix milliseconds.
+
+| `state` | How to handle it |
+| --- | --- |
+| `configured` | Saved setup is confirmed. You can choose to send instructions next. This does not confirm an initialized worker connection or successful execution. |
+| `preparing` | Completion is not confirmed. Poll the original key or inspect the workspace; do not create under a new key automatically. |
+| `rejected` | Setup was rejected before a workspace was associated. `errorCode` explains why. The key stays used. |
+| `failed` | Preparation failed or was interrupted by a restart. Resources may remain; inspect before cleanup or replacement. |
+| `deleted` | CoCo deleted the workspace. The key remains retired, including when deletion retained a branch or conversation. |
+| `unknown` | No receipt is available in this repository. This is not proof that creation had no effects. |
+| `unavailable` | Public request evidence or its target record is unavailable. Inspect rather than recreate automatically. |
+
+Receipts survive coordinator restarts and workspace deletion and have no
+automatic expiry. A stranded `preparing` operation is never restarted by a
+retry. Deleting or restoring local CoCo data can lose evidence; `unknown`
+does not authorize a new creation. Older command-line creations can appear
+as `unavailable` with a null request hash. Lookups do not load conversations.
+
+Known setup failures return a receipt with an `errorCode`, such as
+`WORKSPACE_EXISTS`, `DIRTY_SOURCE`, `PROFILE_NOT_FOUND`, or
+`WORKER_MCP_BINDING_INVALID`. Invalid tool inputs and conflicting retries
+return an MCP error instead. `CREATION_TARGET_UNAVAILABLE` means a retained
+receipt no longer has its workspace record. No error automatically removes
+checkouts, branches, or conversations.
+
+`CREATION_RECEIPT_MISSING` means the workspace still exists but its original
+receipt is missing. Creation will not adopt or reconfigure it. A worker-bound
+workspace whose binding evidence is missing also blocks native loading with
+`WORKER_MCP_BINDING_UNAVAILABLE`; inspect or restore the original local data.
+
+## Give the worker a fixed MCP configuration
+
+This optional configuration supplies tools to the Codex worker, separately
+from the CoCo tools your application calls. It requires Codex **0.166.0**.
+Use a canonical absolute local path readable by the coordinator. Keep the
+file outside the worktree and private:
+
+```json title="worker.json"
+{
+  "mcp_servers": {
+    "run_worker": {
+      "command": "/absolute/path/to/worker-tool",
+      "args": ["serve", "--run", "run-42"],
+      "enabled_tools": ["run.submit"],
+      "default_tools_approval_mode": "approve",
+      "required": true
+    }
+  }
+}
+```
+
+```bash
+chmod 600 /absolute/path/to/worker.json
+sha256sum /absolute/path/to/worker.json
+```
+
+Add `workerMcp` to the create arguments, using the hash of the **exact file
+bytes**, including whitespace and newlines:
+
+```json
+{
+  "workerMcp": {
+    "path": "/absolute/path/to/worker.json",
+    "sha256": "<64-lowercase-hex-digits-from-sha256sum>"
+  }
+}
+```
+
+The file accepts only `mcp_servers`, with 1–16 local standard-input/output
+servers and the five fields shown above. Commands and arguments must contain
+no credentials. Extra settings, environment overrides, and HTTP servers are
+rejected. The file must be regular, symlink-free, valid UTF-8 JSON and at most
+64 KiB; on Unix it must have private permissions, such as `0600` or `0400`.
+Server names use letters, digits, `_` and `-`. Tool names additionally accept
+`.`. Lists are bounded to 128 entries; commands and individual arguments to
+4096 bytes. `enabled_tools` must not be empty.
+
+For a fresh worker-bound workspace, send the first instruction before using
+`coco jump`. An empty native conversation cannot yet be resumed on the tested
+Codex version; opening it early returns `WORKER_MCP_FIRST_SEND_REQUIRED`
+without creating a stranded conversation. After the first accepted send,
+normal jump and resume are available.
+
+Approval modes are native Codex values: `auto`, `prompt`, `writes`, or
+`approve`. Select deliberately. In the tested Codex version, `auto` can pause
+a writing tool for user approval; `approve` explicitly permits execution of
+the listed tools without that prompt. CoCo does not answer or bypass such
+prompts. Use the native Codex UI when human approval is intended.
+
+Use server names that do not already exist in the selected profile or native
+configuration. A collision is rejected, so old settings are not silently
+inherited. Other tools intentionally configured in the profile or native
+configuration remain available.
+
+Keep the same file bytes at the same path for later send, jump, and resume.
+A missing, changed, or symlink-swapped source blocks loading; there is no
+fallback to an old recipe or automatic reload. A successful create retry still
+returns its historical receipt rather than a live connection check. Creating
+a fork from a known worker-bound conversation is currently rejected, including
+one from an unconfirmed first send or a deleted source workspace. An uncertain
+send does not count as an accepted first send for opening the conversation;
+inspect its outcome before continuing.
+
+These bindings help trusted local applications supply a fixed tool selection.
+They do not isolate processes with the same operating-system permissions or
+prevent a user from changing Codex configuration through other clients.
+
+Once setup is confirmed, use [Track a turn](../turns/) to send instructions and
+track their exact outcome under a separate operation ID.

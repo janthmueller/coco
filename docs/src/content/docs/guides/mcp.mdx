@@ -70,12 +70,23 @@ read-only tools:
 | `workspaces.status` | Show the current state of one workspace     |
 | `workspaces.diff`   | Show changes made by one workspace          |
 | `turns.get`         | Check the outcome of one specific send      |
+| `workspaceCreations.get` | Recover a workspace creation receipt |
 | `signals.types`     | Discover signal definitions and permissions |
 | `signals.list`      | Read retained updates from agents           |
 
 Read-only does not mean content-free: the connected host can see workspace
 metadata, repository paths, diffs, and saved signal payloads. Enable the
 server only in hosts you trust with that information.
+
+## Allow creation
+
+Add `--allow-create` only for an application trusted to create local checkouts
+and configure worker tool processes. This adds `workspaces.create` without
+granting message sending or interruption. Creation prepares a permanent
+workspace with fresh context; it does not start a model turn.
+
+See [Create workspaces from an application](../../reference/workspace-setup/)
+for inputs, safe retries, receipt lookup, and fixed worker MCP configuration.
 
 ## Allow messages
 
@@ -121,7 +132,7 @@ To let a Codex workspace publish structured updates, select schema files with
 See [Publish agent updates](../signals/) for setup and
 [Signal reference](../../reference/signals/) for publication permissions.
 
-This MCP server lets another application control existing CoCo workspaces.
+This MCP server lets another application inspect and control CoCo workspaces.
 Configure tools that should be available _inside_ a Codex workspace through
-its selected Codex profile; that is a separate setting from the tools
-`coco-mcp` exposes to its host.
+its selected Codex profile or an application's fixed worker MCP binding.
+Those settings are separate from the tools `coco-mcp` exposes to its host.

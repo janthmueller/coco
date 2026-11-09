@@ -12,6 +12,7 @@ mod hooks;
 mod jump;
 mod output;
 mod prompt;
+mod shell;
 mod signals;
 mod status;
 mod style;

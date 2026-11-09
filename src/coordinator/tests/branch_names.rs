@@ -119,6 +119,7 @@ async fn legacy_default(fixture: &Fixture, params: &WorkspaceCreateParams) -> Wo
         .create_workspace_with_event(
             crate::store::NewWorkspace {
                 create_operation_id: Some(params.operation_id.clone()),
+                creation_request_sha256: None,
                 temporary: None,
                 repository_id: repository.id.clone(),
                 name: params.name.clone(),

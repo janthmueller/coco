@@ -28,6 +28,12 @@ pub(crate) enum CoordinatorError {
     #[error("invalid request parameters: {0}")]
     InvalidParams(String),
     #[error(transparent)]
+    WorkerMcp(#[from] crate::worker_mcp::WorkerMcpError),
+    #[error(
+        "send the first instruction before opening this worker-bound workspace in the Codex UI"
+    )]
+    WorkerMcpFirstSendRequired,
+    #[error(transparent)]
     HookConfig(#[from] HookConfigError),
     #[error(transparent)]
     Guard(#[from] GuardRejection),
@@ -62,6 +68,10 @@ pub(crate) enum CoordinatorError {
     },
     #[error("operation ID was already used with different parameters")]
     IdempotencyConflict,
+    #[error(
+        "the creation key has a workspace but no original receipt; inspect it without creating again"
+    )]
+    CreationEvidenceUnavailable,
     #[error("turn operation not found in the selected workspace")]
     TurnOperationNotFound,
     #[error(
@@ -75,6 +85,8 @@ pub(crate) enum CoordinatorError {
     },
     #[error("workspace has no bound {0}")]
     IncompleteWorkspace(&'static str),
+    #[error("workspace worktree is unavailable: {0}; inspect it with `coco doctor`")]
+    WorktreeUnavailable(PathBuf),
     #[error("workspace is already being opened in the Codex terminal UI")]
     WorkspaceAttachInProgress,
     #[error("workspace cannot be retired safely: {blockers}", blockers = .0.join("; "))]
@@ -120,6 +132,8 @@ impl CoordinatorError {
         match self {
             Self::Signal(error) | Self::Store(StoreError::Signal(error)) => error.code(),
             Self::InvalidParams(_) => "INVALID_PARAMS",
+            Self::WorkerMcp(_) => "WORKER_MCP_BINDING_INVALID",
+            Self::WorkerMcpFirstSendRequired => "WORKER_MCP_FIRST_SEND_REQUIRED",
             Self::HookConfig(_) => "HOOK_CONFIG_INVALID",
             Self::Guard(error) => error.code(),
             Self::RepositoryNotRegistered(_) => "REPOSITORY_NOT_REGISTERED",
@@ -129,10 +143,12 @@ impl CoordinatorError {
             Self::WorkspaceReferenceAmbiguous { .. } => "WORKSPACE_REFERENCE_AMBIGUOUS",
             Self::ContextReferenceUnresolved { .. } => "CONTEXT_REFERENCE_UNRESOLVED",
             Self::IdempotencyConflict => "IDEMPOTENCY_CONFLICT",
+            Self::CreationEvidenceUnavailable => "CREATION_RECEIPT_MISSING",
             Self::TurnOperationNotFound => "TURN_OPERATION_NOT_FOUND",
             Self::OperationUncertain { .. } => "OPERATION_UNCERTAIN",
             Self::InvalidWorkspaceState { .. } => "INVALID_WORKSPACE_STATE",
             Self::IncompleteWorkspace(_) => "INCOMPLETE_WORKSPACE",
+            Self::WorktreeUnavailable(_) => "WORKTREE_UNAVAILABLE",
             Self::WorkspaceAttachInProgress => "WORKSPACE_BUSY",
             Self::WorkspaceRetirementBlocked(_) => "WORKSPACE_RETIREMENT_BLOCKED",
             Self::WorkspaceDeletionIncomplete { .. } => "WORKSPACE_DELETION_INCOMPLETE",
@@ -156,6 +172,8 @@ impl CoordinatorError {
             Self::Store(StoreError::InvalidDecisionState { .. }) => "INVALID_DECISION_STATE",
             Self::Store(StoreError::DecisionGenerationMismatch { .. }) => "STALE_DECISION",
             Self::Store(StoreError::InterruptModeConflict { .. }) => "TURN_INTERRUPT_MODE_CONFLICT",
+            Self::Store(StoreError::CreationKeyRetired) => "IDEMPOTENCY_CONFLICT",
+            Self::Store(StoreError::WorkerMcpBindingMissing) => "WORKER_MCP_BINDING_UNAVAILABLE",
             Self::Store(_) => "INTERNAL",
             Self::Profile(ProfileError::NotFound { .. }) => "PROFILE_NOT_FOUND",
             Self::Profile(_) => "INVALID_PROFILE",

@@ -5,7 +5,7 @@ description: Tracks integrated product work, verified release handoffs and the r
 tags: [work, branch, bootstrap, rust, mcp, architecture]
 status: active
 branch: main
-updated: 2026-11-08
+updated: 2026-11-09
 ---
 
 # main — repository foundation
@@ -17,6 +17,237 @@ architectural baseline for CoCo.
 
 ## Active work
 
+### Post-integration review — 2026-11-09
+
+- Review local `f984d93` against remote 0.7.0 and the pre-merge setup/navigation
+  checkpoint. Focus on semantic conflicts, permission/scope and recovery
+  boundaries, worker configuration and shell/picker dispatch.
+- Inspect authoritative code and regression coverage; use isolated model-free
+  checks for concrete hypotheses. Review only: no product fix, commit, push,
+  release, installation or user-runtime mutation without a separate request.
+- Review complete: no new actionable correctness, data-loss or permission
+  finding in the merged product tree. Verified both parent histories and
+  unchanged remote create/defaults, recent picker, Git-discovery and temporary
+  cleanup regressions. Checked public/private creation claims at association,
+  fixed repository scope, durable receipts/tombstones, schema-19/20 migration,
+  lost/unconfirmed worker identities, source validation and first-send gating.
+- Repeated 169 focused library regressions in the Bash/Zsh/Fish environment
+  (three manual PTY cases deliberately ignored), all four navigation process
+  tests and all seven CLI/daemon process cases: green. Three explicit native
+  setup tests with Codex 0.166.0 pass again using scripted loopback only,
+  including approval behavior, slot collisions, disjoint grants and restart.
+- Navigation remains metadata-only/name-ordered with scoped UUID revalidation;
+  recency and native activation are not accidentally pulled into `path`/`cd`.
+  Public reference, schema and Palm handoff agree with the implementation.
+  No product source or test was changed. Ordinary bin build artifacts were
+  refreshed after native testing; all three hashes exactly match Palm's handoff.
+  Native macOS execution remains a hosted verification gap; this review does
+  not claim a fresh full Nix package build or real-model test. Only this review
+  record is edited; no commit, push or publication.
+- User subsequently authorizes a local checkpoint of this completed review
+  record. Product sources and matching-build handoff remain unchanged; no push
+  or release is authorized.
+
+### Reconcile local setup/navigation with remote 0.7.0 — 2026-11-09
+
+- User authorizes a local merge and explicitly requires retesting remote
+  regressions. Start from clean local `06fa207`; fetched remote main is
+  `3451d27`, including published 0.7.0 at `7edc75f`. Each side has six commits
+  since `1d87f15`. Do not rewrite either history, push, publish, install or
+  touch user runtimes/workspaces.
+- [x] Fetch current main/tags and inspect both histories and remote behavior.
+- [x] Merge remote main with an explicit merge commit, preserving both sets
+  of features, fixes and tests. Keep released 0.7.0 version/changelog metadata.
+- [x] Reconcile shared picker signatures with metadata-only navigation;
+  retain Tab defaults, repository selection, closed recency and strict
+  temporary cleanup guards alongside immutable worker bindings/receipts.
+- [x] Run all automated targets and the remote focused regressions, native
+  model-free temporary/source-preservation proofs, all-shell/terminal probes,
+  Clippy/format/dependency gates and static docs sequentially. Never run a real
+  model merely because its test is ignored by default.
+- [x] Review parent-to-merge diffs and update matching-build Palm handoff and
+  final results. Return on clean local main; no publication is authorized.
+- Plan records the pre-merge state separately so the actual merge begins with
+  a clean index and no automatic stash or side-selection shortcuts.
+- Merge stopped for three textual conflicts: command-module imports and the
+  two chronological knowledge records. Retained both records and the remote
+  shared picker plus local navigation; no whole-file ours/theirs replacement.
+  Add the new CLI-only sort field to navigation and its fixture as explicit
+  name order, retaining the metadata-only contract. The first all-target check
+  exposed the missing fixture field; after adjustment, locked/offline
+  `cargo check --all-targets -j 2` passes. Cargo metadata remains 0.7.0; Store
+  retains the new local schema-20 worker/creation evidence.
+- Merged-tree verification so far: the locked/offline all-target suite in the
+  temporary Bash/Zsh/Fish environment passes 788 library tests and 22 process/
+  CLI tests. Both native temporary-TUI regression tests from remote pass with
+  installed Codex 0.166.0, including all three exit paths and inherited-source
+  preservation. The ten explicitly model-free setup/context/provider/turn
+  probes also pass. Native compatibility checks run only with reviewed exact
+  selectors after the unrestricted ignored-test invocation was denied; no real
+  model test or user credential is used. Remaining native lifecycle/MCP/hook
+  proofs and final terminal, lint, documentation and build gates are pending.
+- All 15 model-free native checks are now green in three explicit sequential
+  groups (2 temporary-TUI, 10 setup/context/provider/turn, 3 lifecycle/MCP/hook).
+  This includes remote's archived-thread recency proof without reopening a
+  closed worktree and the local worker setup across resume and daemon restart.
+- Final verification passes: warning-denied all-target/all-feature Clippy,
+  formatting, cargo-machete, cached/offline cargo-deny (existing duplicate
+  dependency warnings only), Cargo package file listing, and all 19 release
+  tooling unit tests. The unchanged remote terminal probe passes picker
+  resizing/cancellation, Tab defaults with explicit final confirmation, y/n
+  prompts and live-status frame restoration. All nine Bash/Zsh/Fish navigation
+  PTY cases pass against freshly built matching 0.7.0 programs.
+- Astro reports zero diagnostics; the static `/coco` export verifies 19 pages,
+  66 files, Pagefind, links/routing and the strict public boundary. Git flake
+  evaluation passes with `nix flake check --no-build --offline
+  --no-update-lock-file`; a Nix package rebuild, publish dry-run, non-Linux
+  execution and fresh online advisory fetch were not claimed or performed.
+- Parent-to-merge review preserves every remote-owned create/defaults, shared
+  picker, temporary relay, Git discovery and regression-test file verbatim.
+  Shared coordinator/worker/test roots retain the remote behavior plus the
+  additive local setup/navigation seams. No test was removed or weakened.
+  Canonical recency guidance now explicitly records metadata-only navigation's
+  natural-name exception. Resolve the local merge and then refresh Palm's
+  matching-build handoff against that integration commit; no push/release.
+- Completed local merge `0402f02` with parents `319497c` and remote `3451d27`.
+  Both original histories and released 0.7.0 remain ancestors. The refreshed
+  [Palm handoff](../handoffs/palm-workspace-setup.md) pins this integration
+  source, matching local 0.7.0 debug paths/hashes and all combined verification.
+  This documentation-only follow-up leaves product sources identical to the
+  tested build. Main is the active branch; no push, release, user-state
+  migration, installation or user-runtime action is part of this integration.
+
+### Local workspace-setup integration — 2026-11-09
+
+- User requested local integration of `feature/mcp-workspace-setup`. With a
+  clean checkout and main as an ancestor, fast-forwarded `a47f368` to `8196e03`.
+  No conflict resolution or product-code change was needed.
+- Includes public creation/lookup, immutable worker sources and the reviewed
+  ownership/retention corrections at `8c2e3ae`. The detailed task history stays
+  in [the feature record](feature/mcp-workspace-setup.md); the matching builds,
+  contract and Palm next steps remain in [the handoff](../handoffs/palm-workspace-setup.md).
+- The integrated product tree is exactly the verified feature tree. Earlier
+  full gates and subsequent focused/native review therefore remain applicable;
+  no model call or test rerun was needed for this fast-forward. Retain the
+  feature branch. No push, release, installation or live-runtime change.
+
+### Workspace directory navigation — 2026-11-09
+
+- User authorizes `coco path` and `coco cd` with optional shell integration.
+  Work directly on the current main checkout; no commit, push, publication,
+  installation change or live user-runtime action is part of this slice.
+- [x] Add scoped name/UUID path resolution and an interactive workspace picker.
+- [x] Keep navigation independent of native Codex reads, execution, TUI leases
+  and temporary-workspace cleanup; reject closed or missing worktrees without
+  reopening them.
+- [x] Supply explicit Bash, Zsh and Fish initialization; preserve argument
+  quoting and the calling directory on failed lookup or cancelled selection.
+- [x] Document setup and ordinary navigation, add isolated coordinator/CLI/
+  shell tests, then run sequential verification and review the complete diff.
+- Finding: existing workspace get/list calls hydrate native state. Reusing
+  those calls for directory navigation would unnecessarily involve Codex.
+  Add a narrow typed metadata lookup instead; retain the existing scope rules
+  and terminal interaction adapter without exposing storage to the CLI.
+- Implemented typed local `workspace.path.get/list`, a metadata-only
+  name-ordered picker, and offline `shell init` templates. Revalidate picker
+  UUIDs in the original scope. The wrappers derive other command/alias names
+  from Clap so values such as `coco send cd` cannot trigger navigation.
+- Initial focused checks pass for scope/isolation, prepared and bound metadata,
+  closed/missing worktrees, path encoding, and real Bash/Fish wrapper cases.
+  Sandbox Unix-socket binding is denied; rerun those isolated fixtures with
+  ordinary process permissions rather than weakening the tests. Zsh is absent
+  from the initial PATH and needs a temporary test environment.
+- Verification complete: formatting and warning-denied all-target/all-feature
+  Clippy pass. `nix shell --inputs-from . nixpkgs#zsh nixpkgs#fish --command
+  cargo test -j 2 --all-targets -- --test-threads=2` passes 726 library tests,
+  four new navigation process tests, seven daemon/process cases and eleven
+  status cases. Explicit opt-in/manual/live-model tests remain ignored; no
+  model is invoked. All three shells execute their 17 table-driven wrapper
+  cases; the full daemon scenario verifies path lookup sends no native calls
+  and launches no TUI.
+- The explicit `tests/navigation/terminal_smoke.py target/debug/coco` probe
+  passes nine real Bash/Zsh/Fish PTY scenarios: normal selection, immediate
+  number selection and cancellation, exact path quoting, same-scope selected
+  UUID lookup and restored terminal flags. Add all three shells to Nix test
+  app/development inputs so these process checks are reproducible.
+- Dependency-use and offline cached-advisory policy checks pass (existing
+  duplicate-version warnings only). Cargo package listing includes both shell
+  templates and every new production module. Astro reports zero diagnostics;
+  static root and `/coco` builds both verify 18 pages/64 files and the public
+  boundary. The project-path build bypassed pnpm's sandboxed cache database
+  using the already-installed Astro executable; no source or dependency fix
+  was required.
+- Complete and ready for review. Public guide/reference and canonical product/
+  module-boundary knowledge are updated. Local Linux checks cover all three
+  shells; a native macOS run and release packaging remain normal hosted gates
+  if publication is later requested. No commit, push, installation change,
+  shell-configuration write, live workspace action or publication was made.
+- Subsequent requested full review found two P2 shell-integration findings
+  (fixed below); the earlier passing gates did not cover these cases.
+  Fish's `builtin cd` skips its ordinary `cd` function and directory-history
+  updates: after ordinary `a -> b`, `coco cd destination`, `cd -` goes to `a`
+  instead of `b`. Use the shell's normal navigation/history behavior and add
+  a regression covering backward/forward navigation.
+- Bash's inherited `nocasematch` affects the wrapper's `case` parser. With
+  `shopt -s nocasematch`, `coco CD status` is rewritten as `coco path status`,
+  mistaking a case-sensitive repository path for the command. Use exact
+  command/alias/option matching without changing the caller's lasting shell
+  settings, with a regression for uppercase repository paths.
+- Both were reproduced using the generated initialization code and an isolated
+  stub executable, with Fish configuration/data rooted in a temporary fixture.
+  The 17 existing focused navigation/shell/coordinator/protocol tests pass
+  again in the temporary all-shell Nix environment; these missing scenarios
+  explain why the initial gates did not catch the issues. `git diff --check`
+  passes. This review changes only this task record, not product code, tests,
+  public docs, installed shells or live workspaces. Next step: fix those two
+  findings and add focused regression tests when authorized; no commit/push.
+- User now authorizes fixing both findings. Add regression proofs first,
+  preserve the caller's Bash options and Fish's normal directory-history
+  handling, then rerun all-shell tests and the real interactive picker probe.
+  Keep existing navigation/RPC behavior, user configuration and live workspaces
+  unchanged; no commit, push or publication.
+- Both new regression tests failed before the production fix: Bash dispatched
+  an uppercase repository token as navigation, and Fish returned to the wrong
+  directory (history check exit 15). They pass after switching shared Bash/Zsh
+  dispatch to exact `test` comparisons and Fish navigation to its ordinary
+  `cd` function. No caller option is toggled. The table now covers uppercase
+  `CD`, `REPO` and `LS` repository paths, including with `nocasematch` enabled;
+  the dedicated Fish case checks `cd -`, `nextd` and `prevd`.
+- Test fixtures now root XDG configuration/data in their temporary directories,
+  including the PTY probe, so normal Fish history handling cannot touch user
+  universal variables. All five shell-process tests pass in the temporary
+  Bash/Zsh/Fish environment.
+- Final verification: format and warning-denied all-target/all-feature Clippy
+  pass. A fresh sequential all-target run with two test threads passes 728
+  library, four navigation, seven process and eleven status tests; explicit
+  opt-in/manual/live tests remain ignored. All nine actual Bash/Zsh/Fish PTY
+  scenarios pass against the freshly built CLI. `git diff --check` passes.
+  Both review findings are resolved and regression-covered. Public commands,
+  RPC/storage, daemon/runtime behavior and dependencies are unchanged by the
+  fixes; the existing public docs remain accurate. No model calls, user shell
+  edits, installation/runtime changes, commit, push or publication occurred.
+- Continuation: finish the navigation handoff with a focused regression for
+  targetless invocation outside a registered repository. Verify the repository
+  picker precedes the workspace picker, preserves the chosen repository scope,
+  and cancels before any workspace lookup. No further product change is planned.
+- The additional outside-repository regression passes both selection and
+  cancellation cases. All 20 focused navigation/shell/coordinator/protocol
+  checks pass; formatting, warning-denied all-target/all-feature Clippy and
+  `git diff --check` pass again. Product sources remain identical to the prior
+  verified full-suite and nine-PTY result; only this focused test fixture and
+  task record changed in the continuation. No remaining confirmed findings in
+  the navigation slice; ready for a separately authorized checkpoint.
+- Requested repeat review: no new actionable findings in CLI dispatch, typed
+  path contracts, repository/UUID resolution, metadata-only lookup, selection
+  revalidation, shell forwarding/history or public instructions. All 20 focused
+  tests and all nine real Bash/Zsh/Fish PTY scenarios pass again; whitespace
+  checks are clean. Product code/tests remain unchanged by this review. Native
+  macOS execution is still a hosted verification gap, not a claimed local pass.
+  Keep the slice local and uncommitted until separate checkpoint authorization.
+- User authorizes a separate local navigation checkpoint before the external
+  workspace-setup slice. Preserve all reviewed navigation changes in that
+  commit; no push or release. Subsequent setup work should use its own branch
+  and working document while retaining this navigation baseline unchanged.
 ### Reviewed workspace creation and cleanup release — 2026-11-08
 
 - User explicitly authorizes main integration, push, exact-source CI, stable

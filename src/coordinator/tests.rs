@@ -44,6 +44,7 @@ mod doctor;
 mod events;
 mod guards;
 mod jump;
+mod navigation;
 mod operations;
 mod quota;
 mod recency;
@@ -55,6 +56,7 @@ mod retirement_deletion;
 mod retirement_deletion_recovery;
 mod retirement_dependencies;
 mod retirement_safety;
+mod setup;
 mod temporary;
 mod turn_control;
 mod usage;
@@ -62,6 +64,10 @@ mod workspace;
 
 #[derive(Debug, Clone, PartialEq)]
 enum WorkerCall {
+    VerifyWorkerMcp {
+        cwd: PathBuf,
+        slots: Vec<String>,
+    },
     Models,
     Read {
         thread_id: String,
@@ -147,6 +153,7 @@ enum WorkerCall {
 
 #[derive(Default)]
 struct FakeWorker {
+    native_worker_slots: StdMutex<HashSet<String>>,
     turn_control: turn_control::WorkerState,
     calls: StdMutex<Vec<WorkerCall>>,
     native_threads: StdMutex<BTreeMap<String, NativeThread>>,
@@ -359,6 +366,26 @@ impl FakeWorker {
 
 #[async_trait]
 impl WorkerRuntime for FakeWorker {
+    async fn verify_worker_mcp_slots(
+        &self,
+        cwd: &Path,
+        slots: &[String],
+    ) -> Result<(), WorkerError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(WorkerCall::VerifyWorkerMcp {
+                cwd: cwd.into(),
+                slots: slots.into(),
+            });
+        if slots
+            .iter()
+            .any(|slot| self.native_worker_slots.lock().unwrap().contains(slot))
+        {
+            return Err(WorkerError::InvalidResponse("native server collision"));
+        }
+        Ok(())
+    }
     fn supports_exact_turn_interrupt(&self) -> bool {
         self.turn_control.supports_interrupt()
     }

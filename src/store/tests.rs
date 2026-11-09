@@ -6,6 +6,7 @@ mod operations;
 mod retirement;
 mod temporary;
 mod turn_control;
+mod workspace_creations;
 
 use super::*;
 use crate::domain::{
@@ -112,7 +113,7 @@ fn migrates_v14_repositories_as_registered() {
         connection
             .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        18
+        SUPPORTED_SCHEMA_VERSION
     );
 }
 
@@ -211,6 +212,7 @@ fn workspace_availability_transitions_and_record_deletion_are_atomic() {
 fn new_workspace(repository_id: &str, name: &str) -> NewWorkspace {
     NewWorkspace {
         create_operation_id: Some(format!("create-{name}")),
+        creation_request_sha256: None,
         temporary: None,
         repository_id: repository_id.to_owned(),
         name: name.to_owned(),
@@ -389,7 +391,7 @@ fn migrates_v1_tasks_to_workspaces_without_losing_data() {
     let version: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 18);
+    assert_eq!(version, SUPPORTED_SCHEMA_VERSION);
     assert_eq!(workspace.lifecycle, WorkspaceLifecycle::Ready);
     assert_eq!(workspace.phase, WorkspacePhase::Unavailable);
     assert_eq!(
@@ -939,7 +941,7 @@ fn migrates_v5_turn_idempotency_into_the_operation_ledger() {
         let version: i64 = connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 18);
+        assert_eq!(version, SUPPORTED_SCHEMA_VERSION);
     }
 
     let operation = store

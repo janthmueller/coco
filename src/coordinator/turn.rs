@@ -122,6 +122,7 @@ impl Coordinator {
         let started = match started {
             Ok(started) => started,
             Err(source) => {
+                let source = self.worker_turn_error(&workspace, source);
                 return Err(self
                     .handle_failed_turn_start(
                         &workspace,

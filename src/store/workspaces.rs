@@ -32,6 +32,7 @@ impl Store {
     ) -> Result<(Workspace, NormalizedEvent), StoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        super::workspace_creations::assert_creation_claim(&transaction, &input)?;
         let now = now_ms();
         let workspace_id = new_id();
         let profile_json = serde_json::to_string(&input.profile).map_err(json_to_sql_error)?;
@@ -85,6 +86,7 @@ impl Store {
                 id: workspace_id.clone(),
             }
         })?;
+        super::workspace_creations::observe_workspace(&transaction, &workspace, false)?;
         transaction.commit()?;
         Ok((workspace, event))
     }
@@ -177,6 +179,7 @@ impl Store {
         let event = insert_event(&transaction, event)?;
         insert_hook_dispatch(&transaction, hook)?;
         let workspace = require_workspace(&transaction, workspace_id)?;
+        super::workspace_creations::observe_workspace(&transaction, &workspace, false)?;
         transaction.commit()?;
         Ok((workspace, event))
     }
@@ -217,6 +220,7 @@ impl Store {
         event.workspace_id = Some(workspace_id.to_owned());
         let event = insert_event(&transaction, event)?;
         let workspace = require_workspace(&transaction, workspace_id)?;
+        super::workspace_creations::observe_workspace(&transaction, &workspace, false)?;
         transaction.commit()?;
         Ok((workspace, event))
     }
@@ -752,6 +756,7 @@ impl Store {
         )?;
         transaction.execute("DELETE FROM turns WHERE workspace_id = ?1", [workspace_id])?;
         insert_hook_dispatch(&transaction, hook)?;
+        super::workspace_creations::observe_workspace(&transaction, &workspace, true)?;
         transaction.execute("DELETE FROM workspaces WHERE id = ?1", [workspace_id])?;
         transaction.commit()?;
         Ok(())
@@ -844,6 +849,8 @@ impl Store {
                     updated_at_ms = ?2 WHERE id = ?3",
                 params![message, now, workspace.id],
             )?;
+            let failed = require_workspace(&transaction, &workspace.id)?;
+            super::workspace_creations::observe_workspace(&transaction, &failed, false)?;
             insert_event(
                 &transaction,
                 EventDraft {

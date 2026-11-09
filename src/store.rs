@@ -13,7 +13,7 @@ use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
-pub(crate) const SUPPORTED_SCHEMA_VERSION: i64 = 18;
+pub(crate) const SUPPORTED_SCHEMA_VERSION: i64 = 20;
 
 use crate::domain::{
     AuditOutcome, ContextMode, EventKind, EventSource, ProfileSnapshot, Repository, WorktreeMode,
@@ -33,6 +33,7 @@ mod rows;
 mod signals;
 mod turn_control;
 mod usage;
+mod workspace_creations;
 mod workspaces;
 
 pub(crate) use diagnostics::{DiagnosticSnapshot, DiagnosticWorkspaceBinding};
@@ -64,6 +65,10 @@ pub enum StoreError {
     UnsupportedSchema(i64),
     #[error("database mutex is poisoned")]
     Poisoned,
+    #[error("the creation operation ID is retired or already belongs to a different workspace")]
+    CreationKeyRetired,
+    #[error("worker MCP binding evidence is missing; loading is blocked")]
+    WorkerMcpBindingMissing,
     #[error("{entity} not found: {id}")]
     NotFound { entity: &'static str, id: String },
     #[error("invalid {field} value in database: {value}")]
@@ -120,6 +125,9 @@ pub enum StoreError {
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewWorkspace {
     pub create_operation_id: Option<String>,
+    /// Expected public claim, checked atomically at insertion. `None` means
+    /// private creation and cannot consume any existing public intent.
+    pub creation_request_sha256: Option<String>,
     pub temporary: Option<crate::domain::TemporaryWorkspacePolicy>,
     pub repository_id: String,
     pub name: String,

@@ -46,6 +46,8 @@ use super::turn::wait_for_turn;
 
 use super::workspace_picker;
 
+mod navigation;
+
 #[cfg(test)]
 mod picker_tests;
 
@@ -56,10 +58,10 @@ pub(super) async fn run(cli: Cli) -> Result<()> {
 
 async fn run_with_interaction(cli: Cli, interaction: &mut dyn Interaction) -> Result<()> {
     validate_interaction_mode(&cli)?;
-    let paths = CocoPaths::from_env()?;
-    if matches!(&cli.command, Command::Doctor { .. }) {
-        return run_doctor(&cli, &paths).await;
+    if matches!(&cli.command, Command::Doctor { .. } | Command::Shell { .. }) {
+        return run_without_repository(&cli).await;
     }
+    let paths = CocoPaths::from_env()?;
     let cwd = std::env::current_dir().context("could not determine current directory")?;
     let all_repos = cli.requests_all_repositories();
     let global = cli.requests_global_search();
@@ -74,8 +76,8 @@ async fn run_with_interaction(cli: Cli, interaction: &mut dyn Interaction) -> Re
     let repository_path = resolve_repository_path(&cwd, scope_path);
 
     match command {
-        Command::Doctor { .. } => {
-            unreachable!("doctor runs without a repository or current-directory lookup")
+        Command::Doctor { .. } | Command::Shell { .. } => {
+            unreachable!("unscoped commands are handled before repository lookup")
         }
         Command::Signal { command } => {
             super::signals::run(command, &paths, repository_path, all_repos, global).await
@@ -116,6 +118,8 @@ async fn run_with_interaction(cli: Cli, interaction: &mut dyn Interaction) -> Re
         | Command::Delete(_)
         | Command::Send { .. }
         | Command::Jump(_)
+        | Command::Path(_)
+        | Command::Cd(_)
         | Command::Diff { .. }) => {
             run_targeted_scoped(
                 command,
@@ -129,11 +133,7 @@ async fn run_with_interaction(cli: Cli, interaction: &mut dyn Interaction) -> Re
             .await
         }
         Command::List { json, closed, .. } => {
-            if global {
-                bail!("coco list accepts --all-repos for an overview, not --global");
-            }
-            let scope = overview_scope(RepositoryScope::repository(repository_path), all_repos);
-            list_workspaces(&paths, scope, json, closed).await
+            run_list(&paths, repository_path, all_repos, global, json, closed).await
         }
         Command::Status(args) => run_status(&paths, repository_path, args, all_repos, global).await,
         Command::Limits { command } => {
@@ -153,6 +153,33 @@ async fn run_with_interaction(cli: Cli, interaction: &mut dyn Interaction) -> Re
             decide(&paths, decision, choice, interaction).await
         }
     }
+}
+
+async fn run_without_repository(cli: &Cli) -> Result<()> {
+    if let Command::Shell { command } = &cli.command {
+        reject_top_level_scope(
+            cli.scope_path.is_some() || cli.all_repos || cli.global,
+            "shell",
+        )?;
+        super::shell::run(command)
+    } else {
+        run_doctor(cli, &CocoPaths::from_env()?).await
+    }
+}
+
+async fn run_list(
+    paths: &CocoPaths,
+    repository_path: PathBuf,
+    all_repos: bool,
+    global: bool,
+    json: bool,
+    closed: bool,
+) -> Result<()> {
+    if global {
+        bail!("coco list accepts --all-repos for an overview, not --global");
+    }
+    let scope = overview_scope(RepositoryScope::repository(repository_path), all_repos);
+    list_workspaces(paths, scope, json, closed).await
 }
 
 pub(super) fn validate_interaction_mode(cli: &Cli) -> Result<()> {
@@ -362,6 +389,18 @@ async fn run_targeted_scoped(
     interaction: &mut dyn Interaction,
 ) -> Result<()> {
     match command {
+        command @ (Command::Path(_) | Command::Cd(_)) => {
+            navigation::run_scoped(
+                command,
+                paths,
+                repository_path,
+                has_scope_path,
+                all_repos,
+                global,
+                interaction,
+            )
+            .await
+        }
         Command::Close(args) => {
             run_close_scoped(
                 paths,
@@ -879,6 +918,7 @@ fn resolve_text_input(
 async fn run_mcp(command: McpCommand, paths: CocoPaths) -> Result<()> {
     let McpCommand::Serve {
         repository,
+        allow_create,
         allow_send,
         allow_interrupt,
         allowed_signals,
@@ -886,6 +926,7 @@ async fn run_mcp(command: McpCommand, paths: CocoPaths) -> Result<()> {
     } = command;
     crate::mcp::serve(
         repository,
+        allow_create,
         allow_send,
         allow_interrupt,
         paths.socket_path,

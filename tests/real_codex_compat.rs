@@ -64,6 +64,9 @@ mod hooks;
 #[path = "real_codex_compat/turn_control.rs"]
 mod turn_control;
 
+#[path = "real_codex_compat/setup.rs"]
+mod setup;
+
 struct TestPaths {
     home: PathBuf,
     codex_home: PathBuf,

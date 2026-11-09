@@ -4,12 +4,18 @@ title: CoCo turn-control handoff for Palm
 description: Gives Palm's adapter owner the implemented public execution contract, recovery rules, integration responsibilities and verification evidence.
 tags: [handoff, palm, mcp, turns, execution]
 status: active
-updated: 2026-11-05
+updated: 2026-11-09
 ---
 
 # CoCo turn-control handoff for Palm
 
 ## Status and responsibility
+
+For the new, locally verified **unreleased** explicit workspace-setup API and
+matching builds, also read [Workspace setup for Palm](palm-workspace-setup.md).
+It adds separately granted creation/lookup and immutable worker sources without
+changing the turn contract below. Its development builds must not be mixed
+with the older released coordinator assumed in this document.
 
 Generic turn lookup, durable receipts, explicit best-effort interruption and
 the delayed-completion recovery fix ship in

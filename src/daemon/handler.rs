@@ -18,8 +18,8 @@ use crate::protocol::{
     WorkspaceAttachAdoptParams, WorkspaceAttachParams, WorkspaceAttachReleaseParams,
     WorkspaceAttachRenewParams, WorkspaceCloseParams, WorkspaceCreateParams, WorkspaceDeleteParams,
     WorkspaceDiffParams, WorkspaceGetParams, WorkspaceLimitsGetParams, WorkspaceLimitsResetParams,
-    WorkspaceLimitsSetParams, WorkspaceListParams, WorkspaceReopenParams, WorkspaceUsageGetParams,
-    WorkspaceUsageListParams,
+    WorkspaceLimitsSetParams, WorkspaceListParams, WorkspacePathGetParams, WorkspacePathListParams,
+    WorkspaceReopenParams, WorkspaceUsageGetParams, WorkspaceUsageListParams,
 };
 use crate::rpc::{RpcErrorPayload, RpcHandler};
 
@@ -47,6 +47,9 @@ impl RpcHandler for DaemonHandler {
             )
         })?;
         match method {
+            method @ (DaemonMethod::WorkspaceSetup | DaemonMethod::WorkspaceCreationGet) => {
+                self.handle_setup(method, params).await
+            }
             DaemonMethod::Doctor => {
                 decode::<crate::protocol::DoctorParams>(params)?;
                 encode(self.doctor.report(&self.coordinator).await)
@@ -89,6 +92,9 @@ impl RpcHandler for DaemonHandler {
             ),
             DaemonMethod::RepositoryList => {
                 execute(self.coordinator.list_repositories(decode(params)?))
+            }
+            method @ (DaemonMethod::WorkspacePathGet | DaemonMethod::WorkspacePathList) => {
+                self.handle_navigation(method, params)
             }
             method @ (DaemonMethod::WorkspaceCreate
             | DaemonMethod::WorkspaceClose
@@ -137,6 +143,45 @@ impl RpcHandler for DaemonHandler {
 }
 
 impl DaemonHandler {
+    async fn handle_setup(
+        &self,
+        method: DaemonMethod,
+        params: Value,
+    ) -> Result<Value, RpcErrorPayload> {
+        match method {
+            DaemonMethod::WorkspaceSetup => execute(
+                self.coordinator
+                    .setup_workspace(decode::<crate::protocol::WorkspaceSetupParams>(params)?)
+                    .await,
+            ),
+            DaemonMethod::WorkspaceCreationGet => {
+                execute(self.coordinator.get_workspace_creation(decode::<
+                    crate::protocol::WorkspaceCreationGetParams,
+                >(params)?))
+            }
+            _ => unreachable!("non-setup method routed to workspace setup"),
+        }
+    }
+
+    fn handle_navigation(
+        &self,
+        method: DaemonMethod,
+        params: Value,
+    ) -> Result<Value, RpcErrorPayload> {
+        match method {
+            DaemonMethod::WorkspacePathGet => execute(self.coordinator.workspace_path(decode::<
+                WorkspacePathGetParams,
+            >(
+                params
+            )?)),
+            DaemonMethod::WorkspacePathList => execute(
+                self.coordinator
+                    .list_workspace_paths(decode::<WorkspacePathListParams>(params)?),
+            ),
+            _ => unreachable!("non-navigation method"),
+        }
+    }
+
     async fn handle_turn(
         &self,
         method: DaemonMethod,

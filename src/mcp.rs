@@ -29,6 +29,7 @@ const WORKSPACES_DIFF: &str = "workspaces.diff";
 const WORKSPACES_SEND: &str = "workspaces.send";
 const MAX_ERROR_CHARS: usize = 1_024;
 
+mod setup;
 mod signals;
 mod turns;
 
@@ -77,13 +78,19 @@ struct McpServer {
 impl McpServer {
     fn new(
         repository: PathBuf,
+        allow_create: bool,
         allow_send: bool,
         allow_interrupt: bool,
         socket_path: PathBuf,
         allowed_signals: Vec<String>,
     ) -> Self {
-        let mut tool_router =
-            Self::tool_router() + Self::signal_tool_router() + Self::turn_tool_router();
+        let mut tool_router = Self::tool_router()
+            + Self::signal_tool_router()
+            + Self::turn_tool_router()
+            + Self::setup_tool_router();
+        if !allow_create {
+            tool_router.disable_route("workspaces.create");
+        }
         if !allow_send {
             tool_router.disable_route(WORKSPACES_SEND);
         }
@@ -407,6 +414,7 @@ fn bounded(message: String) -> String {
 
 pub async fn run_from_env(
     repository: PathBuf,
+    allow_create: bool,
     allow_send: bool,
     allow_interrupt: bool,
     allowed_signals: Vec<String>,
@@ -415,6 +423,7 @@ pub async fn run_from_env(
     let paths = CocoPaths::from_env()?;
     serve(
         repository,
+        allow_create,
         allow_send,
         allow_interrupt,
         paths.socket_path,
@@ -426,6 +435,7 @@ pub async fn run_from_env(
 
 pub(crate) async fn serve(
     repository: PathBuf,
+    allow_create: bool,
     allow_send: bool,
     allow_interrupt: bool,
     socket_path: PathBuf,
@@ -441,6 +451,7 @@ pub(crate) async fn serve(
         std::path::absolute(repository).context("could not resolve repository path")?;
     let mut server = McpServer::new(
         repository,
+        allow_create,
         allow_send,
         allow_interrupt,
         socket_path,

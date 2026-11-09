@@ -308,6 +308,12 @@ impl Coordinator {
                 actual: workspace.phase,
             });
         }
+        if self.has_worker_mcp(&workspace)? {
+            // An empty native thread has no resumable rollout on 0.166.0.
+            // Starting it here and binding it would strand this workspace.
+            // The supported first-send path binds only after acceptance.
+            return Err(CoordinatorError::WorkerMcpFirstSendRequired);
+        }
         if workspace.context_mode == ContextMode::Fork {
             let workspace = self.materialize_workspace_thread(workspace).await?;
             return self.resume_launch(workspace, params.client).await;

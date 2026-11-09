@@ -7,6 +7,7 @@ fn interrupt_grant_is_independent_of_send_and_defaults_to_read_only() {
         for interrupt in [false, true] {
             let server = McpServer::new(
                 PathBuf::from("/repo"),
+                false,
                 send,
                 interrupt,
                 PathBuf::from("/tmp/unused-turn-test.sock"),

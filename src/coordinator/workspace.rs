@@ -6,6 +6,7 @@ use tracing::warn;
 
 use super::{Coordinator, CoordinatorError, validate_non_empty, validate_operation_id};
 use crate::domain::hooks::{HookDispatch, HookEventKind};
+use crate::domain::setup::WorkspaceCreationReceipt;
 use crate::domain::{
     Audit, ContextMode, EventKind, EventSource, ProfileSnapshot, Repository, ThreadRuntimeSnapshot,
     Workspace, WorkspaceAvailability, WorkspaceLifecycle, WorkspacePhase, WorktreeMode,
@@ -14,7 +15,7 @@ use crate::domain::{
 use crate::git::{
     GitRepository, LocalStatePolicy, LocalStateSnapshot, WorktreePlan, WorktreeTarget,
 };
-use crate::profile::{load_profile, with_effective_thread_settings};
+use crate::profile::with_effective_thread_settings;
 use crate::protocol::{
     AuditRecordParams, EventListParams, EventListResult, GitIncomplete, GitObservationError,
     GitUnavailable, RepositoryListParams, RepositoryRegisterParams, RepositoryRemoveParams,
@@ -173,6 +174,14 @@ impl Coordinator {
         &self,
         params: WorkspaceCreateParams,
     ) -> Result<WorkspaceResult, CoordinatorError> {
+        self.create_workspace_for_setup(params, None).await
+    }
+
+    pub(super) async fn create_workspace_for_setup(
+        &self,
+        params: WorkspaceCreateParams,
+        claim: Option<&WorkspaceCreationReceipt>,
+    ) -> Result<WorkspaceResult, CoordinatorError> {
         if let Some(model) = params.model.as_deref() {
             validate_non_empty("model", model)?;
         }
@@ -180,22 +189,31 @@ impl Coordinator {
         validate_create_request(&params)?;
 
         let git_repository = self.git.discover(&params.repository_path)?;
+        if let Some(existing) = self.store.workspace_by_creation_claim(
+            &params.operation_id,
+            claim.and_then(|claim| claim.request_sha256.as_deref()),
+        )? {
+            ensure_create_replay_matches(&existing, &params, &git_repository.id)?;
+            capture::validate_creation_replay(&existing)?;
+            return self.workspace_response(self.hydrate_native_thread_runtime(existing).await);
+        }
+        let loaded_profile = self
+            .load_creation_profile(&params, claim.and_then(|claim| claim.worker_mcp.as_ref()))
+            .await?;
         let repository_lock = self.repository_lock(&git_repository.id).await;
         let guard = repository_lock.lock().await;
         let repository = self.register_discovered_repository(&git_repository)?;
 
-        if let Some(existing) = self
-            .store
-            .workspace_by_create_operation_id(&params.operation_id)?
-        {
+        if let Some(existing) = self.store.workspace_by_creation_claim(
+            &params.operation_id,
+            claim.and_then(|claim| claim.request_sha256.as_deref()),
+        )? {
             ensure_create_replay_matches(&existing, &params, &repository.id)?;
             capture::validate_creation_replay(&existing)?;
             let existing = self.hydrate_native_thread_runtime(existing).await;
             return self.workspace_response(existing);
         }
 
-        let mut loaded_profile = load_profile(&params.profile, &self.codex_home)?;
-        loaded_profile.snapshot.model_override = params.model.clone();
         let (base, target) =
             self.resolve_creation_worktree(&params, &repository, &git_repository)?;
         let local_state_policy = match params.changes {
@@ -234,8 +252,13 @@ impl Coordinator {
             local_state,
         };
 
-        let workspace =
-            self.persist_prepared_workspace(&params, &repository, &loaded_profile, &creation)?;
+        let workspace = self.persist_prepared_workspace(
+            &params,
+            &repository,
+            &loaded_profile,
+            &creation,
+            claim,
+        )?;
         drop(dependencies);
 
         let hook = self.hooks.event(
@@ -291,13 +314,7 @@ impl Coordinator {
         let context = stored_creation_context(&workspace)?;
         self.validate_materialization_context(&context).await?;
 
-        let mut loaded_profile = load_profile(&workspace.profile.name, &self.codex_home)?;
-        if !super::recovery::same_profile_source(&loaded_profile.snapshot, &workspace.profile) {
-            return Err(CoordinatorError::ProfileChanged(
-                workspace.profile.name.clone(),
-            ));
-        }
-        loaded_profile.snapshot.model_override = workspace.profile.model_override.clone();
+        let loaded_profile = self.load_workspace_profile(&workspace).await?;
         let started_thread = self
             .start_context_thread(
                 &workspace.id,
@@ -307,7 +324,10 @@ impl Coordinator {
                 loaded_profile.thread_config,
                 workspace.profile.model_override.as_deref(),
             )
-            .await?;
+            .await
+            .map_err(|error| self.worker_load_error(&workspace, error))?;
+        self.store
+            .remember_worker_mcp_thread(&workspace.id, &started_thread.id)?;
         let compact = context.fork.as_ref().is_some_and(|fork| fork.compact);
         let workspace = self.bind_context_thread(
             &workspace.id,
@@ -352,13 +372,7 @@ impl Coordinator {
                 "stored fresh workspace context unexpectedly contains a fork source".to_owned(),
             ));
         }
-        let mut loaded_profile = load_profile(&workspace.profile.name, &self.codex_home)?;
-        if !super::recovery::same_profile_source(&loaded_profile.snapshot, &workspace.profile) {
-            return Err(CoordinatorError::ProfileChanged(
-                workspace.profile.name.clone(),
-            ));
-        }
-        loaded_profile.snapshot.model_override = workspace.profile.model_override.clone();
+        let loaded_profile = self.load_workspace_profile(workspace).await?;
         let started = self
             .worker
             .start_thread(
@@ -368,7 +382,10 @@ impl Coordinator {
                 loaded_profile.thread_config,
                 workspace.profile.model_override.as_deref(),
             )
-            .await?;
+            .await
+            .map_err(|error| self.worker_load_error(workspace, error.into()))?;
+        self.store
+            .remember_worker_mcp_thread(&workspace.id, &started.id)?;
         Ok(PendingFreshThread {
             started,
             profile: loaded_profile.snapshot,
@@ -584,6 +601,11 @@ impl Coordinator {
         };
 
         let (native, source) = self.resolve_context_source(source, repository).await?;
+        if self.store.thread_has_worker_mcp_binding(&native.id)? {
+            return Err(CoordinatorError::InvalidParams(
+                "forking a worker-bound context is not supported; create a fresh context".into(),
+            ));
+        }
         if matches!(native.status, crate::domain::CodexThreadStatus::SystemError) {
             return Err(CoordinatorError::InvalidParams(
                 "context source thread is unavailable".to_owned(),
@@ -896,7 +918,12 @@ impl Coordinator {
         repository: &Repository,
         loaded_profile: &crate::profile::LoadedProfile,
         creation: &ResolvedCreation,
+        claim: Option<&WorkspaceCreationReceipt>,
     ) -> Result<Workspace, CoordinatorError> {
+        if let Some(reference) = claim.and_then(|claim| claim.worker_mcp.as_ref()) {
+            // Recheck the operative source just before the atomic association.
+            crate::worker_mcp::load(reference)?;
+        }
         let base = &creation.base;
         let context = &creation.context;
         let plan = &creation.worktree;
@@ -957,6 +984,7 @@ impl Coordinator {
         let (workspace, _) = self.store.create_workspace_with_event(
             NewWorkspace {
                 create_operation_id: Some(params.operation_id.clone()),
+                creation_request_sha256: claim.and_then(|claim| claim.request_sha256.clone()),
                 temporary: params.temporary,
                 repository_id: repository.id.clone(),
                 name: params.name.clone(),

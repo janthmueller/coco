@@ -81,6 +81,23 @@ leaks above remain as the historical pre-refactor baseline.
 
 ## Target dependency direction
 
+Directory navigation lives in private `coordinator/navigation` and
+`cli/commands/navigation` children, connected by typed `workspace.path.get`
+and `workspace.path.list` contracts. It reads stored bindings without worker
+hydration. Shell templates stay under private `cli/shell`, derive their
+command stopping points from Clap and keep shell-specific directory changes
+outside the daemon. Focused tests own picker, metadata and process boundaries;
+no crate split, schema change, MCP tool or SDK visibility expansion is needed.
+
+Public workspace setup retains the same direction: typed receipts/references
+in domain/protocol, policy in `coordinator/setup`, transactional claim and
+receipt ownership in `store/workspace_creations`, and filesystem recipes in
+the private `worker_mcp` adapter. Its private Store `threads` child records
+minimal native identity exclusions independently of confirmed workspace
+bindings and deletable operation rows. The schema-20 migration backfills only
+known evidence. Focused claim/race/recovery test children exercise both create
+entry points without adding a crate, SDK surface or MCP-to-Store dependency.
+
 Temporary workspace policy is a typed domain value and nullable Store column.
 Its schema-18 migration and one-shot transaction have focused private children.
 `protocol/temporary.rs` supplies a distinct successful-session completion DTO;

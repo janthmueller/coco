@@ -59,6 +59,8 @@ mod lifecycle;
 mod mcp_client;
 #[path = "process_smoke/multi_client.rs"]
 mod multi_client;
+#[path = "process_smoke/navigation.rs"]
+mod navigation;
 #[path = "process_smoke/retirement.rs"]
 mod retirement;
 #[path = "process_smoke/signals.rs"]

@@ -21,6 +21,7 @@ use crate::domain::{CodexModel, CodexThreadStatus};
 use super::execution::WorkspaceExecutors;
 
 mod context;
+mod setup;
 mod turn_control;
 
 const MODEL_PAGE_LIMIT: u32 = 100;
@@ -195,6 +196,13 @@ impl CodexWorker {
 
 #[async_trait]
 impl WorkerRuntime for CodexWorker {
+    async fn verify_worker_mcp_slots(
+        &self,
+        cwd: &Path,
+        slots: &[String],
+    ) -> Result<(), WorkerError> {
+        self.check_worker_mcp_slots(cwd, slots).await
+    }
     async fn last_completed_turn_id(&self, thread_id: &str) -> Result<Option<String>, WorkerError> {
         self.read_last_completed_turn_id(thread_id).await
     }

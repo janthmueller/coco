@@ -43,6 +43,10 @@ it concise, factual, and useful to the next maintainer.
 
 ## Current records
 
+- [`feature/mcp-workspace-setup`](feature/mcp-workspace-setup.md) - Public
+  idempotent fresh-workspace setup, durable scoped receipts and immutable
+  worker-MCP source bindings for external clients.
+
 - [`feature/temporary-workspaces`](feature/temporary-workspaces.md) - Opt-in
   successful-session cleanup with durable one-shot policy, existing delete
   safeguards, deferred opening and guided creation.

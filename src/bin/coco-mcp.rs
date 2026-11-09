@@ -9,6 +9,9 @@ struct Args {
     /// Fix all tools to this repository.
     #[arg(long)]
     repository: PathBuf,
+    /// Allow workspace creation and executable worker MCP configuration.
+    #[arg(long)]
+    allow_create: bool,
     /// Advertise the mutating workspaces.send tool.
     #[arg(long)]
     allow_send: bool,
@@ -38,6 +41,7 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     coco::run_mcp_from_env(
         args.repository,
+        args.allow_create,
         args.allow_send,
         args.allow_interrupt,
         args.allowed_signals,

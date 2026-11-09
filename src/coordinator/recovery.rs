@@ -2,7 +2,6 @@ use super::{Coordinator, CoordinatorError, NativeThread, StartedThread, WorkerEr
 use crate::domain::{
     CodexThreadStatus, ProfileSnapshot, Workspace, WorkspaceAvailability, WorkspaceLifecycle,
 };
-use crate::profile::load_profile;
 
 impl Coordinator {
     /// Returns the bound native thread without loading it into the App Server.
@@ -56,6 +55,11 @@ impl Coordinator {
             return self.materialize_workspace_thread(workspace).await;
         }
 
+        if self.has_worker_mcp(&workspace)? {
+            // Validate immutable sources even when the thread is already loaded.
+            self.load_workspace_profile(&workspace).await?;
+        }
+
         let native = self.read_bound_thread(&workspace).await?;
         let thread_id = native.id.clone();
         let needs_resume = native.status == CodexThreadStatus::NotLoaded
@@ -88,12 +92,7 @@ impl Coordinator {
             .worktree_path
             .as_deref()
             .ok_or(CoordinatorError::IncompleteWorkspace("worktree"))?;
-        let profile = load_profile(&workspace.profile.name, &self.codex_home)?;
-        if !same_profile_source(&profile.snapshot, &workspace.profile) {
-            return Err(CoordinatorError::ProfileChanged(
-                workspace.profile.name.clone(),
-            ));
-        }
+        let profile = self.load_workspace_profile(workspace).await?;
         let resumed = self
             .worker
             .resume_thread(
@@ -103,7 +102,8 @@ impl Coordinator {
                 profile.thread_config,
                 workspace.profile.model_override.as_deref(),
             )
-            .await?;
+            .await
+            .map_err(|error| self.worker_load_error(workspace, error.into()))?;
         if resumed.id != thread_id {
             return Err(CoordinatorError::Worker(WorkerError::ThreadIdMismatch {
                 expected: thread_id.to_owned(),

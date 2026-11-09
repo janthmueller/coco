@@ -373,6 +373,7 @@ pub(super) fn legacy_context_workspace(
         .unwrap();
     let (workspace, _) = fixture.store.create_workspace_with_event(crate::store::NewWorkspace {
         create_operation_id: Some(format!("legacy-create-{name}")), repository_id: repository.id.clone(),
+        creation_request_sha256: None,
         temporary: None,
         name: name.to_owned(), context_mode: ContextMode::Fork,
         context: json!({"version": 3, "resolved": {"context": {

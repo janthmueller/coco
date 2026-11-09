@@ -43,9 +43,22 @@ impl DaemonRpc for RecordingDaemon {
     }
 }
 
+fn fake_creation() -> Value {
+    json!({
+        "operationId": "setup-key", "state": "configured", "requestSha256": "hash",
+        "repositoryId": "repo-test", "repositoryPath": "/fixed/repo", "workspaceId": "workspace-test",
+        "workspaceName": "feat/work", "baseSha": "base", "worktreePath": "/worktree", "branchName": "feat/work",
+        "profile": null, "workerMcp": null, "codexThreadId": null, "errorCode": null,
+        "createdAtMs": 1, "updatedAtMs": 2
+    })
+}
+
 fn fake_response(method: DaemonMethod) -> Value {
     match method {
-        DaemonMethod::Doctor => unreachable!("doctor is exposed through the CLI"),
+        DaemonMethod::WorkspaceSetup | DaemonMethod::WorkspaceCreationGet => fake_creation(),
+        DaemonMethod::Doctor | DaemonMethod::WorkspacePathGet | DaemonMethod::WorkspacePathList => {
+            unreachable!("diagnostics and directory navigation are exposed through the CLI")
+        }
         DaemonMethod::SignalCatalogLoad
         | DaemonMethod::SignalTypeList
         | DaemonMethod::SignalEmit
@@ -262,8 +275,15 @@ fn fake_retirement_plan() -> Value {
 #[test]
 fn workspaces_send_is_only_exposed_when_enabled() {
     let socket = PathBuf::from("/tmp/cocod-test.sock");
-    let read_only = McpServer::new(PathBuf::from("/repo"), false, false, socket.clone(), vec![]);
-    let writable = McpServer::new(PathBuf::from("/repo"), true, false, socket, vec![]);
+    let read_only = McpServer::new(
+        PathBuf::from("/repo"),
+        false,
+        false,
+        false,
+        socket.clone(),
+        vec![],
+    );
+    let writable = McpServer::new(PathBuf::from("/repo"), false, true, false, socket, vec![]);
 
     let read_only_names: Vec<_> = read_only
         .tool_router
@@ -277,6 +297,7 @@ fn workspaces_send_is_only_exposed_when_enabled() {
             "signals.list",
             "signals.types",
             "turns.get",
+            "workspaceCreations.get",
             WORKSPACES_DIFF,
             WORKSPACES_LIST,
             WORKSPACES_STATUS
@@ -298,6 +319,7 @@ fn workspaces_send_is_only_exposed_when_enabled() {
             "signals.list",
             "signals.types",
             "turns.get",
+            "workspaceCreations.get",
             WORKSPACES_DIFF,
             WORKSPACES_LIST,
             WORKSPACES_SEND,

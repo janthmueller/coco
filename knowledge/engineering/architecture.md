@@ -1035,10 +1035,10 @@ remain absent without invalidating thread status; general `updatedAt`, CoCo
 mutation time and observation time are not substitutes. The value is an
 in-memory passive projection, not a second usage-history store or a new SQLite
 column. Public JSON schema 18 exposes optional `recencyAtMs`. The shared private
-CLI workspace picker uses it for create code/context and all interactive target
-commands: recent-first across the eligible scope, missing values last, natural
-name/repository/ID ties and `--sort name` override. Create code remains local;
-context spans registered repositories without a current-repository priority.
+CLI workspace picker uses it for create code/context and interactive execution
+and lifecycle targets: recent-first across the eligible scope, missing values
+last, natural-name/repository/ID ties and `--sort name` override. Create code
+remains local; context spans registered repositories without a current-repository priority.
 Stable closed/ready workspaces use the same validated passive read, including
 archived native threads, so reopen/delete/limits candidates retain their native
 recency. Their public phase remains `closed`; no read recreates the worktree,
@@ -1051,6 +1051,9 @@ Choice times/order freeze before input. The prompt renderer owns responsive dim
 trailing metadata and drops it before truncating existing main content.
 Collection status/list ordering, resource collection and native thread-loading
 behavior retain their existing contracts.
+Directory navigation (`path`/shell-integrated `cd`) deliberately uses saved
+metadata and natural-name ordering instead: native recency lookup must not make
+entering an existing checkout depend on Codex or conversation availability.
 
 Legacy snapshots retain their old App Server generation and receipt time only
 as migration data. Startup or connection loss can mark such rows stale, but
