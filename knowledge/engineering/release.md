@@ -205,6 +205,12 @@ Before either channel:
    [RUSTSEC-2026-0386](https://rustsec.org/advisories/RUSTSEC-2026-0386.html)
    in previously locked Tokio 1.53.1; require patched 1.53.3 or newer rather
    than suppressing that advisory.
+   The 2026-11-09 refresh also caught bundled SQLite
+   [RUSTSEC-2026-0459](https://rustsec.org/advisories/RUSTSEC-2026-0459.html)
+   and RMCP advisories -0457/-0461/-0462. The targeted baseline uses
+   rusqlite 0.41.1/libsqlite3-sys 0.39.1 and rmcp 3.9.0. Keep the existing
+   stdio-only MCP feature boundary; do not suppress a version-based policy
+   failure merely because a reported HTTP/OAuth path is disabled.
    Generated release commits carry `[skip ci]`; if the current main tip is such
    a commit, use the Rust workflow's manual dispatch before rehearsing or
    promoting it. A successful test of its parent is not exact-tip proof.

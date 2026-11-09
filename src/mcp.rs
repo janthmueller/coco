@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use rmcp::{
     ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{CallToolResult, Implementation, ServerCapabilities, ServerInfo},
+    model::{CallToolResult, Implementation, ServerCapabilities, ServerConfig},
     schemars, tool, tool_handler, tool_router,
 };
 use serde::Deserialize;
@@ -182,8 +182,8 @@ impl McpServer {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for McpServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("coco", env!("CARGO_PKG_VERSION")))
             .with_instructions(format!(
                 "Repository-scoped CoCo inspection. Mutating tools require operator opt-in. signals.emit uses Codex thread metadata and records a claim without starting work or changing workspace state. Allowed signal grants (a bare name means version 1): {}.",

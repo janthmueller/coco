@@ -39,6 +39,54 @@ architectural baseline for CoCo.
   terminal/all-shell probes, lints and static export; the repeat review passes
   another 169 focused tests, 11 process cases and three native setup fixtures.
   Hosted fresh advisories, packaging, Nix and Linux/macOS smoke remain mandatory.
+- Pushed checkpoint `fe90f7eddc723fe194783330e8d93b5a874d7538` normally to main.
+  Exact-source Rust run `42668955921` is in progress; documentation run
+  `42668956346` passed including Pages deployment. No release dispatch was made.
+- Fresh `cargo deny --locked check` fails advisories while bans/licenses/sources
+  pass: `libsqlite3-sys 0.38.2` through `rusqlite 0.40.2` is flagged by
+  RUSTSEC-2026-0459; `rmcp 3.2.0` by RUSTSEC-2026-0457, -0461 and -0462.
+  Patched ranges require libsqlite3-sys >=0.39.0 (rusqlite 0.41 line) and
+  rmcp >=3.9.0. The SQLite issue concerns opening a crafted database/WAL pair;
+  rmcp's affected OAuth/HTTP features are not enabled in CoCo's stdio-only
+  feature graph. The version-based release gate still correctly blocks.
+- Publication is held. No advisory suppression, dependency change, channel
+  switch, user-service action or publishing/rehearsal dispatch was performed.
+  Next decision: approve a focused dependency-update/reverification slice,
+  then run fresh exact-source CI before the original stable-release plan.
+- User now authorizes that focused update and continuation of the stable
+  release. Update only the affected SQLite/MCP dependency families, preserve
+  stdio-only MCP features and public behavior, adapt APIs only if required,
+  then repeat sequential local and model-free native gates plus fresh exact-SHA
+  hosted verification. No advisory suppression or broader dependency sweep.
+- Resolved rusqlite 0.41.1 with bundled libsqlite3-sys 0.39.1, and rmcp /
+  rmcp-macros 3.9.0. Exactly four package versions change; unrelated locked
+  dependencies remain untouched. MCP remains server/macros/stdio only with
+  HTTP/OAuth disabled. The previous Rust run fails at its fresh dependency
+  policy as expected; no release request was issued for that revision.
+- All-target checking exposes only RMCP's deprecated `ServerInfo` alias;
+  replace it with `ServerConfig` in the existing adapter without changing
+  routing, capabilities, scopes or grants. Warning-denied all-target/all-feature
+  Clippy, formatting and dependency-use checks pass. The fresh complete
+  dependency-policy check now passes without advisory exceptions; only the
+  pre-existing allowed duplicate-version warnings remain. Full regression and
+  native verification are in progress before any new push or release request.
+- Updated-dependency all-target regression run passes 788 library tests, four
+  navigation cases, seven CLI/daemon cases and eleven status cases (810 total).
+  Explicit live/manual/native probes remain ignored in the ordinary run; the
+  native model-free subsets are now being opted into separately. All 19
+  release-tooling tests also pass. No schema, permission or test expectation
+  was changed to accommodate the dependency updates.
+- All 15 selected native model-free checks pass again with Codex 0.166.0 and
+  the patched libraries: ten setup/context/provider/turn cases, two temporary
+  TUI cases and three exact lifecycle/MCP/hook cases. This includes the real
+  CoCo MCP process, separate tool grants, archive/recency, close/reopen, worker
+  submission/approval and coordinator restart. No real inference was used.
+- The real terminal regression probe and all nine Bash/Zsh/Fish navigation
+  PTY cases also pass against the updated builds. The final product diff is
+  limited to four dependency versions and the equivalent private SDK type
+  alias; no public command, tool permission or persistence schema changed.
+  Commit/push this security correction and require new exact-source hosted
+  gates before resuming the previously authorized stable rehearsal/release.
 
 ### Post-integration review — 2026-11-09
 
