@@ -2,6 +2,27 @@
 
 <!-- version list -->
 
+## v0.8.0 (2026-11-09)
+
+### Bug Fixes
+
+- Update SQLite and MCP security dependencies
+  ([`0b4d185`](https://github.com/janthmueller/coco/commit/0b4d185fb13b142dff776291493eef1481a8e356))
+
+### Documentation
+
+- Prepare verified workspace setup release
+  ([`fe90f7e`](https://github.com/janthmueller/coco/commit/fe90f7eddc723fe194783330e8d93b5a874d7538))
+
+- Record verified 0.7.0 release
+  ([`3451d27`](https://github.com/janthmueller/coco/commit/3451d273c9cedbca6d3ff4a5c735bedda11acb67))
+
+### Features
+
+- Add recoverable MCP workspace setup and shell navigation
+  ([`7878ccd`](https://github.com/janthmueller/coco/commit/7878ccd72a2b66d2b52cbf27564cc8bbeb27680a))
+
+
 ## v0.7.0 (2026-11-08)
 
 ### Bug Fixes
