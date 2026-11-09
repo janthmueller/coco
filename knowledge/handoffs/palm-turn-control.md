@@ -11,18 +11,19 @@ updated: 2026-11-09
 
 ## Status and responsibility
 
-For the new, locally verified **unreleased** explicit workspace-setup API and
-matching builds, also read [Workspace setup for Palm](palm-workspace-setup.md).
+For the explicit workspace-setup API now released in **0.8.0** and matching
+builds, also read [Workspace setup for Palm](palm-workspace-setup.md).
 It adds separately granted creation/lookup and immutable worker sources without
-changing the turn contract below. Its development builds must not be mixed
-with the older released coordinator assumed in this document.
+changing the turn contract below. Use matching 0.8.0 programs for the combined
+setup/send/lookup flow; do not mix them with an older coordinator.
 
 Generic turn lookup, durable receipts, explicit best-effort interruption and
 the delayed-completion recovery fix ship in
 [CoCo 0.5.0](https://github.com/janthmueller/coco/releases/tag/v0.5.0).
 The source is integrated into `main`; the `v0.5.0` tag is release commit
 `daaa9dd`. Registry availability of `codex-coordinator 0.5.0` is verified.
-Use matching release builds or build that source, rather than installed
+The same contract is preserved and reverified in 0.8.0, including the security
+dependency updates. Use matching current release builds rather than installed
 `0.4.0` binaries, which predate this API. Check that `turns.interrupt`
 advertises `mode: strict | bestEffort`.
 
@@ -37,7 +38,7 @@ not. Palm must choose best-effort explicitly, never as a silent strict fallback.
 
 CoCo remains independent of Palm. The provider adapter belongs in Palm and
 uses public MCP tools. CoCo contains no Palm workflows, task scheduling,
-artifact validation, automatic workspace provisioning or result transfer.
+artifact validation, automatic Palm activation or result transfer.
 This handoff describes the usable generic execution capability and its limits.
 
 The authoritative public contract is
@@ -47,7 +48,7 @@ The internal implementation rationale is
 
 ## Process setup
 
-Use matching `cocod` and `coco-mcp` builds from release `0.5.0` and the selected
+Use matching `cocod` and `coco-mcp` builds from release `0.8.0` and the selected
 Codex `0.166.0`. To build the released source locally:
 
 ```sh
@@ -65,9 +66,10 @@ configure a standard-input/output MCP server:
 coco-mcp --repository /absolute/path/to/project --allow-send --allow-interrupt
 ```
 
-`coco mcp serve` accepts the same arguments. Repository registration and the
-workspace must already exist. A server is fixed to its repository; the tools
-cannot override that path. IDs alone do not bypass this restriction.
+`coco mcp serve` accepts the same arguments. Before sending, prepare the
+workspace through the CLI or explicit setup API above. A server is fixed to
+its repository; the tools cannot override that path. IDs alone do not bypass
+this restriction.
 
 Default tools include read-only `turns.get`. `--allow-send` exposes
 `workspaces.send`; `--allow-interrupt` independently exposes `turns.interrupt`.

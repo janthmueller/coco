@@ -11,10 +11,10 @@ updated: 2026-11-09
 
 ## Checkpoint and matching programs
 
-Implemented in **CoCo only**, integrated on local `main`:
+Implemented in **CoCo only** and published in **0.8.0**:
 
-- Matching implementation commit: `7878ccd72a2b66d2b52cbf27564cc8bbeb27680a`
-  (`feat: add recoverable MCP workspace setup and shell navigation`).
+- Matching released source: `v0.8.0`, commit
+  `d51541e8e7037b2d3f4762d2e5f0ae088fe9c0b4`.
   It preserves remote main `3451d27` and all published 0.7.0 behavior/tests
   alongside the local navigation and reviewed workspace-setup additions.
   Use this source checkpoint or a later documentation-only descendant for the
@@ -23,22 +23,27 @@ Implemented in **CoCo only**, integrated on local `main`:
 - The checkpoint includes both reviewed corrections: atomic public/private
   claim ownership and durable exclusion of known unconfirmed worker threads.
   Use the complete implementation, not an earlier partial setup prototype.
-- No push, release, installation change, user service restart or real model call.
+- The source is on `main`. It includes patched rusqlite 0.41.1 /
+  libsqlite3-sys 0.39.1 and rmcp 3.9.0; tool contracts and permissions are
+  unchanged. [Regular GitHub release and binary archives](https://github.com/janthmueller/coco/releases/tag/v0.8.0)
+  and [the non-yanked Cargo package](https://crates.io/crates/codex-coordinator/0.8.0)
+  are independently verified. The earlier GitHub service interruption is resolved.
+  No installation change, user service restart or real model call.
 
-Matching **local debug builds**, Linux x86_64, Rust 1.98.1, all reporting 0.7.0:
+Matching **local debug builds**, Linux x86_64, Rust 1.98.1, all reporting 0.8.0:
 
 | Program | Absolute path | SHA-256 |
 | --- | --- | --- |
-| `coco` | `/home/jan/coco/target/debug/coco` | `31817ab40785fb228605119428b77bf43b4f43f39ce14369c5b7be3139412388` |
-| `cocod` | `/home/jan/coco/target/debug/cocod` | `17a776614518d80538b90aa57e51c359d5c94c3ddf0d0ad4be86dbd945f9ada8` |
-| `coco-mcp` | `/home/jan/coco/target/debug/coco-mcp` | `92298f5f2432fcfec7abfe0fbfcfcd96aae1af098638c6bf025157362770e634` |
+| `coco` | `/home/jan/coco/target/debug/coco` | `6156cb98cfccb66a9b6ea7c0687aca1dd1876a0205a10ecc876eeff78e3d73e5` |
+| `cocod` | `/home/jan/coco/target/debug/cocod` | `6bbc14ccbc3a5fee22e3b12269088ac331bab2364126a93e0c092a6224766951` |
+| `coco-mcp` | `/home/jan/coco/target/debug/coco-mcp` | `e32ce247137570f729baceadfe7f9add76aaf85a84ef8be050d0835c95bb3ba8` |
 
-Build command used: `cargo build --locked --offline -j 2 --bins`. These are not
-published 0.7.0 artifacts despite retaining its version string. Use explicit
-matching paths, not an older installed `cocod` or `coco-mcp`. Rebuilding can
-change artifact hashes. The builds were refreshed for the merged product tree
-and their hashes/version output rechecked. A `0.7.0` version string alone cannot
-distinguish this unreleased feature from installed/released programs.
+Build command used: `cargo build --locked --offline -j 2 --bins`. These local
+debug builds use the tagged 0.8.0 source; they are not the downloaded optimized
+release binaries. Use matching explicit paths or install the complete published
+package, never mix versions of `coco`, `cocod` and `coco-mcp`. Rebuilding can
+change artifact hashes. The builds were refreshed after integrating the
+generated release metadata and all three hashes/version outputs were checked.
 
 Use isolated CoCo state/socket paths and temporary repositories for adapter
 tests. Both processes must use the same `COCO_*` paths; use an isolated
@@ -240,7 +245,13 @@ Passed:
 - Clippy all targets/all features with `-D warnings`, formatting, diff checks,
   cargo-machete (no unused dependencies), and cached/offline cargo-deny pass.
   Existing duplicate-version policy warnings remain; no fresh online advisory
-  fetch is claimed. All 19 release-tooling unit tests also pass.
+  fetch was claimed for the earlier integration run. All 19 release-tooling
+  unit tests also pass.
+- After the authorized security update, all 810 ordinary tests, 15 selected
+  model-free Codex 0.166.0 fixtures, real terminal probe and nine shell PTY
+  scenarios pass again. Fresh online cargo-deny now passes all policy groups
+  without advisory exceptions. Clippy, formatting, dependency-use checks and
+  Git-flake evaluation pass; no test expectation or schema was weakened.
 - Prior feature review found no new actionable issue: 22 setup, 7 Store and
   4 recipe checks passed before integration and remain covered by the full
   merged suite. One temporary stronger native assertion also
@@ -257,8 +268,19 @@ Passed:
   passed; targeted credential-pattern checks found no key/token material.
   Git flake evaluation passes with `nix flake check --no-build --offline
   --no-update-lock-file`; package file listing includes the worker binding,
-  creation and shell modules. No full Nix package rebuild, publish dry-run,
-  native macOS execution, installation or release was performed.
+  creation and shell modules. Hosted exact-source Rust run `42673369545`,
+  attempt 2, now passes for `0b4d185`, including fresh policy, registry-package
+  dry-run, full Nix checks and native Linux/macOS binary build/version/help/
+  archive smokes. Full behavioral/native-Codex tests on macOS are not claimed.
+  After GitHub recovery, exact-source Docs run `42683202414` passes build and
+  deployment. Stable rehearsal `42683548614` validates 0.8.0 and publishing run
+  `42684117998` passes registry and both tagged native archive jobs. Independent
+  downloads match GitHub digests and both SHA-256 sidecars; the released lockfile
+  matches the tag. Crates.io and the Cargo sparse index agree on the non-yanked
+  version/checksum; the crate's VCS metadata identifies exact tag commit
+  `d51541e`, its original manifest matches the tag, required modules are present
+  and root knowledge/docs/tests/automation are excluded. No user installation,
+  service restart, real inference or guard bypass was performed.
 
 ### Next implementation in Palm
 

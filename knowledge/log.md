@@ -10,6 +10,16 @@ status: stable
 
 ## 2026-11-09
 
+- **Normal release 0.8.0**: Publish recoverable public MCP workspace setup,
+  immutable worker sources and shell-integrated directory navigation through
+  the guarded stable workflow. Refresh SQLite/RMCP security dependencies
+  without advisory exceptions; repeat full regression and model-free native
+  proofs. After GitHub service recovery, verify exact-source hosted gates,
+  non-publishing rehearsal, non-yanked Cargo availability, tagged crate
+  provenance, released lockfile and both native archive checksums. Update Palm
+  handoffs to the published source/builds; retain disabled automatic alpha and
+  leave user installations/runtimes unchanged.
+
 - **Local 0.7.0 integration**: Preserve released remote history, features and
   regressions alongside local directory navigation and recoverable MCP setup.
   Keep recent-first execution/lifecycle selection and metadata-only name-ordered

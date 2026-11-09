@@ -25,13 +25,13 @@ architectural baseline for CoCo.
   version is 0.8.0. Keep automatic alpha disabled, credentials/settings and
   installed user binaries/runtimes unchanged. No real-model calls.
 - [x] Correct the integration handoff to the complete matching implementation.
-- [ ] Commit/push the documentation correction with unchanged product sources;
+- [x] Commit/push the documentation correction with unchanged product sources;
   require exact-current-main Rust and documentation workflows to succeed.
-- [ ] Refresh advisory evidence, dispatch stable with `publish=false`, and
+- [x] Refresh advisory evidence, dispatch stable with `publish=false`, and
   inspect the proposed version/changelog plus synchronized Cargo metadata.
-- [ ] Recheck unchanged tested main and dispatch stable with `publish=true`;
+- [x] Recheck unchanged tested main and dispatch stable with `publish=true`;
   verify normal release, non-yanked registry package and native archives.
-- [ ] Integrate generated release metadata locally, finish the Palm/release
+- [x] Integrate generated release metadata locally, finish the Palm/release
   record and return on clean main. Do not advance remote main between its
   successful verification, rehearsal and authorized publishing dispatch.
 - Prior verification remains applicable because implementation, tests and
@@ -87,6 +87,85 @@ architectural baseline for CoCo.
   alias; no public command, tool permission or persistence schema changed.
   Commit/push this security correction and require new exact-source hosted
   gates before resuming the previously authorized stable rehearsal/release.
+- Security checkpoint `0b4d185fb13b142dff776291493eef1481a8e356` is committed
+  and pushed normally. Local Git-flake evaluation also passes; exact-source
+  Rust and explicitly repeated documentation delivery are now the publication
+  gates. Keep remote main unchanged until their success and the stable
+  rehearsal/publication checks complete.
+- Hosted runs initially terminate before jobs with GitHub startup errors.
+  Workflow/flake files are byte-identical to the previous candidate; Actions
+  remains enabled with unchanged permissions. Rust retry attempt 2 starts and
+  passes formatting/Clippy before its full tests. Docs' public annotation
+  explicitly reports an internal server error, so start a fresh identical
+  documentation dispatch after the failed retry. Do not edit workflows or
+  weaken gates to mask the service error; publication is still held.
+- Fresh documentation run `42674388696` starts normally for exact `0b4d185`
+  and its static-site build passes. The required Rust run remains
+  `42673369545` attempt 2; finish all test/policy/package/Nix and both native
+  smoke jobs before the stable rehearsal. No publishing dispatch yet.
+- GitHub's official status API confirms an active critical Actions/Checks
+  incident (`Actions: major_outage`, overall partial system outage). Fresh Docs
+  run `42674388696` completes its build but cannot start deployment, with an
+  explicit internal-server-error annotation; failed-only retry is refused by
+  GitHub as not retryable. Preserve the exact tested source rather than changing
+  workflow policy. No rehearsal, publishing dispatch, tag or crate was created.
+- Release is externally blocked until Actions recovers. Resume by checking
+  exact `0b4d185` Rust run `42673369545` attempt 2 and successful documentation
+  delivery; retry the unchanged failed infrastructure portions only as needed.
+  Then recheck current remote main, perform stable non-publishing rehearsal,
+  verify 0.8.0 and publish through the existing guarded workflow. Do not
+  substitute local test success for mandatory hosted verification.
+- The local Palm handoff now pins `0b4d185`, its refreshed matching patched
+  debug binaries/hashes, all repeated verification and the not-yet-published
+  status. Only this record and that handoff remain uncommitted locally while
+  remote main stays on the candidate. No user installation/runtime changed.
+- Exact-source Rust run `42673369545` attempt 2 now completes successfully:
+  all Rust/advisory/package/Nix gates and both Ubuntu 22.04 x86-64/macOS 15
+  arm64 binary build/version/help/archive smokes pass for `0b4d185`. Remote
+  main is rechecked unchanged. The remaining blocker is GitHub's active major
+  Actions/Checks outage and failed documentation-deployment startup, not a
+  failed product test. Resume documentation delivery and stable rehearsal/
+  publication only after service recovery; no version was published here.
+- User authorizes resuming after the official GitHub status returns to normal.
+  Retain exact source `0b4d185` and its successful latest Rust run; start a fresh
+  Docs delivery, then stable non-publishing rehearsal and publication only
+  after validating the unchanged source, version and Cargo metadata. Keep the
+  automatic-alpha switch disabled and all existing local progress notes.
+- Resumed exact-source Docs run `42683202414` passes both build and Pages
+  deployment for unchanged `0b4d185`. Its latest Rust run remains successful,
+  and a refreshed online dependency-policy check passes again. Dispatch the
+  authorized `channel=stable,publish=false` rehearsal; no publication yet.
+- Stable rehearsal `42683548614` succeeds for exact `0b4d185`: logs calculate
+  0.8.0 and validate stable channel, v0.8.0 tag and synchronized Cargo/lock
+  metadata. Binary/registry publication jobs are correctly skipped. Recheck
+  unchanged remote main and its latest successful exact Rust workflow, then
+  dispatch the user-authorized `channel=stable,publish=true` publication.
+  Do not claim completion until registry and both native assets are verified.
+- Authorized publishing run `42684117998` passes its source/version guards and
+  creates regular v0.8.0 at `d51541e8e7037b2d3f4762d2e5f0ae088fe9c0b4`.
+  It changes only Cargo.toml, Cargo.lock and CHANGELOG.md relative to tested
+  `0b4d185`; product, tests, workflows and rendered docs remain identical.
+  Fast-forward the generated metadata locally while preserving these progress
+  notes. Refreshed local bin builds report 0.8.0. Registry/native publication
+  and independent archive checks remain pending before completion.
+- Complete: publishing run `42684117998` passes all jobs, including tagged
+  Linux x86-64/macOS arm64 builds and actual 0.8.0 version/help smoke for all
+  three programs. Both public archives match their SHA-256 sidecars and
+  GitHub asset digests, and contain exactly the three programs, license and
+  README. The public release lockfile is byte-identical to tagged Cargo.lock.
+- Crates.io API and Cargo sparse index independently confirm available,
+  non-yanked 0.8.0 and checksum
+  `5a8019bded43764e7d4858472c392130208dba0abfedad3be1377863f27ae537`.
+  The downloaded crate matches it, declares the patched dependency minima,
+  identifies exact tag commit `d51541e` in VCS metadata and contains its exact
+  original manifest plus required modules, without root knowledge/docs/tests/
+  automation. Independent downloads are retained only in a private temporary
+  verification directory; no downloaded executable was installed or run locally.
+- Both Palm handoffs now identify the published 0.8.0 surface and complete
+  matching local debug builds/hashes. Record completion in a documentation-only
+  checkpoint and push normally; product/source behavior remains identical to
+  the tested revision except generated version stamps. Keep automatic alpha
+  disabled; no credential, user package, live workspace or service was changed.
 
 ### Post-integration review — 2026-11-09
 
