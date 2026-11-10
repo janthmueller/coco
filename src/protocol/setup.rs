@@ -5,8 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::{WorkspaceChangesRequest, WorkspaceWorktreeRequest};
 pub(crate) use crate::domain::setup::{WorkerMcpReference, WorkspaceCreationReceipt};
 
-/// The public setup surface deliberately supports fresh, permanent workspaces.
-/// Existing CLI context and temporary-workspace controls remain independent.
+/// Public setup keeps a fixed repository scope and permanent lifetime.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct WorkspaceSetupRequest {
@@ -15,10 +14,32 @@ pub(crate) struct WorkspaceSetupRequest {
     pub worktree: WorkspaceWorktreeRequest,
     pub changes: WorkspaceChangesRequest,
     pub profile: String,
+    #[serde(default, skip_serializing_if = "WorkspaceSetupContext::is_fresh")]
+    pub context: WorkspaceSetupContext,
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
     pub worker_mcp: Option<WorkerMcpReference>,
+}
+
+/// Raw native IDs and cross-repository context remain CLI-only. Public hosts
+/// cannot escape their repository grant through a context source UUID.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) enum WorkspaceSetupContext {
+    #[default]
+    Fresh,
+    Fork {
+        workspace: String,
+        #[serde(default)]
+        compact: bool,
+    },
+}
+
+impl WorkspaceSetupContext {
+    fn is_fresh(&self) -> bool {
+        matches!(self, Self::Fresh)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

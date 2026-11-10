@@ -19,6 +19,9 @@ mod clients;
 #[path = "tui/temporary.rs"]
 mod temporary;
 
+#[path = "tui/ai.rs"]
+mod ai;
+
 pub(super) async fn verify_inherited_context_resume(
     paths: &TestPaths,
     codex_binary: &Path,
@@ -224,7 +227,7 @@ impl TmuxServer {
             "120",
             "-y",
             "40",
-            "bash --noprofile --norc",
+            "env HISTFILE=/dev/null bash --noprofile --norc",
         ])
         .await
         .map(|_| ())

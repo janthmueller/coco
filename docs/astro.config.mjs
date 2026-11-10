@@ -38,6 +38,7 @@ export default defineConfig({
           label: 'Everyday work',
           items: [
             { label: 'Run and navigate agents', slug: 'guides/workspaces' },
+            { label: 'Use natural language', slug: 'guides/ai' },
             { label: 'Choose code and context', slug: 'guides/context' },
             { label: 'Models and profiles', slug: 'guides/execution-profiles' },
             { label: 'Monitor usage and set limits', slug: 'guides/resources' },

@@ -18,6 +18,9 @@ struct Args {
     /// Expose turns.interrupt; clients can explicitly select bestEffort.
     #[arg(long)]
     allow_interrupt: bool,
+    /// Ask the connected user to review create, send and interrupt before dispatch.
+    #[arg(long)]
+    confirm_changes: bool,
     /// Grant NAME@VERSION; a bare NAME grants version 1. Repeat for each grant.
     #[arg(
         long = "allow-emit",
@@ -46,6 +49,7 @@ async fn main() -> anyhow::Result<()> {
         args.allow_interrupt,
         args.allowed_signals,
         args.signal_catalog,
+        args.confirm_changes,
     )
     .await
 }

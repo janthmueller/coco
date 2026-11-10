@@ -56,9 +56,10 @@ fn fake_creation() -> Value {
 fn fake_response(method: DaemonMethod) -> Value {
     match method {
         DaemonMethod::WorkspaceSetup | DaemonMethod::WorkspaceCreationGet => fake_creation(),
-        DaemonMethod::Doctor | DaemonMethod::WorkspacePathGet | DaemonMethod::WorkspacePathList => {
-            unreachable!("diagnostics and directory navigation are exposed through the CLI")
-        }
+        DaemonMethod::Doctor
+        | DaemonMethod::ControlSessionPrepare
+        | DaemonMethod::WorkspacePathGet
+        | DaemonMethod::WorkspacePathList => unreachable!("CLI-only method"),
         DaemonMethod::SignalCatalogLoad
         | DaemonMethod::SignalTypeList
         | DaemonMethod::SignalEmit

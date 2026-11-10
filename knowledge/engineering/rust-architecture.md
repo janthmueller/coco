@@ -81,6 +81,32 @@ leaks above remain as the historical pre-refactor baseline.
 
 ## Target dependency direction
 
+The private `cli/ai` launcher depends only on typed protocol/RPC, neutral path
+and diagnostic helpers, and native process invocation. `coordinator/control`
+owns read-only repository inventory, with inherited-tool metadata discovery behind
+the worker port in `daemon/worker/control`. No native recipes flow back through
+the protocol. Public context setup continues through existing creation and
+receipt boundaries rather than coupling MCP to Store, CLI or Codex adapters.
+Private `domain/control` carries only inherited MCP names and a neutral
+transport-kind enum, shared by the worker port and typed preparation response.
+The launcher supplies harmless disabled transport declarations required by
+native config validation; foreign recipes stay in the adapter. This small
+metadata boundary introduces no storage, library API or reversed dependency.
+The launcher's opted-in native feature-resolution proof lives in private
+`cli/ai/tests/native`; native TUI proofs remain focused children of the
+existing compatibility fixture. Neither expands the library API.
+An authenticated smoke scenario and its private fixture stay beneath
+`tests/real_codex_compat/tui/ai/live`, separately opted in from model-free
+compatibility tests. They reuse the existing private TUI/daemon harness;
+production code gains no login-copy or test-runner interface.
+The private `live/privacy` helper owns the complete authenticated proof's
+returned-error boundary, asynchronous cleanup redaction and their model-free
+regressions. It uses existing `anyhow` error handling without new dependencies,
+changing shared shutdown helpers or exposing a production/API boundary.
+The sibling private `ai/progress` test helper observes bounded native completion
+records only in that fixture's new control session; it is also verified against
+the scripted native scenarios. It does not become a production rollout reader.
+
 Directory navigation lives in private `coordinator/navigation` and
 `cli/commands/navigation` children, connected by typed `workspace.path.get`
 and `workspace.path.list` contracts. It reads stored bindings without worker

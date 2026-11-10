@@ -4,10 +4,12 @@ use std::sync::Arc;
 use anyhow::Context;
 use async_trait::async_trait;
 use rmcp::{
-    ServerHandler, ServiceExt,
+    RoleServer, ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{CallToolResult, Implementation, ServerCapabilities, ServerConfig},
-    schemars, tool, tool_handler, tool_router,
+    schemars,
+    service::RequestContext,
+    tool, tool_handler, tool_router,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -29,6 +31,7 @@ const WORKSPACES_DIFF: &str = "workspaces.diff";
 const WORKSPACES_SEND: &str = "workspaces.send";
 const MAX_ERROR_CHARS: usize = 1_024;
 
+mod confirmation;
 mod setup;
 mod signals;
 mod turns;
@@ -73,6 +76,7 @@ struct McpServer {
     dispatcher: Dispatcher<RpcClient>,
     allowed_signals: Vec<String>,
     signal_catalog: Option<Arc<Vec<SignalType>>>,
+    confirm_changes: bool,
 }
 
 impl McpServer {
@@ -100,11 +104,24 @@ impl McpServer {
         if allowed_signals.is_empty() {
             tool_router.disable_route("signals.emit");
         }
+        // Repository identity is host-owned, not a model-supplied argument.
+        // Supply it in tool metadata for hosts that display titles. The
+        // opt-in confirmation form separately carries the full action review.
+        for (name, action) in [
+            ("workspaces.create", "Create workspace"),
+            (WORKSPACES_SEND, "Send to workspace"),
+            ("turns.interrupt", "Interrupt turn"),
+        ] {
+            if let Some(route) = tool_router.map.get_mut(name) {
+                route.attr.title = Some(format!("{action} ({})", repository.display()));
+            }
+        }
         Self {
             tool_router,
             dispatcher: Dispatcher::new(RpcClient::new(socket_path), repository),
             allowed_signals,
             signal_catalog: None,
+            confirm_changes: false,
         }
     }
 }
@@ -174,8 +191,16 @@ impl McpServer {
     )]
     async fn workspaces_send(
         &self,
-        Parameters(input): Parameters<WorkspaceSendInput>,
+        Parameters(mut input): Parameters<WorkspaceSendInput>,
+        context: RequestContext<RoleServer>,
     ) -> CallToolResult {
+        input
+            .operation_id
+            .get_or_insert_with(|| Uuid::new_v4().to_string());
+        let review = confirmation::send_review(&self.dispatcher.repository, &input);
+        if let Err(error) = self.confirm_change(review, &context).await {
+            return error;
+        }
         self.dispatcher.workspaces_send(input).await
     }
 }
@@ -419,13 +444,17 @@ pub async fn run_from_env(
     allow_interrupt: bool,
     allowed_signals: Vec<String>,
     signal_catalog: Option<PathBuf>,
+    confirm_changes: bool,
 ) -> anyhow::Result<()> {
     let paths = CocoPaths::from_env()?;
     serve(
         repository,
-        allow_create,
-        allow_send,
-        allow_interrupt,
+        ServePermissions {
+            allow_create,
+            allow_send,
+            allow_interrupt,
+            confirm_changes,
+        },
         paths.socket_path,
         allowed_signals,
         signal_catalog,
@@ -435,9 +464,7 @@ pub async fn run_from_env(
 
 pub(crate) async fn serve(
     repository: PathBuf,
-    allow_create: bool,
-    allow_send: bool,
-    allow_interrupt: bool,
+    permissions: ServePermissions,
     socket_path: PathBuf,
     allowed_signals: Vec<String>,
     signal_catalog: Option<PathBuf>,
@@ -451,12 +478,13 @@ pub(crate) async fn serve(
         std::path::absolute(repository).context("could not resolve repository path")?;
     let mut server = McpServer::new(
         repository,
-        allow_create,
-        allow_send,
-        allow_interrupt,
+        permissions.allow_create,
+        permissions.allow_send,
+        permissions.allow_interrupt,
         socket_path,
         allowed_signals,
     );
+    server.confirm_changes = permissions.confirm_changes;
     if let Some(directory) = signal_catalog {
         server.load_signal_catalog(directory).await?;
     }
@@ -469,6 +497,14 @@ pub(crate) async fn serve(
         .await
         .context("CoCo MCP stdio server stopped with an error")?;
     Ok(())
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct ServePermissions {
+    pub allow_create: bool,
+    pub allow_send: bool,
+    pub allow_interrupt: bool,
+    pub confirm_changes: bool,
 }
 
 #[cfg(test)]

@@ -5,7 +5,7 @@ description: Create a workspace once, recover a lost response, and supply a fixe
 
 Use `workspaces.create` when your application needs to prepare a named checkout
 before sending instructions. Save a unique creation `operationId` before calling
-the tool. Creation prepares a permanent workspace with a fresh conversation;
+the tool. Creation prepares a permanent workspace with fresh or selected conversation context;
 it opens no terminal UI and starts no model turn.
 
 ## Enable creation
@@ -42,8 +42,8 @@ Call `workspaces.create` with:
 ```
 
 Required fields are `operationId`, `name`, `worktree`, `changes`, and `profile`.
-`model` and `workerMcp` are optional. Unknown fields are rejected, including
-conversation-fork and temporary-workspace options.
+`context`, `model`, and `workerMcp` are optional. Unknown fields are rejected,
+including temporary-workspace and repository override options.
 
 Worktree choices are:
 
@@ -56,7 +56,29 @@ Worktree choices are:
 
 A `base` can instead be `{"kind":"workspace","workspace":"review/base"}`
 to use another workspace's committed checkout in this repository. This selects
-code only; the new conversation is still fresh.
+code only; conversation context is selected separately.
+
+### Reuse a conversation
+
+Omit `context`, or pass `{"kind":"fresh"}`, for a fresh conversation.
+To capture another workspace's latest finished turn, add:
+
+```json
+{
+  "context": {"kind": "fork", "workspace": "feat/auth", "compact": false}
+}
+```
+
+The source name or workspace ID must belong to the configured repository.
+Raw Codex thread IDs and sources from another repository are not accepted by
+this tool. The source can keep working; its unfinished turn is excluded.
+A successful creation already has its own captured conversation. Retrying
+the same operation does not capture later source work.
+
+`compact: true` requests compaction of the child before its first activation;
+that later activation can consume tokens. It never compacts the source.
+Context inherited from a worker-bound workspace, or combining a fork with
+`workerMcp`, is rejected. Fixed worker configuration requires fresh context.
 
 `changes` must explicitly be `reject`, `ignore`, `carryTracked`, or
 `carryTrackedAndUntracked`. These use the same safety rules as

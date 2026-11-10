@@ -56,6 +56,10 @@ coco jump fix/login
 Run `coco create` for a guided setup, or add `-i` after a named create to walk
 through its code, context, model, and start choices interactively.
 
+Prefer describing the setup? Use `coco ai "Create fix/login from main"` and
+review the proposed action in Codex. See
+[natural-language control](https://janthmueller.github.io/coco/guides/ai/).
+
 Each agent works in a separate Git checkout, called a worktree. The start
 commands return while work continues. Use `jump` to read the conversation,
 answer questions, or continue in the Codex terminal UI. Leaving that UI keeps

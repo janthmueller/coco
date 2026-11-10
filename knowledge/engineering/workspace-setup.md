@@ -17,8 +17,9 @@ interrupt or signal publication. The exact public contract is
 [`reference/workspace-setup.mdx`](../../docs/src/content/docs/reference/workspace-setup.mdx).
 
 Public setup reuses ordinary Git discovery, local-state snapshots, worktree
-planning, provisioning, profile checks and retirement. It offers fresh context
-and permanent lifetime. CLI context/temporary creation remains independent.
+planning, provisioning, profile checks and retirement. It offers fresh or
+repository-local workspace-forked context and permanent lifetime. CLI raw
+thread/cross-repository context and temporary creation remain independent.
 No Palm adapter, activation, scheduler, result validation, destructive
 compensation, registry, gateway or remote file transport is introduced.
 
@@ -38,6 +39,15 @@ worker path/hash, execution/code/local-change choices and operation ID; compare
 repository identity separately. Externally the hash is opaque. Creation keys
 are globally unique in their own ledger, independently of send keys. Foreign
 repository lookup reveals no receipt, even with a known key.
+
+The optional `context` defaults to fresh and is omitted from canonical request
+serialization in that case, preserving existing fresh-request hashes exactly.
+Explicit fresh is equivalent. Fork identifies a workspace in this endpoint's
+repository; resolve that ownership before reusing core create-time capture.
+Foreign UUIDs, arbitrary native IDs and worker-binding-plus-fork are rejected.
+Replay is checked before source lookup, so a changed/missing/busy source never
+recaptures or blocks a confirmed result. Normal capture/restart handling and
+the receipt's native child ID apply without a new storage schema.
 
 1. Discover identity read-only. A retained matching receipt is replayed without
    recapturing Git/native context. An existing workspace with missing original
@@ -150,8 +160,10 @@ No raw recipe transport or fresh-TUI protocol injection is added for this MVP.
 CoCo refuses forks of known worker-bound contexts,
 including raw native IDs from unconfirmed first sends and retained deleted
 targets. An uncertain send never bypasses exclusion merely because its thread
-was not yet bound to the workspace. Public fork/rebind is
-not offered; future expansion requires proof of no inherited old grant.
+was not yet bound to the workspace. Public worker-bound fork/rebind is
+not offered; expansion requires proof of no inherited old grant. Ordinary
+unbound same-repository contexts can be forked through the additive `context`
+field; this does not weaken worker-grant exclusions.
 
 These are cooperative local capability controls, not protection against
 same-UID processes, direct native clients or concurrent config editors. Native

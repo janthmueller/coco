@@ -11,6 +11,7 @@ const requiredPages = [
   'installation/index.html',
   'getting-started/index.html',
   'guides/workspaces/index.html',
+  'guides/ai/index.html',
   'guides/context/index.html',
   'guides/cleanup/index.html',
   'guides/resources/index.html',

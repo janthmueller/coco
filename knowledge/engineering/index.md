@@ -43,6 +43,8 @@ agents.
   attempts, without conversation-history mirroring.
 - [Public workspace setup](workspace-setup.md) - Separately granted idempotent
   creation, deletion-safe receipts, immutable worker sources and native proofs.
+- [Native AI control](ai-control.md) - Conversational repository selection,
+  scoped existing tools, native confirmations and independent context creation.
 - [Agent-emitted signals](signals.md) - Defines explicit opt-in publication,
   native thread attribution, validation, bounded retention, and independent replay.
 - [CoCo hooks and guards](hooks.md) - Separates native Codex lifecycle hooks

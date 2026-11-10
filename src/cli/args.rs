@@ -33,6 +33,8 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub(super) enum Command {
+    /// Manage CoCo conversationally in the native Codex terminal UI.
+    Ai(AiArgs),
     /// Check installation, connections, and saved workspace bindings without changing them.
     Doctor {
         /// Emit the complete diagnostic report as machine-readable JSON.
@@ -169,6 +171,7 @@ impl Command {
             Self::Status(args) => args.all_repos,
             Self::Signal { command } => command.all_repos(),
             Self::Repo { .. }
+            | Self::Ai(_)
             | Self::Doctor { .. }
             | Self::Model { .. }
             | Self::Models { .. }
@@ -201,6 +204,7 @@ impl Command {
             Self::Reopen(args) => args.global,
             Self::Delete(args) => args.global,
             Self::Repo { .. }
+            | Self::Ai(_)
             | Self::Doctor { .. }
             | Self::Model { .. }
             | Self::Models { .. }
@@ -212,6 +216,29 @@ impl Command {
             | Self::Hook { .. } => false,
         }
     }
+}
+
+#[derive(Debug, Args)]
+pub(super) struct AiArgs {
+    /// Optional first request. Omit it to open a conversation.
+    #[arg(value_parser = non_empty_message)]
+    pub(super) prompt: Option<String>,
+    /// Override the Codex model for this control conversation.
+    #[arg(long, short = 'm', value_name = "MODEL", value_parser = non_empty_model)]
+    pub(super) model: Option<String>,
+    /// Offer inspection tools only, without create, send or interrupt.
+    #[arg(long)]
+    pub(super) read_only: bool,
+    /// Confirm changes yourself (default), or explicitly allow automatic actions.
+    #[arg(long, value_enum, default_value_t = AiApproval::Ask, conflicts_with = "read_only")]
+    pub(super) approval: AiApproval,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+pub(super) enum AiApproval {
+    #[default]
+    Ask,
+    Auto,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
@@ -705,6 +732,9 @@ pub(super) enum McpCommand {
         /// Expose turns.interrupt; clients can explicitly select bestEffort.
         #[arg(long)]
         allow_interrupt: bool,
+        /// Ask the connected user to review create, send and interrupt before dispatch.
+        #[arg(long)]
+        confirm_changes: bool,
         /// Grant NAME@VERSION; a bare NAME grants version 1. Repeat for each grant.
         #[arg(
             long = "allow-emit",

@@ -5,6 +5,7 @@ use sha2::{Digest, Sha256};
 
 mod bindings;
 mod claims;
+mod context;
 mod recovery;
 
 fn params(fixture: &Fixture) -> WorkspaceSetupParams {
@@ -17,6 +18,7 @@ fn params(fixture: &Fixture) -> WorkspaceSetupParams {
             worktree: existing.worktree,
             changes: existing.changes,
             profile: "default".into(),
+            context: Default::default(),
             model: Some("fixture-model".into()),
             worker_mcp: None,
         },

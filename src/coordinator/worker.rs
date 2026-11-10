@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::domain::control::InheritedMcpServer;
 use crate::domain::runtime::{
     WorkspaceResourceCapabilities, WorkspaceResourceControllerStatus,
     WorkspaceResourcePolicySnapshot, WorkspaceRuntimeResources, WorkspaceRuntimeState,
@@ -154,6 +155,17 @@ impl WorkerError {
 #[async_trait]
 pub(crate) trait WorkerRuntime: Send + Sync + 'static {
     async fn list_models(&self) -> Result<Vec<CodexModel>, WorkerError>;
+
+    /// Enumerate inherited names and transport kinds, never recipes. Disabled
+    /// project layers must remain excluded after native folder-trust changes.
+    async fn control_mcp_servers(
+        &self,
+        _cwd: &Path,
+    ) -> Result<Vec<InheritedMcpServer>, WorkerError> {
+        Err(WorkerError::InvalidResponse(
+            "verified control session configuration",
+        ))
+    }
 
     /// Must reject any preexisting effective native server slot. Codex merges
     /// tables recursively, so replacing a partial entry is not safe.

@@ -1,0 +1,96 @@
+---
+title: Manage workspaces in natural language
+description: Ask CoCo to find work, prepare workspaces, and send instructions in a Codex conversation.
+---
+
+Use `coco ai` when you know what you want to do but would rather describe it
+than assemble the command options:
+
+```bash
+coco ai "Create fix/login from main, using conversation context from feat/auth"
+```
+
+This opens a Codex conversation with CoCo's workspace tools ready to use.
+You can ask questions, refine the request, and review changes before they run.
+Omit the message to start with an empty conversation:
+
+```bash
+coco ai
+```
+
+Start `cocod` first. This feature requires an interactive terminal, matching
+CoCo programs, and Codex **0.166.0**. It uses your configured Codex account and
+consumes tokens like an ordinary Codex conversation.
+
+Registered repository names and paths are included in this conversation.
+Workspace details, diffs, or signals you inspect can also reach your configured
+model provider. Use an account and provider you trust with those projects.
+
+## Work across repositories
+
+The current repository is the default for requests such as "show my workspaces".
+Other [registered repositories](../../reference/cli/#repository-commands) are
+available automatically. Name them when you want to work elsewhere:
+
+```bash
+coco ai "Create review/api in frontend and backend, both based on main"
+```
+
+No all-repositories flag is needed. If names are ambiguous, the assistant is
+instructed to ask which repository you mean. From outside Git, you can select
+a default with `coco /path/to/project ai`, or name a registered repository in
+the conversation. Reopen the dialog after adding another repository.
+
+Each creation has its own result. If one succeeds and another fails, the
+successful workspace remains available.
+
+## Review changes before they run
+
+Before creation, CoCo shows a summary of the repository, workspace, code base,
+conversation source, local changes, profile/model, and next action in Codex's
+confirmation dialog. The summary is generated from the actual tool inputs.
+Review it and explicitly confirm before continuing. Reading status or
+listing workspaces does not require approval.
+
+Creation prepares the workspace. Sending instructions is a separate action
+that starts agent work. A fork takes the source's latest finished turn and
+leaves its current work running. Its conversation source must be another
+workspace in the same repository; code and context are selected independently.
+
+For inspection only:
+
+```bash
+coco ai --read-only
+```
+
+To deliberately let the assistant execute the available changing actions
+without asking for each tool call:
+
+```bash
+coco ai --approval auto "Create review/api from main"
+```
+
+The default is `--approval ask`. Automatic approval keeps CoCo's normal safety
+checks and workspace permissions, but lets the assistant create workspaces,
+send instructions, and request interruption. Use it only when you intend that
+access. Describing an automatic mode in chat does not change this setting.
+
+## Continue working
+
+You can inspect workspaces and diffs, create fresh or forked workspaces, send
+instructions, and check a specific send's outcome. An interrupt request still
+uses the [documented turn-control rules](../../reference/turns/).
+
+Choose the model for the control conversation with `coco ai -m MODEL`. This
+does not change existing workspace models.
+
+Use the ordinary commands for cleanup, limits, and terminal navigation. For
+example, leave the control conversation and open a created workspace with:
+
+```bash
+coco jump fix/login
+```
+
+The assistant uses CoCo tools to manage workspaces. Direct shell execution,
+other configured integrations, and file-write escalation are disabled in this
+conversation. Worker agents still run with their own selected permissions.

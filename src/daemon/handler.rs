@@ -56,7 +56,8 @@ impl RpcHandler for DaemonHandler {
             }
             method @ (DaemonMethod::Health
             | DaemonMethod::ModelList
-            | DaemonMethod::AccountQuotaGet) => self.handle_global_read(method, params).await,
+            | DaemonMethod::AccountQuotaGet
+            | DaemonMethod::ControlSessionPrepare) => self.handle_global_read(method, params).await,
             DaemonMethod::RepositoryRegister => {
                 execute(self.coordinator.register_repository(decode(params)?).await)
             }
@@ -218,6 +219,11 @@ impl DaemonHandler {
         params: Value,
     ) -> Result<Value, RpcErrorPayload> {
         match method {
+            DaemonMethod::ControlSessionPrepare => execute(
+                self.coordinator
+                    .prepare_control_session(decode(params)?)
+                    .await,
+            ),
             DaemonMethod::Health => {
                 decode::<HealthParams>(params)?;
                 encode(HealthResult {

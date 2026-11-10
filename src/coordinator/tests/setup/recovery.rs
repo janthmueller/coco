@@ -2,6 +2,45 @@ use super::*;
 
 mod uncertain;
 
+#[tokio::test]
+async fn captured_public_context_survives_database_restart_without_a_second_fork() {
+    let fixture = Fixture::new_persistent(FakeWorker::default());
+    let source = fixture
+        .create_and_materialize(fixture.create_params())
+        .await;
+    let mut request = params(&fixture);
+    request.request.name = "recovered-public-child".into();
+    request.request.context = crate::protocol::WorkspaceSetupContext::Fork {
+        workspace: source.id,
+        compact: false,
+    };
+    let created = fixture
+        .coordinator
+        .setup_workspace(request.clone())
+        .await
+        .unwrap();
+    let fixture = reopen(fixture);
+    fixture
+        .worker
+        .failed_thread_reads
+        .lock()
+        .unwrap()
+        .push(source.codex_thread_id.unwrap());
+    assert_eq!(
+        fixture.coordinator.setup_workspace(request).await.unwrap(),
+        created
+    );
+    assert_eq!(
+        fixture
+            .worker
+            .calls()
+            .iter()
+            .filter(|call| matches!(call, WorkerCall::Fork { .. }))
+            .count(),
+        1
+    );
+}
+
 fn reopen(fixture: Fixture) -> Fixture {
     let Fixture {
         _temp,

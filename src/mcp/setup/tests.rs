@@ -22,6 +22,16 @@ fn create_grant_is_independent_of_all_existing_mutation_grants() {
                 );
                 assert_eq!(server.get_tool("workspaces.create").is_some(), create);
                 assert_eq!(server.tool_router.has_route("workspaces.create"), create);
+                if create {
+                    assert_eq!(
+                        server
+                            .get_tool("workspaces.create")
+                            .unwrap()
+                            .title
+                            .as_deref(),
+                        Some("Create workspace (/repo)")
+                    );
+                }
                 assert!(server.get_tool("workspaceCreations.get").is_some());
                 assert_eq!(server.get_tool("workspaces.send").is_some(), send);
                 assert_eq!(server.get_tool("turns.interrupt").is_some(), interrupt);
@@ -31,7 +41,7 @@ fn create_grant_is_independent_of_all_existing_mutation_grants() {
 }
 
 #[test]
-fn create_schema_requires_explicit_policies_and_cannot_override_scope_or_context() {
+fn create_schema_requires_explicit_policies_and_cannot_override_scope() {
     let value = input();
     assert!(serde_json::from_value::<CreateInput>(value.clone()).is_ok());
     for field in ["operationId", "name", "worktree", "changes", "profile"] {
@@ -56,6 +66,33 @@ fn create_schema_requires_explicit_policies_and_cannot_override_scope_or_context
     let mut invalid = value;
     invalid["worktree"]["base"]["unexpected"] = json!(true);
     assert!(!validator.is_valid(&invalid));
+}
+
+#[test]
+fn context_schema_only_accepts_a_fresh_or_repository_local_workspace_source() {
+    let schema = serde_json::to_value(schemars::schema_for!(CreateInput)).unwrap();
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    for context in [
+        json!({"kind":"fresh"}),
+        json!({"kind":"fork", "workspace":"feat/source"}),
+        json!({"kind":"fork", "workspace":"source-id", "compact":true}),
+    ] {
+        let mut value = input();
+        value["context"] = context;
+        assert!(validator.is_valid(&value));
+        assert!(serde_json::from_value::<CreateInput>(value).is_ok());
+    }
+    for context in [
+        json!({"kind":"fork", "threadId":"native"}),
+        json!({"kind":"fork"}),
+        json!({"kind":"fork", "workspace":"source", "repositoryPath":"/foreign"}),
+        json!({"kind":"handoff"}),
+    ] {
+        let mut value = input();
+        value["context"] = context;
+        assert!(!validator.is_valid(&value));
+        assert!(serde_json::from_value::<CreateInput>(value).is_err());
+    }
 }
 
 #[tokio::test]

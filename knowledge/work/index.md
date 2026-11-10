@@ -43,6 +43,9 @@ it concise, factual, and useful to the next maintainer.
 
 ## Current records
 
+- [`feature/ai-control`](feature/ai-control.md) - Native conversational control,
+  automatic repository inventory, confirmations and recoverable context creation.
+
 - [`feature/mcp-workspace-setup`](feature/mcp-workspace-setup.md) - Public
   idempotent fresh-workspace setup, durable scoped receipts and immutable
   worker-MCP source bindings for external clients.

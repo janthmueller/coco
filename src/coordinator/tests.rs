@@ -38,6 +38,7 @@ mod branch_names;
 mod clients;
 mod context;
 mod context_capture;
+mod control;
 mod creation;
 mod decisions;
 mod doctor;
@@ -64,6 +65,9 @@ mod workspace;
 
 #[derive(Debug, Clone, PartialEq)]
 enum WorkerCall {
+    ControlConfig {
+        cwd: PathBuf,
+    },
     VerifyWorkerMcp {
         cwd: PathBuf,
         slots: Vec<String>,
@@ -366,6 +370,30 @@ impl FakeWorker {
 
 #[async_trait]
 impl WorkerRuntime for FakeWorker {
+    async fn control_mcp_servers(
+        &self,
+        cwd: &Path,
+    ) -> Result<Vec<crate::domain::control::InheritedMcpServer>, WorkerError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(WorkerCall::ControlConfig { cwd: cwd.into() });
+        let mut names = self
+            .native_worker_slots
+            .lock()
+            .unwrap()
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        names.sort();
+        Ok(names
+            .into_iter()
+            .map(|name| crate::domain::control::InheritedMcpServer {
+                name,
+                transport: crate::domain::control::McpTransportKind::Stdio,
+            })
+            .collect())
+    }
     async fn verify_worker_mcp_slots(
         &self,
         cwd: &Path,

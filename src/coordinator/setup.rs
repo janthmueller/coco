@@ -6,8 +6,8 @@ use crate::domain::Workspace;
 use crate::domain::setup::{WorkerMcpReference, WorkspaceCreationReceipt, WorkspaceCreationState};
 use crate::profile::{LoadedProfile, load_profile};
 use crate::protocol::{
-    WorkspaceContextRequest, WorkspaceCreateParams, WorkspaceCreationGetParams,
-    WorkspaceSetupParams,
+    WorkspaceContextRequest, WorkspaceContextSource, WorkspaceCreateParams,
+    WorkspaceCreationGetParams, WorkspaceSetupContext, WorkspaceSetupParams, WorkspaceSetupRequest,
 };
 use crate::worker_mcp::{self, WorkerMcpError};
 
@@ -133,25 +133,30 @@ impl Coordinator {
         }
         // Read untrusted external bytes before taking a SQLite writer lock.
         // Keep any rejection durable too, without storing parser diagnostics.
-        let validation = params
-            .request
-            .worker_mcp
-            .as_ref()
-            .map(worker_mcp::load)
-            .transpose();
+        let validation = self
+            .setup_context(&params.request, &intent.repository_id)
+            .and_then(|context| {
+                params
+                    .request
+                    .worker_mcp
+                    .as_ref()
+                    .map(worker_mcp::load)
+                    .transpose()?;
+                Ok(context)
+            });
         let (claimed, execute) = self.store.claim_workspace_creation(&intent)?;
         if !execute {
             return self.observe_creation_target(check_replay(claimed, &intent)?);
         }
         let result = match validation {
-            Err(error) => Err(CoordinatorError::from(error)),
-            Ok(_) => {
+            Err(error) => Err(error),
+            Ok(context) => {
                 self.create_workspace_for_setup(
                     WorkspaceCreateParams {
                         repository_path: params.repository_path.clone(),
                         temporary: None,
                         name: params.request.name,
-                        context: WorkspaceContextRequest::Fresh,
+                        context,
                         worktree: params.request.worktree,
                         changes: params.request.changes,
                         profile: params.request.profile,
@@ -170,6 +175,42 @@ impl Coordinator {
         self.get_workspace_creation(WorkspaceCreationGetParams {
             repository_path: params.repository_path,
             operation_id: intent.operation_id,
+        })
+    }
+
+    fn setup_context(
+        &self,
+        request: &WorkspaceSetupRequest,
+        repository_id: &str,
+    ) -> Result<WorkspaceContextRequest, CoordinatorError> {
+        let WorkspaceSetupContext::Fork { workspace, compact } = &request.context else {
+            return Ok(WorkspaceContextRequest::Fresh);
+        };
+        if request.worker_mcp.is_some() {
+            return Err(CoordinatorError::InvalidParams(
+                "worker MCP configuration requires fresh context".into(),
+            ));
+        }
+        // Unlike CLI context selection, the public grant cannot read another
+        // repository or an arbitrary native conversation. Resolve to an exact
+        // owned UUID before normal creation, without exposing foreign candidates.
+        let source = self
+            .store
+            .workspace_by_id(workspace)?
+            .filter(|source| source.repository_id == repository_id);
+        let source = match source {
+            Some(source) => Some(source),
+            None => self.store.workspace_by_name(repository_id, workspace)?,
+        }
+        .ok_or_else(|| CoordinatorError::WorkspaceNotFound {
+            reference: workspace.clone(),
+            candidates: Vec::new(),
+        })?;
+        Ok(WorkspaceContextRequest::Fork {
+            source: WorkspaceContextSource::Workspace {
+                workspace: source.id,
+            },
+            compact: *compact,
         })
     }
 

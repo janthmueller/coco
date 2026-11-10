@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 
+mod ai;
 mod args;
 mod clients;
 mod commands;

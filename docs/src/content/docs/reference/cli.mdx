@@ -74,6 +74,28 @@ has not started, do not cause failure. The report includes whether its coverage
 is complete. It inspects up to 32 registered repositories and 64 workspaces;
 collection limits and exhausted time budgets are reported explicitly.
 
+## Natural-language control
+
+```text
+coco [REPOSITORY_PATH] ai [PROMPT] [-m MODEL]
+  [--approval ask|auto | --read-only]
+```
+
+Open a Codex conversation to inspect and manage workspaces. The current
+repository is the default; other registered repositories are discovered
+automatically without `-a` or `-g`. Mutating tool calls require native approval
+unless you explicitly select `--approval auto`. `--read-only` omits changing
+tools and cannot be combined with an explicit approval option.
+
+Requires a terminal, matching CoCo programs, and Codex 0.166.0. Uses the same
+Codex home as `cocod`. Up to 32 registered repositories plus the current
+repository can be attached; unavailable repository entries are skipped.
+The repository inventory is fixed when the conversation starts.
+`--no-input` is not supported for this interactive command.
+
+See [Manage workspaces in natural language](../../guides/ai/) for examples,
+confirmation behavior, and the available actions.
+
 ## Repository commands
 
 ```text

@@ -11,6 +11,7 @@ use crate::coordinator::{
     NativeAccountQuotaWindow, NativeThread, NativeTurnOutcome, StartedThread, StartedTurn,
     WorkerError, WorkerExecutionEnvironment, WorkerRuntime,
 };
+use crate::domain::control::InheritedMcpServer;
 use crate::domain::runtime::{
     WorkspaceResourceCapabilities, WorkspaceResourceControllerStatus,
     WorkspaceResourcePolicySnapshot, WorkspaceRuntimeResources, WorkspaceRuntimeState,
@@ -21,6 +22,7 @@ use crate::domain::{CodexModel, CodexThreadStatus};
 use super::execution::WorkspaceExecutors;
 
 mod context;
+mod control;
 mod setup;
 mod turn_control;
 
@@ -196,6 +198,13 @@ impl CodexWorker {
 
 #[async_trait]
 impl WorkerRuntime for CodexWorker {
+    async fn control_mcp_servers(
+        &self,
+        cwd: &Path,
+    ) -> Result<Vec<InheritedMcpServer>, WorkerError> {
+        self.read_control_mcp_servers(cwd).await
+    }
+
     async fn verify_worker_mcp_slots(
         &self,
         cwd: &Path,

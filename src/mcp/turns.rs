@@ -56,7 +56,17 @@ impl McpServer {
     async fn turns_interrupt(
         &self,
         Parameters(input): Parameters<TurnInterruptInput>,
+        context: RequestContext<RoleServer>,
     ) -> CallToolResult {
+        let review = super::confirmation::interrupt_review(
+            &self.dispatcher.repository,
+            &input.workspace,
+            &input.operation_id,
+            input.mode,
+        );
+        if let Err(error) = self.confirm_change(review, &context).await {
+            return error;
+        }
         self.dispatcher.turns_interrupt(input).await
     }
 }

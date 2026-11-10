@@ -83,7 +83,7 @@ server only in hosts you trust with that information.
 Add `--allow-create` only for an application trusted to create local checkouts
 and configure worker tool processes. This adds `workspaces.create` without
 granting message sending or interruption. Creation prepares a permanent
-workspace with fresh context; it does not start a model turn.
+workspace with fresh or repository-local forked context; it does not start a model turn.
 
 See [Create workspaces from an application](../../reference/workspace-setup/)
 for inputs, safe retries, receipt lookup, and fixed worker MCP configuration.
@@ -107,6 +107,23 @@ Codex turn:
 This adds `workspaces.send`. Any connected host can then start the first or a
 later turn under that workspace's Codex permissions and account usage. Leave
 it disabled unless that is the access you intend to grant.
+
+## Ask the user before changes
+
+For an interactive host, add `--confirm-changes` to show a CoCo-generated
+review before `workspaces.create`, `workspaces.send`, or `turns.interrupt`.
+The corresponding `--allow-*` grants are still required. Ordinary MCP setup
+does not ask questions unless this option is present.
+
+The host must support MCP form elicitation. Confirmation defaults to No and
+expires after five minutes. A declined or cancelled review returns
+`CONFIRMATION_CANCELLED`; an unsupported host, lost response, or timeout
+returns `CONFIRMATION_UNAVAILABLE`. Neither dispatches the action. Reviews
+over 16 KiB return `CONFIRMATION_TOO_LARGE`; use an ordinary CoCo command for
+those messages. After acceptance, normal operation and retry rules apply.
+
+`coco ai` enables these reviews automatically. See
+[Natural-language control](../ai/) for its optional automatic mode.
 
 ## Track a specific send
 

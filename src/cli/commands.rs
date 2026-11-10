@@ -18,7 +18,7 @@ use crate::protocol::{
 use crate::rpc::{RpcClient, RpcClientError};
 
 use super::args::{
-    Cli, CloseArgs, Command, CreateArgs, DeleteArgs, JumpArgs, LimitField, LimitsCommand,
+    AiArgs, Cli, CloseArgs, Command, CreateArgs, DeleteArgs, JumpArgs, LimitField, LimitsCommand,
     LimitsSetArgs, LimitsTargetArgs, McpCommand, ModelCommand, RepoCommand, StatusArgs,
     WorkspaceSort,
 };
@@ -76,31 +76,29 @@ async fn run_with_interaction(cli: Cli, interaction: &mut dyn Interaction) -> Re
     let repository_path = resolve_repository_path(&cwd, scope_path);
 
     match command {
+        Command::Ai(args) => {
+            run_ai(
+                &paths,
+                repository_path,
+                args,
+                all_repos || global,
+                interaction,
+            )
+            .await
+        }
         Command::Doctor { .. } | Command::Shell { .. } => {
             unreachable!("unscoped commands are handled before repository lookup")
         }
         Command::Signal { command } => {
             super::signals::run(command, &paths, repository_path, all_repos, global).await
         }
-        Command::Mcp { command } => {
-            reject_top_level_scope(has_explicit_scope, "mcp")?;
-            run_mcp(command, paths).await
-        }
-        Command::Hook { command } => {
-            reject_top_level_scope(has_explicit_scope, "hook")?;
-            super::hooks::run(command, &paths).await
-        }
-        Command::Repo { command } => {
-            reject_top_level_scope(has_explicit_scope, "repo")?;
-            run_repo(command, &paths, &cwd).await
-        }
-        Command::Model { command } => {
-            reject_top_level_scope(has_explicit_scope, "model")?;
-            run_model(command, &paths).await
-        }
-        Command::Models { json } => {
-            reject_top_level_scope(has_explicit_scope, "models")?;
-            list_models(&paths, json).await
+        command @ (Command::Mcp { .. }
+        | Command::Hook { .. }
+        | Command::Repo { .. }
+        | Command::Model { .. }
+        | Command::Models { .. }
+        | Command::Decide { .. }) => {
+            run_unscoped(command, paths, has_explicit_scope, &cwd, interaction).await
         }
         Command::Create(args) => {
             run_create(
@@ -148,11 +146,61 @@ async fn run_with_interaction(cli: Cli, interaction: &mut dyn Interaction) -> Re
             )
             .await
         }
+    }
+}
+
+async fn run_unscoped(
+    command: Command,
+    paths: CocoPaths,
+    has_scope: bool,
+    cwd: &Path,
+    interaction: &mut dyn Interaction,
+) -> Result<()> {
+    match command {
+        Command::Mcp { command } => {
+            reject_top_level_scope(has_scope, "mcp")?;
+            run_mcp(command, paths).await
+        }
+        Command::Hook { command } => {
+            reject_top_level_scope(has_scope, "hook")?;
+            super::hooks::run(command, &paths).await
+        }
+        Command::Repo { command } => {
+            reject_top_level_scope(has_scope, "repo")?;
+            run_repo(command, &paths, cwd).await
+        }
+        Command::Model { command } => {
+            reject_top_level_scope(has_scope, "model")?;
+            run_model(command, &paths).await
+        }
+        Command::Models { json } => {
+            reject_top_level_scope(has_scope, "models")?;
+            list_models(&paths, json).await
+        }
         Command::Decide { decision, choice } => {
-            reject_top_level_scope(has_explicit_scope, "decide")?;
+            reject_top_level_scope(has_scope, "decide")?;
             decide(&paths, decision, choice, interaction).await
         }
+        _ => unreachable!("only unscoped commands are routed here"),
     }
+}
+
+async fn run_ai(
+    paths: &CocoPaths,
+    repository: PathBuf,
+    args: AiArgs,
+    scope_flags: bool,
+    interaction: &dyn Interaction,
+) -> Result<()> {
+    if scope_flags {
+        bail!("coco ai discovers repositories automatically; omit -a and -g");
+    }
+    if !interaction.is_interactive() {
+        bail!(
+            "coco ai requires an interactive terminal; use ordinary commands or MCP for automation"
+        );
+    }
+    super::ai::run(paths, repository, args).await
 }
 
 async fn run_without_repository(cli: &Cli) -> Result<()> {
@@ -921,14 +969,18 @@ async fn run_mcp(command: McpCommand, paths: CocoPaths) -> Result<()> {
         allow_create,
         allow_send,
         allow_interrupt,
+        confirm_changes,
         allowed_signals,
         signal_catalog,
     } = command;
     crate::mcp::serve(
         repository,
-        allow_create,
-        allow_send,
-        allow_interrupt,
+        crate::mcp::ServePermissions {
+            allow_create,
+            allow_send,
+            allow_interrupt,
+            confirm_changes,
+        },
         paths.socket_path,
         allowed_signals,
         signal_catalog,

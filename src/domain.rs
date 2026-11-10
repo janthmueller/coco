@@ -5,6 +5,7 @@ use serde_json::Value;
 
 pub(crate) mod activity;
 pub(crate) mod clients;
+pub(crate) mod control;
 pub(crate) mod hooks;
 pub(crate) mod runtime;
 pub(crate) mod setup;

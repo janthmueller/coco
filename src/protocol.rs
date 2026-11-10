@@ -18,6 +18,7 @@ use crate::domain::{
 
 #[cfg(test)]
 mod clients_tests;
+mod control;
 mod doctor;
 mod hooks;
 mod navigation;
@@ -28,6 +29,7 @@ mod turns;
 pub(crate) use crate::domain::turns::{
     TurnInterruptAttempt, TurnInterruptAttemptState, TurnInterruptMode, TurnTerminalStatus,
 };
+pub(crate) use control::*;
 pub(crate) use doctor::*;
 pub(crate) use hooks::*;
 pub(crate) use navigation::*;
@@ -40,6 +42,7 @@ pub(crate) use turns::*;
 pub enum DaemonMethod {
     Health,
     Doctor,
+    ControlSessionPrepare,
     ModelList,
     AccountQuotaGet,
     RepositoryRegister,
@@ -87,9 +90,10 @@ pub enum DaemonMethod {
 
 impl DaemonMethod {
     #[cfg(test)]
-    pub const ALL: [Self; 45] = [
+    pub const ALL: [Self; 46] = [
         Self::Health,
         Self::Doctor,
+        Self::ControlSessionPrepare,
         Self::ModelList,
         Self::AccountQuotaGet,
         Self::RepositoryRegister,
@@ -139,6 +143,7 @@ impl DaemonMethod {
         match self {
             Self::Health => "health",
             Self::Doctor => "doctor",
+            Self::ControlSessionPrepare => "controlSession.prepare",
             Self::ModelList => "model.list",
             Self::AccountQuotaGet => "account.quota.get",
             Self::RepositoryRegister => "repository.register",
@@ -189,6 +194,7 @@ impl DaemonMethod {
         match value {
             "health" => Some(Self::Health),
             "doctor" => Some(Self::Doctor),
+            "controlSession.prepare" => Some(Self::ControlSessionPrepare),
             "model.list" => Some(Self::ModelList),
             "account.quota.get" => Some(Self::AccountQuotaGet),
             "repository.register" => Some(Self::RepositoryRegister),
@@ -1121,6 +1127,7 @@ mod tests {
             [
                 "health",
                 "doctor",
+                "controlSession.prepare",
                 "model.list",
                 "account.quota.get",
                 "repository.register",

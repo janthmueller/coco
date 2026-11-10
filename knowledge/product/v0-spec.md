@@ -187,6 +187,14 @@ peer-response routing remain separate, unimplemented capabilities.
 - The CLI and a local CoCo MCP server are v0 client adapters. Later TUI and
   local web clients are equal peers and must use the same headless
   orchestrator behavior rather than reimplementing it.
+- `coco ai [prompt]` adds a native interactive control conversation over the
+  same public tools. The current repository is the default; known repositories
+  are discovered without an all-repository flag. Reads are automatic, changes
+  use native human confirmation unless the operator explicitly selects
+  `--approval auto`, and `--read-only` omits mutation grants. This conversation
+  has no automatically created CoCo workspace. See
+  [Native AI control](../engineering/ai-control.md) for scope and capability
+  boundaries; ordinary CLI/MCP remain the deterministic surfaces.
 - CoCo itself must be usable as an MCP server. Its initial external transport
   is local `stdio`; the MCP adapter must not contain orchestration policy.
 - A workspace, Codex thread, worktree, branch, base commit, context provenance,

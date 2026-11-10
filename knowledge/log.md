@@ -8,6 +8,15 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-11-10
+
+- **Conversational control**: Add a thin native `coco ai` launcher with current-
+  repository defaults and automatic known-repository discovery. Reuse separate
+  scoped MCP endpoints and CoCo-generated reviews in native forms, with operator-only
+  automatic/read-only selection and invocation-only execution restrictions.
+  Extend idempotent public setup with repository-local ordinary context forks,
+  preserving fresh hashes, worker exclusions and core capture/recovery.
+
 ## 2026-11-09
 
 - **Normal release 0.8.0**: Publish recoverable public MCP workspace setup,
