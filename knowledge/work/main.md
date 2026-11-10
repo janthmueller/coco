@@ -5,7 +5,7 @@ description: Tracks integrated product work, verified release handoffs and the r
 tags: [work, branch, bootstrap, rust, mcp, architecture]
 status: active
 branch: main
-updated: 2026-11-09
+updated: 2026-11-10
 ---
 
 # main — repository foundation
@@ -16,6 +16,65 @@ Establish the repository, documentation workflow, and first executable and
 architectural baseline for CoCo.
 
 ## Active work
+
+### Authorized native AI control release — 2026-11-10
+
+- User authorizes commit, merge, push and normal stable publication after the
+  readiness review. Feature `4abf44c483ddaf9c13bf25c70be8b2c571677136`
+  (`feat: add native AI workspace control`) is fast-forwarded from
+  `feature/ai-control` onto main and pushed without losing remote changes.
+  The automatic-alpha switch is verified false and remains unchanged.
+- Local evidence and resolved scope/consent/native trust findings live in
+  [the feature record](feature/ai-control.md). No real-model rerun, credentials,
+  installation or production-runtime changes are part of delivery.
+- [x] Commit and fast-forward/push the reviewed source.
+- [x] Require exact-source Rust workflow `42904557277`, including all-target
+  tests, fresh dependency policy, package verification and Linux/macOS binary
+  smoke; require documentation workflow `42904557342` too.
+- [x] Run stable `publish=false` rehearsal and inspect the calculated version
+  (expected 0.9.0), synchronized Cargo metadata and proposed tag.
+- [x] Publish through the guarded same-source GitHub Actions workflow, verify
+  crates.io and GitHub checksummed assets, then synchronize clean local main.
+- No source is changed while these exact-SHA publication gates are running;
+  this delivery record will be checkpointed after verification.
+- Both workflows are successful. Full CI reports 812 library and 40 integration
+  tests passed (852 total), with native/paid opt-ins deliberately ignored;
+  fresh advisory/license/source/bans policy, package dry-run, Flake checks and
+  Linux/macOS binary smoke pass. Static docs build and Pages deployment pass.
+- Verified remote main still equals the tested feature SHA and dispatched
+  stable `publish=false` rehearsal `42906948761`; publication remains pending
+  its result and expected-version inspection.
+- Rehearsal is successful: normal version 0.9.0, tag v0.9.0 and synchronized
+  Cargo metadata verified; upload jobs were skipped as required. Remote main
+  is rechecked unchanged before the separately publishing dispatch.
+- Publishing stable workflow `42907430227` is dispatched on the same source.
+  Await version/tag publication, registry upload and both platform archives;
+  keep local delivery notes unpushed until these gates finish.
+- Version/tag/GitHub release creation succeeds. Tag v0.9.0 points to CI stamp
+  `b58bce155b73abd1e897b1024204a2ce19ef8d95`, whose exact parent is the tested
+  feature SHA. Only Cargo.toml/Cargo.lock versions and CHANGELOG.md change.
+  Local main is fast-forwarded to that stamp; crates.io and native archives
+  remain pending their publishing jobs.
+- The crates.io publishing job is successful. Await only final native archives
+  and their checksums before closing delivery.
+- Publication workflow `42907430227` is fully successful, including both
+  platform version/help smokes and archive uploads. The public crates.io API
+  confirms normal version 0.9.0 is present and not yanked. GitHub release
+  v0.9.0 is neither draft nor prerelease, with Cargo.lock and both archives:
+  `coco-linux-ubuntu-22.04-x86_64-v0.9.0.tar.gz` and
+  `coco-macos-15-arm64-v0.9.0.tar.gz`, each with a SHA-256 file. Downloaded
+  checksum text matches GitHub's corresponding archive digest; archive
+  execution/version/help verification is provided by the native CI jobs.
+- Verified links: [source CI](https://github.com/janthmueller/coco/actions/runs/42904557277),
+  [Pages](https://github.com/janthmueller/coco/actions/runs/42904557342),
+  [stable rehearsal](https://github.com/janthmueller/coco/actions/runs/42906948761),
+  [publication](https://github.com/janthmueller/coco/actions/runs/42907430227),
+  [release](https://github.com/janthmueller/coco/releases/tag/v0.9.0),
+  [crate](https://crates.io/crates/codex-coordinator/0.9.0).
+- Feature delivery is complete. Close its branch record and checkpoint only
+  these internal verification notes after publication; no product source or
+  release metadata changes are made after the tested CI version stamp. Keep
+  automatic alpha disabled, user installations/runtimes and secrets unchanged.
 
 ### Authorized workspace setup and navigation release — 2026-11-09
 

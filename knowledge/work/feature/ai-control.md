@@ -3,7 +3,7 @@ type: Working Document
 title: "feature/ai-control: natural-language CLI control"
 description: Native Codex control session with scoped CoCo tools and recoverable context creation.
 tags: [work, branch, cli, mcp, codex]
-status: active
+status: complete
 branch: feature/ai-control
 updated: 2026-11-10
 ---
@@ -595,7 +595,7 @@ logic, scope checks, receipts and native approvals. Keep normal CLI behavior.
   propose the next minor (expected 0.9.0); CI owns the actual version stamp.
   Keep publication separate and explicitly authorized, not an incidental push.
 
-## Authorized delivery — active
+## Authorized delivery — completed
 
 - User authorizes commit, merge, push and release after the readiness review.
   Preserve the reviewed slice and normal versioning; no manual version stamp,
@@ -606,3 +606,13 @@ logic, scope checks, receipts and native approvals. Keep normal CLI behavior.
   without publication, inspect the proposed version and publish through the
   same guarded GitHub workflow. Verify registry, tag, release assets and local
   clean-main synchronization before handing over.
+- Delivered as feature commit `4abf44c` and stable v0.9.0, tagged at CI version
+  stamp `b58bce1` with the exact tested feature commit as parent. Full hosted
+  CI passes 852 ordinary tests, fresh dependency policy, package/Flake checks,
+  native Linux/macOS binary smoke and static Pages delivery. Stable rehearsal
+  `42906948761` and publishing workflow `42907430227` both pass.
+- The public registry confirms codex-coordinator 0.9.0 is available and not
+  yanked. Both published archive checksum files match GitHub's corresponding
+  archive SHA-256 digests. Automatic alpha remains disabled. Delivery details
+  are recorded in the main branch document; no production installation,
+  credentials/settings change or additional real-model call was performed.
