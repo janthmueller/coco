@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.9.0 (2026-11-10)
+
+### Documentation
+
+- Record verified 0.8.0 release
+  ([`aa8215b`](https://github.com/janthmueller/coco/commit/aa8215b87685c3ad17fca12c4e07a1176f33c8ee))
+
+### Features
+
+- Add native AI workspace control
+  ([`4abf44c`](https://github.com/janthmueller/coco/commit/4abf44c483ddaf9c13bf25c70be8b2c571677136))
+
+
 ## v0.8.0 (2026-11-09)
 
 ### Bug Fixes
