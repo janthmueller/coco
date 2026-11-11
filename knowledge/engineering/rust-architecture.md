@@ -109,11 +109,16 @@ the scripted native scenarios. It does not become a production rollout reader.
 
 Directory navigation lives in private `coordinator/navigation` and
 `cli/commands/navigation` children, connected by typed `workspace.path.get`
-and `workspace.path.list` contracts. It reads stored bindings without worker
-hydration. Shell templates stay under private `cli/shell`, derive their
-command stopping points from Clap and keep shell-specific directory changes
-outside the daemon. Focused tests own picker, metadata and process boundaries;
-no crate split, schema change, MCP tool or SDK visibility expansion is needed.
+and `workspace.path.list` contracts. Stored bindings determine availability;
+only recent-first interactive discovery opts into bounded passive worker
+summaries. Shared private CLI sort keys/relative labels accept both workspace
+and path entries without manufacturing status-bearing workspace rows. Direct
+targets and name ordering stay native-free. Shell templates stay under private
+`cli/shell`, derive their command stopping points from Clap and keep
+shell-specific directory changes outside the daemon. Focused tests own picker,
+metadata and process boundaries; no crate split, database/schema change, MCP
+tool or SDK visibility expansion is needed. Optional recency fields extend
+only the private typed path-list DTOs.
 
 Public workspace setup retains the same direction: typed receipts/references
 in domain/protocol, policy in `coordinator/setup`, transactional claim and
@@ -123,6 +128,16 @@ minimal native identity exclusions independently of confirmed workspace
 bindings and deletable operation rows. The schema-20 migration backfills only
 known evidence. Focused claim/race/recovery test children exercise both create
 entry points without adding a crate, SDK surface or MCP-to-Store dependency.
+
+Checked public cleanup keeps neutral plans and minimal deletion receipts in
+private `domain/retirement`, with unchanged protocol plan reexports. Typed
+deletion requests connect MCP to `coordinator/retirement/public`, which composes
+the existing saga; `store/workspace_deletions` owns the schema-21 durable claim,
+association and non-cascading receipt. Focused lifecycle dispatch, confirmation,
+policy and recovery test children preserve dependency direction. The narrow
+binary facade additionally exports the executable's permissions value instead
+of growing boolean argument lists; no orchestration SDK, crate or dependency
+is introduced. See [Public workspace lifecycle](workspace-lifecycle.md).
 
 Temporary workspace policy is a typed domain value and nullable Store column.
 Its schema-18 migration and one-shot transaction have focused private children.
@@ -336,8 +351,9 @@ library facade a promised general-purpose SDK. `lib.rs` should expose only
 stable executable entry points and, where needed, protocol types used by future
 clients. Everything else should prefer private or `pub(crate)` visibility.
 
-This end state is now implemented: Rustdoc exposes only
-`run_cli_from_env`, `run_daemon_from_env`, and `run_mcp_from_env`; all twelve
+This end state is now implemented: Rustdoc exposes
+`run_cli_from_env`, `run_daemon_from_env`, `run_mcp_from_env` and the MCP
+executable's explicit permissions value; all twelve
 implementation modules are private. Integration tests exercise binaries
 through `CARGO_BIN_EXE_*`, while in-crate unit tests use module privacy rather
 than expanding the external library API for convenience.

@@ -635,6 +635,16 @@ impl Store {
         intent: WorkspaceDeletionIntent,
         head_sha: Option<&str>,
     ) -> Result<Workspace, StoreError> {
+        self.begin_workspace_deletion_with_operation(workspace_id, intent, head_sha, None)
+    }
+
+    pub(crate) fn begin_workspace_deletion_with_operation(
+        &self,
+        workspace_id: &str,
+        intent: WorkspaceDeletionIntent,
+        head_sha: Option<&str>,
+        operation: Option<&str>,
+    ) -> Result<Workspace, StoreError> {
         let mut connection = self.lock()?;
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let current = require_workspace(&transaction, workspace_id)?;
@@ -650,6 +660,7 @@ impl Store {
                 actual: current.availability.as_str().to_owned(),
             });
         }
+        super::workspace_deletions::associate(&transaction, &current, operation)?;
         transaction.execute(
             "UPDATE workspaces SET availability = 'deleting',
                 delete_thread_requested = ?1, delete_branch_requested = ?2,
@@ -757,6 +768,7 @@ impl Store {
         transaction.execute("DELETE FROM turns WHERE workspace_id = ?1", [workspace_id])?;
         insert_hook_dispatch(&transaction, hook)?;
         super::workspace_creations::observe_workspace(&transaction, &workspace, true)?;
+        super::workspace_deletions::finish(&transaction, &workspace, true)?;
         transaction.execute("DELETE FROM workspaces WHERE id = ?1", [workspace_id])?;
         transaction.commit()?;
         Ok(())
@@ -777,6 +789,7 @@ impl Store {
                 actual: current.availability.as_str().to_owned(),
             });
         }
+        super::workspace_deletions::finish(&transaction, &current, false)?;
         transaction.execute(
             "UPDATE workspaces SET availability = CASE WHEN ?3 THEN 'open' ELSE 'closed' END,
                 closed_head_sha = CASE WHEN ?3 THEN NULL ELSE closed_head_sha END,

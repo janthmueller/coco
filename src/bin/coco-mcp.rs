@@ -18,7 +18,16 @@ struct Args {
     /// Expose turns.interrupt; clients can explicitly select bestEffort.
     #[arg(long)]
     allow_interrupt: bool,
-    /// Ask the connected user to review create, send and interrupt before dispatch.
+    /// Allow checked workspace deletion.
+    #[arg(long)]
+    allow_delete: bool,
+    /// Allow closing workspaces and removing their worktrees.
+    #[arg(long)]
+    allow_close: bool,
+    /// Allow restoring closed workspace worktrees.
+    #[arg(long)]
+    allow_reopen: bool,
+    /// Ask the connected user to review workspace changes and interruptions.
     #[arg(long)]
     confirm_changes: bool,
     /// Grant NAME@VERSION; a bare NAME grants version 1. Repeat for each grant.
@@ -44,12 +53,17 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     coco::run_mcp_from_env(
         args.repository,
-        args.allow_create,
-        args.allow_send,
-        args.allow_interrupt,
+        coco::McpPermissions {
+            allow_create: args.allow_create,
+            allow_send: args.allow_send,
+            allow_interrupt: args.allow_interrupt,
+            allow_delete: args.allow_delete,
+            allow_close: args.allow_close,
+            allow_reopen: args.allow_reopen,
+            confirm_changes: args.confirm_changes,
+        },
         args.allowed_signals,
         args.signal_catalog,
-        args.confirm_changes,
     )
     .await
 }

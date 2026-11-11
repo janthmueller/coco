@@ -14,9 +14,12 @@ fn create_grant_is_independent_of_all_existing_mutation_grants() {
             for interrupt in [false, true] {
                 let server = McpServer::new(
                     "/repo".into(),
-                    create,
-                    send,
-                    interrupt,
+                    ServePermissions {
+                        allow_create: create,
+                        allow_send: send,
+                        allow_interrupt: interrupt,
+                        ..Default::default()
+                    },
                     "/tmp/unused-setup.sock".into(),
                     vec![],
                 );

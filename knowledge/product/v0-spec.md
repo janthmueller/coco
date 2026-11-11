@@ -259,6 +259,10 @@ peer-response routing remain separate, unimplemented capabilities.
   CoCo-created branch. `--keep-thread` and `--keep-branch` opt into retention;
   an adopted branch is always retained. No lifecycle action has a
   destructive collection scope, and `--yes` never implies a discard policy.
+- Control MCP exposes the same checked close/reopen/delete actions through
+  separate operator grants. Delete adds caller-keyed, non-cascading evidence
+  and safe replay over ordinary retirement, without Palm-specific scheduling.
+  See [Public workspace lifecycle](../engineering/workspace-lifecycle.md).
 - `create --temporary` persists a one-session cleanup policy, independently
   of immediate jump or send. After the last tracked TUI finishes regularly,
   try ordinary guarded deletion without file/commit discard; `--keep-thread`
@@ -967,14 +971,21 @@ automatically. No storage-schema migration is required for these descriptors.
   left-to-right; do not insert repository priority ahead of them. Missing
   default tie-breakers (repository path, natural name) are appended only after
   user keys, with workspace ID last. `--sort repo,state,name` explicitly restores
-  repository-first grouping. Prefix each key with `-` for descending; unavailable
-  values stay last either way. Reject unknown/empty/duplicate keys.
-  Keys are state/name/repo/model/branch plus memory/cpu/procs with `-r` and
+  repository-first grouping. Prefix each key with `-` to reverse its normal
+  order; ordinary keys default ascending and `recent` defaults newest-first.
+  Unavailable values stay last either way. Reject unknown/empty/duplicate keys.
+  Keys are state/name/repo/model/branch/recent plus memory/cpu/procs with `-r` and
   tokens/context with `-u`. Workspace/repository are aliases for name/repo.
   Use typed raw values: observed model/effort, actual displayed memory source,
   finite CPU, counts, cumulative tokens and latest context ratio. Never use
-  truncated/formatted labels or turn activity as keys. State order is approval,
-  input, system error, unavailable, failed, working, provisioning, starting,
+  truncated/formatted labels or generated activity text as keys. `recent` uses
+  only the existing optional native `recencyAtMs`, validated as a nonnegative
+  representable timestamp; missing/negative/overflowing dates remain unknown
+  without borrowing management or observation dates. `-recent` orders known
+  dates oldest-first. No extra RPC, native read, persisted field or human output
+  column is added. One-shot/JSON/follow use the same sort and stable fallbacks.
+  State order is approval, input, system error, unavailable, failed, working,
+  provisioning, starting,
   closing, reopening, deleting, idle, completed, prepared, unloaded. Plain list
   retains repository/name defaults; create pickers do not inherit status flags.
   Cost/client-label
@@ -1187,12 +1198,21 @@ automatically. No storage-schema migration is required for these descriptors.
 - `path` resolves a saved open, ready-lifecycle worktree by the existing scoped
   name/UUID rules and prints only its absolute UTF-8 path plus one newline.
   Reject control characters rather than truncating or rewriting filenames.
-- Use only saved CoCo metadata and filesystem existence checks; do not hydrate
-  native state, read conversation history, activate an executor, open a TUI,
-  acquire a client lease or consume temporary cleanup permission.
-- With no target, use the shared terminal interaction adapter and natural name
-  ordering, retaining exceptional branch/detached and global repository details.
-  Do not claim fresh native recency. Exclude closed, transitional, incomplete
+- Direct targets and name-ordered discovery use only saved CoCo metadata and
+  filesystem existence checks. Never read conversation history, activate an
+  executor, open a TUI, acquire a client lease or consume temporary cleanup
+  permission for directory navigation.
+- With no target, use the shared terminal interaction adapter and default to
+  descending optional native `recencyAt`, retaining exceptional branch/detached
+  and global repository details without native status decoration. Apply shared
+  natural-name/repository-path/exact-ID ties and dim relative ages frozen before
+  input; `--sort name` skips native discovery. Unknown dates sort last and never
+  borrow management or observation timestamps.
+- Optional enrichment reads only eligible bound threads, validating thread ID
+  and cwd, with at most four reads in flight and a single one-second total
+  deadline. Keep partial results; unavailable or timed-out dates remain unknown
+  without hiding worktrees. An older daemon rejecting the optional field gets
+  one same-scope metadata-only retry. Exclude closed, transitional, incomplete
   and missing worktrees. Revalidate the selected UUID in the original scope
   before printing; no fallback to a reused name.
 - `cd` requires explicit shell initialization. Bash/Zsh/Fish functions rewrite
@@ -1423,9 +1443,17 @@ arbitrary paths or expands filesystem authority at runtime.
 | Tool | Mutability | Input and result |
 | --- | --- | --- |
 | `workspaces.list` | read-only | Optional phase filters; returns the same workspace summaries and status/Git field meanings as `coco list --json`. |
-| `workspaces.status` | read-only | Workspace name/ID; returns the same projection as `coco status --json`. |
-| `workspaces.diff` | read-only | Workspace name/ID and optional output bound; returns base/head, tracked patch, untracked paths, and truncation metadata from the same use case as `coco diff`. |
+| `workspaces.status` | read-only | Workspace name/ID; current workspace/Git state, runtime resources, activity and open decisions, without CLI usage/quota composition. |
+| `workspaces.diff` | read-only | Workspace name/ID and optional output bound; bounded tracked patch, untracked paths and truncation metadata from the same use case as `coco diff`. |
 | `workspaces.send` | mutating, opt-in | Workspace name/ID, non-empty text, and optional operation ID (generated when omitted); starts the same turn as `coco send` and returns workspace/thread/turn correlation. Advertised only with `--allow-send`. |
+| `workspaces.create` | mutating, opt-in | Public typed setup/context and optional immutable worker source; `--allow-create` and durable creation key. |
+| `workspaceCreations.get` | read-only | Repository-scoped retained creation receipt. |
+| `turns.get` | read-only | Exact send-key technical outcome without conversation history. |
+| `turns.interrupt` | mutating, opt-in | Separately granted operation-bound strict/explicit best-effort interruption. |
+| `workspaces.close` | mutating, opt-in | Checked reversible worktree removal with preview/expected-plan protection; `--allow-close`. |
+| `workspaces.reopen` | mutating, opt-in | Restore the exact closed binding; `--allow-reopen`. |
+| `workspaces.delete` | mutating, opt-in | Checked resource cleanup with keep/discard policies, preview and durable deletion key; `--allow-delete`. |
+| `workspaceDeletions.get` | read-only | Retained deletion result across restart and workspace removal, without native reads. |
 | `signals.types` | read-only | Selected immutable definitions and JSON Schemas with `emitAllowed`; without a selected catalog, retained repository definitions are read-only. |
 | `signals.list` | read-only | Bounded independent pages with scope-bound resume cursors; does not consume records or wake models. |
 | `signals.emit` | mutating, version-granted | Exact granted name/version, JSON payload, and required idempotency key. Native Codex thread metadata must resolve to a workspace in the configured repository. |

@@ -31,14 +31,12 @@ pub(super) async fn run_scoped(
     reject_all_repos_for_reference(all_repos, "path")?;
     run(
         paths,
-        // Directory navigation is metadata-only: do not fetch native recency
-        // merely to share the target commands' selection descriptor.
         workspace_selection(
             repository_path,
             has_scope_path,
             args.workspace,
             global,
-            WorkspaceSort::Name,
+            args.sort,
         ),
         interaction,
     )
@@ -66,7 +64,7 @@ async fn resolve_path(
         has_explicit_path,
         workspace,
         global,
-        sort: _,
+        sort,
     } = selection;
     let (scope, workspace) = if let Some(workspace) = workspace {
         (
@@ -85,18 +83,15 @@ async fn resolve_path(
                 resolve_interactive_repository(paths, path, has_explicit_path, interaction).await?,
             )
         };
-        let mut entries = client
-            .request(WorkspacePathListParams {
-                scope: scope.clone(),
-            })
-            .await?;
+        let mut entries = list_entries(&client, &scope, sort).await?;
         if entries.is_empty() {
             bail!("no open worktrees are available; use `coco create` or `coco reopen`");
         }
-        sort_entries(&mut entries);
+        sort_entries(&mut entries, sort);
+        let now_ms = chrono::Utc::now().timestamp_millis();
         let choices = entries
             .iter()
-            .map(|entry| choice(entry, global))
+            .map(|entry| choice(entry, global, now_ms))
             .collect::<Vec<_>>();
         let index = interaction.select("Workspace directory", &choices)?;
         (scope, entries[index].workspace_id.clone())
@@ -108,15 +103,42 @@ async fn resolve_path(
         .await?)
 }
 
-fn sort_entries(entries: &mut [WorkspacePathEntry]) {
-    entries.sort_by(|left, right| {
-        super::super::status::natural_cmp(&left.name, &right.name)
-            .then_with(|| left.repository.root_path.cmp(&right.repository.root_path))
-            .then_with(|| left.workspace_id.cmp(&right.workspace_id))
-    });
+async fn list_entries(
+    client: &RpcClient,
+    scope: &RepositoryScope,
+    sort: WorkspaceSort,
+) -> Result<Vec<WorkspacePathEntry>> {
+    let mut params = WorkspacePathListParams {
+        scope: scope.clone(),
+        include_recency: sort == WorkspaceSort::Recent,
+    };
+    match client.request(params.clone()).await {
+        // Older daemons reject the optional field. Retrying the same read-only
+        // scope without enrichment keeps navigation available during upgrades.
+        Err(RpcClientError::Remote(error))
+            if params.include_recency && error.code == "INVALID_PARAMS" =>
+        {
+            params.include_recency = false;
+            Ok(client.request(params).await?)
+        }
+        result => Ok(result?),
+    }
 }
 
-fn choice(entry: &WorkspacePathEntry, global: bool) -> Choice {
+fn sort_entries(entries: &mut [WorkspacePathEntry], sort: WorkspaceSort) {
+    entries.sort_by(|left, right| workspace_picker::compare(sort_key(left), sort_key(right), sort));
+}
+
+fn sort_key(entry: &WorkspacePathEntry) -> workspace_picker::SortKey<'_> {
+    workspace_picker::SortKey {
+        name: &entry.name,
+        repository_path: &entry.repository.root_path,
+        id: &entry.workspace_id,
+        recency_at_ms: entry.recency_at_ms,
+    }
+}
+
+fn choice(entry: &WorkspacePathEntry, global: bool, now_ms: i64) -> Choice {
     let mut detail = Vec::new();
     if let Some(branch) = entry
         .branch_name
@@ -134,6 +156,7 @@ fn choice(entry: &WorkspacePathEntry, global: bool) -> Choice {
         entry.name.clone(),
         (!detail.is_empty()).then(|| detail.join(" · ")),
     )
+    .with_trailing_detail(workspace_picker::recency_label(entry.recency_at_ms, now_ms))
 }
 
 fn printable_path(path: &Path) -> Result<&str> {

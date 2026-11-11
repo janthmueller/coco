@@ -7,6 +7,7 @@ pub(crate) mod activity;
 pub(crate) mod clients;
 pub(crate) mod control;
 pub(crate) mod hooks;
+pub(crate) mod retirement;
 pub(crate) mod runtime;
 pub(crate) mod setup;
 pub(crate) mod signals;

@@ -99,6 +99,18 @@ fn cases() -> Vec<Case> {
         ("coco cd fix/login", vec!["path", "fix/login"], 0, true),
         ("coco cd", vec!["path"], 0, true),
         (
+            "coco cd --sort name",
+            vec!["path", "--sort", "name"],
+            0,
+            true,
+        ),
+        (
+            "coco cd -g --sort recent",
+            vec!["path", "-g", "--sort", "recent"],
+            0,
+            true,
+        ),
+        (
             "coco -g cd fix/login",
             vec!["-g", "path", "fix/login"],
             0,

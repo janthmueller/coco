@@ -225,7 +225,14 @@ fn automatic_approval_is_explicit_and_read_only_removes_every_mutation_grant() {
             .unwrap();
         assert_eq!(server["default_tools_approval_mode"], expected_mode);
         let args = server["args"].as_array().unwrap();
-        for flag in ["--allow-create", "--allow-send", "--allow-interrupt"] {
+        for flag in [
+            "--allow-create",
+            "--allow-send",
+            "--allow-interrupt",
+            "--allow-delete",
+            "--allow-close",
+            "--allow-reopen",
+        ] {
             assert_eq!(args.iter().any(|arg| arg == flag), writes);
         }
         for feature in ["apps", "connectors", "memories", "memory_tool"] {

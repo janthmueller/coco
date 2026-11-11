@@ -13,6 +13,7 @@ mod turn_control;
 mod usage;
 mod worker_mcp_threads;
 mod workspace_creations;
+mod workspace_deletions;
 
 pub(super) fn migrate(connection: &Connection) -> Result<(), StoreError> {
     let version: i64 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
@@ -35,7 +36,10 @@ pub(super) fn migrate(connection: &Connection) -> Result<(), StoreError> {
     if version < 19 {
         workspace_creations::migrate(connection)?;
     }
-    worker_mcp_threads::migrate(connection)
+    if version < 20 {
+        worker_mcp_threads::migrate(connection)?;
+    }
+    workspace_deletions::migrate(connection)
 }
 
 fn migrate_before_turn_control(connection: &Connection) -> Result<(), StoreError> {

@@ -137,9 +137,9 @@ select the corresponding option immediately. Press Escape, `q`, or Ctrl+C to
 cancel.
 
 Workspace selectors put recently used conversations first and show a dim
-relative time when available. Use `--sort name` on `create`, `send`, `jump`, `diff`,
-`limits`, `close`, `reopen`, or `delete` for name order. `--sort recent` selects
-the default order.
+relative time when available. Use `--sort name` on `create`, `send`, `jump`,
+`path`, `cd`, `diff`, `limits`, `close`, `reopen`, or `delete` for name order.
+`--sort recent` selects the default order.
 
 CoCo never opens a selector when its input or prompt stream is not attached to
 a terminal, or when `--no-input` is present. In those cases, pass every required
@@ -149,15 +149,18 @@ non-interactive.
 ## Workspace directories
 
 ```text
-coco [REPOSITORY_PATH] path [WORKSPACE] [-g]
-coco [REPOSITORY_PATH] cd [WORKSPACE] [-g]
+coco [REPOSITORY_PATH] path [WORKSPACE] [-g] [--sort recent|name]
+coco [REPOSITORY_PATH] cd [WORKSPACE] [-g] [--sort recent|name]
 coco shell init <bash|zsh|fish>
 ```
 
 `path` prints one absolute worktree path followed by a newline. An omitted
-workspace opens a name-ordered selector in an interactive terminal. `-g`
-searches or selects across repositories; `-a` is not accepted. Full workspace
-IDs work from any directory. A closed or missing worktree produces an error
+workspace opens a selector with recently active conversations first and a dim
+relative time when available. Use `--sort name` for name order. Workspaces
+without a known time remain selectable after those with known activity; if
+times are unavailable, the selector uses name order. `-g` searches or selects
+across repositories; `-a` is not accepted. Full workspace IDs work from any
+directory. A closed or missing worktree produces an error
 instead of a path.
 
 `cd` changes your current shell directory after you enable the
@@ -385,18 +388,26 @@ across repositories; add `repo` first when you want repository grouping:
 
 ```bash
 coco status -a --sort state,name
+coco status -a --sort recent
+coco status -af --sort state,recent
 coco status -a --sort repo,state,name
 coco status -ar --sort state,-memory,name
 ```
 
-Prefix a key with `-` to reverse it. For a leading minus, use
-`--sort=-memory,state`. Repeating `--sort` adds keys in the same order.
+Prefix a key with `-` to reverse it. The equals sign is optional:
+`--sort -recent` and `--sort=-recent` are equivalent. Repeating `--sort` adds
+keys in the same order.
 Unspecified ties use repository path, natural workspace name and finally ID.
 Missing values stay last in either direction.
 
+`recent` puts the latest reported Codex activity first. Use `-recent` for
+oldest activity first; workspaces without a reported time remain last. With
+`--follow`, the order updates as conversations become active. The default
+overview remains sorted by repository and workspace name.
+
 | Keys | Required option |
 | --- | --- |
-| `state`, `name`, `repo`, `model`, `branch` | None |
+| `state`, `name`, `repo`, `model`, `branch`, `recent` | None |
 | `memory`, `cpu`, `procs` | `--resources` (`-r`) |
 | `tokens`, `context` | `--usage` (`-u`) |
 
@@ -645,8 +656,8 @@ printed unchanged so they remain safe to redirect.
 ## MCP commands
 
 ```text
-coco mcp serve --repository <PATH> [--allow-create] [--allow-send] [--allow-interrupt] [--signal-catalog <DIR>] [--allow-emit <SIGNAL>]...
-coco-mcp --repository <PATH> [--allow-create] [--allow-send] [--allow-interrupt] [--signal-catalog <DIR>] [--allow-emit <SIGNAL>]...
+coco mcp serve --repository <PATH> [OPTIONS]
+coco-mcp --repository <PATH> [OPTIONS]
 ```
 
 Both forms expose the same repository-scoped standard input/output server.
@@ -662,6 +673,12 @@ unsupported with current Codex. Callers may explicitly select `bestEffort`,
 accepting that native cancellation can hit a concurrently started newer turn.
 Repeated calls do not automatically send another interrupt. See
 [Track a turn](../turns/) for the contract and limitations.
+`--allow-close`, `--allow-reopen`, and `--allow-delete` independently expose
+the matching workspace actions. `workspaceDeletions.get` is read-only and
+available by default. See [Clean up from an application](../workspace-lifecycle/)
+for previews, retention options, and deletion retries.
+`--confirm-changes` asks a form-capable host to confirm permitted workspace
+changes and interruptions; it does not grant any action by itself.
 `--allow-emit NAME@VERSION` grants only that signal version; a bare name grants
 version `1`. It requires `--signal-catalog DIR` and a matching
 `NAME@VERSION.json` schema file. The directory is read at MCP startup; files

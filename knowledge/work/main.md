@@ -5,7 +5,7 @@ description: Tracks integrated product work, verified release handoffs and the r
 tags: [work, branch, bootstrap, rust, mcp, architecture]
 status: active
 branch: main
-updated: 2026-11-10
+updated: 2026-11-11
 ---
 
 # main — repository foundation
@@ -16,6 +16,56 @@ Establish the repository, documentation workflow, and first executable and
 architectural baseline for CoCo.
 
 ## Active work
+
+### Authorized navigation and MCP cleanup delivery — 2026-11-11
+
+- User authorizes the reviewed `feature/navigation-recency` slice to be
+  committed, merged, pushed and released through CI. Includes recent-first
+  directory navigation, optional recent status ordering and separately granted
+  Control-MCP/AI close/reopen/delete with durable deletion receipts.
+- Preserve remote main, require exact-source Rust and documentation success,
+  rehearse stable without publication, then publish and verify GitHub release,
+  both checksummed native archives and crates.io. Expected version: 0.10.0.
+  No manual version stamping or automatic-alpha policy change.
+- Source/review evidence lives in
+  [the branch record](feature/navigation-recency.md). No Palm implementation,
+  installed service/configuration change or real model call is part of delivery.
+- [ ] Commit and integrate the complete reviewed source without losing edits.
+- [ ] Verify hosted Rust and static documentation for the pushed source SHA.
+- [ ] Verify stable rehearsal and publish through the guarded workflow.
+- [ ] Verify artifacts/registry, update handoff and synchronize clean main.
+
+### Directory-picker recency review — 2026-11-11
+
+- User asks whether `coco cd` should use the same recent-first ordering as
+  other workspace pickers. Review current routing, timestamp source, fallback
+  and navigation availability before recommending a change. No product edits,
+  tests/model calls, commit, push or publication are authorized by this review.
+- Preserve metadata-only explicit path lookup, shell stdout/stderr separation,
+  scope checks and final selected-path revalidation. Record the recommendation
+  and evidence below; do not treat it as implemented behavior.
+- Review complete: shell `cd` delegates to `path`; its command adapter forces
+  `WorkspaceSort::Name`, applies its own natural-name comparator and uses a
+  `WorkspacePathEntry` with no time field. Ordinary workspace source/target
+  pickers already share descending native recency, relative labels and
+  deterministic name/repository/ID ties. The navigation exception is deliberate
+  in product/architecture guidance, not an accidental broken sort.
+- Recommend recent-first for omitted-target interactive `cd`/`path` too,
+  including global selection, with the same dim native-activity age and
+  `--sort name` alternative. This is native Codex recent activity, not a new
+  last-directory-visit history or a substitute management timestamp.
+- Preserve explicit-target lookup as metadata-only. Optional picker enrichment
+  must be passive and bounded by a small total budget, with name fallback on
+  missing/unavailable native data; no resume, executor/model/history load or
+  new persisted recency. Name mode should retain a native-free fast path.
+  Unknown times stay eligible and sort last; freeze ordering before input and
+  revalidate the selected UUID exactly as today. Reuse ordering/time semantics,
+  not the status-heavy row decoration or an unconditional ordinary list call
+  (its native hydration currently runs sequentially without a picker budget).
+- Verification is source/contract/test inspection and diff whitespace check
+  only. No target code/tests, backend requests, product edits, commit, push or
+  release. Await user agreement before implementation; no public docs or
+  canonical behavior contract changed by this proposal.
 
 ### Authorized native AI control release — 2026-11-10
 

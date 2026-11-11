@@ -8,6 +8,26 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-11-11
+
+- **Public checked cleanup**: Expose separately granted close/reopen/delete to
+  MCP and AI, with authoritative reviews and exact target/plan pinning. Retain
+  minimal operation-keyed deletion evidence independently of removed workspaces
+  in schema 21. Reuse ordinary retirement/recovery and separate file/commit-loss
+  policies; preserve uncertainty without blind destructive replay or attributing
+  a later independent deletion to an old attempt.
+
+- **Optional recent status order**: Add `status --sort recent` and multi-key
+  combinations using existing optional native activity dates. Keep defaults,
+  list order and human columns stable; unknown dates remain last in both
+  directions and follow reorders each current snapshot without extra reads.
+
+- **Recent directory selection**: Align omitted-target `cd`/`path` with shared
+  native recent-first ordering and dim relative ages. Preserve metadata-only
+  explicit targets/name sorting and exact scoped UUID revalidation. Bound
+  optional passive date discovery by one total deadline, retain unknown/partial
+  results and support a same-scope metadata fallback with older daemons.
+
 ## 2026-11-10
 
 - **Conversational control**: Add a thin native `coco ai` launcher with current-

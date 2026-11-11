@@ -15,6 +15,14 @@ impl Coordinator {
         &self,
         params: WorkspaceDeleteParams,
     ) -> Result<WorkspaceDeleteResult, CoordinatorError> {
+        self.delete_workspace_with_operation(params, None).await
+    }
+
+    pub(super) async fn delete_workspace_with_operation(
+        &self,
+        params: WorkspaceDeleteParams,
+        operation: Option<&str>,
+    ) -> Result<WorkspaceDeleteResult, CoordinatorError> {
         let resolved = self.resolve_workspace(&params.scope, &params.workspace)?;
         let repository_lock = self.repository_lock(&resolved.repository_id).await;
         let _guard = repository_lock.lock().await;
@@ -33,7 +41,7 @@ impl Coordinator {
         // accepting the durable intent, not only before the later Git command.
         let checked = self.prepare_delete(&params).await?;
         validate_expected_plan(Some(&prepared.plan), &checked.plan)?;
-        self.apply_delete(checked, &params).await
+        self.apply_delete(checked, &params, operation).await
     }
 
     async fn check_delete_guards(
@@ -68,6 +76,7 @@ impl Coordinator {
         &self,
         prepared: PreparedDelete,
         params: &WorkspaceDeleteParams,
+        operation: Option<&str>,
     ) -> Result<WorkspaceDeleteResult, CoordinatorError> {
         let intent = WorkspaceDeletionIntent {
             delete_thread: prepared.plan.thread_disposition == WorkspaceThreadDisposition::Delete,
@@ -75,11 +84,19 @@ impl Coordinator {
             discard_unretained_commits: params.discard_unretained_commits,
             from_open: prepared.workspace.availability == WorkspaceAvailability::Open,
         };
-        let deleting = self.store.begin_workspace_deletion(
-            &prepared.workspace.id,
-            intent,
-            prepared.plan.head_sha.as_deref(),
-        )?;
+        let deleting = match operation {
+            Some(operation) => self.store.begin_workspace_deletion_with_operation(
+                &prepared.workspace.id,
+                intent,
+                prepared.plan.head_sha.as_deref(),
+                Some(operation),
+            )?,
+            None => self.store.begin_workspace_deletion(
+                &prepared.workspace.id,
+                intent,
+                prepared.plan.head_sha.as_deref(),
+            )?,
+        };
         if let Err(source) = self.remove_deleting_worktree(&prepared, params).await {
             // Removal may have succeeded despite an I/O error. Recovery uses
             // actual verified path/registration evidence to choose open/closed.

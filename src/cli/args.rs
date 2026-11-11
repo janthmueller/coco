@@ -267,6 +267,9 @@ pub(super) struct NavigationArgs {
     /// Resolve or choose the workspace across every registered repository.
     #[arg(long, short = 'g')]
     pub(super) global: bool,
+    /// Order the workspace picker by recent use or name.
+    #[arg(long, value_enum, default_value_t = WorkspaceSort::Recent)]
+    pub(super) sort: WorkspaceSort,
 }
 
 #[derive(Debug, Subcommand)]
@@ -532,9 +535,9 @@ pub(super) struct StatusArgs {
         conflicts_with_all = ["workspace", "json", "sort"]
     )]
     pub(super) tree: bool,
-    /// Order by comma-separated keys; prefix - for descending.
+    /// Order by comma-separated keys; prefix - to reverse a key's order.
     ///
-    /// Keys: state, name, repo, model, branch.
+    /// Keys: state, name, repo, model, branch, recent (newest first).
     /// With -r: memory, cpu, procs. With -u: tokens, context.
     ///
     /// Keys run left-to-right. Repeat --sort to add keys. Missing values stay last.
@@ -732,7 +735,16 @@ pub(super) enum McpCommand {
         /// Expose turns.interrupt; clients can explicitly select bestEffort.
         #[arg(long)]
         allow_interrupt: bool,
-        /// Ask the connected user to review create, send and interrupt before dispatch.
+        /// Allow checked workspace deletion.
+        #[arg(long)]
+        allow_delete: bool,
+        /// Allow closing workspaces and removing their worktrees.
+        #[arg(long)]
+        allow_close: bool,
+        /// Allow restoring closed workspace worktrees.
+        #[arg(long)]
+        allow_reopen: bool,
+        /// Ask the connected user to review workspace changes and interruptions.
         #[arg(long)]
         confirm_changes: bool,
         /// Grant NAME@VERSION; a bare NAME grants version 1. Repeat for each grant.

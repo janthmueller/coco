@@ -15,6 +15,10 @@ pub(super) struct Fixture {
 
 impl Fixture {
     pub async fn new() -> Result<Self> {
+        Self::with_lifecycle(false).await
+    }
+
+    pub async fn with_lifecycle(lifecycle: bool) -> Result<Self> {
         let root = tempfile::tempdir()?;
         let socket = root.path().join("rpc.sock");
         let listener = UnixListener::bind(&socket)?;
@@ -29,7 +33,15 @@ impl Fixture {
                 }
                 let request: Value = serde_json::from_str(&line).unwrap();
                 recorded.lock().unwrap().push(request.clone());
-                let response = json!({"id":request["id"],"error":{"code":"FIXTURE_DISPATCHED","message":"isolated no-op backend"}});
+                let result = lifecycle
+                    .then(|| super::lifecycle::preview_response(&request))
+                    .flatten();
+                let response = match result {
+                    Some(result) => json!({"id":request["id"],"result":result}),
+                    None => {
+                        json!({"id":request["id"],"error":{"code":"FIXTURE_DISPATCHED","message":"isolated no-op backend"}})
+                    }
+                };
                 write
                     .write_all(format!("{response}\n").as_bytes())
                     .await

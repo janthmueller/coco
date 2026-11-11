@@ -228,9 +228,7 @@ mod tests {
     fn grants_pin_versions_and_never_expand_with_the_catalog() {
         let mut server = McpServer::new(
             "/repo".into(),
-            false,
-            false,
-            false,
+            ServePermissions::default(),
             "/tmp/cocod.sock".into(),
             vec!["review.requested@2".into(), "tests.finished".into()],
         );

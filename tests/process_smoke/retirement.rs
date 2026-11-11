@@ -4,6 +4,9 @@ use super::*;
 
 const RETIREMENT_WORKSPACE: &str = "cleanup/process";
 
+#[path = "retirement/mcp.rs"]
+mod mcp;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn cli_closes_reopens_and_deletes_a_prepared_workspace_safely() -> Result<()> {
     let temporary = tempfile::tempdir()?;
@@ -88,6 +91,7 @@ async fn cli_closes_reopens_and_deletes_a_prepared_workspace_safely() -> Result<
     assert_branch_missing(&repository, &branch).await?;
     verify_retirement_hooks(&paths, &repository).await?;
     verify_direct_delete(&paths, &repository).await?;
+    mcp::exercise(&paths, &repository).await?;
 
     interrupt(&daemon).await?;
     let daemon_status = timeout(PROCESS_TIMEOUT, daemon.wait()).await??;

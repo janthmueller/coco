@@ -47,14 +47,14 @@ impl RpcHandler for DaemonHandler {
             )
         })?;
         match method {
-            method @ (DaemonMethod::WorkspaceSetup | DaemonMethod::WorkspaceCreationGet) => {
-                self.handle_setup(method, params).await
-            }
-            DaemonMethod::Doctor => {
-                decode::<crate::protocol::DoctorParams>(params)?;
-                encode(self.doctor.report(&self.coordinator).await)
+            method @ (DaemonMethod::WorkspaceSetup
+            | DaemonMethod::WorkspaceCreationGet
+            | DaemonMethod::WorkspaceDeleteOperation
+            | DaemonMethod::WorkspaceDeletionGet) => {
+                self.handle_public_workspace(method, params).await
             }
             method @ (DaemonMethod::Health
+            | DaemonMethod::Doctor
             | DaemonMethod::ModelList
             | DaemonMethod::AccountQuotaGet
             | DaemonMethod::ControlSessionPrepare) => self.handle_global_read(method, params).await,
@@ -95,7 +95,7 @@ impl RpcHandler for DaemonHandler {
                 execute(self.coordinator.list_repositories(decode(params)?))
             }
             method @ (DaemonMethod::WorkspacePathGet | DaemonMethod::WorkspacePathList) => {
-                self.handle_navigation(method, params)
+                self.handle_navigation(method, params).await
             }
             method @ (DaemonMethod::WorkspaceCreate
             | DaemonMethod::WorkspaceClose
@@ -144,12 +144,20 @@ impl RpcHandler for DaemonHandler {
 }
 
 impl DaemonHandler {
-    async fn handle_setup(
+    async fn handle_public_workspace(
         &self,
         method: DaemonMethod,
         params: Value,
     ) -> Result<Value, RpcErrorPayload> {
         match method {
+            DaemonMethod::WorkspaceDeleteOperation => execute(
+                self.coordinator
+                    .delete_workspace_operation(decode(params)?)
+                    .await,
+            ),
+            DaemonMethod::WorkspaceDeletionGet => {
+                execute(self.coordinator.get_workspace_deletion(decode(params)?))
+            }
             DaemonMethod::WorkspaceSetup => execute(
                 self.coordinator
                     .setup_workspace(decode::<crate::protocol::WorkspaceSetupParams>(params)?)
@@ -160,11 +168,11 @@ impl DaemonHandler {
                     crate::protocol::WorkspaceCreationGetParams,
                 >(params)?))
             }
-            _ => unreachable!("non-setup method routed to workspace setup"),
+            _ => unreachable!("non-public operation routed to public workspace handler"),
         }
     }
 
-    fn handle_navigation(
+    async fn handle_navigation(
         &self,
         method: DaemonMethod,
         params: Value,
@@ -177,7 +185,8 @@ impl DaemonHandler {
             )?)),
             DaemonMethod::WorkspacePathList => execute(
                 self.coordinator
-                    .list_workspace_paths(decode::<WorkspacePathListParams>(params)?),
+                    .list_workspace_paths(decode::<WorkspacePathListParams>(params)?)
+                    .await,
             ),
             _ => unreachable!("non-navigation method"),
         }
@@ -219,6 +228,10 @@ impl DaemonHandler {
         params: Value,
     ) -> Result<Value, RpcErrorPayload> {
         match method {
+            DaemonMethod::Doctor => {
+                decode::<crate::protocol::DoctorParams>(params)?;
+                encode(self.doctor.report(&self.coordinator).await)
+            }
             DaemonMethod::ControlSessionPrepare => execute(
                 self.coordinator
                     .prepare_control_session(decode(params)?)

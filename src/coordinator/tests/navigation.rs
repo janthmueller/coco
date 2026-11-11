@@ -1,6 +1,8 @@
 use super::*;
 use crate::protocol::{WorkspacePathGetParams, WorkspacePathListParams};
 
+mod recency;
+
 fn lookup(fixture: &Fixture, reference: &str) -> WorkspacePathGetParams {
     WorkspacePathGetParams {
         scope: RepositoryScope::repository(fixture.source.clone()),
@@ -67,7 +69,9 @@ async fn prepared_and_bound_workspaces_resolve_without_any_native_calls_or_mutat
         .coordinator
         .list_workspace_paths(WorkspacePathListParams {
             scope: RepositoryScope::AllRepositories,
+            include_recency: false,
         })
+        .await
         .unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].workspace_id, bound.id);
@@ -100,7 +104,9 @@ async fn closed_and_missing_worktrees_fail_explicit_lookup_and_are_omitted_from_
             .coordinator
             .list_workspace_paths(WorkspacePathListParams {
                 scope: RepositoryScope::AllRepositories,
+                include_recency: false,
             })
+            .await
             .unwrap()
             .is_empty()
     );
@@ -130,7 +136,9 @@ async fn closed_and_missing_worktrees_fail_explicit_lookup_and_are_omitted_from_
             .coordinator
             .list_workspace_paths(WorkspacePathListParams {
                 scope: RepositoryScope::AllRepositories,
+                include_recency: false,
             })
+            .await
             .unwrap()
             .is_empty()
     );
@@ -204,7 +212,9 @@ async fn navigation_uses_existing_repository_isolation_and_global_ambiguity_rule
         .coordinator
         .list_workspace_paths(WorkspacePathListParams {
             scope: RepositoryScope::repository(fixture.source.clone()),
+            include_recency: false,
         })
+        .await
         .unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].workspace_id, first.id);

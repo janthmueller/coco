@@ -10,7 +10,7 @@ mod support;
 #[path = "status_query/views.rs"]
 mod views;
 
-use support::{Fixture, names, row, usage};
+use support::{Fixture, names, row, row_with_recency, usage};
 
 #[tokio::test]
 async fn real_cli_obeys_explicit_cross_repo_keys_and_keeps_default_list_order() -> Result<()> {

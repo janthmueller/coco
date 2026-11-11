@@ -126,6 +126,17 @@ coco status -af --sort state,name --exclude-state unloaded
 
 Prepared workspaces stay visible. This only changes what you see; agents keep
 their current state. Rows appear and disappear as their states change.
+
+To bring recently active conversations to the top instead:
+
+```bash
+coco status -af --sort recent
+```
+
+Use `--sort state,recent` to keep states together and put recent activity first
+within each state. Workspaces without a reported activity time come last
+within their group.
+
 See [ordering and filters](../../reference/cli/#order-and-filter-the-overview)
 to choose other sort keys or show only particular states.
 
@@ -155,6 +166,7 @@ Use `coco cd` to enter a workspace's checkout in your current shell:
 coco cd fix/login
 coco cd                 # Choose a workspace
 coco cd -g              # Choose across repositories
+coco cd --sort name     # Choose by name
 ```
 
 First, enable the integration for your shell. Add the matching line to your
@@ -180,7 +192,9 @@ code "$(coco path fix/login)"
 `path` works without shell integration. It prints only the absolute path;
 selectors and errors use the terminal's error stream. It accepts the same
 workspace names, IDs, leading repository path, and `-g` scope as `cd`.
-Both selectors use name order.
+Both selectors show recently active conversations first, with a dim relative
+time when available. Use `--sort name` for name order. Workspaces remain
+selectable even when their conversation's last activity is unavailable.
 
 ## Find open terminals
 

@@ -71,6 +71,7 @@ read-only tools:
 | `workspaces.diff`   | Show changes made by one workspace          |
 | `turns.get`         | Check the outcome of one specific send      |
 | `workspaceCreations.get` | Recover a workspace creation receipt |
+| `workspaceDeletions.get` | Recover a workspace deletion result |
 | `signals.types`     | Discover signal definitions and permissions |
 | `signals.list`      | Read retained updates from agents           |
 
@@ -111,7 +112,7 @@ it disabled unless that is the access you intend to grant.
 ## Ask the user before changes
 
 For an interactive host, add `--confirm-changes` to show a CoCo-generated
-review before `workspaces.create`, `workspaces.send`, or `turns.interrupt`.
+review before creation, sending, interruption, closing, reopening, or deletion.
 The corresponding `--allow-*` grants are still required. Ordinary MCP setup
 does not ask questions unless this option is present.
 
@@ -124,6 +125,22 @@ those messages. After acceptance, normal operation and retry rules apply.
 
 `coco ai` enables these reviews automatically. See
 [Natural-language control](../ai/) for its optional automatic mode.
+
+## Allow cleanup
+
+Grant only the actions your application needs:
+
+```bash
+coco-mcp --repository /absolute/path/to/project --allow-close --allow-reopen --allow-delete
+```
+
+This adds `workspaces.close`, `workspaces.reopen`, and `workspaces.delete`.
+Closing frees the checkout while preserving work for later. Deletion removes
+the workspace and its associated resources, with explicit options to keep the
+conversation or branch. Active work and unsafe data loss remain protected.
+
+For deletion previews, recoverable operation IDs, and safe retries, see
+[Clean up from an application](../../reference/workspace-lifecycle/).
 
 ## Track a specific send
 

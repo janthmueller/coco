@@ -43,6 +43,11 @@ it concise, factual, and useful to the next maintainer.
 
 ## Current records
 
+- [`feature/navigation-recency`](feature/navigation-recency.md) - Recent-first
+  directory selection, compact ages, bounded optional native metadata and
+  opt-in recent activity ordering for status; subsequently approved checked
+  Control-MCP/AI cleanup and durable deletion receipts.
+
 - [`feature/ai-control`](feature/ai-control.md) - Native conversational control,
   automatic repository inventory, confirmations and recoverable context creation.
 

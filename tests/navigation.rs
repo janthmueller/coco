@@ -39,6 +39,8 @@ async fn path_preserves_explicit_repository_and_global_uuid_scopes() -> Result<(
         vec!["path", "fix/login", "-g"],
         vec!["-g", "path", "fix/login"],
         vec!["path", "118a6e27-e5d8-47fa-9213-7fa9f7c07fb4"],
+        vec!["path", "fix/login", "-g", "--sort", "name"],
+        vec!["path", "fix/login", "-g", "--sort", "recent"],
     ] {
         let output = fixture.run(&args).await?;
         ensure!(

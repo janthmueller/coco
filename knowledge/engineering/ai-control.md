@@ -98,7 +98,7 @@ does not inherit a new CoCo enforcement promise.
 ## Review and consent
 
 Default `--approval ask` enables `--confirm-changes` on each CoCo MCP endpoint.
-Before create/send/interrupt dispatch, that endpoint builds a deterministic
+Before changing dispatch, that endpoint builds a deterministic
 review from its actual typed inputs and fixed repository path, then requests
 a native MCP form with an explicit false-by-default confirmation. No model-
 provided boolean can satisfy it. Decline, malformed reply, cancellation, missing
@@ -106,7 +106,13 @@ capability and request failure are fail-closed before coordinator mutation.
 The bounded review is at most 16 KiB and waits at most five minutes; it is not
 a persisted second plan or a promise that moving Git references stop changing.
 
-Use native `approve` for reads and these three server-confirmed tools, avoiding
+Close/delete additionally use checked previews and pin the exact target/plan
+after consent. Reopen reviews and restores the exact closed UUID. Delete
+replays retained receipts without dispatch or new consent. See
+[Public workspace lifecycle](workspace-lifecycle.md) for cleanup keys, loss
+policies, uncertainty and recovery.
+
+Use native `approve` for reads and server-confirmed changing tools, avoiding
 a duplicate generic tool dialog that omits nested parameters from its main
 view. Keep native `prompt` as the fallback for other tools, and force human
 review rather than inheriting auto-review settings. An assistant-authored
@@ -144,9 +150,10 @@ or mirrored Codex history is needed.
 ## Current boundary
 
 Available control actions are existing inspection/signals, create/fork, send,
-creation/send lookup and explicitly granted strict/best-effort interruption.
-Close/delete, resource policy administration, hook management and interactive
-terminal/directory transfer are not secretly implemented through shell calls.
+creation/send/deletion lookup, checked close/reopen/delete and explicitly
+granted strict/best-effort interruption. Resource policy administration, hook
+management and interactive terminal/directory transfer are not secretly
+implemented through shell calls.
 The assistant gives an ordinary command for these. Per-session startup cost,
 lazy connection discovery, richer authoritative action previews and broader
 MCP coverage can be evaluated independently.

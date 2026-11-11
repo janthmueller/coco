@@ -376,9 +376,13 @@ Methods for the handed-off commands are:
 | `repository.list` | `coco repo list` / `repo ls` | not exposed |
 | `model.list` | `coco model list` / `model ls` | not exposed |
 | `workspace.create` | `coco create` | not exposed in v0 |
-| `workspace.close` | `coco close` | not exposed in v0 |
-| `workspace.reopen` | `coco reopen` | not exposed in v0 |
+| `workspace.setup` | external-client setup | `workspaces.create` with `--allow-create` |
+| `workspaceCreation.get` | no CLI command | `workspaceCreations.get` |
+| `workspace.close` | `coco close` | `workspaces.close` with `--allow-close` |
+| `workspace.reopen` | `coco reopen` | `workspaces.reopen` with `--allow-reopen` |
 | `workspace.delete` | `coco delete` | not exposed in v0 |
+| `workspace.deleteOperation` | no CLI command | `workspaces.delete` with `--allow-delete` |
+| `workspaceDeletion.get` | no CLI command | `workspaceDeletions.get` |
 | `workspace.list` | `coco list` / `coco ls`, targetless `status`, and interactive selectors | `workspaces.list` |
 | `workspace.get` | explicitly targeted `coco status` | `workspaces.status` |
 | `workspace.usage.list` | targetless `coco status --usage` composition | not exposed |
@@ -475,12 +479,15 @@ reserves stdout for MCP frames, logs only to stderr, and exits with a clear MCP
 error if the daemon is unavailable. It never opens SQLite, invokes Git, spawns
 the Codex App Server, or implements fallback orchestration.
 
-The default server advertises five read-only tools:
+The default server advertises eight read-only tools:
 
 ```text
 workspaces.list
 workspaces.status
 workspaces.diff
+turns.get
+workspaceCreations.get
+workspaceDeletions.get
 signals.types
 signals.list
 ```
@@ -488,9 +495,16 @@ signals.list
 Starting it with `--allow-send` additionally advertises `workspaces.send`. That
 tool requires workspace and message, accepts an optional caller operation ID,
 and delegates to `turn.start` with a generated ID when omitted.
-The flag is an explicit operator capability grant; v0 exposes no approval,
-cleanup, repository-registration, arbitrary-command, A2A ask, or integration
-tool.
+The flag is an explicit operator capability grant, independent of creation,
+interruption and checked cleanup. `--allow-create` exposes `workspaces.create`
+over public setup; `--allow-interrupt` exposes operation-scoped interruption.
+`--allow-close`, `--allow-reopen` and `--allow-delete` independently grant those
+workspace actions. Delete uses a separate durable client-operation receipt,
+not a direct public wrapper of private `workspace.delete`. Optional native
+forms review checked effects and pin the exact target/plan. See
+[Public workspace lifecycle](workspace-lifecycle.md) for schema-21 association,
+replay/recovery and receipt-retention boundaries. There is still no approval,
+repository-registration, arbitrary-command or A2A ask tool.
 
 Repeated `--allow-emit NAME@VERSION` grants opt into `signals.emit` for exact
 selected versions (a bare name means version 1). `--signal-catalog` selects an
@@ -1049,11 +1063,27 @@ Lists that do not request the closed phase exclude those rows before native
 inspection, so open/context pickers do not query unrelated retired threads.
 Choice times/order freeze before input. The prompt renderer owns responsive dim
 trailing metadata and drops it before truncating existing main content.
-Collection status/list ordering, resource collection and native thread-loading
-behavior retain their existing contracts.
-Directory navigation (`path`/shell-integrated `cd`) deliberately uses saved
-metadata and natural-name ordering instead: native recency lookup must not make
-entering an existing checkout depend on Codex or conversation availability.
+Default collection status/list ordering, resource collection and native
+thread-loading behavior retain their existing contracts. Status additionally
+offers an explicit `recent` sort key using the same already-projected native
+timestamp, validated as nonnegative and representable. Its normal direction is
+newest-first; `-recent` reverses known dates while retaining unknown-last
+handling. Existing multi-key priority and repository/name/ID fallbacks apply
+in one-shot, JSON and every follow snapshot. No extra read, column or schema
+change is introduced, and plain list ordering is unchanged.
+
+Directory navigation (`path`/shell-integrated `cd`) uses saved metadata for
+eligibility and direct lookup. Its recent-first interactive picker optionally
+enriches eligible bound paths through validated passive `thread/read` summaries
+(no turns), with at most four reads in flight and a one-second total budget.
+Partial/missing/invalid dates remain optional and transient; no read loads a
+thread or changes the saved binding. Shared CLI sort keys and relative labels
+apply without adding status details to the directory picker. Explicit targets
+and `--sort name` do not query native metadata. The typed path-list DTO defaults
+to no enrichment and omits absent dates; a CLI talking to an older daemon can
+retry the same read-only scope once without its optional recency field.
+Native lookup must never make an existing checkout unavailable. Final selected
+UUID revalidation and shell stdout isolation retain their existing contract.
 
 Legacy snapshots retain their old App Server generation and receipt time only
 as migration data. Startup or connection loss can mark such rows stale, but

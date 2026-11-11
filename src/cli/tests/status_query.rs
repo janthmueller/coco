@@ -29,6 +29,10 @@ fn multi_key_sort_accepts_commas_repeated_flags_and_per_key_direction() {
         vec!["coco", "status", "-r", "--sort", "-cpu"],
         vec!["coco", "status", "-u", "--sort", "-tokens,context"],
         vec!["coco", "status", "--sort", "repository,workspace"],
+        vec!["coco", "status", "--sort", "recent"],
+        vec!["coco", "status", "-af", "--sort", "state,recent"],
+        vec!["coco", "status", "--sort=-recent,name"],
+        vec!["coco", "status", "--sort", "state", "--sort", "recent"],
     ] {
         assert!(query(&arguments).is_ok(), "{arguments:?}");
     }
@@ -45,7 +49,8 @@ fn invalid_unknown_duplicate_and_unrequested_metric_keys_fail_before_rpc() {
         "name,-name",
         "cost",
         "clients",
-        "recent",
+        "recent,recent",
+        "recent,-recent",
         "--cpu",
         "memory",
         "cpu",
@@ -102,6 +107,9 @@ fn filters_repeat_combine_with_tree_follow_json_but_not_an_explicit_target() {
         vec!["coco", "status", "work", "--state", "ready"],
         vec!["coco", "status", "work", "--exclude-state", "unloaded"],
         vec!["coco", "status", "--tree", "--sort", "state"],
+        vec!["coco", "status", "--tree", "--sort", "recent"],
+        vec!["coco", "status", "work", "--sort", "recent"],
+        vec!["coco", "list", "--sort", "recent"],
         vec!["coco", "status", "--state", "closed"],
         vec!["coco", "status", "--state", "invalid"],
         vec!["coco", "status", "--exclude-state", ""],

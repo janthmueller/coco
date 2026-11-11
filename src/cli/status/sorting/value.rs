@@ -37,6 +37,11 @@ pub(super) fn read(
         SortField::State => SortValue::Integer(state_order(row.workspace.phase)),
         SortField::Name => SortValue::Text(row.workspace.name.clone()),
         SortField::Repo => SortValue::Text(row.repository.root_path.to_string_lossy().into_owned()),
+        SortField::Recent => {
+            let time = row.workspace.thread_runtime.as_ref()?.recency_at_ms?;
+            chrono::DateTime::from_timestamp_millis(time)?;
+            SortValue::Integer(u64::try_from(time).ok()?)
+        }
         SortField::Branch => SortValue::Text(
             row.workspace
                 .branch_name

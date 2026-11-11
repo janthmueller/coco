@@ -56,6 +56,7 @@ mod retirement_confirmation;
 mod retirement_deletion;
 mod retirement_deletion_recovery;
 mod retirement_dependencies;
+mod retirement_public;
 mod retirement_safety;
 mod setup;
 mod temporary;

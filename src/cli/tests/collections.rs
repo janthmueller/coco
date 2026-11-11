@@ -277,7 +277,7 @@ fn status_supports_collection_overviews_and_explicit_workspace_details() {
         vec!["coco", "status", "auth", "--sort", "state"],
         vec!["coco", "status", "--tree", "--json"],
         vec!["coco", "status", "--tree", "--sort", "name"],
-        vec!["coco", "status", "--sort", "recent"],
+        vec!["coco", "status", "--sort", "recency"],
     ] {
         assert!(
             Cli::try_parse_from(&arguments).is_err(),

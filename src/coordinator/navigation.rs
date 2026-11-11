@@ -1,4 +1,7 @@
 use std::path::PathBuf;
+use std::time::Duration;
+
+use futures_util::{StreamExt, stream};
 
 use super::{Coordinator, CoordinatorError};
 use crate::domain::{Workspace, WorkspaceAvailability, WorkspaceLifecycle};
@@ -6,6 +9,9 @@ use crate::protocol::{
     RepositoryScope, RepositorySummary, WorkspacePathEntry, WorkspacePathGetParams,
     WorkspacePathListParams,
 };
+
+const RECENCY_BUDGET: Duration = Duration::from_secs(1);
+const MAX_RECENCY_READS: usize = 4;
 
 impl Coordinator {
     pub(crate) fn workspace_path(
@@ -16,7 +22,7 @@ impl Coordinator {
         available_path(&workspace)
     }
 
-    pub(crate) fn list_workspace_paths(
+    pub(crate) async fn list_workspace_paths(
         &self,
         params: WorkspacePathListParams,
     ) -> Result<Vec<WorkspacePathEntry>, CoordinatorError> {
@@ -26,21 +32,48 @@ impl Coordinator {
             }
             RepositoryScope::AllRepositories => None,
         };
+        let workspaces = self.store.list_workspaces(repository_id.as_deref())?;
         let mut entries = Vec::new();
-        for workspace in self.store.list_workspaces(repository_id.as_deref())? {
-            let Ok(path) = available_path(&workspace) else {
+        let mut reads = Vec::new();
+        for workspace in &workspaces {
+            let Ok(path) = available_path(workspace) else {
                 continue;
             };
             let repository = self.repository_by_id(&workspace.repository_id)?;
             entries.push(WorkspacePathEntry {
-                workspace_id: workspace.id,
-                name: workspace.name,
+                workspace_id: workspace.id.clone(),
+                name: workspace.name.clone(),
                 repository: RepositorySummary::from(&repository),
                 path,
-                branch_name: workspace.branch_name,
+                branch_name: workspace.branch_name.clone(),
                 worktree_mode: workspace.worktree_mode,
+                recency_at_ms: None,
             });
+            if params.include_recency && workspace.codex_thread_id.is_some() {
+                let index = entries.len() - 1;
+                reads.push(async move {
+                    let time = self
+                        .read_bound_thread(workspace)
+                        .await
+                        .ok()
+                        .and_then(|native| native.recency_at_ms)
+                        .filter(|millis| *millis >= 0)
+                        .filter(|millis| {
+                            chrono::DateTime::from_timestamp_millis(*millis).is_some()
+                        });
+                    (index, time)
+                });
+            }
         }
+        // One budget for the whole picker, not one timeout per workspace.
+        // Cancelling these passive reads never changes the saved candidates.
+        let mut reads = stream::iter(reads).buffer_unordered(MAX_RECENCY_READS);
+        let _ = tokio::time::timeout(RECENCY_BUDGET, async {
+            while let Some((index, time)) = reads.next().await {
+                entries[index].recency_at_ms = time;
+            }
+        })
+        .await;
         Ok(entries)
     }
 }

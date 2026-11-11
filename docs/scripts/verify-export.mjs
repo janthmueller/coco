@@ -24,6 +24,7 @@ const requiredPages = [
   'reference/automation/index.html',
   'reference/turns/index.html',
   'reference/workspace-setup/index.html',
+  'reference/workspace-lifecycle/index.html',
   'reference/signals/index.html',
   'reference/resources/index.html',
   'reference/current-limitations/index.html',

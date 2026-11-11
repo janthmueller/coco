@@ -13,7 +13,7 @@ use serde_json::Value;
 use thiserror::Error;
 use uuid::Uuid;
 
-pub(crate) const SUPPORTED_SCHEMA_VERSION: i64 = 20;
+pub(crate) const SUPPORTED_SCHEMA_VERSION: i64 = 21;
 
 use crate::domain::{
     AuditOutcome, ContextMode, EventKind, EventSource, ProfileSnapshot, Repository, WorktreeMode,
@@ -34,6 +34,7 @@ mod signals;
 mod turn_control;
 mod usage;
 mod workspace_creations;
+mod workspace_deletions;
 mod workspaces;
 
 pub(crate) use diagnostics::{DiagnosticSnapshot, DiagnosticWorkspaceBinding};
@@ -67,6 +68,8 @@ pub enum StoreError {
     Poisoned,
     #[error("the creation operation ID is retired or already belongs to a different workspace")]
     CreationKeyRetired,
+    #[error("the deletion operation cannot be associated with this workspace or dispatched again")]
+    DeletionClaimMismatch,
     #[error("worker MCP binding evidence is missing; loading is blocked")]
     WorkerMcpBindingMissing,
     #[error("{entity} not found: {id}")]

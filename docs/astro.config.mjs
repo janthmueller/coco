@@ -61,6 +61,7 @@ export default defineConfig({
             { label: 'Automation reference', slug: 'reference/automation' },
             { label: 'Track a turn', slug: 'reference/turns' },
             { label: 'Create from an application', slug: 'reference/workspace-setup' },
+            { label: 'Clean up from an application', slug: 'reference/workspace-lifecycle' },
             { label: 'Signal reference', slug: 'reference/signals' },
             { label: 'Resource accounting', slug: 'reference/resources' },
             {

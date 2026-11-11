@@ -174,7 +174,7 @@ fn v19_migration_recovers_operation_bound_and_retired_thread_evidence() {
             .unwrap()
             .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        20
+        SUPPORTED_SCHEMA_VERSION
     );
     // These assertions deliberately inspect the new independent evidence, not
     // the existing fallback queries on workspaces/creation receipts.

@@ -7,6 +7,7 @@ mod retirement;
 mod temporary;
 mod turn_control;
 mod workspace_creations;
+mod workspace_deletions;
 
 use super::*;
 use crate::domain::{

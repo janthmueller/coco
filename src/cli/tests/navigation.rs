@@ -1,5 +1,5 @@
 use super::*;
-use crate::cli::args::{NavigationArgs, ShellCommand, ShellKind};
+use crate::cli::args::{NavigationArgs, ShellCommand, ShellKind, WorkspaceSort};
 
 #[test]
 fn path_and_cd_follow_existing_local_global_and_uuid_target_shapes() {
@@ -25,7 +25,20 @@ fn path_and_cd_follow_existing_local_global_and_uuid_target_shapes() {
         let parsed = Cli::try_parse_from(["coco", "../repo", command, "fix/login"]).unwrap();
         assert_eq!(parsed.scope_path, Some(PathBuf::from("../repo")));
         assert!(Cli::try_parse_from(["coco", command, "-a"]).is_err());
-        assert!(Cli::try_parse_from(["coco", command, "--sort", "recent"]).is_err());
+        for (args, expected) in [
+            (vec![], WorkspaceSort::Recent),
+            (vec!["--sort", "recent"], WorkspaceSort::Recent),
+            (vec!["--sort", "name"], WorkspaceSort::Name),
+        ] {
+            let mut argv = vec!["coco", command];
+            argv.extend(args);
+            let parsed = Cli::try_parse_from(argv).unwrap();
+            let (Command::Path(args) | Command::Cd(args)) = parsed.command else {
+                panic!("expected navigation");
+            };
+            assert_eq!(args.sort, expected);
+        }
+        assert!(Cli::try_parse_from(["coco", command, "--sort", "state"]).is_err());
     }
 }
 

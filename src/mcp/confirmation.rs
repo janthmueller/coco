@@ -4,7 +4,9 @@ use rmcp::service::ElicitationMode;
 use std::path::Path;
 use std::time::Duration;
 
+mod retirement;
 mod review;
+pub(super) use retirement::{reopen_review, retirement_review};
 pub(super) use review::{create_review, interrupt_review, send_review};
 
 impl McpServer {

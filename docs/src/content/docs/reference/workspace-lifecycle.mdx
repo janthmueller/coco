@@ -1,0 +1,168 @@
+---
+title: Clean up from an application
+description: Close, restore, or safely delete workspaces through MCP, including recoverable deletion results.
+---
+
+Use these tools to free workspace checkouts or remove finished work from an
+application. For terminal commands, see [Review and clean up](../../guides/cleanup/).
+
+## Enable the actions you need
+
+```bash
+coco-mcp --repository /absolute/path/to/project --allow-close --allow-reopen --allow-delete
+```
+
+The three permissions are independent. Creation, message sending, and
+interruption permissions do not grant cleanup. Each action is restricted to
+this repository, including when given a workspace UUID.
+Configure the server against a checkout that will remain available, rather
+than the worktree you plan to remove. Later calls still need a valid repository
+path to check their scope.
+
+For an interactive host, add `--confirm-changes` to review each action before
+it runs. `coco ai` enables these reviews by default. Applications can use the
+tools without dialogs by omitting that option; normal safety checks still apply.
+
+## Preview and delete one workspace
+
+Call `workspaces.delete` with:
+
+```json
+{
+  "workspace": "fix/login",
+  "operationId": "cleanup-42",
+  "dryRun": true
+}
+```
+
+`workspace` and `operationId` are required. The workspace may be open or closed.
+Save a unique deletion operation ID before executing the deletion.
+Applications should use the workspace UUID returned by creation or listing
+when available, so the target stays unambiguous if names are later reused.
+
+A preview returns `state: "preview"`, a checked `plan`, and `planSha256` in
+`structuredContent`. Inspect the resources, local changes, commits, and
+`plan.blockers`. A preview reserves no operation ID and removes nothing.
+
+To execute, repeat the arguments with `dryRun: false`. Supply the returned
+digest as `expectedPlanSha256` to require the reviewed plan:
+
+```json
+{
+  "workspace": "fix/login",
+  "operationId": "cleanup-42",
+  "dryRun": false,
+  "expectedPlanSha256": "<copy planSha256 from the preview>"
+}
+```
+
+The default removes the workspace, its worktree, its Codex conversation, and
+its CoCo-created branch. Existing branches adopted with `--checkout` are kept.
+
+### Choose what to keep or discard
+
+| Optional argument | Default | Effect |
+| --- | --- | --- |
+| `keepThread` | `false` | Keep the Codex conversation |
+| `keepBranch` | `false` | Keep the CoCo-created branch |
+| `discardChanges` | `false` | Permit loss of tracked, untracked, and ignored local changes |
+| `discardUnretainedCommits` | `false` | Permit commits to lose their last retaining branch, tag, or remote-tracking reference |
+| `dryRun` | `false` | Return a checked preview without deleting or reserving the key |
+| `expectedPlanSha256` | omitted | Reject a changed plan before starting a new deletion |
+
+Extra arguments are rejected. There is no `force`, `yes`, or model-supplied
+confirmation argument. Local changes and unretained commits require their
+separate explicit discard policies. Active work, attached Codex UIs, guards,
+and other safety blockers remain effective with every option.
+
+Keeping a conversation does **not** keep CoCo's send-operation and turn-outcome
+records. Read and save any needed outcomes before deletion. Close the workspace
+instead when you want those records to remain available.
+
+## Recover a deletion result
+
+`workspaceDeletions.get` is read-only and available without cleanup permissions:
+
+```json
+{"operationId": "cleanup-42"}
+```
+
+The response includes `operationId`, `state`, `repositoryId`, `repositoryPath`,
+`requestSha256`, `plan`, `planSha256`, `errorCode`, `createdAtMs`, and
+`updatedAtMs`. Unknown evidence has null plan, digests, error, and timestamps.
+Timestamps are observation times in Unix milliseconds. Treat digests as opaque.
+
+| State | Meaning |
+| --- | --- |
+| `unknown` | No result is available in this repository; this does not prove that no effects occurred |
+| `preview` | A read-only plan, returned only by `workspaces.delete` with `dryRun` |
+| `preparing` | The deletion key is reserved; dispatch or completion is not confirmed |
+| `deleting` | The checked deletion has been accepted; completion is not yet confirmed |
+| `deleted` | The requested checked deletion completed |
+| `rejected` | Deletion was rejected before its retirement operation was accepted; inspect `errorCode` and the saved plan |
+| `uncertain` | Completion is unconfirmed; some resources may already have been removed |
+
+A successful MCP call is not by itself confirmation of deletion. Check for
+`state: "deleted"`. Invalid input, scope failures, changed preview conditions,
+or transport failures can instead return a tool error before a receipt is saved.
+After a key is claimed, action failures are recorded in its receipt.
+
+### Safe retries
+
+After a lost response, repeat the same deletion request or query its original
+operation ID. Identical repeats return the retained attempt/result without
+dispatching another deletion. Changed workspace references or keep/discard
+policies under that key return `IDEMPOTENCY_CONFLICT`.
+
+Deletion keys are unique across repositories in this CoCo installation, within
+their own namespace separate from creation and send keys. Omitted boolean
+options and explicit `false` are equivalent. `dryRun` and the optional plan
+precondition are not new deletion intents; a retained result takes precedence
+over a newly supplied precondition.
+
+Results survive coordinator restarts and workspace deletion. Reusing the old
+workspace name for a new workspace does not redirect a retained operation.
+Receipt lookup starts no model work and reads no conversation history.
+
+Do not switch to a new key to retry a `preparing`, `deleting`, `uncertain`, or
+`unknown` result. Inspect the workspace and resources first. Restart recovery
+never automatically repeats discarding files from a worktree that remains.
+There is no rollback or exactly-once delivery guarantee. Lost or restored CoCo
+state can also lose operation evidence.
+
+`WORKSPACE_NOT_FOUND` means the requested workspace could not be resolved in
+this repository. `WORKSPACE_RETIREMENT_BLOCKED` means the plan changed or a
+safety check blocks it. A saved rejection can also carry `GUARD_DENIED` or
+`GUARD_FAILED_CLOSED`. Resolve blockers and review before deliberately making
+a new cleanup request. A known operation ID never grants access to another
+repository's receipt.
+
+## Close and restore work for later
+
+`workspaces.close` retains the workspace, branch, conversation, and turn-outcome
+records while removing the checked worktree:
+
+```json
+{"workspace": "fix/login", "dryRun": true}
+```
+
+Its response contains `workspace`, `plan`, `planSha256`, and `applied`.
+Set `dryRun: false` to apply. Optional arguments are `archiveThread` and
+`discardChanges` (both default `false`), and `expectedPlanSha256` to require a
+reviewed plan. New detached commits must have a retaining branch or tag before
+closing; close has no commit-discard option.
+
+Restore a closed workspace with `workspaces.reopen`:
+
+```json
+{"workspace": "fix/login"}
+```
+
+The response contains the restored `workspace`. Reopening preserves the exact
+workspace identity and retained checkout/conversation binding and starts no turn.
+
+Close and reopen do not take an `operationId` and have no deletion-style
+receipt. After a lost response, inspect `workspaces.status` before acting again.
+An already closed or already open target returns `INVALID_WORKSPACE_STATE`
+for close or reopen respectively. Neither action bypasses ownership, worktree,
+runtime, or guard checks.

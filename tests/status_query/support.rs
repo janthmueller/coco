@@ -134,6 +134,14 @@ pub(super) fn usage(row: &Value, total: u64) -> Value {
         "cost":{"status":"unavailable","reason":"notReported"}})
 }
 
+pub(super) fn row_with_recency(repo: &str, name: &str, phase: &str, time: Option<i64>) -> Value {
+    let mut row = row(repo, name, phase);
+    row["threadRuntime"] = json!({"status":{"type":"idle"},
+        "recencyAtMs":time,"runtimeGeneration":"test", "observedAtMs":1,
+        "isFresh":true});
+    row
+}
+
 pub(super) fn names(value: &Value) -> Vec<&str> {
     value["workspaces"]
         .as_array()

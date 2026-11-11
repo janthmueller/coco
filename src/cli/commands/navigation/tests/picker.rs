@@ -8,11 +8,14 @@ use super::*;
 use crate::cli::prompt::ReviewField;
 use crate::rpc::{RpcErrorPayload, RpcHandler, RpcServer};
 
+mod recency;
+
 struct Capture {
     calls: Mutex<Vec<(String, Value)>>,
     unavailable: bool,
     empty: bool,
     outside_repository: bool,
+    legacy_recency: bool,
 }
 
 #[async_trait]
@@ -22,7 +25,10 @@ impl RpcHandler for Capture {
         method: &str,
         params: Value,
     ) -> std::result::Result<Value, RpcErrorPayload> {
-        self.calls.lock().unwrap().push((method.to_owned(), params));
+        self.calls
+            .lock()
+            .unwrap()
+            .push((method.to_owned(), params.clone()));
         match method {
             "repository.resolve" if self.outside_repository => Err(RpcErrorPayload::new(
                 "NOT_A_GIT_REPOSITORY",
@@ -35,11 +41,18 @@ impl RpcHandler for Capture {
                 {"id":"repo", "displayName":"repo", "rootPath":"/repos/repo"}
             ])),
             "workspace.path.list" if self.empty => Ok(json!([])),
+            "workspace.path.list" if self.legacy_recency && params["includeRecency"] == true => {
+                Err(RpcErrorPayload::new(
+                    "INVALID_PARAMS",
+                    "unknown field includeRecency",
+                ))
+            }
             "workspace.path.list" => {
-                Ok(
-                    serde_json::to_value(vec![entry("feat/10", "repo"), entry("feat/2", "repo")])
-                        .unwrap(),
-                )
+                let mut recent = entry("feat/10", "repo");
+                if params["includeRecency"] == true {
+                    recent.recency_at_ms = Some(NOW);
+                }
+                Ok(serde_json::to_value(vec![recent, entry("feat/2", "repo")]).unwrap())
             }
             "workspace.path.get" if self.unavailable => Err(RpcErrorPayload::new(
                 "WORKTREE_UNAVAILABLE",
@@ -97,6 +110,33 @@ async fn exercise(
     empty: bool,
     interaction: &mut Select,
 ) -> (Result<PathBuf>, Vec<(String, Value)>) {
+    exercise_selection(
+        Options {
+            global,
+            unavailable,
+            empty,
+            sort: WorkspaceSort::Name,
+            ..Default::default()
+        },
+        interaction,
+    )
+    .await
+}
+
+#[derive(Default)]
+struct Options {
+    global: bool,
+    unavailable: bool,
+    empty: bool,
+    sort: WorkspaceSort,
+    legacy_recency: bool,
+    workspace: Option<String>,
+}
+
+async fn exercise_selection(
+    options: Options,
+    interaction: &mut Select,
+) -> (Result<PathBuf>, Vec<(String, Value)>) {
     let root = tempfile::tempdir().unwrap();
     let paths = CocoPaths {
         data_dir: root.path().to_owned(),
@@ -110,9 +150,10 @@ async fn exercise(
     };
     let capture = Arc::new(Capture {
         calls: Mutex::new(Vec::new()),
-        unavailable,
-        empty,
+        unavailable: options.unavailable,
+        empty: options.empty,
         outside_repository: interaction.outside_repository,
+        legacy_recency: options.legacy_recency,
     });
     let server = RpcServer::bind(&paths.socket_path, capture.clone())
         .await
@@ -128,9 +169,9 @@ async fn exercise(
                 "/repos/repo"
             }),
             has_explicit_path: false,
-            workspace: None,
-            global,
-            sort: WorkspaceSort::Name,
+            workspace: options.workspace,
+            global: options.global,
+            sort: options.sort,
         },
         interaction,
     )

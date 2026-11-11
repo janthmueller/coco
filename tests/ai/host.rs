@@ -25,7 +25,14 @@ impl Host {
         fixture.apply(&mut command);
         command.arg("--repository").arg(fixture.root.path());
         if granted {
-            command.args(["--allow-create", "--allow-send", "--allow-interrupt"]);
+            command.args([
+                "--allow-create",
+                "--allow-send",
+                "--allow-interrupt",
+                "--allow-delete",
+                "--allow-close",
+                "--allow-reopen",
+            ]);
         }
         if confirmation {
             command.arg("--confirm-changes");

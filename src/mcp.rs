@@ -32,6 +32,7 @@ const WORKSPACES_SEND: &str = "workspaces.send";
 const MAX_ERROR_CHARS: usize = 1_024;
 
 mod confirmation;
+mod lifecycle;
 mod setup;
 mod signals;
 mod turns;
@@ -82,24 +83,32 @@ struct McpServer {
 impl McpServer {
     fn new(
         repository: PathBuf,
-        allow_create: bool,
-        allow_send: bool,
-        allow_interrupt: bool,
+        permissions: ServePermissions,
         socket_path: PathBuf,
         allowed_signals: Vec<String>,
     ) -> Self {
         let mut tool_router = Self::tool_router()
             + Self::signal_tool_router()
             + Self::turn_tool_router()
-            + Self::setup_tool_router();
-        if !allow_create {
+            + Self::setup_tool_router()
+            + Self::lifecycle_tool_router();
+        if !permissions.allow_create {
             tool_router.disable_route("workspaces.create");
         }
-        if !allow_send {
+        if !permissions.allow_send {
             tool_router.disable_route(WORKSPACES_SEND);
         }
-        if !allow_interrupt {
+        if !permissions.allow_interrupt {
             tool_router.disable_route("turns.interrupt");
+        }
+        for (allowed, route) in [
+            (permissions.allow_delete, "workspaces.delete"),
+            (permissions.allow_close, "workspaces.close"),
+            (permissions.allow_reopen, "workspaces.reopen"),
+        ] {
+            if !allowed {
+                tool_router.disable_route(route);
+            }
         }
         if allowed_signals.is_empty() {
             tool_router.disable_route("signals.emit");
@@ -111,6 +120,9 @@ impl McpServer {
             ("workspaces.create", "Create workspace"),
             (WORKSPACES_SEND, "Send to workspace"),
             ("turns.interrupt", "Interrupt turn"),
+            ("workspaces.delete", "Delete workspace"),
+            ("workspaces.close", "Close workspace"),
+            ("workspaces.reopen", "Reopen workspace"),
         ] {
             if let Some(route) = tool_router.map.get_mut(name) {
                 route.attr.title = Some(format!("{action} ({})", repository.display()));
@@ -121,7 +133,7 @@ impl McpServer {
             dispatcher: Dispatcher::new(RpcClient::new(socket_path), repository),
             allowed_signals,
             signal_catalog: None,
-            confirm_changes: false,
+            confirm_changes: permissions.confirm_changes,
         }
     }
 }
@@ -439,22 +451,14 @@ fn bounded(message: String) -> String {
 
 pub async fn run_from_env(
     repository: PathBuf,
-    allow_create: bool,
-    allow_send: bool,
-    allow_interrupt: bool,
+    permissions: ServePermissions,
     allowed_signals: Vec<String>,
     signal_catalog: Option<PathBuf>,
-    confirm_changes: bool,
 ) -> anyhow::Result<()> {
     let paths = CocoPaths::from_env()?;
     serve(
         repository,
-        ServePermissions {
-            allow_create,
-            allow_send,
-            allow_interrupt,
-            confirm_changes,
-        },
+        permissions,
         paths.socket_path,
         allowed_signals,
         signal_catalog,
@@ -476,15 +480,7 @@ pub(crate) async fn serve(
     );
     let repository =
         std::path::absolute(repository).context("could not resolve repository path")?;
-    let mut server = McpServer::new(
-        repository,
-        permissions.allow_create,
-        permissions.allow_send,
-        permissions.allow_interrupt,
-        socket_path,
-        allowed_signals,
-    );
-    server.confirm_changes = permissions.confirm_changes;
+    let mut server = McpServer::new(repository, permissions, socket_path, allowed_signals);
     if let Some(directory) = signal_catalog {
         server.load_signal_catalog(directory).await?;
     }
@@ -500,10 +496,14 @@ pub(crate) async fn serve(
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct ServePermissions {
+/// Explicit capability grants for the MCP executable entry point.
+pub struct ServePermissions {
     pub allow_create: bool,
     pub allow_send: bool,
     pub allow_interrupt: bool,
+    pub allow_delete: bool,
+    pub allow_close: bool,
+    pub allow_reopen: bool,
     pub confirm_changes: bool,
 }
 

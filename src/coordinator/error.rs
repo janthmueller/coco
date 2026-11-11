@@ -173,6 +173,7 @@ impl CoordinatorError {
             Self::Store(StoreError::DecisionGenerationMismatch { .. }) => "STALE_DECISION",
             Self::Store(StoreError::InterruptModeConflict { .. }) => "TURN_INTERRUPT_MODE_CONFLICT",
             Self::Store(StoreError::CreationKeyRetired) => "IDEMPOTENCY_CONFLICT",
+            Self::Store(StoreError::DeletionClaimMismatch) => "DELETION_CLAIM_INVALID",
             Self::Store(StoreError::WorkerMcpBindingMissing) => "WORKER_MCP_BINDING_UNAVAILABLE",
             Self::Store(_) => "INTERNAL",
             Self::Profile(ProfileError::NotFound { .. }) => "PROFILE_NOT_FOUND",

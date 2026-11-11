@@ -9,6 +9,10 @@ updated: 2026-11-09
 
 # Workspace setup: return handoff to Palm
 
+Additive local follow-up: [Workspace cleanup](palm-workspace-lifecycle.md)
+describes separately granted close/reopen/delete and retained deletion outcomes.
+It is not part of the released checkpoint/builds documented below.
+
 ## Checkpoint and matching programs
 
 Implemented in **CoCo only** and published in **0.8.0**:

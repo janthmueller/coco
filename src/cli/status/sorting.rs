@@ -21,6 +21,7 @@ pub(in crate::cli) enum SortField {
     Repo,
     Model,
     Branch,
+    Recent,
     Memory,
     Cpu,
     Procs,
@@ -38,12 +39,18 @@ impl FromStr for SortKey {
     type Err = String;
 
     fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
-        let (descending, name) = value
+        let (reverse, name) = value
             .strip_prefix('-')
             .map_or((false, value), |name| (true, name));
+        let field = <SortField as ValueEnum>::from_str(name, false)?;
         Ok(Self {
-            field: <SortField as ValueEnum>::from_str(name, false)?,
-            descending,
+            field,
+            // Recent starts newest-first; '-' reverses a key's normal order.
+            descending: if field == SortField::Recent {
+                !reverse
+            } else {
+                reverse
+            },
         })
     }
 }

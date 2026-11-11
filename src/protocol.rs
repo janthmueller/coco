@@ -22,6 +22,7 @@ mod control;
 mod doctor;
 mod hooks;
 mod navigation;
+mod retirement;
 mod setup;
 mod signals;
 mod temporary;
@@ -33,6 +34,7 @@ pub(crate) use control::*;
 pub(crate) use doctor::*;
 pub(crate) use hooks::*;
 pub(crate) use navigation::*;
+pub(crate) use retirement::*;
 pub(crate) use setup::*;
 pub(crate) use signals::*;
 pub(crate) use temporary::*;
@@ -55,6 +57,8 @@ pub enum DaemonMethod {
     WorkspaceClose,
     WorkspaceReopen,
     WorkspaceDelete,
+    WorkspaceDeleteOperation,
+    WorkspaceDeletionGet,
     WorkspaceList,
     WorkspaceGet,
     WorkspacePathGet,
@@ -90,7 +94,7 @@ pub enum DaemonMethod {
 
 impl DaemonMethod {
     #[cfg(test)]
-    pub const ALL: [Self; 46] = [
+    pub const ALL: [Self; 48] = [
         Self::Health,
         Self::Doctor,
         Self::ControlSessionPrepare,
@@ -106,6 +110,8 @@ impl DaemonMethod {
         Self::WorkspaceClose,
         Self::WorkspaceReopen,
         Self::WorkspaceDelete,
+        Self::WorkspaceDeleteOperation,
+        Self::WorkspaceDeletionGet,
         Self::WorkspaceList,
         Self::WorkspaceGet,
         Self::WorkspacePathGet,
@@ -156,6 +162,8 @@ impl DaemonMethod {
             Self::WorkspaceClose => "workspace.close",
             Self::WorkspaceReopen => "workspace.reopen",
             Self::WorkspaceDelete => "workspace.delete",
+            Self::WorkspaceDeleteOperation => "workspace.deleteOperation",
+            Self::WorkspaceDeletionGet => "workspaceDeletion.get",
             Self::WorkspaceList => "workspace.list",
             Self::WorkspaceGet => "workspace.get",
             Self::WorkspacePathGet => "workspace.path.get",
@@ -207,6 +215,8 @@ impl DaemonMethod {
             "workspace.close" => Some(Self::WorkspaceClose),
             "workspace.reopen" => Some(Self::WorkspaceReopen),
             "workspace.delete" => Some(Self::WorkspaceDelete),
+            "workspace.deleteOperation" => Some(Self::WorkspaceDeleteOperation),
+            "workspaceDeletion.get" => Some(Self::WorkspaceDeletionGet),
             "workspace.list" => Some(Self::WorkspaceList),
             "workspace.get" => Some(Self::WorkspaceGet),
             "workspace.path.get" => Some(Self::WorkspacePathGet),
@@ -867,45 +877,6 @@ pub struct WorkspaceListItem {
     pub clients: Option<Vec<WorkspaceClient>>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum WorkspaceThreadDisposition {
-    Retain,
-    Archive,
-    Delete,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct WorkspaceRetirementPlan {
-    pub workspace_id: String,
-    pub workspace_name: String,
-    pub worktree_path: PathBuf,
-    pub remove_worktree: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub head_sha: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub branch_name: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thread_id: Option<String>,
-    pub thread_disposition: WorkspaceThreadDisposition,
-    pub delete_branch: bool,
-    pub tracked_changes: bool,
-    pub untracked_file_count: usize,
-    pub ignored_file_count: usize,
-    pub detached_commits: bool,
-    pub unretained_commit_count: usize,
-    pub descendant_thread_count: usize,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub blockers: Vec<String>,
-}
-
-impl WorkspaceRetirementPlan {
-    pub const fn has_local_changes(&self) -> bool {
-        self.tracked_changes || self.untracked_file_count > 0 || self.ignored_file_count > 0
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkspaceCloseResult {
@@ -1140,6 +1111,8 @@ mod tests {
                 "workspace.close",
                 "workspace.reopen",
                 "workspace.delete",
+                "workspace.deleteOperation",
+                "workspaceDeletion.get",
                 "workspace.list",
                 "workspace.get",
                 "workspace.path.get",

@@ -36,6 +36,76 @@ async fn recency_is_available_in_json_without_changing_status_or_list_order_and_
 }
 
 #[tokio::test]
+async fn explicit_recent_sort_is_global_composable_and_adds_no_columns_or_rpc() -> Result<()> {
+    let fixture = Fixture::new(
+        vec![vec![
+            row("alpha", "unknown", "prepared"),
+            row_with_recency("alpha", "old", "idle", Some(1_000)),
+            row_with_recency("zeta", "new", "idle", Some(3_000)),
+            row_with_recency("beta", "waiting", "waiting_for_input", Some(2_000)),
+        ]],
+        vec![],
+    )
+    .await?;
+    for (sort, expected) in [
+        ("recent", vec!["new", "waiting", "old", "unknown"]),
+        ("-recent", vec!["old", "waiting", "new", "unknown"]),
+        ("state,recent", vec!["waiting", "new", "old", "unknown"]),
+        ("repo,recent", vec!["old", "unknown", "waiting", "new"]),
+    ] {
+        let result = fixture
+            .json(&["status", "-a", "--sort", sort, "--json"])
+            .await?;
+        assert_eq!(names(&result), expected);
+        assert_eq!(result["schemaVersion"], 18);
+    }
+    let filtered = fixture
+        .json(&[
+            "status", "-a", "--state", "ready", "--sort", "state", "--sort", "recent", "--json",
+        ])
+        .await?;
+    assert_eq!(names(&filtered), ["new", "old"]);
+    let output = fixture.run(&["status", "-a", "--sort", "recent"]).await?;
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout)?;
+    assert!(text.find("new").unwrap() < text.find("waiting").unwrap());
+    assert!(text.find("waiting").unwrap() < text.find("old").unwrap());
+    assert!(text.find("old").unwrap() < text.find("unknown").unwrap());
+    assert!(!text.contains(" ago"));
+    assert!(!text.contains("RECENT"));
+    assert!(
+        fixture
+            .calls()
+            .iter()
+            .all(|call| call["method"] == "workspace.list")
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn recent_sort_treats_invalid_native_dates_as_unknown_but_keeps_epoch_known() -> Result<()> {
+    let fixture = Fixture::new(
+        vec![vec![
+            row("repo", "no-runtime", "prepared"),
+            row_with_recency("repo", "no-date", "idle", None),
+            row_with_recency("repo", "negative", "idle", Some(-1)),
+            row_with_recency("repo", "overflow", "idle", Some(i64::MAX)),
+            row_with_recency("repo", "epoch", "idle", Some(0)),
+        ]],
+        vec![],
+    )
+    .await?;
+    for sort in ["recent", "-recent"] {
+        let result = fixture.json(&["status", "--sort", sort, "--json"]).await?;
+        assert_eq!(
+            names(&result),
+            ["epoch", "negative", "no-date", "no-runtime", "overflow"]
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn reported_dollars_are_rendered_and_keep_estimate_provenance_in_json() -> Result<()> {
     let workspace = row("repo", "reported-cost", "idle");
     let mut observation = usage(&workspace, 100);

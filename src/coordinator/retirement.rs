@@ -19,6 +19,7 @@ use crate::protocol::{
 use crate::store::WorkspaceDeletionIntent;
 
 mod deletion;
+mod public;
 mod safety;
 
 struct PreparedClose {
@@ -325,6 +326,9 @@ impl Coordinator {
                     "could not recover interrupted workspace retirement"
                 ),
             }
+        }
+        if let Err(source) = self.store.recover_unassociated_deletions() {
+            warn!(%source, "could not reconcile unconfirmed public deletion claims");
         }
         recovered
     }

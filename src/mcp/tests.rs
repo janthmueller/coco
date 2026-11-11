@@ -76,15 +76,7 @@ fn fake_response(method: DaemonMethod) -> Value {
             "reason": "notReported",
             "checkedAtMs": 1,
         }),
-        DaemonMethod::RepositoryRegister | DaemonMethod::RepositoryRemove => json!({
-            "id": "repo-test",
-            "rootPath": "/repo",
-            "gitCommonDir": "/repo/.git",
-            "displayName": "repo",
-            "isLinkedWorktree": false,
-            "createdAtMs": 1,
-            "updatedAtMs": 1,
-        }),
+        DaemonMethod::RepositoryRegister | DaemonMethod::RepositoryRemove => fake_repository(),
         DaemonMethod::RepositoryResolve => json!({
             "id": "repo-test",
             "rootPath": "/repo",
@@ -102,6 +94,9 @@ fn fake_response(method: DaemonMethod) -> Value {
             "plan": fake_retirement_plan(),
             "applied": true,
         }),
+        DaemonMethod::WorkspaceDeleteOperation | DaemonMethod::WorkspaceDeletionGet => {
+            fake_deletion()
+        }
         DaemonMethod::WorkspaceList => json!([]),
         DaemonMethod::WorkspaceAttach => json!({
             "workspace": fake_workspace(),
@@ -263,13 +258,31 @@ fn fake_retirement_plan() -> Value {
         "worktreePath": "/worktree",
         "branchName": "coco/workspace",
         "threadId": "thread-test",
+        "removeWorktree": true,
         "threadDisposition": "retain",
         "deleteBranch": false,
         "trackedChanges": false,
         "untrackedFileCount": 0,
         "ignoredFileCount": 0,
         "detachedCommits": false,
+        "unretainedCommitCount": 0,
         "descendantThreadCount": 0,
+    })
+}
+
+fn fake_repository() -> Value {
+    json!({
+        "id": "repo-test", "rootPath": "/repo", "gitCommonDir": "/repo/.git",
+        "displayName": "repo", "isLinkedWorktree": false, "createdAtMs": 1, "updatedAtMs": 1,
+    })
+}
+
+fn fake_deletion() -> Value {
+    json!({
+        "operationId": "delete-key", "state": "preview", "repositoryId": "repo-test",
+        "repositoryPath": "/repo", "requestSha256": null,
+        "plan": fake_retirement_plan(), "planSha256": null,
+        "errorCode": null, "createdAtMs": null, "updatedAtMs": null,
     })
 }
 
@@ -278,13 +291,19 @@ fn workspaces_send_is_only_exposed_when_enabled() {
     let socket = PathBuf::from("/tmp/cocod-test.sock");
     let read_only = McpServer::new(
         PathBuf::from("/repo"),
-        false,
-        false,
-        false,
+        ServePermissions::default(),
         socket.clone(),
         vec![],
     );
-    let writable = McpServer::new(PathBuf::from("/repo"), false, true, false, socket, vec![]);
+    let writable = McpServer::new(
+        PathBuf::from("/repo"),
+        ServePermissions {
+            allow_send: true,
+            ..Default::default()
+        },
+        socket,
+        vec![],
+    );
 
     let read_only_names: Vec<_> = read_only
         .tool_router
@@ -299,6 +318,7 @@ fn workspaces_send_is_only_exposed_when_enabled() {
             "signals.types",
             "turns.get",
             "workspaceCreations.get",
+            "workspaceDeletions.get",
             WORKSPACES_DIFF,
             WORKSPACES_LIST,
             WORKSPACES_STATUS
@@ -321,6 +341,7 @@ fn workspaces_send_is_only_exposed_when_enabled() {
             "signals.types",
             "turns.get",
             "workspaceCreations.get",
+            "workspaceDeletions.get",
             WORKSPACES_DIFF,
             WORKSPACES_LIST,
             WORKSPACES_SEND,

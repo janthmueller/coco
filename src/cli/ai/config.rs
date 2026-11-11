@@ -9,6 +9,7 @@ const READ_TOOLS: &[&str] = &[
     "workspaces.status",
     "workspaces.diff",
     "workspaceCreations.get",
+    "workspaceDeletions.get",
     "turns.get",
     "signals.types",
     "signals.list",
@@ -160,14 +161,28 @@ fn server_config(
         .collect::<Vec<_>>();
     if !args.read_only {
         arguments.extend(
-            ["--allow-create", "--allow-send", "--allow-interrupt"]
-                .map(|value| Value::String(value.into())),
+            [
+                "--allow-create",
+                "--allow-send",
+                "--allow-interrupt",
+                "--allow-delete",
+                "--allow-close",
+                "--allow-reopen",
+            ]
+            .map(|value| Value::String(value.into())),
         );
         if args.approval == AiApproval::Ask {
             arguments.push(Value::String("--confirm-changes".into()));
         }
     }
-    let confirmed = ["workspaces.create", "workspaces.send", "turns.interrupt"];
+    let confirmed = [
+        "workspaces.create",
+        "workspaces.send",
+        "turns.interrupt",
+        "workspaces.delete",
+        "workspaces.close",
+        "workspaces.reopen",
+    ];
     let safe_tools = READ_TOOLS.iter().copied().chain(
         confirmed
             .into_iter()

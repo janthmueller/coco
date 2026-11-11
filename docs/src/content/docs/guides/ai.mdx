@@ -72,19 +72,23 @@ coco ai --approval auto "Create review/api from main"
 
 The default is `--approval ask`. Automatic approval keeps CoCo's normal safety
 checks and workspace permissions, but lets the assistant create workspaces,
-send instructions, and request interruption. Use it only when you intend that
+send instructions, request interruption, and close, reopen, or delete workspaces.
+Discarding local changes or unretained commits still requires explicit options.
+Use it only when you intend that
 access. Describing an automatic mode in chat does not change this setting.
 
 ## Continue working
 
 You can inspect workspaces and diffs, create fresh or forked workspaces, send
-instructions, and check a specific send's outcome. An interrupt request still
+instructions, check a specific send's outcome, and clean up finished work.
+Close/delete reviews show the exact workspace and resources affected. An interrupt request still
 uses the [documented turn-control rules](../../reference/turns/).
 
 Choose the model for the control conversation with `coco ai -m MODEL`. This
 does not change existing workspace models.
 
-Use the ordinary commands for cleanup, limits, and terminal navigation. For
+For automated cleanup, see [the cleanup contract](../../reference/workspace-lifecycle/).
+Use the ordinary commands for limits and terminal navigation. For
 example, leave the control conversation and open a created workspace with:
 
 ```bash

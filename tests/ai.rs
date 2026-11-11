@@ -5,6 +5,8 @@ use serde_json::json;
 
 #[path = "ai/host.rs"]
 mod host;
+#[path = "ai/lifecycle.rs"]
+mod lifecycle;
 #[path = "ai/support.rs"]
 mod support;
 use host::Host;

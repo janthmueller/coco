@@ -43,6 +43,8 @@ agents.
   attempts, without conversation-history mirroring.
 - [Public workspace setup](workspace-setup.md) - Separately granted idempotent
   creation, deletion-safe receipts, immutable worker sources and native proofs.
+- [Public workspace lifecycle](workspace-lifecycle.md) - Separately granted
+  checked close/reopen/delete, pinned reviews and retained deletion results.
 - [Native AI control](ai-control.md) - Conversational repository selection,
   scoped existing tools, native confirmations and independent context creation.
 - [Agent-emitted signals](signals.md) - Defines explicit opt-in publication,
