@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.10.0 (2026-11-11)
+
+### Documentation
+
+- Record verified 0.9.0 release
+  ([`b17e770`](https://github.com/janthmueller/coco/commit/b17e770130960c5d9cfc163b00222cac1be850d0))
+
+### Features
+
+- Add recent navigation and checked MCP workspace cleanup
+  ([`a2b94cc`](https://github.com/janthmueller/coco/commit/a2b94cc5d895e646f314efc367155dadacc4ec8a))
+
+
 ## v0.9.0 (2026-11-10)
 
 ### Documentation
