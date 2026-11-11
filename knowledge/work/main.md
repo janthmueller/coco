@@ -30,10 +30,50 @@ architectural baseline for CoCo.
 - Source/review evidence lives in
   [the branch record](feature/navigation-recency.md). No Palm implementation,
   installed service/configuration change or real model call is part of delivery.
-- [ ] Commit and integrate the complete reviewed source without losing edits.
-- [ ] Verify hosted Rust and static documentation for the pushed source SHA.
-- [ ] Verify stable rehearsal and publish through the guarded workflow.
-- [ ] Verify artifacts/registry, update handoff and synchronize clean main.
+- [x] Commit and integrate the complete reviewed source without losing edits.
+- [x] Verify hosted Rust and static documentation for the pushed source SHA.
+- [x] Verify stable rehearsal and publish through the guarded workflow.
+- [x] Verify artifacts/registry, update handoff and synchronize release main.
+- Source `a2b94cc5d895e646f314efc367155dadacc4ec8a` is committed and
+  fast-forwarded onto main, pushed normally after refreshing origin. Fresh
+  local format, warnings-denied Clippy and all-target offline tests pass
+  (845 library + 46 integration = 891; opt-in native/model checks ignored).
+  The automatic-alpha variable is confirmed false and remains unchanged.
+- Exact-source Rust run `43067869722` is successful, including fresh dependency
+  policy, package verification, Flake checks and Linux/macOS binary smoke.
+  Documentation run `43067869313` successfully built and deployed Pages.
+- Remote main is rechecked at the exact tested source before dispatching
+  stable `publish=false` rehearsal `43070100829`. This delivery record stayed
+  local throughout the tested-tip rehearsal and publication.
+- Rehearsal succeeds with expected version 0.10.0 / tag v0.10.0 and synchronized
+  Cargo metadata; binary/registry upload jobs are skipped. Remote main remains
+  the tested source before the publishing stable dispatch.
+- Publishing workflow: `43070538136`, stable channel with `publish=true` on
+  source `a2b94cc5d895e646f314efc367155dadacc4ec8a`.
+- Version/tag creation succeeds: v0.10.0 points to
+  `a3e68a8832a91f6b508e0e92610effad38bc6bcc`, a direct child of the tested
+  source changing only Cargo metadata and the changelog. Local main is
+  fast-forwarded to that stamp without overwriting these delivery notes.
+- Registry publication job succeeds. The public Cargo sparse index confirms
+  non-yanked `codex-coordinator` 0.10.0 with checksum
+  `d3c9d245c54a8abebacea8532f80c62f234304e1d99ec9aeef6b61a36afd25dc`.
+  The separate crates.io web API returns HTTP 403 in this environment; use
+  the actual Cargo index as independent registry evidence instead.
+- Publishing run `43070538136` finishes successfully for version/tag, crates.io
+  and Linux x86_64/macOS arm64 archive build/smoke/upload jobs. GitHub release
+  is public, non-draft and non-prerelease, with both archives, their SHA-256
+  files and Cargo.lock uploaded. Both downloaded archives match their hashes
+  and contain all three executables, README and license; none was executed
+  locally. Handoff now points to verified 0.10.0 builds and exact commits.
+- Non-blocking existing packaging follow-up: checksum manifests include the
+  CI-relative `dist/` prefix. For independent verification, normalize that
+  filename prefix in the streamed manifest without changing the digest. A
+  future packaging-only change can emit portable basenames; do not replace
+  published artifacts or broaden this release into another source change.
+- Automatic-alpha remains false. No operator installation/service/configuration
+  change, real model call or Palm edit occurred. Checkpoint these delivery-only
+  notes and the handoff, push normally, then confirm local main is clean and
+  synchronized with origin. No further publication is needed for those notes.
 
 ### Directory-picker recency review — 2026-11-11
 

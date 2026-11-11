@@ -3,7 +3,7 @@ type: Integration Handoff
 title: CoCo workspace cleanup for Palm
 description: Describes the additive public cleanup tools, permissions, durable deletion outcomes and integration safety limits.
 tags: [handoff, palm, mcp, cleanup, recovery]
-status: publication-pending
+status: released
 updated: 2026-11-11
 ---
 
@@ -11,33 +11,36 @@ updated: 2026-11-11
 
 ## Availability
 
-This additive CoCo slice was implemented on `feature/navigation-recency`,
-alongside navigation/status work. Integration and guarded stable publication
-were authorized on 2026-11-11; actual source commit, workflow and release
-evidence are recorded in `knowledge/work/main.md`. Publication is pending
-until those checks finish. No Palm implementation, operator-service restart
-or real model invocation is part of delivery.
+Available in **CoCo 0.10.0**, published on 2026-11-11:
+[GitHub release](https://github.com/janthmueller/coco/releases/tag/v0.10.0).
+The implementation commit is `a2b94cc5d895e646f314efc367155dadacc4ec8a`;
+tag v0.10.0 points to the CI version stamp
+`a3e68a8832a91f6b508e0e92610effad38bc6bcc`. Workflow and registry evidence
+are recorded in `knowledge/work/main.md`. This is generic CoCo cleanup,
+available to Palm and `coco ai`; no Palm implementation, operator-service
+restart or real model invocation was part of delivery.
 
-The locally tested package still reports 0.9.0; that number alone does not
-establish that the binaries include these tools. Use matching programs built
-from the complete reviewed source until a newer publication is confirmed.
-An older released installation does not gain the API from this document.
+Use matching 0.10.0 `coco`, `cocod` and `coco-mcp` programs from the release,
+Cargo package or tagged source. Earlier released versions do not expose these
+tools. Pre-release local debug programs may still report 0.9.0; rebuild from
+the tag rather than treating that old version number as capability evidence.
 
 State migration adds schema 21. Test with isolated paths and matching builds;
 an older program cannot reopen migrated state. Do not silently replace Palm's
-operator coordinator. Final verification is recorded in the branch work document.
+operator coordinator. Source verification is recorded in the branch work document;
+delivery verification is recorded in main's working document.
 
-Matching local Linux debug programs (SHA-256, from the tested working tree):
+Verified release archives (SHA-256):
 
-| Program | Absolute path | SHA-256 |
-| --- | --- | --- |
-| `coco` | `/home/jan/coco/target/debug/coco` | `6b88b4f2f5d36839c6b87c8d937685b6f240597fb1fba509c984582e2fb71073` |
-| `cocod` | `/home/jan/coco/target/debug/cocod` | `880e0ab270eaa31e2b6e9e971e617a223f2b59548492a3bcda1c184e9a126016` |
-| `coco-mcp` | `/home/jan/coco/target/debug/coco-mcp` | `7daa4c8cb10479a3e36f0232846bc65f2f7fedebc552c53619a97aef844a46cc` |
+| Archive | SHA-256 |
+| --- | --- |
+| `coco-linux-ubuntu-22.04-x86_64-v0.10.0.tar.gz` | `15c019816d81dae409d489e91a52e6936fd819585305497eb973da71ecafa5da` |
+| `coco-macos-15-arm64-v0.10.0.tar.gz` | `6e23522d5957fe7ba7e9063b420137853942e08d817642638a959665a25f9038` |
 
-These were built by the full all-target gate below. Rebuilding can change hashes.
-Do not substitute an older release that happens to report 0.9.0. The matching
-source commit and confirmed release will be recorded with delivery evidence.
+Each archive contains all three executables, README and license. Registry
+publication and both native version/help smoke tests passed; downloaded
+archives independently match the published checksums. The Cargo sparse index
+also confirms non-yanked `codex-coordinator` 0.10.0.
 
 ## Public API
 
