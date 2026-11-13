@@ -51,6 +51,8 @@ mod doctor;
 mod fork;
 #[path = "process_smoke/fresh_jump.rs"]
 mod fresh_jump;
+#[path = "process_smoke/git_source.rs"]
+mod git_source;
 #[path = "process_smoke/hooks.rs"]
 mod hooks;
 #[path = "process_smoke/lifecycle.rs"]

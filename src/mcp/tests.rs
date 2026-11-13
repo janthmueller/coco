@@ -57,6 +57,7 @@ fn fake_response(method: DaemonMethod) -> Value {
     match method {
         DaemonMethod::WorkspaceSetup | DaemonMethod::WorkspaceCreationGet => fake_creation(),
         DaemonMethod::Doctor
+        | DaemonMethod::RepositoryGitInspect
         | DaemonMethod::ControlSessionPrepare
         | DaemonMethod::WorkspacePathGet
         | DaemonMethod::WorkspacePathList => unreachable!("CLI-only method"),

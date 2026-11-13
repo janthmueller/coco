@@ -14,6 +14,7 @@ mod diff;
 mod local_state;
 mod repository;
 mod retirement;
+mod source;
 mod worktree;
 
 #[cfg(test)]

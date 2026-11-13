@@ -808,6 +808,31 @@ later values behind truncation. The CLI performs only read-only discovery
 before that final selection and does not submit `workspace.create` when the
 guide is cancelled.
 
+Guided code selection displays the selected checkout's actual branch and
+short commit, or an explicit detached commit, rather than a bare `HEAD`.
+Its Branch picker lists the current local branch first, other local branches
+in natural-name order and then cached remote-tracking branches. Symbolic
+remote HEAD aliases are omitted and inspection never fetches. A branch already
+checked out remains a valid code base; Existing branch adoption instead offers
+only free local branches. Other revision retains manual commit-ish input.
+The final review resolves the chosen base again and includes its exact short
+commit. Guided creation supplies the full reviewed base SHA as an expectation;
+a changed resolved base fails with `CREATE_BASE_CHANGED` before managed
+workspace provisioning rather than starting at an unreviewed commit. Ordinary
+noninteractive revision semantics remain unchanged.
+
+For the invoking-checkout default, a clean source skips the local-change
+question. Tracked-only state offers Don't copy / Copy tracked; any ordinary
+untracked files instead offer Don't copy / Copy tracked + untracked, with
+category counts. The latter remains the existing both-category policy even
+when no tracked file currently differs. Ignored include files keep their
+independent convention. Counts are re-read before final review; a change
+reconsiders the copy policy without automatically broadening it. Tab still
+applies the safe Don't copy default. Explicit carry presets keep their intent,
+including for currently empty categories. Backend snapshot/binding checks
+remain authoritative for changes after review; late untracked files still
+block tracked-only carry.
+
 1. **Code base.** `--base <revision>` resolves a commit and defaults to the
    invoking checkout's `HEAD`. `--base-workspace <workspace>` instead uses
    that same-repository workspace's committed `HEAD`.
@@ -834,8 +859,9 @@ guide is cancelled.
    when the invoking checkout is dirty. The CLI warns and leaves its tracked
    and ordinary untracked changes there. `--carry-changes` instead preserves
    staged and unstaged tracked changes with separate binary patches; ordinary
-   non-ignored untracked files block that mode, and the walkthrough states this
-   before selection.
+   non-ignored untracked files block that mode. When they are present, the
+   walkthrough omits tracked-only copying and offers tracked-plus-untracked
+   copying instead.
    `--carry-untracked` also copies ordinary non-ignored untracked files and
    requires tracked carry. `--dirty`/`-d` is the CLI shorthand for both. It is
    independent from detached mode, so `-dD` combines dirty-state carry with

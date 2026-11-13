@@ -294,6 +294,7 @@ async fn real_daemon_and_cli_complete_a_fake_codex_turn() -> Result<()> {
         "prepared workspace worktree does not exist"
     );
     super::navigation::verify(&paths, &repository, &worktree, &observed_requests).await?;
+    super::git_source::verify(&paths, &repository, &worktree, &observed_requests).await?;
 
     let missing_message = capture_cli(&paths, &repository, &["send", WORKSPACE_NAME], None).await?;
     ensure!(

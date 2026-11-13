@@ -13,6 +13,7 @@ use super::workspace_picker;
 
 mod context;
 mod defaults;
+mod git_source;
 mod temporary;
 
 pub(super) fn walkthrough_requested(args: &CreateArgs) -> bool {
@@ -25,10 +26,29 @@ pub(super) async fn walkthrough(
     args: CreateArgs,
     interaction: &mut dyn Interaction,
 ) -> Result<CreateArgs> {
+    let inspector = RpcClient::new(paths.socket_path.clone());
+    walkthrough_with_inspector(paths, repository_path, args, interaction, &inspector).await
+}
+
+async fn walkthrough_with_inspector<'a>(
+    paths: &CocoPaths,
+    repository_path: PathBuf,
+    args: CreateArgs,
+    interaction: &'a mut dyn Interaction,
+    inspector: &'a dyn git_source::GitInspector,
+) -> Result<CreateArgs> {
     validate_local_change_flags(args.carry_changes, args.carry_untracked, args.dirty)?;
     let (args, selected_context_source) =
         resolve_current_context_selection(paths, &repository_path, args).await?;
     let client = RpcClient::new(paths.socket_path.clone());
+    let source = inspector
+        .inspect(crate::protocol::RepositoryGitInspectParams {
+            path: repository_path.clone(),
+            base: None,
+            include_branches: false,
+        })
+        .await?;
+    let changes_preset = args.carry_changes || args.carry_untracked || args.dirty;
     CreateWalkthrough {
         args,
         repository_path,
@@ -37,6 +57,11 @@ pub(super) async fn walkthrough(
         interaction: defaults::DefaultsInteraction::new(interaction),
         selected_code_workspace: None,
         selected_context_source,
+        inspector,
+        source,
+        reviewed_code: None,
+        changes_prompted: None,
+        changes_preset,
     }
     .run()
     .await
@@ -86,12 +111,17 @@ struct CreateWalkthrough<'a> {
     interaction: defaults::DefaultsInteraction<'a>,
     selected_code_workspace: Option<String>,
     selected_context_source: Option<String>,
+    inspector: &'a dyn git_source::GitInspector,
+    source: crate::protocol::RepositoryGitState,
+    reviewed_code: Option<String>,
+    changes_prompted: Option<crate::protocol::GitChangeSummary>,
+    changes_preset: bool,
 }
 
 impl CreateWalkthrough<'_> {
     async fn run(mut self) -> Result<CreateArgs> {
         self.prompt_name()?;
-        self.prompt_worktree()?;
+        self.prompt_worktree().await?;
         self.prompt_code_base().await?;
         self.prompt_local_changes()?;
         self.prompt_context().await?;
@@ -99,6 +129,7 @@ impl CreateWalkthrough<'_> {
         self.prompt_model().await?;
         self.prompt_temporary()?;
         self.prompt_post_action()?;
+        self.prepare_git_review().await?;
         self.confirm_creation()?;
         Ok(self.args)
     }
@@ -106,111 +137,6 @@ impl CreateWalkthrough<'_> {
     fn prompt_name(&mut self) -> Result<()> {
         if self.args.name.is_none() {
             self.args.name = Some(self.interaction.text("Workspace name")?);
-        }
-        Ok(())
-    }
-
-    fn prompt_worktree(&mut self) -> Result<()> {
-        if self.args.branch.is_some() || self.args.checkout.is_some() || self.args.detached {
-            return Ok(());
-        }
-        let name = self
-            .args
-            .name
-            .as_deref()
-            .expect("the walkthrough resolves the workspace name first");
-        let default_branch = name.to_owned();
-        let mut choices = vec![
-            Choice::new("New branch", Some(default_branch)).with_default_marker(),
-            Choice::new("Custom branch", None),
-        ];
-        let mut actions = vec![WorktreeChoice::DefaultBranch, WorktreeChoice::NamedBranch];
-        if !has_explicit_code_base(&self.args) {
-            choices.push(Choice::new("Existing branch", None));
-            actions.push(WorktreeChoice::ExistingBranch);
-        }
-        choices.push(Choice::new("Detached HEAD", None));
-        actions.push(WorktreeChoice::Detached);
-
-        let selected = self.interaction.select("Worktree", &choices)?;
-        match actions[selected] {
-            WorktreeChoice::DefaultBranch => {}
-            WorktreeChoice::NamedBranch => {
-                self.args.branch = Some(self.interaction.text("Branch name")?);
-            }
-            WorktreeChoice::ExistingBranch => {
-                self.args.checkout = Some(self.interaction.text("Existing branch")?);
-            }
-            WorktreeChoice::Detached => self.args.detached = true,
-        }
-        Ok(())
-    }
-
-    async fn prompt_code_base(&mut self) -> Result<()> {
-        if self.args.checkout.is_some()
-            || self.args.base.is_some()
-            || self.args.base_workspace.is_some()
-            || self.args.fork_from.is_some()
-        {
-            return Ok(());
-        }
-        loop {
-            let choices = [
-                Choice::new("Current HEAD", None).with_default_marker(),
-                Choice::new("Workspace", None),
-                Choice::new("Git revision", Some("branch, tag, or commit".to_owned())),
-            ];
-            match self.interaction.select("Code", &choices)? {
-                0 => return Ok(()),
-                1 => {
-                    let mut workspaces = self.list_workspaces(None).await?;
-                    workspaces.retain(|item| item.workspace.worktree_path.is_some());
-                    if workspaces.is_empty() {
-                        self.interaction
-                            .notice("No workspace with reusable code found.")?;
-                        continue;
-                    }
-                    let selected = select_workspace(
-                        &mut self.interaction,
-                        "Code from workspace",
-                        &mut workspaces,
-                        self.args.sort,
-                    )?;
-                    self.args.base_workspace = Some(selected.id);
-                    self.selected_code_workspace = Some(selected.name);
-                    return Ok(());
-                }
-                2 => {
-                    self.args.base = Some(self.interaction.text("Git revision")?);
-                    return Ok(());
-                }
-                _ => unreachable!("the picker returns an index within its choices"),
-            }
-        }
-    }
-
-    fn prompt_local_changes(&mut self) -> Result<()> {
-        let explicit = self.args.carry_changes || self.args.carry_untracked || self.args.dirty;
-        let uses_invoking_head = self.args.checkout.is_none()
-            && self.args.base.is_none()
-            && self.args.base_workspace.is_none()
-            && self.args.fork_from.is_none();
-        if explicit || !uses_invoking_head {
-            return Ok(());
-        }
-        let choices = [
-            Choice::new("Don't copy", None).with_default_marker(),
-            Choice::new(
-                "Copy tracked",
-                Some("fails if non-ignored untracked files exist".to_owned()),
-            ),
-            Choice::new("Copy tracked + untracked", None),
-        ];
-        match self.interaction.select("Git changes", &choices)? {
-            0 => {}
-            1 => self.args.carry_changes = true,
-            2 => self.args.dirty = true,
-            _ => unreachable!("the picker returns an index within its choices"),
         }
         Ok(())
     }
@@ -391,11 +317,18 @@ impl CreateWalkthrough<'_> {
     }
 
     fn confirm_creation(&mut self) -> Result<()> {
-        let fields = create_review_fields(
+        let mut fields = create_review_fields(
             &self.args,
             self.selected_code_workspace.as_deref(),
             self.selected_context_source.as_deref(),
         );
+        if let Some(code) = &self.reviewed_code {
+            fields
+                .iter_mut()
+                .find(|field| field.label == "Code")
+                .unwrap()
+                .value = code.clone();
+        }
         let choices = [Choice::new("Create", None), Choice::new("Cancel", None)];
         if self
             .interaction

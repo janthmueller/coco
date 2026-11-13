@@ -11,6 +11,7 @@ use super::{Git, GitError, WorktreeTarget};
 
 mod local_state;
 mod retirement;
+mod source;
 mod worktree_modes;
 
 struct Fixture {

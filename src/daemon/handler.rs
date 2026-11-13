@@ -13,13 +13,14 @@ use crate::daemon::execution::{ContainmentError, WorkspaceExecutionError};
 use crate::protocol::{
     AccountQuotaGetParams, AuditRecordParams, DaemonMethod, DecisionGetParams,
     DecisionRespondParams, EventListParams, HealthParams, HealthResult, HookDeliveryListParams,
-    HookListParams, HookReloadParams, ModelListParams, RepositoryRemoveParams,
-    RepositoryResolveParams, TurnGetParams, TurnInterruptParams, TurnResultParams, TurnStartParams,
-    WorkspaceAttachAdoptParams, WorkspaceAttachParams, WorkspaceAttachReleaseParams,
-    WorkspaceAttachRenewParams, WorkspaceCloseParams, WorkspaceCreateParams, WorkspaceDeleteParams,
-    WorkspaceDiffParams, WorkspaceGetParams, WorkspaceLimitsGetParams, WorkspaceLimitsResetParams,
-    WorkspaceLimitsSetParams, WorkspaceListParams, WorkspacePathGetParams, WorkspacePathListParams,
-    WorkspaceReopenParams, WorkspaceUsageGetParams, WorkspaceUsageListParams,
+    HookListParams, HookReloadParams, ModelListParams, RepositoryGitInspectParams,
+    RepositoryRemoveParams, RepositoryResolveParams, TurnGetParams, TurnInterruptParams,
+    TurnResultParams, TurnStartParams, WorkspaceAttachAdoptParams, WorkspaceAttachParams,
+    WorkspaceAttachReleaseParams, WorkspaceAttachRenewParams, WorkspaceCloseParams,
+    WorkspaceCreateParams, WorkspaceDeleteParams, WorkspaceDiffParams, WorkspaceGetParams,
+    WorkspaceLimitsGetParams, WorkspaceLimitsResetParams, WorkspaceLimitsSetParams,
+    WorkspaceListParams, WorkspacePathGetParams, WorkspacePathListParams, WorkspaceReopenParams,
+    WorkspaceUsageGetParams, WorkspaceUsageListParams,
 };
 use crate::rpc::{RpcErrorPayload, RpcHandler};
 
@@ -87,12 +88,10 @@ impl RpcHandler for DaemonHandler {
                 self.coordinator
                     .list_hook_deliveries(decode::<HookDeliveryListParams>(params)?),
             ),
-            DaemonMethod::RepositoryResolve => execute(
-                self.coordinator
-                    .resolve_repository(decode::<RepositoryResolveParams>(params)?),
-            ),
-            DaemonMethod::RepositoryList => {
-                execute(self.coordinator.list_repositories(decode(params)?))
+            method @ (DaemonMethod::RepositoryResolve
+            | DaemonMethod::RepositoryList
+            | DaemonMethod::RepositoryGitInspect) => {
+                self.handle_repository_read(method, params).await
             }
             method @ (DaemonMethod::WorkspacePathGet | DaemonMethod::WorkspacePathList) => {
                 self.handle_navigation(method, params).await
@@ -144,6 +143,32 @@ impl RpcHandler for DaemonHandler {
 }
 
 impl DaemonHandler {
+    async fn handle_repository_read(
+        &self,
+        method: DaemonMethod,
+        params: Value,
+    ) -> Result<Value, RpcErrorPayload> {
+        match method {
+            DaemonMethod::RepositoryResolve => execute(
+                self.coordinator
+                    .resolve_repository(decode::<RepositoryResolveParams>(params)?),
+            ),
+            DaemonMethod::RepositoryList => {
+                execute(self.coordinator.list_repositories(decode(params)?))
+            }
+            DaemonMethod::RepositoryGitInspect => {
+                let params = decode::<RepositoryGitInspectParams>(params)?;
+                let coordinator = Arc::clone(&self.coordinator);
+                let result =
+                    tokio::task::spawn_blocking(move || coordinator.inspect_repository_git(params))
+                        .await
+                        .map_err(|_| RpcErrorPayload::new("INTERNAL", "Git inspection failed"))?;
+                execute(result)
+            }
+            _ => unreachable!("non-repository read method"),
+        }
+    }
+
     async fn handle_public_workspace(
         &self,
         method: DaemonMethod,

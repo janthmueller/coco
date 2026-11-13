@@ -28,6 +28,7 @@ mod control;
 mod decision;
 mod doctor;
 mod error;
+mod git_source;
 mod hooks;
 mod jump;
 mod navigation;

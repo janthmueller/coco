@@ -68,6 +68,8 @@ pub(crate) enum CoordinatorError {
     },
     #[error("operation ID was already used with different parameters")]
     IdempotencyConflict,
+    #[error("the selected Git base changed; run create again to review its current commit")]
+    CreationBaseChanged,
     #[error(
         "the creation key has a workspace but no original receipt; inspect it without creating again"
     )]
@@ -143,6 +145,7 @@ impl CoordinatorError {
             Self::WorkspaceReferenceAmbiguous { .. } => "WORKSPACE_REFERENCE_AMBIGUOUS",
             Self::ContextReferenceUnresolved { .. } => "CONTEXT_REFERENCE_UNRESOLVED",
             Self::IdempotencyConflict => "IDEMPOTENCY_CONFLICT",
+            Self::CreationBaseChanged => "CREATE_BASE_CHANGED",
             Self::CreationEvidenceUnavailable => "CREATION_RECEIPT_MISSING",
             Self::TurnOperationNotFound => "TURN_OPERATION_NOT_FOUND",
             Self::OperationUncertain { .. } => "OPERATION_UNCERTAIN",

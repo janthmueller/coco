@@ -43,6 +43,7 @@ mod creation;
 mod decisions;
 mod doctor;
 mod events;
+mod git_source;
 mod guards;
 mod jump;
 mod navigation;
@@ -1118,6 +1119,7 @@ impl Fixture {
     fn fork_params(&self, source: &Workspace, name: &str, compact: bool) -> WorkspaceCreateParams {
         WorkspaceCreateParams {
             repository_path: self.source.clone(),
+            expected_base_sha: None,
             temporary: None,
             name: name.to_owned(),
             context: WorkspaceContextRequest::Fork {
@@ -1163,6 +1165,7 @@ fn fresh_create_params(
 ) -> WorkspaceCreateParams {
     WorkspaceCreateParams {
         repository_path,
+        expected_base_sha: None,
         temporary: None,
         name: name.to_owned(),
         context: WorkspaceContextRequest::Fresh,

@@ -125,7 +125,7 @@ async fn invalid_local_change_presets_fail_before_the_walkthrough_starts() {
 async fn walkthrough_covers_custom_existing_and_detached_worktrees() {
     let args = create_args(&["coco", "create", "review/custom", "-i"]);
     let mut interaction =
-        ScriptedInteraction::new([1, 2, 0, 0, 0, 0, 0], ["review/custom-branch", "release"]);
+        ScriptedInteraction::new([1, 3, 0, 0, 0, 0, 0], ["review/custom-branch", "release"]);
     let args = walkthrough(
         &test_paths(),
         PathBuf::from("/repo"),
@@ -160,7 +160,7 @@ async fn walkthrough_covers_custom_existing_and_detached_worktrees() {
     interaction.assert_consumed();
 
     let args = create_args(&["coco", "create", "review/existing", "-i"]);
-    let mut interaction = ScriptedInteraction::new([2, 0, 0, 0, 0, 0], ["review/existing-branch"]);
+    let mut interaction = ScriptedInteraction::new([2, 0, 0, 0, 0, 0, 0], [] as [&str; 0]);
     let args = walkthrough(
         &test_paths(),
         PathBuf::from("/repo"),
@@ -183,7 +183,7 @@ async fn walkthrough_covers_custom_existing_and_detached_worktrees() {
     );
     assert_eq!(
         final_review_value(&interaction, "Code"),
-        "branch review/existing-branch"
+        "review/existing-branch · aaaaaaaa"
     );
     let (params, _, _) =
         normalize_create_args(PathBuf::from("/repo"), args, "existing".to_owned()).unwrap();
@@ -241,7 +241,7 @@ async fn walkthrough_selects_workspace_code_and_each_local_change_policy() {
     let server_task = tokio::spawn(server.run(shutdown_rx));
 
     let args = create_args(&["coco", "create", "review/workspace-base", "-i"]);
-    let mut interaction = ScriptedInteraction::new([0, 1, 0, 0, 0, 0, 0, 0], [] as [&str; 0]);
+    let mut interaction = ScriptedInteraction::new([0, 2, 0, 0, 0, 0, 0, 0], [] as [&str; 0]);
     let args = walkthrough(&paths, PathBuf::from("/repo"), args, &mut interaction)
         .await
         .unwrap();
@@ -251,27 +251,30 @@ async fn walkthrough_selects_workspace_code_and_each_local_change_policy() {
     shutdown_tx.send(true).unwrap();
     server_task.await.unwrap().unwrap();
 
-    for (local_choice, expected) in [
-        (1, WorkspaceChangesRequest::CarryTracked),
-        (2, WorkspaceChangesRequest::CarryTrackedAndUntracked),
+    for (untracked, expected) in [
+        (0, WorkspaceChangesRequest::CarryTracked),
+        (1, WorkspaceChangesRequest::CarryTrackedAndUntracked),
     ] {
         let args = create_args(&["coco", "create", "review/local", "-i"]);
-        let mut interaction =
-            ScriptedInteraction::new([0, 0, local_choice, 0, 0, 0, 0, 0], [] as [&str; 0]);
-        let args = walkthrough(
+        let mut interaction = ScriptedInteraction::new([0, 0, 1, 0, 0, 0, 0, 0], [] as [&str; 0]);
+        let mut state = git_state();
+        state.changes.untracked_files = untracked;
+        let inspector = FakeGitInspector {
+            states: Mutex::new(VecDeque::from([state.clone(), state])),
+            ..Default::default()
+        };
+        let args = super::super::walkthrough_with_inspector(
             &test_paths(),
             PathBuf::from("/repo"),
             args,
             &mut interaction,
+            &inspector,
         )
         .await
         .unwrap();
-        let (params, _, _) = normalize_create_args(
-            PathBuf::from("/repo"),
-            args,
-            format!("local-{local_choice}"),
-        )
-        .unwrap();
+        let (params, _, _) =
+            normalize_create_args(PathBuf::from("/repo"), args, format!("local-{untracked}"))
+                .unwrap();
         assert_eq!(params.changes, expected);
         interaction.assert_consumed();
     }

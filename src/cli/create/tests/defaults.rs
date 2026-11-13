@@ -46,7 +46,7 @@ async fn tab_at_the_first_step_keeps_defaults_and_skips_unneeded_discovery() {
     .await
     .unwrap();
     assert_eq!(interaction.titles, ["Worktree", "Create workspace"]);
-    assert_eq!(final_review_value(&interaction, "Code"), "HEAD");
+    assert_eq!(final_review_value(&interaction, "Code"), "main · aaaaaaaa");
     assert_eq!(final_review_value(&interaction, "Context"), "fresh");
     let (params, message, jump) = normalize_create_args(scope, args, "defaults".into()).unwrap();
     assert_eq!(params.context, WorkspaceContextRequest::Fresh);
@@ -58,7 +58,7 @@ async fn tab_at_the_first_step_keeps_defaults_and_skips_unneeded_discovery() {
 
 #[tokio::test]
 async fn tab_after_code_and_context_keeps_prior_choices_and_reviews_the_result() {
-    let mut interaction = tab_at("Profile", [3, 2, 2, 1, 0], ["main", "probe-context"]);
+    let mut interaction = tab_at("Profile", [3, 3, 2, 1, 0], ["main", "probe-context"]);
     let args = walkthrough(
         &test_paths(),
         "/repo".into(),
@@ -80,7 +80,7 @@ async fn tab_after_code_and_context_keeps_prior_choices_and_reviews_the_result()
             .iter()
             .any(|title| title == "Model" || title == "After create")
     );
-    assert_eq!(final_review_value(&interaction, "Code"), "main");
+    assert_eq!(final_review_value(&interaction, "Code"), "main · aaaaaaaa");
     assert_eq!(
         final_review_value(&interaction, "Context"),
         "thread probe-context · compact"

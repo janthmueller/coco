@@ -520,16 +520,16 @@ impl Coordinator {
         repository: &Repository,
         git_repository: &GitRepository,
     ) -> Result<(CreationBase, WorktreeTarget), CoordinatorError> {
-        match &params.worktree {
+        let (base, target) = match &params.worktree {
             WorkspaceWorktreeRequest::NewBranch { branch, base } => {
                 let base = self.resolve_creation_base(base, repository, git_repository)?;
                 let branch_name = branch.clone().unwrap_or_else(|| params.name.clone());
-                Ok((base, WorktreeTarget::NewBranch { branch_name }))
+                (base, WorktreeTarget::NewBranch { branch_name })
             }
             WorkspaceWorktreeRequest::ExistingBranch { branch } => {
                 let reference = format!("refs/heads/{branch}");
                 let base_sha = self.git.resolve_local_branch(git_repository, branch)?;
-                Ok((
+                (
                     CreationBase {
                         requested: WorkspaceBaseRequest::Revision {
                             revision: reference.clone(),
@@ -541,13 +541,32 @@ impl Coordinator {
                     WorktreeTarget::ExistingBranch {
                         branch_name: branch.clone(),
                     },
-                ))
+                )
             }
-            WorkspaceWorktreeRequest::Detached { base } => Ok((
+            WorkspaceWorktreeRequest::Detached { base } => (
                 self.resolve_creation_base(base, repository, git_repository)?,
                 WorktreeTarget::Detached,
-            )),
+            ),
+        };
+        if params
+            .expected_base_sha
+            .as_ref()
+            .is_some_and(|expected| *expected != base.base_sha)
+        {
+            return Err(CoordinatorError::CreationBaseChanged);
         }
+        Ok((base, target))
+    }
+
+    pub(super) fn preview_workspace_base(
+        &self,
+        base: &WorkspaceBaseRequest,
+        git_repository: &GitRepository,
+    ) -> Result<String, CoordinatorError> {
+        let (repository, _) = self.registered_repository_for_path(&git_repository.root_path)?;
+        Ok(self
+            .resolve_creation_base(base, &repository, git_repository)?
+            .base_sha)
     }
 
     fn resolve_creation_base(
@@ -1483,10 +1502,20 @@ fn creation_request(params: &WorkspaceCreateParams) -> Value {
     if let Some(policy) = params.temporary {
         request["temporary"] = json!(policy);
     }
+    if let Some(sha) = &params.expected_base_sha {
+        request["expectedBaseSha"] = json!(sha);
+    }
     request
 }
 
 fn validate_create_request(params: &WorkspaceCreateParams) -> Result<(), CoordinatorError> {
+    if let Some(sha) = &params.expected_base_sha
+        && (!matches!(sha.len(), 40 | 64) || !sha.bytes().all(|byte| byte.is_ascii_hexdigit()))
+    {
+        return Err(CoordinatorError::InvalidParams(
+            "expectedBaseSha must be a complete Git commit ID".into(),
+        ));
+    }
     match &params.worktree {
         WorkspaceWorktreeRequest::NewBranch { branch, base } => {
             if let Some(branch) = branch {

@@ -27,6 +27,85 @@ use crate::cli::prompt::StepSelection;
 
 static RPC_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+mod git_source;
+
+// Inject only read-only Git inspection. Workspace/model discovery still uses
+// the existing fake RPC fixtures; git_source tests additionally prove RPC wiring.
+async fn walkthrough(
+    paths: &CocoPaths,
+    path: PathBuf,
+    args: CreateArgs,
+    interaction: &mut dyn Interaction,
+) -> Result<CreateArgs> {
+    super::walkthrough_with_inspector(paths, path, args, interaction, &FakeGitInspector::default())
+        .await
+}
+
+#[derive(Default)]
+struct FakeGitInspector {
+    states: Mutex<VecDeque<crate::protocol::RepositoryGitState>>,
+    calls: Mutex<Vec<crate::protocol::RepositoryGitInspectParams>>,
+}
+
+fn git_state() -> crate::protocol::RepositoryGitState {
+    use crate::protocol::{GitBranch, GitChangeSummary, RepositoryGitState};
+    let commit = "a".repeat(40);
+    RepositoryGitState {
+        repository_id: "repository-1".into(),
+        root_path: "/repo".into(),
+        branch: Some("main".into()),
+        head_sha: Some(commit.clone()),
+        changes: GitChangeSummary {
+            tracked_files: 1,
+            untracked_files: 0,
+        },
+        branches: vec![
+            GitBranch {
+                name: "main".into(),
+                reference: "refs/heads/main".into(),
+                commit: commit.clone(),
+                remote: false,
+                checkout_path: Some("/repo".into()),
+            },
+            GitBranch {
+                name: "review/existing-branch".into(),
+                reference: "refs/heads/review/existing-branch".into(),
+                commit: commit.clone(),
+                remote: false,
+                checkout_path: None,
+            },
+            GitBranch {
+                name: "origin/main".into(),
+                reference: "refs/remotes/origin/main".into(),
+                commit,
+                remote: true,
+                checkout_path: None,
+            },
+        ],
+        base_sha: None,
+    }
+}
+
+#[async_trait]
+impl super::git_source::GitInspector for FakeGitInspector {
+    async fn inspect(
+        &self,
+        params: crate::protocol::RepositoryGitInspectParams,
+    ) -> Result<crate::protocol::RepositoryGitState> {
+        let mut state = self
+            .states
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or_else(git_state);
+        if params.base.is_some() && state.base_sha.is_none() {
+            state.base_sha = state.head_sha.clone();
+        }
+        self.calls.lock().unwrap().push(params);
+        Ok(state)
+    }
+}
+
 #[tokio::test]
 async fn defaults_prepare_a_fresh_workspace_without_contacting_discovery() {
     let args = create_args(&["coco", "create"]);
@@ -173,7 +252,7 @@ async fn explicit_flags_seed_the_walkthrough_and_skip_resolved_steps() {
         final_review_value(&interaction, "Worktree"),
         "branch review/api"
     );
-    assert_eq!(final_review_value(&interaction, "Code"), "main");
+    assert_eq!(final_review_value(&interaction, "Code"), "main · aaaaaaaa");
     assert_eq!(
         final_review_value(&interaction, "Context"),
         "thread 0199-native-thread · compact"
@@ -240,7 +319,7 @@ async fn empty_workspace_choices_explain_the_problem_and_return_to_the_walkthrou
     let server_task = tokio::spawn(server.run(shutdown_rx));
 
     let args = create_args(&["coco", "create", "review/api", "-i"]);
-    let mut interaction = ScriptedInteraction::new([0, 1, 0, 0, 1, 0, 0, 0, 0, 0], [] as [&str; 0]);
+    let mut interaction = ScriptedInteraction::new([0, 2, 0, 0, 1, 0, 0, 0, 0, 0], [] as [&str; 0]);
     let args = walkthrough(&paths, PathBuf::from("/repo"), args, &mut interaction)
         .await
         .unwrap();
@@ -288,7 +367,7 @@ async fn unregistered_repository_choices_are_treated_as_empty_inventory() {
     let server_task = tokio::spawn(server.run(shutdown_rx));
 
     let args = create_args(&["coco", "create", "review/api", "-i"]);
-    let mut interaction = ScriptedInteraction::new([0, 1, 0, 0, 1, 0, 0, 0, 0, 0], [] as [&str; 0]);
+    let mut interaction = ScriptedInteraction::new([0, 2, 0, 0, 1, 0, 0, 0, 0, 0], [] as [&str; 0]);
     let args = walkthrough(&paths, PathBuf::from("/repo"), args, &mut interaction)
         .await
         .unwrap();
@@ -373,12 +452,9 @@ fn assert_default_walkthrough_copy(interaction: &ScriptedInteraction) {
             .iter()
             .map(|choice| choice.label.as_str())
             .collect::<Vec<_>>(),
-        ["Don't copy", "Copy tracked", "Copy tracked + untracked"]
+        ["Don't copy", "Copy tracked"]
     );
-    assert_eq!(
-        git_choices[1].detail.as_deref(),
-        Some("fails if non-ignored untracked files exist")
-    );
+    assert_eq!(git_choices[1].detail.as_deref(), Some("1 file"));
     assert_eq!(
         choices_for_title(interaction, "Profile")
             .iter()

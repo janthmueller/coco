@@ -8,6 +8,15 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-11-13
+
+- **Guided Git source selection**: Show branch/commit identity in code choices
+  and final review; offer cached local/remote branch bases and free-local
+  adoption through read-only discovery. Bind guided apply to the reviewed base
+  while preserving independent context and direct flags. Hide clean/no-op
+  carry questions, show valid category policies/counts and reconsider changed
+  source evidence without silently widening the copy policy.
+
 ## 2026-11-11
 
 - **Public checked cleanup**: Expose separately granted close/reopen/delete to

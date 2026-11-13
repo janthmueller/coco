@@ -15,6 +15,19 @@ examples below show the equivalent direct flags.
 coco create fix/login --base main
 ```
 
+This creates the workspace on its own new branch, starting at the current
+commit of your local `main` branch. `main` stays unchanged and can already be
+checked out elsewhere.
+
+In the walkthrough, **Current checkout** shows your actual branch and a short
+commit ID. **Branch** opens a picker with local branches followed by cached
+remote-tracking branches, such as `origin/main`. CoCo does not fetch updates
+for this picker. Use **Other revision** for a tag, commit, or Git expression.
+
+The final review shows the selected commit. CoCo checks it again when creating
+the workspace. If it reports a changed base, run creation again to review the
+new commit.
+
 `--base` accepts a Git revision and defaults to your current `HEAD`.
 To start from another workspace's committed code:
 
@@ -100,6 +113,7 @@ If the default branch already exists, choose a different `--branch` or use
 names, including older `coco/` names.
 
 An existing branch must be available locally and not checked out elsewhere.
+The walkthrough's **Existing branch** picker offers those free local branches.
 `--checkout` selects the branch's code directly, so it cannot be combined
 with a base option.
 
@@ -107,6 +121,14 @@ Detached work has no branch name. Before closing it, retain any new commits
 on a Git branch or tag so you can reopen them.
 
 ## Bring local changes
+
+When starting from **Current checkout**, the walkthrough skips the copy
+question if it is clean. With local edits it shows the applicable copy option
+and file counts: **Copy tracked**
+when only tracked files changed, or **Copy tracked + untracked** when ordinary
+untracked files are present. **Don't copy** remains the default. CoCo rechecks
+before the final review. Changed counts prompt a new choice, or use **Don't
+copy** if you chose the remaining defaults with Tab.
 
 Use `--dirty` (`-d`) to copy staged edits, unstaged edits, and ordinary
 untracked files from your checkout:

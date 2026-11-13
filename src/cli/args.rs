@@ -607,6 +607,8 @@ pub(super) enum ModelCommand {
 pub(super) struct CreateArgs {
     /// Workspace name, such as fix/login. Omit it to start guided creation.
     pub(super) name: Option<String>,
+    #[arg(skip)]
+    pub(super) expected_base_sha: Option<String>,
     /// Walk through workspace creation interactively, using flags as preset values.
     /// Press Tab during setup to accept the remaining defaults and review.
     #[arg(long, short = 'i')]

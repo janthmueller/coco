@@ -27,6 +27,7 @@ async fn selects_the_git_base_independently_from_workspace_context() {
         .coordinator
         .create_workspace(WorkspaceCreateParams {
             repository_path: fixture.source.clone(),
+            expected_base_sha: None,
             temporary: None,
             name: "independent".to_owned(),
             context: WorkspaceContextRequest::Fork {

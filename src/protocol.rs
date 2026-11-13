@@ -20,6 +20,7 @@ use crate::domain::{
 mod clients_tests;
 mod control;
 mod doctor;
+mod git_source;
 mod hooks;
 mod navigation;
 mod retirement;
@@ -32,6 +33,7 @@ pub(crate) use crate::domain::turns::{
 };
 pub(crate) use control::*;
 pub(crate) use doctor::*;
+pub(crate) use git_source::*;
 pub(crate) use hooks::*;
 pub(crate) use navigation::*;
 pub(crate) use retirement::*;
@@ -51,6 +53,7 @@ pub enum DaemonMethod {
     RepositoryRemove,
     RepositoryResolve,
     RepositoryList,
+    RepositoryGitInspect,
     WorkspaceCreate,
     WorkspaceSetup,
     WorkspaceCreationGet,
@@ -94,7 +97,7 @@ pub enum DaemonMethod {
 
 impl DaemonMethod {
     #[cfg(test)]
-    pub const ALL: [Self; 48] = [
+    pub const ALL: [Self; 49] = [
         Self::Health,
         Self::Doctor,
         Self::ControlSessionPrepare,
@@ -104,6 +107,7 @@ impl DaemonMethod {
         Self::RepositoryRemove,
         Self::RepositoryResolve,
         Self::RepositoryList,
+        Self::RepositoryGitInspect,
         Self::WorkspaceCreate,
         Self::WorkspaceSetup,
         Self::WorkspaceCreationGet,
@@ -156,6 +160,7 @@ impl DaemonMethod {
             Self::RepositoryRemove => "repository.remove",
             Self::RepositoryResolve => "repository.resolve",
             Self::RepositoryList => "repository.list",
+            Self::RepositoryGitInspect => "repository.git.inspect",
             Self::WorkspaceCreate => "workspace.create",
             Self::WorkspaceSetup => "workspace.setup",
             Self::WorkspaceCreationGet => "workspaceCreation.get",
@@ -209,6 +214,7 @@ impl DaemonMethod {
             "repository.remove" => Some(Self::RepositoryRemove),
             "repository.resolve" => Some(Self::RepositoryResolve),
             "repository.list" => Some(Self::RepositoryList),
+            "repository.git.inspect" => Some(Self::RepositoryGitInspect),
             "workspace.create" => Some(Self::WorkspaceCreate),
             "workspace.setup" => Some(Self::WorkspaceSetup),
             "workspaceCreation.get" => Some(Self::WorkspaceCreationGet),
@@ -388,6 +394,8 @@ pub enum WorkspaceChangesRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkspaceCreateParams {
     pub repository_path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_base_sha: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub temporary: Option<crate::domain::TemporaryWorkspacePolicy>,
     pub name: String,
@@ -1105,6 +1113,7 @@ mod tests {
                 "repository.remove",
                 "repository.resolve",
                 "repository.list",
+                "repository.git.inspect",
                 "workspace.create",
                 "workspace.setup",
                 "workspaceCreation.get",
@@ -1184,9 +1193,14 @@ mod tests {
             DaemonMethod::RepositoryResolve,
             json!({"path": "/repo/worktree"}),
         );
+    }
+
+    #[test]
+    fn create_request_dtos_preserve_wire_names_and_omit_absent_expectations() {
         assert_request(
             WorkspaceCreateParams {
                 repository_path: PathBuf::from("/repo"),
+                expected_base_sha: None,
                 temporary: None,
                 name: "workspace".to_owned(),
                 context: WorkspaceContextRequest::Fresh,
@@ -1219,6 +1233,7 @@ mod tests {
         assert_request(
             WorkspaceCreateParams {
                 repository_path: PathBuf::from("/repo"),
+                expected_base_sha: None,
                 temporary: None,
                 name: "child".to_owned(),
                 context: WorkspaceContextRequest::Fork {

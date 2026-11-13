@@ -1109,6 +1109,7 @@ pub(super) fn normalize_create_args(
     )?;
     let CreateArgs {
         name,
+        expected_base_sha,
         interactive: _,
         sort: _,
         temporary,
@@ -1179,6 +1180,7 @@ pub(super) fn normalize_create_args(
     Ok((
         WorkspaceCreateParams {
             repository_path,
+            expected_base_sha,
             temporary: temporary.then_some(crate::domain::TemporaryWorkspacePolicy { keep_thread }),
             name: name.clone(),
             context,

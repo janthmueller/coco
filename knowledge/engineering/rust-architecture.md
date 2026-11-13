@@ -81,6 +81,16 @@ leaks above remain as the historical pre-refactor baseline.
 
 ## Target dependency direction
 
+Guided creation Git discovery follows the same staged boundary: neutral
+source/branch/change values in `domain/git_source`, typed read-only requests
+in `protocol/git_source`, policy in `coordinator/git_source`, and native parsing
+in `git/source`. `cli/create/git_source` owns only picker/review policy through
+typed inspection. Its private `GitInspector` port is justified by deterministic
+changed-during-walkthrough fixtures; production delegates to the same RPC
+client, with a separate real-RPC proof. Backend and native Git regressions
+remain focused test children. No CLI-to-Git dependency, public SDK visibility,
+crate split, new dependency, or workspace storage schema is introduced.
+
 The private `cli/ai` launcher depends only on typed protocol/RPC, neutral path
 and diagnostic helpers, and native process invocation. `coordinator/control`
 owns read-only repository inventory, with inherited-tool metadata discovery behind

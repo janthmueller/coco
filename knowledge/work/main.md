@@ -5,7 +5,7 @@ description: Tracks integrated product work, verified release handoffs and the r
 tags: [work, branch, bootstrap, rust, mcp, architecture]
 status: active
 branch: main
-updated: 2026-11-11
+updated: 2026-11-13
 ---
 
 # main — repository foundation
@@ -16,6 +16,286 @@ Establish the repository, documentation workflow, and first executable and
 architectural baseline for CoCo.
 
 ## Active work
+
+### Authorized guided-creation delivery — 2026-11-13
+
+- User authorizes committing and pushing the reviewed slice, waiting for
+  exact-source CI, then stable rehearsal and publication through GitHub Actions.
+  Expected next version is 0.11.0; verify the actual workflow proposal.
+  Retain the earlier audit/review notes and all source/test/documentation edits.
+- [ ] Commit the complete reviewed slice, including its currently new modules,
+  and push main normally after checking origin. No history rewrite or force push.
+- [ ] Require successful Rust (including package/Nix/binary smoke) and public
+  documentation workflows for the exact pushed source commit.
+- [ ] Recheck remote main, rehearse stable without publication, verify version
+  and source, then publish stable through the existing guarded workflow.
+- [ ] Verify release/tag, native archives and checksums, crates.io publication,
+  update this handoff and synchronize the local main with the release commit.
+- Automatic alpha remains disabled; no version stamping, secret changes,
+  release-guard bypass, installed-service change or real model call is part of
+  delivery. Local evidence: 915 model-free tests, all-target/all-feature Clippy,
+  formatting, terminal smoke and static documentation checks; later focused
+  review checks also passed. Hosted checks remain required before publication.
+
+### Guided creation post-follow-up review — 2026-11-13
+
+- User requests another full-slice review after the six new regressions.
+  Inspect the complete tracked/untracked slice, test fidelity and earlier
+  findings; preserve all changes. No product fixes, staging, commit, push,
+  release or real Codex/model operations.
+- [x] Recheck source, copy/default transitions, scope and review/apply binding,
+  validate the new fixtures and rerun relevant isolated checks.
+- [x] Record concrete findings or the absence of new findings and residual
+  verification limits; do not infer correctness solely from passing tests.
+- No new actionable defect or blocker identified. Reviewed production changes,
+  new untracked modules, fixture behavior and public/canonical documentation.
+  Previous stale wording is corrected and its follow-up cases have meaningful
+  assertions: no fallback/create on deleted refs, branch movement independent
+  of HEAD, no empty picker and no masking unrelated errors as version issues.
+- Rechecked exact base propagation into normalized private creation, replay
+  ordering/provenance, repository-scoped workspace bases, occupied/free branch
+  distinction, safe default/count transitions and explicit carry presets.
+  Copy remains a category policy rather than a frozen per-file snapshot, and
+  external Git changes remain subject to final binding validation; no new
+  atomicity guarantee is claimed.
+- Reverification passes 55 Create cases, 19 source cases (12 overlap Create),
+  three native Git inspection cases, one parser case and one complete dummy
+  daemon process smoke: 67 distinct passing cases. `git diff --check` passes.
+  Earlier full 915-test, Clippy, format and static-site evidence remains
+  applicable; only this work record changed during the review. No fresh full
+  suite, real Codex/model run, Nix package build or dependency audit claimed.
+  Nothing staged, committed, pushed or released; no further fix required by
+  this review. Preserve all edits and await the user's next instruction.
+- Subsequent readiness question: read-only GitHub checks confirm remote main
+  still equals local HEAD `fda05316215b859c1cf3df4eff6d5b691327fc7c`, and
+  `COCO_RELEASE_ENABLED=false`. Offline `cargo package --allow-dirty --list`
+  succeeds and includes the new source modules; this is package inventory,
+  not a verified package/Nix build. Commit/push is recommended on approval,
+  followed by exact-source hosted Rust/Docs checks (including package/Nix and
+  binary smoke), stable rehearsal and explicit publication. A feature commit
+  should propose stable 0.11.0 from 0.10.0; verify the workflow's actual result.
+  No staging, Git ref/remote write or workflow dispatch was performed.
+
+### Guided creation review follow-ups — 2026-11-13
+
+- User approves correcting the stale local-state rule and adding the missing
+  branch-picker, changed/deleted branch and old-daemon diagnostic coverage.
+  Keep all existing local changes on main; no staging, commit, push, release
+  or real Codex/model operations.
+- [x] Align the canonical copy-choice rule with the implemented dynamic picker.
+- [x] Test empty branch/free-local choices, selected-branch removal/movement,
+  and old-daemon diagnostics through isolated UI/RPC and native Git fixtures.
+- [x] Run the affected regressions and quality gates, review the follow-up
+  diff and record results without changing production behavior unnecessarily.
+- Six additional isolated regressions now pass (19 source-focused cases in
+  total). Both empty-list paths return to the prior question. An old daemon
+  stops before prompts with the matching-build restart hint; unrelated Git
+  errors retain their actual diagnostic. A lost branch stops before final
+  confirmation or create, proven through the real RPC client, and native Git
+  fixtures reject deletion without falling back to another HEAD or provisioning.
+  A moved selected branch is tested independently of an unchanged invoking
+  HEAD: stale expectations reject; a reviewed new commit succeeds.
+- Reused the focused RPC fixture and kept all additions in existing Git-source
+  test modules. No production logic, module boundary, dependency or public
+  contract changes were necessary.
+- Final verification: offline all-target tests pass 869 library and 46
+  integration cases (915 total; native/model opt-ins remain ignored). Format
+  check, all-target/all-feature warnings-denied Clippy and `git diff --check`
+  pass. Reviewed the added tests and corrected canonical sentence. Public site
+  files were not changed in this follow-up, so its prior static-build evidence
+  remains applicable; no new site build or dependency audit claimed.
+- The preceding review's documentation finding and stated coverage gaps are
+  resolved. Changes remain uncommitted/unstaged on main, with all earlier edits
+  preserved. No push, release, installed-service action or real model call.
+
+### Guided creation follow-up review — 2026-11-13
+
+- User requests another review of the complete uncommitted creation slice.
+  Read-only product review, preserving all edits; no fixes, staging, commit,
+  push, release, installed-service changes or real Codex/model operations.
+- [x] Recheck actual branch/worktree/base behavior, review/apply expectations,
+  scope, copy presets, dynamic choices, replay and documentation claims.
+- [x] Verify focused regressions and record findings and any remaining limits.
+- No introduced functional/blocking defect identified in the inspected product
+  paths. Checked qualified branch references, occupied base versus adoption,
+  scoped workspace preview, reviewed-SHA rejection and original-operation
+  replay, tracked/untracked copy policy, explicit presets, Tab and cancellation.
+- One low-priority documentation inconsistency: v0-spec's numbered Local state
+  rule still says the walkthrough warns about the blocked tracked-only choice
+  before selection. The new picker omits that choice when untracked files exist
+  instead. Align that sentence with the newer dynamic-policy paragraph.
+- Non-blocking coverage opportunities: explicit empty/free-local branch-picker
+  fallback, selected branch removal/movement during the dialog, and the new
+  old-daemon restart diagnostic. Existing moving-HEAD/backend binding checks
+  are covered, but do not directly prove every one of those UI paths.
+- Reverification passes: 51 Create tests (manual PTY probe ignored), 13 focused
+  source CLI/coordinator/protocol tests (eight overlap Create), three real-Git
+  inspection cases, one parser case, and one complete dummy-daemon process
+  smoke (61 distinct cases). Prior full 909-test/lint/terminal/docs evidence
+  remains applicable because product files did not change during this review.
+  `git diff --check` passes. Only this review record was added; no product fix,
+  dependency change, staging, commit, push or release.
+
+### Guided creation Git picker and change-aware choices — 2026-11-13
+
+- User approves implementing the preceding review and additionally requests
+  change-aware carry options. Continue locally on main with its existing
+  audit/review notes preserved. No commit, push, release or live model/session
+  operation is authorized.
+- [x] Add read-only repository Git inspection through the existing adapter /
+  coordinator / typed RPC boundary, including unregistered valid checkouts.
+- [x] Show real current branch/commit, add local/remote branch-base selection
+  and free-local-branch adoption, and retain manual revisions and defaults.
+- [x] Skip clean carry selection, show only meaningful tracked/untracked
+  policies with counts, and recheck before the explicit final review.
+- [x] Bind guided creation to the reviewed base SHA without changing ordinary
+  noninteractive flags, context selection or default dirty-source safety.
+- [x] Add isolated Git/coordinator/CLI/RPC regressions, run sequential gates,
+  update public usage guidance and canonical knowledge, and review the diff.
+- Design: keep existing picker navigation rather than adding disabled rows.
+  A clean source needs no carry question; tracked-only and untracked-present
+  snapshots offer distinct meaningful policies. Preset carry flags remain
+  explicit intent. Later changes never auto-upgrade a policy; creation's
+  existing Git checks remain authoritative. Ignored include files keep their
+  separate existing convention. Git metadata and previews make no native
+  Codex calls or persistence writes. Focused child modules/tests preserve the
+  documented staged dependency direction, without a crate/dependency split.
+- Implemented the metadata-only `repository.git.inspect` RPC, including source
+  checkout identity, lazy local/remote refs, occupancy, and ordinary-file
+  counts. Preview and apply share base resolution. Final review supplies an
+  optional full-SHA expectation; a mismatch fails before managed workspace
+  provisioning, while original operation replay still returns its result.
+- Clean/default copy steps disappear rather than showing disabled rows.
+  Changed categories/counts are reconsidered before review, with Don't copy
+  as the safe default, including Tab. Explicit carry flags retain intent.
+  Ignored-file conventions and independent conversation selection remain
+  unchanged. An old daemon gives an actionable matching-build restart hint.
+- Verification: `cargo test --offline --all-targets -j 2 -- --test-threads=2`
+  passes 863 library and 46 integration tests (909 total, 18 more library
+  cases than baseline). It covers real Git discovery/index preservation,
+  tracked/untracked/ignored categories, detached/linked/unborn inspection,
+  local/remote/symbolic/occupied refs, changed-base refusal, original replay,
+  late untracked safety, dynamic/Tab/preset/cancel behavior and real typed RPC.
+  The existing process smoke additionally calls the new method through the
+  actual dummy daemon from both the source checkout and linked worktree,
+  asserting that no native Codex requests are added.
+- Format check and all-target/all-feature warnings-denied offline Clippy pass.
+  The isolated tmux terminal smoke passes picker rendering/navigation/resize,
+  guided defaults/final confirmation, y/n and follow restoration. Machete finds
+  no unused dependencies; offline bans/licenses/sources checks pass with only
+  pre-existing locked duplicate-version warnings. This is not a fresh advisory
+  audit; no dependencies or lockfiles changed.
+- Public Astro check passes without diagnostics; static build/export checks
+  verify 21 pages, 70 files, search, routing and the public-only boundary.
+  Canonical product/architecture notes and usage/reference docs are updated.
+- No real Codex sessions/model calls, installed-service operations, staging,
+  commit, push or release. Changes remain local on main. Opt-in native/model
+  compatibility tests and Nix packaging are not run; Git-flake packaging would
+  first require including the new currently untracked files in Git's index.
+  Creation's existing requirement for a committed source HEAD is unchanged;
+  inspecting an unborn checkout does not add new creation semantics.
+
+### Create Git-source selection UX review — 2026-11-13
+
+- User requests review and a proposal: show which branch/commit "Current HEAD"
+  means in the guided create flow, and offer existing branches as selectable
+  code starting points. Preserve the prior uncommitted audit record. No product
+  implementation, staging, commit, push, release or live session action.
+- [x] Trace the invoking checkout, current-HEAD display and final review.
+- [x] Distinguish creating from a branch tip from adopting that branch, and
+  inspect existing Git/reference discovery and applicable test coverage.
+- [x] Recommend a compact, consistent picker and record verification/next step.
+- Confirmed: `prompt_code_base` renders `Current HEAD` without a detail;
+  `create_review_fields` likewise falls back to literal `HEAD`. Normalization
+  sends that symbolic revision, and the coordinator resolves it from the
+  selected/invoking checkout, including a linked worktree, only during creation.
+  Scope resolution deliberately retains the requested checkout path rather
+  than replacing it with the registered repository's root.
+- Both existing-branch adoption and free Git-revision selection currently use
+  text input. The product already distinguishes `--base <revision>` (new
+  branch/detached worktree from its commit) from `--checkout <local-branch>`
+  (adopt the branch itself, rejected when checked out elsewhere). No existing
+  client/RPC ref-list picker was found; Git already has ref enumeration and
+  branch/checkout verification primitives to build on.
+- Proposed UX, not implemented: show Current checkout with actual branch and
+  short commit in dim details, Detached HEAD with its commit when applicable,
+  and the same resolved identity in the final review. Add a Branch source
+  picker beside Workspace and Other revision; reuse existing navigation and
+  numeric choice behavior. Current/local refs come first, cached remote refs
+  after them, without automatic fetch or a duplicate remote HEAD alias.
+  A checked-out branch remains a valid *base*; adoption instead permits only
+  free local branches. Context and dirty-file policies stay independent.
+- A displayed branch tip must not silently change by the time Create is
+  accepted. Implementation should bind the reviewed commit or re-confirm an
+  observed change, while retaining clear source provenance and current
+  noninteractive flag semantics. Read-only Git discovery should reuse the
+  existing Git/coordinator boundary, including unregistered valid repositories.
+- Verification: source/contract/test inspection only. Existing scripted tests
+  explicitly expect final Code=HEAD and manually typed revisions/checkouts;
+  they do not prove actual branch/commit presentation or ref-picker behavior.
+  A future slice needs Git-backed fixtures for linked/detached/unborn HEAD,
+  branch-tip selection versus adoption, occupied branches, remote aliases,
+  moving/deleted refs, final review/Tab defaults, presets and cancellation.
+  No target test/build, native/model/session operation or product change was
+  performed. Await user agreement before implementation; no commit or push.
+
+### Source-first security audit — 2026-11-12
+
+- User requests a repository security audit and explicitly authorizes targeted
+  independent subagent review. Standard-profile full audit of source-visible
+  product, IPC/MCP/AI boundaries, lifecycle/storage/files, execution/hooks,
+  resource limits and CI/release/static-site inputs. No fixes, staging, commit,
+  push, release, production-service probes or real model calls are authorized.
+- Reviewed baseline: clean main `fda05316215b859c1cf3df4eff6d5b691327fc7c`
+  (released code 0.10.0). Only this bookkeeping entry may change in the target;
+  retain audit artifacts outside Git under
+  `/home/jan/security-audit-skill/coco/run-1`.
+- [x] Map principals, entry surfaces, sinks and execution-sandbox capabilities.
+- [x] Seed coverage ledger, investigate bounded source-grounded leads and run
+  independent candidate/record verification and coverage critics.
+- [x] Validate machine-readable results and deliver reports with explicit gaps.
+- Target-controlled execution requires no external network, isolated loopback
+  where needed, empty allowlisted environment, read-only source/toolchain,
+  scratch-only writes and low resource/time limits. If any cannot be enforced,
+  retain source evidence only and disclose validation blockers, not a clean
+  runtime-security claim. Previous 891 passing product tests are not proof of
+  adversarial security validation in this run.
+- Four independent reconnaissance assignments completed without execution or
+  writes. Seeded 30 deterministic units across seven focused source groups;
+  ledger validation passes. No prior structured CoCo run is available.
+- Trusted system `true`-only sandbox probes fail before target execution:
+  normal namespace setup cannot create NETLINK_ROUTE (EPERM); escalated setup
+  cannot create a namespace (EAGAIN under low limits). Retain source-only audit
+  evidence; do not run target-controlled code or weaken required controls.
+- First two hunter waves and their independent coverage critics completed.
+  Accepted five additional source-backed units (35 total). The third wave
+  examines CLI/output, executor/decision state, passive-query cost and audit
+  retention. Fresh candidate/record verifiers and a separate final coverage
+  critic remain required; source-only leads are not confirmed vulnerabilities.
+- Structured source results are retained only outside the repo. Parent-owned
+  no-follow directory descriptors, allowlisted regular JSON files, link/size
+  checks and exclusive destination creation protect result transfer; no
+  target-produced runtime artifact has been executed or promoted.
+- All 35 source units now have owned checks. The third post-wave critic and
+  a distinct final-clean critic identify no additional source-visible gap.
+  Seven unique candidates proceed to fresh independent validation; no
+  vulnerability is confirmed by these source-only hypotheses. Candidate
+  prompts were prepared before any verifier result to avoid peer-verdict
+  contamination; final retained records require another fresh review.
+- Completed all six audit phases: 35 source units, 268 recorded source paths,
+  zero confirmed vulnerabilities, six independently assessed and final-reviewed
+  needs-validation records, and one rejected hardening-only security claim.
+  The material rejection received an additional fresh independent review.
+  Both trusted JSON/coverage validators pass after report generation.
+- Private handoff: `REPORT.md`, `FINDINGS-DETAIL.md`, `NEEDS-VALIDATION.md`,
+  `findings.json`, and `coverage-ledger.json` in the external audit directory
+  above. Keep detailed candidates out of public repository documentation.
+  Scope/grant/operation controls show positive source patterns, not a runtime
+  security clearance. Sandbox-dependent reproductions, third-party runtime
+  effects, current advisories and actual deployment controls remain unverified.
+- Product HEAD remains `fda05316215b859c1cf3df4eff6d5b691327fc7c`; only this
+  unstaged working-record update differs. No product fixes, tests/builds,
+  model calls, installed-service operations, staging, commit, push or release.
 
 ### Authorized navigation and MCP cleanup delivery — 2026-11-11
 

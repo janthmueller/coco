@@ -194,7 +194,7 @@ async fn code_picker_stays_local_while_context_picker_crosses_repositories() {
         PathBuf::from("/projects/current"),
         Some(local.repository.clone()),
         vec![item("another", "foreign", "investigate/api"), local],
-        &[0, 1, 0, 1, 0, 0, 0, 0, 0, 0],
+        &[0, 2, 0, 1, 0, 0, 0, 0, 0, 0],
         WorkspaceSort::Recent,
     )
     .await;
@@ -277,7 +277,7 @@ async fn create_sorts_local_code_and_cross_repository_context_by_recent_use_or_n
                 old,
                 recent_item("current", "local-new", "work/z", 1_800_000_100_000),
             ],
-            &[0, 1, 0, 1, 0, 0, 0, 0, 0, 0],
+            &[0, 2, 0, 1, 0, 0, 0, 0, 0, 0],
             sort,
         )
         .await;

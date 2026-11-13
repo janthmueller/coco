@@ -216,6 +216,18 @@ workspace pickers.
 It does not create anything until you accept the final
 summary. `--interactive` cannot be combined with `--no-input`.
 
+**Current checkout** displays its branch and short commit ID. **Branch**
+lists local and cached remote-tracking branches as code starting points;
+**Other revision** accepts a tag, commit, or expression. The final review
+shows the selected commit. If creation reports a changed base, rerun it
+to review the current commit. **Existing branch** selects only a
+free local branch to use directly.
+
+For **Current checkout**, the local-change question is skipped when it is
+clean. Otherwise it shows file counts and the applicable copy option. Counts
+are checked again before the final review. Explicit carry flags retain their
+requested policy, even when no files currently need copying.
+
 `--temporary` requests a single safe cleanup attempt after the first regular
 exit of the last CoCo-launched Codex UI. It works without `--jump`; the
 workspace waits for a later session. Send, observation, lost connections and

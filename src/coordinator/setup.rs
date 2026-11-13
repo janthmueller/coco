@@ -154,6 +154,7 @@ impl Coordinator {
                 self.create_workspace_for_setup(
                     WorkspaceCreateParams {
                         repository_path: params.repository_path.clone(),
+                        expected_base_sha: None,
                         temporary: None,
                         name: params.request.name,
                         context,

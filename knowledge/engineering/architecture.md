@@ -1157,6 +1157,27 @@ category, not shell-expanded commands.
 
 ### Worktree creation
 
+Guided CLI source discovery uses the read-only typed
+`repository.git.inspect` method. A valid unregistered checkout is inspected
+without enrolling it. The Git adapter reads porcelain-v2 branch/commit and
+tracked/untracked counts with optional index writes disabled, and lazily lists
+local/remote refs with symbolic aliases and checkout occupancy. Metadata stays
+generation-local; there is no store/cache migration, model/executor action or
+worker-MCP change. The daemon dispatches the bounded-output Git work off the
+async runtime. The same base resolver handles workspace provenance/scope and
+manual refs in preview and creation.
+
+The CLI rereads source/category evidence before its explicit final review.
+It retains the selected revision/workspace request, adds optional
+`expectedBaseSha` to the private create command, and records it in minimal
+request provenance. Under the repository lock creation rejects a different
+resolved base as `CREATE_BASE_CHANGED` before worktree planning/persistence.
+Absent expectations preserve existing direct/MCP semantics and old request
+JSON. Original operation replay is checked before current-base validation and
+must return its original result even if the source advances afterward. Git's
+normal final binding checks still guard external changes during native
+worktree creation; CoCo does not claim to lock out unrelated Git processes.
+
 Under a repository-scoped mutex, create one of three typed bindings with native
 `git worktree add`: a new branch at the resolved SHA, an existing free local
 branch at its resolved SHA, or `--detach` at the resolved SHA. After success
