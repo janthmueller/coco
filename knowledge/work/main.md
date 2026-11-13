@@ -23,19 +23,78 @@ architectural baseline for CoCo.
   exact-source CI, then stable rehearsal and publication through GitHub Actions.
   Expected next version is 0.11.0; verify the actual workflow proposal.
   Retain the earlier audit/review notes and all source/test/documentation edits.
-- [ ] Commit the complete reviewed slice, including its currently new modules,
+- [x] Commit the complete reviewed slice, including its currently new modules,
   and push main normally after checking origin. No history rewrite or force push.
-- [ ] Require successful Rust (including package/Nix/binary smoke) and public
+- [x] Require successful Rust (including package/Nix/binary smoke) and public
   documentation workflows for the exact pushed source commit.
-- [ ] Recheck remote main, rehearse stable without publication, verify version
+- [x] Recheck remote main, rehearse stable without publication, verify version
   and source, then publish stable through the existing guarded workflow.
-- [ ] Verify release/tag, native archives and checksums, crates.io publication,
+- [x] Verify release/tag, native archives and checksums, crates.io publication,
   update this handoff and synchronize the local main with the release commit.
 - Automatic alpha remains disabled; no version stamping, secret changes,
   release-guard bypass, installed-service change or real model call is part of
   delivery. Local evidence: 915 model-free tests, all-target/all-feature Clippy,
   formatting, terminal smoke and static documentation checks; later focused
   review checks also passed. Hosted checks remain required before publication.
+- Source commit `da97d8746cc83b91cffd16409983879a7fbaf516` contains the complete
+  39-file slice and preserved audit/review bookkeeping. All ten new source/test
+  files are tracked. Origin refresh found no competing commit; normal push
+  succeeded. The automatic-alpha variable was rechecked as false and left
+  unchanged. Hosted run discovery/publication checks are in progress; no
+  release dispatch has occurred yet.
+- Hosted exact-source runs: Documentation `43494506512` has completed
+  successfully, including its static build and Pages deployment. Rust
+  `43494506567` is in progress; release remains gated on the complete Rust
+  result, including package/Nix and Linux/macOS binary smoke.
+- Rust's main verification job has now succeeded, including full tests, fresh
+  dependency policy, crates.io package verification and the Nix flake check.
+  Both native binary-smoke matrix jobs are running. Publication is still held
+  until the entire source workflow is successful.
+- Both exact-source workflows are now completed/successful: Rust
+  `43494506567` (including both native binary-smoke builds) and Documentation
+  `43494506512`. Remote main was confirmed at the tested `da97d87` immediately
+  before the authorized stable `publish=false` rehearsal dispatch. Local
+  delivery notes remain unpublished and do not change the tested remote tip.
+- Stable rehearsal run: `43496370547`, explicitly dispatched with
+  `channel=stable`, `publish=false`, on tested source `da97d87`. Await success
+  and inspect the proposed version before any publishing dispatch.
+- Rehearsal `43496370547` is successful: its checked metadata is version
+  `0.11.0`, tag `v0.11.0`, with synchronized Cargo files. All publishing/asset
+  jobs were skipped as requested. Remote main still equals the tested source
+  immediately before the explicitly authorized stable `publish=true` dispatch.
+- Publishing run: `43496835326`, `channel=stable`, `publish=true`, source
+  `da97d8746cc83b91cffd16409983879a7fbaf516`. Await native/registry results
+  before claiming the release is fully available; no manual Cargo publish or
+  tag/version mutation is used.
+- Its guarded version/publish job has succeeded. Crates.io and both native
+  archive jobs are running; continue verification before final handoff.
+- Stable tag `v0.11.0` resolves to release commit
+  `db69ac989b5916b4aa1739293caf82884f9fdb13`, whose sole parent is tested source
+  `da97d87`. Its only file changes are `Cargo.toml`, `Cargo.lock`, and generated
+  `CHANGELOG.md`. GitHub marks it published, non-draft and non-prerelease.
+  The crates.io job has also succeeded; native archive jobs remain pending.
+- Public crates.io confirms `codex-coordinator` 0.11.0, not yanked. Downloaded
+  crate checksum matches its registry metadata; VCS provenance is the clean
+  release commit `db69ac9`, repository root, and all new production source
+  modules are included. Local main was fast-forwarded to the release commit
+  without losing the unpublished handoff notes. Linux release/archive job has
+  succeeded; macOS is still building.
+- Publishing workflow `43496835326` is now completed/successful, including
+  crates.io and both native platform jobs. Verify downloaded archive checksums
+  and finish the documentation-only receipt before final handoff.
+- Final artifacts verified: all five expected GitHub assets are uploaded
+  (`Cargo.lock`, Linux x86_64/macOS arm64 tarballs and their SHA-256 files).
+  Both downloaded tarballs pass their published checksum checks and contain
+  `coco`, `cocod`, `coco-mcp`, README and license. Uploaded Cargo.lock equals
+  the tagged file. Both platform jobs verified version 0.11.0 and help for all
+  three executables. Registry crate provenance/checksum was independently
+  confirmed as above; no downloaded executable was run locally.
+- Stable 0.11.0 delivery is complete. Local main contains the release commit
+  via fast-forward; this final documentation-only receipt records verification
+  without changing tested product code. Automatic alpha remains disabled.
+  No installed configuration/service change, model call or manual publication.
+  Temporary verification downloads can be discarded; all original published
+  assets remain available from GitHub/crates.io.
 
 ### Guided creation post-follow-up review — 2026-11-13
 
