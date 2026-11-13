@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.11.0 (2026-11-13)
+
+### Documentation
+
+- Record verified 0.10.0 release
+  ([`fda0531`](https://github.com/janthmueller/coco/commit/fda05316215b859c1cf3df4eff6d5b691327fc7c))
+
+### Features
+
+- Add guided Git source selection and change-aware copy options
+  ([`da97d87`](https://github.com/janthmueller/coco/commit/da97d8746cc83b91cffd16409983879a7fbaf516))
+
+
 ## v0.10.0 (2026-11-11)
 
 ### Documentation
