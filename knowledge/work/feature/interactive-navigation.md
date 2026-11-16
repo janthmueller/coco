@@ -3,7 +3,7 @@ type: Working Document
 title: "feature/interactive-navigation: editable creation walkthrough"
 description: In-memory back navigation, reusable terminal input and explicit creation review.
 tags: [work, branch, cli, ux]
-status: active
+status: complete
 branch: feature/interactive-navigation
 updated: 2026-11-16
 ---
@@ -26,17 +26,30 @@ outside scope.
   push → exact-source CI → stable rehearsal → release sequence. Preserve all
   reviewed files, including prior main audit/history notes and new modules.
   Expected version is 0.12.0; the workflow rehearsal must confirm it.
-- [ ] Commit the complete reviewed slice and fast-forward local main safely.
-- [ ] Refresh origin, push normally and require successful Rust/Docs workflows
+- [x] Commit the complete reviewed slice and fast-forward local main safely.
+- [x] Refresh origin, push normally and require successful Rust/Docs workflows
   for that exact main SHA, including package, Nix and native Linux/macOS smoke.
-- [ ] Recheck remote tip/disabled automatic-alpha state, dispatch stable with
+- [x] Recheck remote tip/disabled automatic-alpha state, dispatch stable with
   publish=false and verify version/metadata before publish=true.
-- [ ] Verify the actual release/tag, Cargo availability/provenance and native
+- [x] Verify the actual release/tag, Cargo availability/provenance and native
   assets/checksums, update delivery receipts and synchronize local main.
 - Do not change release settings, stamp versions manually, bypass guards,
   rewrite history, alter installed services or invoke real models. The last
   reviewed source passes 958 model-free tests, Clippy, formatting, expanded
   terminal probes and static docs; exact-source hosted gates remain mandatory.
+- Source `6c518cdff4eca22581f6023b3514d42a24abb657` is fast-forward integrated
+  on main and pushed normally. Hosted Rust `43918411568` and Documentation
+  `43918411780` succeeded, including Nix/package, native platform smoke and
+  Pages. Stable rehearsal `43920610702` confirmed 0.12.0 / v0.12.0 before the
+  first authorized publishing attempt `43921063354`.
+- Delivery is complete on main as stable v0.12.0. The first publishing attempt
+  pushed only metadata before GitHub rejected its tag; exact-tip Rust recovery
+  `43921694078`, stable rehearsal `43924039945` and publishing `43924502204`
+  succeeded without changing settings or bypassing guards. Release tag and
+  clean crate provenance resolve to `d0e5a04d4a724dac32516867dc6a2365ade7c539`.
+  Both native archive checksums/contents, uploaded Cargo.lock and public registry
+  metadata were independently verified. Full delivery receipts are in main's
+  working document; no installed-runtime changes or real model calls.
 
 ## Delivery readiness check — 2026-11-16
 
@@ -449,19 +462,20 @@ the three open defects mean it should not yet be treated as merge-ready.
 
 ## Handoff
 
-The approved first delivery is implemented locally on
-`feature/interactive-navigation`, based on released main 0.11.0. All changes,
-including the existing main audit record, remain uncommitted and unstaged.
+The approved first delivery is committed as
+`6c518cdff4eca22581f6023b3514d42a24abb657`, fast-forward integrated on main
+and published as stable v0.12.0, based on released main 0.11.0. All source,
+including the existing main audit record and new modules, is preserved.
 The initial three P2 defects and the follow-up carry-policy/UI-memory defect
 are corrected, with twelve added permanent regression tests, expanded terminal
 coverage and final 958-test/Clippy/format verification recorded above. The
 original carry-policy reproduction also passes against the real CLI using
 read-only fake RPC. The subsequent full review found no additional actionable
 issue and repeated the full Rust/terminal/static-doc checks successfully.
-The user has now authorized delivery as recorded above: commit, integrate on
-main, push, require exact-source hosted checks, rehearse stable and publish only
-after the guards pass. Delivery is in progress; installed-runtime changes and
-real model calls remain excluded.
+The authorized commit/integration/push, exact-source hosted checks, stable
+rehearsal and publication are complete as recorded above and in main's work
+document. The initial partial publication was recovered through the normal
+exact-tip checks. Installed-runtime changes and real model calls remain excluded.
 
 Follow-up scope is unchanged: apply the opt-in primitives to repository /
 workspace navigation and send separately; close/delete need renewed pinned

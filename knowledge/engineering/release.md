@@ -100,6 +100,16 @@ a publishing dispatch, or changing registry credentials remains an operational
 release decision. Preparing this workflow locally does not authorize any of
 those operations.
 
+Publication can fail after its metadata commit reaches main but before the
+tag is pushed. Inspect main, the exact commit diff, tag, GitHub Release and
+registry state before retrying. If only the expected metadata commit exists,
+preserve it and run Rust manually on that new skip-ci tip, then dispatch a
+fresh nonpublishing rehearsal and verify the proposed version before publishing.
+Do not replay the stale parent dispatch, reset published history, create a tag
+manually or substitute the parent's successful CI. Existing tags or partially
+published registry/assets require their own state-aware recovery; this narrow
+case does not authorize overwriting a published artifact.
+
 ## Version and changelog policy
 
 `releaserc.toml` is the release authority. The Cargo package is named

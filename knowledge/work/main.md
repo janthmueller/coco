@@ -17,6 +17,61 @@ architectural baseline for CoCo.
 
 ## Active work
 
+### Authorized interactive-navigation delivery — 2026-11-16
+
+- User authorizes commit, local main integration, normal push, exact-source CI,
+  stable rehearsal and publication through GitHub Actions. Expected version is
+  0.12.0, subject to the guarded rehearsal. No history rewrite, release-setting
+  change, guard bypass, installed-service action or real model call.
+- [x] Commit the complete reviewed slice and fast-forward local main.
+- [x] Require exact-source Rust and Documentation success, including fresh
+  dependency policy, registry-package/Nix checks and native Linux/macOS smoke.
+- [x] Verify stable publish=false rehearsal, then publish=true on the same
+  tested current remote main revision.
+- [x] Verify release/tag, archives/checksums and registry provenance; sync main
+  and complete the branch handoff.
+- Source commit `6c518cdff4eca22581f6023b3514d42a24abb657` contains the complete
+  32-file reviewed slice, including new modules and preserved audit notes.
+  Main was fast-forwarded safely and pushed normally. The automatic-alpha
+  variable was confirmed false and left unchanged. Local evidence remains 958
+  model-free tests, all-target/all-feature warning-denied Clippy, formatting,
+  expanded terminal probes and static public-doc checks.
+- Exact-source Rust `43918411568` and Documentation `43918411780` succeeded,
+  including fresh dependency policy, registry-package/Nix checks, native
+  Linux/macOS smoke and static Pages deployment. Stable publish=false rehearsal
+  `43920610702` succeeded and confirmed 0.12.0 / v0.12.0. Remote tip was
+  rechecked before each authorized publication step; local work notes were
+  deliberately not pushed during the exact-source guard sequence.
+- Publishing run `43921063354` failed while pushing tag v0.12.0: GitHub
+  returned a generic remote rejection, without a policy/permission reason.
+  Its release commit `d0e5a04d4a724dac32516867dc6a2365ade7c539` did reach main;
+  API verification confirms sole parent `6c518cd` and only expected
+  Cargo.toml/Cargo.lock/CHANGELOG changes. At failure, tag/release were absent
+  and registry/binary jobs were skipped. No general GitHub outage or active
+  repository ruleset was established, so no permissions/settings were changed.
+- Recovery preserved the partial metadata commit and used the same guards:
+  exact-tip Rust `43921694078` succeeded on `d0e5a04`, including fresh policy,
+  package/Nix and native smoke. Stable publish=false `43924039945` succeeded
+  with the same 0.12.0 version. After rechecking remote tip and disabled
+  automatic-alpha state, publishing `43924502204` succeeded completely,
+  including crates.io and both native archives. No additional metadata commit,
+  history rewrite, manual tag or parent-CI substitution was needed.
+- All five expected assets are uploaded to the non-draft, non-prerelease
+  GitHub Release. Both downloaded archives pass their SHA-256 files and contain
+  coco, cocod, coco-mcp, README and license. Native jobs verified 0.12.0/help for
+  each executable; uploaded Cargo.lock equals the tagged file. Public crates.io
+  reports 0.12.0, not yanked; its downloaded crate checksum matches registry
+  metadata, clean VCS provenance resolves to `d0e5a04` at the repository root,
+  and all four new production modules are included.
+- Delivery is complete: stable v0.12.0 is available on GitHub and crates.io,
+  with successful static Docs/Pages and exact-tip hosted Rust proof. Local main,
+  origin/main and the release tag resolve to `d0e5a04` before this final
+  documentation-only receipt. The initial tag-push failure was recovered through
+  unchanged guards, not manual version/tag operations or rewritten history.
+  The canonical release document now records this narrow partial-publish
+  recovery. Automatic alpha remains false; no installed service/configuration
+  changes, real model calls or local execution of downloaded binaries.
+
 ### Interactive back-navigation UX audit and proposal — 2026-11-16
 
 - User reports that entering a nested picker prevents returning to the parent
@@ -102,7 +157,8 @@ architectural baseline for CoCo.
   first slice and final verification now live in
   [feature/interactive-navigation](feature/interactive-navigation.md). Its local
   branch starts from released main 0.11.0 and preserves this audit record;
-  no commit, push or release is part of that delivery.
+  its initial implementation scope excluded Git/publication actions. The
+  subsequent authorized integration and release are recorded above.
 
 ### Authorized guided-creation delivery — 2026-11-13
 
