@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v0.12.0 (2026-11-16)
+
+### Documentation
+
+- Record verified 0.11.0 release
+  ([`0208034`](https://github.com/janthmueller/coco/commit/020803419fa7316d210ab28b27790e8bb44204b4))
+
+### Features
+
+- **cli**: Add editable workspace creation walkthrough
+  ([`6c518cd`](https://github.com/janthmueller/coco/commit/6c518cdff4eca22581f6023b3514d42a24abb657))
+
+
 ## v0.11.0 (2026-11-13)
 
 ### Documentation
