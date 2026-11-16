@@ -8,12 +8,13 @@ use crate::protocol::{ModelListParams, RepositoryScope, WorkspaceListItem, Works
 use crate::rpc::{RpcClient, RpcClientError};
 
 use super::args::{CreateArgs, WorkspaceSort};
-use super::prompt::{Choice, Interaction, ReviewField};
+use super::prompt::{Choice, Interaction, ReviewField, parent_choice};
 use super::workspace_picker;
 
 mod context;
 mod defaults;
 mod git_source;
+mod navigation;
 mod temporary;
 
 pub(super) fn walkthrough_requested(args: &CreateArgs) -> bool {
@@ -57,6 +58,7 @@ async fn walkthrough_with_inspector<'a>(
         interaction: defaults::DefaultsInteraction::new(interaction),
         selected_code_workspace: None,
         selected_context_source,
+        previous_context: None,
         inspector,
         source,
         reviewed_code: None,
@@ -111,6 +113,7 @@ struct CreateWalkthrough<'a> {
     interaction: defaults::DefaultsInteraction<'a>,
     selected_code_workspace: Option<String>,
     selected_context_source: Option<String>,
+    previous_context: Option<(String, String)>,
     inspector: &'a dyn git_source::GitInspector,
     source: crate::protocol::RepositoryGitState,
     reviewed_code: Option<String>,
@@ -119,21 +122,6 @@ struct CreateWalkthrough<'a> {
 }
 
 impl CreateWalkthrough<'_> {
-    async fn run(mut self) -> Result<CreateArgs> {
-        self.prompt_name()?;
-        self.prompt_worktree().await?;
-        self.prompt_code_base().await?;
-        self.prompt_local_changes()?;
-        self.prompt_context().await?;
-        self.prompt_profile()?;
-        self.prompt_model().await?;
-        self.prompt_temporary()?;
-        self.prompt_post_action()?;
-        self.prepare_git_review().await?;
-        self.confirm_creation()?;
-        Ok(self.args)
-    }
-
     fn prompt_name(&mut self) -> Result<()> {
         if self.args.name.is_none() {
             self.args.name = Some(self.interaction.text("Workspace name")?);
@@ -164,76 +152,118 @@ impl CreateWalkthrough<'_> {
             choices.push(Choice::new("Fresh", None).with_default_marker());
             actions.push(ContextChoice::Fresh);
         }
+        if let Some((reference, label)) = &self.previous_context {
+            choices.push(
+                Choice::new("Selected source", Some(label.clone()))
+                    .with_key(format!("selected:{reference}")),
+            );
+            actions.push(ContextChoice::Selected(reference.clone(), label.clone()));
+        }
         if let Some(current) = current {
-            choices.push(Choice::new("Current workspace", Some(current.name.clone())));
+            choices.push(
+                Choice::new("Current workspace", Some(current.name.clone()))
+                    .with_key(format!("current:{}", current.id)),
+            );
             actions.push(ContextChoice::Current(current));
         }
-        choices.push(Choice::new(
-            if has_current {
-                "Another workspace"
-            } else {
-                "Workspace"
-            },
-            None,
-        ));
+        choices.push(
+            Choice::new(
+                if has_current {
+                    "Another workspace"
+                } else {
+                    "Workspace"
+                },
+                None,
+            )
+            .with_key("Workspace"),
+        );
         actions.push(ContextChoice::Existing);
         choices.push(Choice::new("Thread ID", None));
         actions.push(ContextChoice::Thread);
 
         loop {
             let selected = self.interaction.select("Context", &choices)?;
-            match &actions[selected] {
-                ContextChoice::Fresh => return Ok(()),
-                ContextChoice::Current(current) => {
-                    self.args.context = Some(format!("workspace:{}", current.id));
-                    self.selected_context_source = Some(format!("workspace {}", current.name));
-                    break;
-                }
-                ContextChoice::Existing => {
-                    let mut workspaces = context::list_workspaces(&self.client).await?;
-                    if let Some(current) = workspace_owning_path(&workspaces, &self.repository_path)
-                    {
-                        let current_id = current.workspace.id.clone();
-                        workspaces.retain(|item| item.workspace.id != current_id);
-                    }
-                    if workspaces.is_empty() {
-                        let qualifier = if has_current { "other " } else { "" };
-                        self.interaction.notice(&format!(
-                            "No {qualifier}workspace with reusable context found."
-                        ))?;
-                        continue;
-                    }
-                    let selected = context::select_workspace(
-                        &mut self.interaction,
-                        &mut workspaces,
-                        self.args.sort,
-                    )?;
-                    self.args.context = Some(format!("workspace:{}", selected.workspace.id));
-                    self.selected_context_source = Some(context::source_label(selected));
-                    break;
-                }
-                ContextChoice::Thread => {
-                    let thread_id = self.interaction.text("Codex thread ID")?;
-                    let context = if thread_id.starts_with("thread:") {
-                        thread_id
-                    } else {
-                        format!("thread:{thread_id}")
-                    };
-                    self.selected_context_source = Some(context_reference_label(&context));
-                    self.args.context = Some(context);
-                    break;
-                }
+            if matches!(actions[selected], ContextChoice::Fresh) {
+                self.args.compact_context = false;
+                return Ok(());
             }
-        }
-        if !compact_was_requested {
+            let Some(source) =
+                parent_choice(self.choose_context(&actions[selected], has_current).await)?
+            else {
+                continue;
+            };
+            let Some((reference, label)) = source else {
+                continue;
+            };
             let copy_choices = [
                 Choice::new("Full context", None).with_default_marker(),
                 Choice::new("Compact context", None),
             ];
-            self.args.compact_context =
-                self.interaction.select("Context size", &copy_choices)? == 1;
+            let compact = if compact_was_requested {
+                true
+            } else {
+                let Some(size) =
+                    parent_choice(self.interaction.select("Context size", &copy_choices))?
+                else {
+                    continue;
+                };
+                size == 1
+            };
+            self.args.context = Some(reference);
+            self.selected_context_source = Some(label);
+            self.args.compact_context = compact;
+            return Ok(());
         }
-        Ok(())
+    }
+
+    async fn choose_context(
+        &mut self,
+        choice: &ContextChoice,
+        has_current: bool,
+    ) -> Result<Option<(String, String)>> {
+        match choice {
+            ContextChoice::Fresh => unreachable!("fresh context needs no child input"),
+            ContextChoice::Selected(reference, label) => {
+                Ok(Some((reference.clone(), label.clone())))
+            }
+            ContextChoice::Current(current) => Ok(Some((
+                format!("workspace:{}", current.id),
+                format!("workspace {}", current.name),
+            ))),
+            ContextChoice::Thread => {
+                let id = self.interaction.text("Codex thread ID")?;
+                let reference = if id.starts_with("thread:") {
+                    id
+                } else {
+                    format!("thread:{id}")
+                };
+                let label = context_reference_label(&reference);
+                Ok(Some((reference, label)))
+            }
+            ContextChoice::Existing => {
+                let mut workspaces = context::list_workspaces(&self.client).await?;
+                if let Some(current) = workspace_owning_path(&workspaces, &self.repository_path) {
+                    let id = current.workspace.id.clone();
+                    workspaces.retain(|item| item.workspace.id != id);
+                }
+                if workspaces.is_empty() {
+                    let qualifier = if has_current { "other " } else { "" };
+                    self.interaction.notice(&format!(
+                        "No {qualifier}workspace with reusable context found."
+                    ))?;
+                    return Ok(None);
+                }
+                let selected = context::select_workspace(
+                    &mut self.interaction,
+                    &mut workspaces,
+                    self.args.sort,
+                )?;
+                Ok(Some((
+                    format!("workspace:{}", selected.workspace.id),
+                    context::source_label(selected),
+                )))
+            }
+        }
     }
 
     fn prompt_profile(&mut self) -> Result<()> {
@@ -244,10 +274,15 @@ impl CreateWalkthrough<'_> {
             Choice::new("Use Codex config", None).with_default_marker(),
             Choice::new("Choose profile", None),
         ];
-        if self.interaction.select("Profile", &choices)? == 1 {
-            self.args.profile = Some(self.interaction.text("Profile name")?);
+        loop {
+            if self.interaction.select("Profile", &choices)? == 0 {
+                return Ok(());
+            }
+            if let Some(profile) = parent_choice(self.interaction.text("Profile name"))? {
+                self.args.profile = Some(profile);
+                return Ok(());
+            }
         }
-        Ok(())
     }
 
     async fn prompt_model(&mut self) -> Result<()> {
@@ -270,9 +305,12 @@ impl CreateWalkthrough<'_> {
                 continue;
             }
             let model_choices = models.iter().map(model_choice).collect::<Vec<_>>();
-            let selected = self.interaction.select("Choose model", &model_choices)?;
-            self.args.model = Some(models[selected].model.clone());
-            return Ok(());
+            if let Some(selected) =
+                parent_choice(self.interaction.select("Choose model", &model_choices))?
+            {
+                self.args.model = Some(models[selected].model.clone());
+                return Ok(());
+            }
         }
     }
 
@@ -303,20 +341,34 @@ impl CreateWalkthrough<'_> {
                 }
             })
             .collect();
-        match actions[self.interaction.select("After create", &choices)?] {
-            0 => {}
-            1 => self.args.send = Some(self.interaction.text("Message")?),
-            2 => self.args.jump = true,
-            3 => {
-                self.args.send = Some(self.interaction.text("Message")?);
-                self.args.jump = true;
-            }
-            _ => unreachable!("the picker returns an index within its choices"),
+        loop {
+            let action = actions[self.interaction.select("After create", &choices)?];
+            let message = if action == 1 || action == 3 {
+                let Some(message) = parent_choice(self.interaction.text("Message"))? else {
+                    continue;
+                };
+                Some(message)
+            } else {
+                None
+            };
+            self.args.send = message;
+            self.args.jump = action == 2 || action == 3;
+            return Ok(());
         }
-        Ok(())
     }
 
-    fn confirm_creation(&mut self) -> Result<()> {
+    fn confirm_creation(&mut self) -> Result<usize> {
+        let fields = self.review_fields();
+        let choices = [
+            Choice::new("Create", None),
+            Choice::new("Edit settings", None),
+            Choice::new("Cancel", None),
+        ];
+        self.interaction
+            .select_with_review("Create workspace", &fields, &choices)
+    }
+
+    fn review_fields(&self) -> Vec<ReviewField> {
         let mut fields = create_review_fields(
             &self.args,
             self.selected_code_workspace.as_deref(),
@@ -329,16 +381,7 @@ impl CreateWalkthrough<'_> {
                 .unwrap()
                 .value = code.clone();
         }
-        let choices = [Choice::new("Create", None), Choice::new("Cancel", None)];
-        if self
-            .interaction
-            .select_with_review("Create workspace", &fields, &choices)?
-            == 0
-        {
-            Ok(())
-        } else {
-            bail!("workspace creation cancelled")
-        }
+        fields
     }
 
     async fn list_workspaces(&self, phases: Option<Vec<String>>) -> Result<Vec<WorkspaceListItem>> {
@@ -353,12 +396,15 @@ fn select_workspace(
     sort: WorkspaceSort,
 ) -> Result<SelectedWorkspace> {
     debug_assert!(!workspaces.is_empty());
-    let choices = workspace_picker::choices(
+    let mut choices = workspace_picker::choices(
         workspaces,
         sort,
         false,
         chrono::Utc::now().timestamp_millis(),
     );
+    for (choice, item) in choices.iter_mut().zip(workspaces.iter()) {
+        choice.key = Some(item.workspace.id.clone());
+    }
     let selected = interaction.select(title, &choices)?;
     Ok(SelectedWorkspace {
         id: workspaces[selected].workspace.id.clone(),
@@ -382,6 +428,7 @@ impl SelectedWorkspace {
 
 enum ContextChoice {
     Fresh,
+    Selected(String, String),
     Current(SelectedWorkspace),
     Existing,
     Thread,
@@ -472,7 +519,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 
 fn model_choice(model: &CodexModel) -> Choice {
     let detail = (model.display_name != model.model).then(|| model.model.clone());
-    let choice = Choice::new(model.display_name.clone(), detail);
+    let choice = Choice::new(model.display_name.clone(), detail).with_key(&model.model);
     if model.is_default {
         choice.with_default_marker()
     } else {

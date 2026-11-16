@@ -230,7 +230,7 @@ async fn tab_in_the_source_picker_requires_selection_instead_of_using_the_first_
 
 #[tokio::test]
 async fn tab_never_bypasses_the_final_create_or_cancel_decision() {
-    let mut interaction = tab_at("Worktree", [1], [] as [&str; 0]);
+    let mut interaction = tab_at("Worktree", [2], [] as [&str; 0]);
     let result = walkthrough(
         &test_paths(),
         "/repo".into(),

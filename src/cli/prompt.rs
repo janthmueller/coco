@@ -8,7 +8,11 @@ use unicode_width::UnicodeWidthStr;
 use super::style::{Palette, Tone};
 use terminal::PickerTerminal;
 
+mod navigation;
 pub(in crate::cli) mod terminal;
+mod text;
+
+pub(super) use navigation::{Navigation, NavigationExit, NavigationOptions, parent_choice};
 
 const MAX_VISIBLE_ROWS: usize = 9;
 const DETAIL_PREFIX: &str = "  · ";
@@ -18,6 +22,7 @@ const MIN_LABEL_WITH_DEFAULT: usize = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Choice {
+    pub(super) key: Option<String>,
     pub(super) label: String,
     pub(super) detail: Option<String>,
     pub(super) trailing_detail: Option<String>,
@@ -27,11 +32,21 @@ pub(super) struct Choice {
 impl Choice {
     pub(super) fn new(label: impl Into<String>, detail: Option<String>) -> Self {
         Self {
+            key: None,
             label: label.into(),
             detail,
             trailing_detail: None,
             is_default: false,
         }
+    }
+
+    pub(super) fn with_key(mut self, key: impl Into<String>) -> Self {
+        self.key = Some(key.into());
+        self
+    }
+
+    pub(super) fn identity(&self) -> &str {
+        self.key.as_deref().unwrap_or(&self.label)
     }
 
     pub(super) fn with_default_marker(mut self) -> Self {
@@ -81,6 +96,40 @@ pub(super) trait Interaction {
     fn confirm(&mut self, title: &str) -> Result<bool>;
     fn text(&mut self, label: &str) -> Result<String>;
     fn notice(&mut self, message: &str) -> Result<()>;
+    fn select_navigable(
+        &mut self,
+        title: &str,
+        fields: &[ReviewField],
+        choices: &[Choice],
+        options: NavigationOptions,
+    ) -> Result<Navigation<StepSelection>> {
+        let selection = if !fields.is_empty() {
+            self.select_with_review(title, fields, choices)
+                .map(StepSelection::Selected)
+        } else if options.allow_defaults {
+            self.select_step(title, choices)
+        } else {
+            self.select(title, choices).map(StepSelection::Selected)
+        }?;
+        Ok(Navigation::Value(selection))
+    }
+    fn text_navigable(
+        &mut self,
+        label: &str,
+        _initial: &str,
+        _allow_back: bool,
+    ) -> Result<Navigation<String>> {
+        self.text(label).map(Navigation::Value)
+    }
+
+    fn recover(
+        &mut self,
+        _title: &str,
+        error: anyhow::Error,
+        _allow_back: bool,
+    ) -> Result<Navigation<()>> {
+        Err(error)
+    }
 }
 
 pub(super) struct TerminalInteraction {
@@ -173,6 +222,53 @@ impl Interaction for TerminalInteraction {
         }
         eprintln!("{}", Palette::stderr().paint(Tone::YellowBold, message));
         Ok(())
+    }
+
+    fn select_navigable(
+        &mut self,
+        title: &str,
+        fields: &[ReviewField],
+        choices: &[Choice],
+        options: NavigationOptions,
+    ) -> Result<Navigation<StepSelection>> {
+        if !self.interactive || choices.is_empty() {
+            bail!("{title} has no interactive choices available");
+        }
+        navigation::run(title, fields, choices, options)
+    }
+
+    fn text_navigable(
+        &mut self,
+        label: &str,
+        initial: &str,
+        allow_back: bool,
+    ) -> Result<Navigation<String>> {
+        if !self.interactive {
+            bail!("interactive input is unavailable");
+        }
+        text::run(label, initial, allow_back)
+    }
+
+    fn recover(
+        &mut self,
+        title: &str,
+        error: anyhow::Error,
+        allow_back: bool,
+    ) -> Result<Navigation<()>> {
+        self.notice(&format!(
+            "Could not finish this step: {}",
+            single_line(&error.to_string())
+        ))?;
+        let choices = [Choice::new("Retry", None), Choice::new("Cancel", None)];
+        let options = NavigationOptions {
+            allow_back,
+            ..NavigationOptions::default()
+        };
+        match self.select_navigable(title, &[], &choices, options)? {
+            Navigation::Value(StepSelection::Selected(0)) => Ok(Navigation::Value(())),
+            Navigation::Back => Ok(Navigation::Back),
+            _ => Ok(Navigation::Cancel),
+        }
     }
 }
 

@@ -25,6 +25,13 @@ conversation source. When you run it inside a reusable CoCo workspace, that
 current workspace is offered directly. You can also enter an exact Codex
 thread ID.
 
+Use Esc or Shift+Tab to go back and change an answer. Your accepted choices
+and text are kept. At the first question, Esc cancels; Ctrl+C cancels from
+any question. Going back stops Tab's automatic defaults.
+
+At the final review, choose **Edit settings** to change a setting and return
+to the summary. CoCo creates the workspace only when you choose **Create**.
+
 The code selection shows your current branch and commit. Choose **Branch**
 to start from another branch, or **Existing branch** in the worktree step to
 use a free local branch directly. The final review shows the selected commit.
@@ -43,7 +50,8 @@ coco create investigate/search -s "Investigate slow searches" -j
 ```
 
 Use `coco create fix/login -i` when you already know the name but still want
-the walkthrough. Any other flags you provide prefill and skip those decisions.
+the walkthrough. Any other flags you provide prefill and skip those decisions;
+you can still change them through **Edit settings** at the final review.
 
 To prepare a workspace before giving it an instruction, use
 `coco create fix/login`. Its status is `Prepared` until work begins.

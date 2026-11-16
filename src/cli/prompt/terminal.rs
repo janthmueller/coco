@@ -1,6 +1,7 @@
 use std::io::{self, Write};
 
-use crossterm::cursor::{Hide, MoveToColumn, MoveUp, Show};
+use crossterm::cursor::{Hide, MoveDown, MoveToColumn, MoveUp, Show};
+use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
 use crossterm::queue;
 use crossterm::terminal::{
     Clear, ClearType, DisableLineWrap, EnableLineWrap, disable_raw_mode, enable_raw_mode, size,
@@ -12,6 +13,8 @@ pub(super) struct PickerTerminal<W: Write> {
     frame: InlineFrame,
     rows: u16,
     active: bool,
+    cursor_up: u16,
+    paste: bool,
 }
 
 impl<W: Write> PickerTerminal<W> {
@@ -22,6 +25,8 @@ impl<W: Write> PickerTerminal<W> {
             frame: InlineFrame::default(),
             rows: 24,
             active: true,
+            cursor_up: 0,
+            paste: false,
         };
         queue!(terminal.output, Hide, DisableLineWrap)?;
         terminal.output.flush()?;
@@ -29,8 +34,29 @@ impl<W: Write> PickerTerminal<W> {
     }
 
     pub(super) fn draw(&mut self, lines: &[String], rows: u16) -> io::Result<()> {
+        self.reset_cursor()?;
         self.rows = rows;
         self.frame.draw(&mut self.output, lines, rows)
+    }
+
+    pub(super) fn enable_paste(&mut self) -> io::Result<()> {
+        self.paste = true;
+        queue!(self.output, EnableBracketedPaste)?;
+        self.output.flush()
+    }
+
+    pub(super) fn input_cursor(&mut self, column: u16) -> io::Result<()> {
+        self.cursor_up = 2;
+        queue!(self.output, MoveUp(2), MoveToColumn(column), Show)?;
+        self.output.flush()
+    }
+
+    fn reset_cursor(&mut self) -> io::Result<()> {
+        if self.cursor_up > 0 {
+            queue!(self.output, Hide, MoveDown(self.cursor_up), MoveToColumn(0))?;
+            self.cursor_up = 0;
+        }
+        Ok(())
     }
 
     pub(super) fn finish(mut self) -> io::Result<()> {
@@ -39,9 +65,17 @@ impl<W: Write> PickerTerminal<W> {
 
     fn restore(&mut self) -> io::Result<()> {
         let rows = size().map_or(self.rows, |(_, rows)| rows);
-        let cleared = self.frame.clear(&mut self.output, rows);
+        let cleared = self
+            .reset_cursor()
+            .and_then(|()| self.frame.clear(&mut self.output, rows));
         // Do not let a failed cleanup skip restoring cursor visibility or input.
-        let shown = queue!(self.output, EnableLineWrap, Show).and_then(|()| self.output.flush());
+        let shown = (|| {
+            if self.paste {
+                queue!(self.output, DisableBracketedPaste)?;
+            }
+            queue!(self.output, EnableLineWrap, Show)?;
+            self.output.flush()
+        })();
         let raw_mode = disable_raw_mode();
         self.active = raw_mode.is_err();
         cleared.and(shown).and(raw_mode)

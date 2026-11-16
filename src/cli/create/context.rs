@@ -25,12 +25,15 @@ pub(super) fn select_workspace<'a>(
     workspaces: &'a mut [WorkspaceListItem],
     sort: WorkspaceSort,
 ) -> Result<&'a WorkspaceListItem> {
-    let choices = workspace_picker::choices(
+    let mut choices = workspace_picker::choices(
         workspaces,
         sort,
         true,
         chrono::Utc::now().timestamp_millis(),
     );
+    for (choice, item) in choices.iter_mut().zip(workspaces.iter()) {
+        choice.key = Some(item.workspace.id.clone());
+    }
     let selected = interaction.select("Context from workspace", &choices)?;
     Ok(&workspaces[selected])
 }

@@ -764,18 +764,18 @@ the caller omitted the leading path and `.` is not inside a Git repository,
 the interactive layer may instead choose from `repository.list`; an explicitly
 supplied invalid path fails directly instead of silently falling back.
 
-In a human terminal, omitting the name starts a linear walkthrough;
+In a human terminal, omitting the name starts a navigable walkthrough;
 `--interactive`/`-i` starts the same walkthrough with an optional supplied name
 and flags as presets. Every unresolved selection with a product default begins
 on and marks that default so Enter advances without changing it. Creation
 selection steps show a bounded Tab hint. Tab accepts the current semantic
 default and enables the remaining semantic defaults, keeping flags and earlier
-committed selections. The final review still requires an explicit Create or
-Cancel; Tab never submits it. Required text and choices without a marked default
+committed selections. The final review offers Create / Edit settings / Cancel
+and requires an explicit choice; Tab never submits it. Required text and choices without a marked default
 still ask for a value, rather than silently choosing their first row. Defaults
 follow the current configuration, including Open Codex for temporary creation.
 An early default-fresh context does not query optional workspace discovery.
-A required source choice and the final `Create`/`Cancel` decision deliberately claim no
+A required source choice and the final review deliberately claim no
 semantic default; the cursor alone shows what Enter would select. The
 walkthrough covers Git binding, code base, applicable Git-change carry,
 conversation context, profile, model, and the post-create action. Context
@@ -802,11 +802,49 @@ has no code-workspace inventory yet but can still reuse context from other
 registered repositories. An empty native model catalog
 likewise returns to the inherit-model choice. The last picker presents a
 bounded, multi-line review of the workspace, worktree, code, context, Git
-changes, profile, model, and post-create action above `Create` and `Cancel`.
+changes, profile, model, and post-create action above its three actions.
 Each field occupies its own terminal row so an ordinary terminal does not hide
 later values behind truncation. The CLI performs only read-only discovery
 before that final selection and does not submit `workspace.create` when the
 guide is cancelled.
+
+Within this walkthrough Esc/Shift-Tab return from a nested input to its parent,
+or from a main question to the last visited step. Esc at the root cancels;
+Shift-Tab at the root does nothing. Ctrl-C cancels throughout, and q remains
+picker cancellation rather than a text-entry shortcut. Back stops remaining-
+defaults advancement. Accepted answers stay in an in-memory draft, selections
+retain stable ref/UUID/model identity and text is prefilled on return. A missing
+identity requires selection again, never reuse of its former row number.
+Abandoning a reopened setting restores both its accepted values and its UI
+selection/text memory. A read-only retry retains pending input without replacing
+that rollback baseline. Back skips historical questions that no longer apply
+to the current binding, and leaving Edit settings restores normal navigation
+from review.
+Terminal text input supports ordinary cursor/editing keys and bracketed paste;
+newlines/tabs become spaces and terminal controls are removed, without accepting
+the input automatically. No draft history is written to disk.
+
+Edit settings opens the selected question, including necessary child inputs,
+and returns directly to a refreshed review. Preset flags can deliberately be
+edited there. Cancelling a pending setting restores its previously accepted
+values. Derived branch names follow the workspace name; explicit names do not.
+Fresh context clears compaction, persistent cleanup clears temporary keep-thread
+policy and changing profile preserves an explicit model override. Editing a
+legacy fork separates its code/context inputs. The selected context can be
+retained verbatim, without guessing a different interpretation for an ambiguous
+reference. Adopting an existing branch still requires removing a separate base
+first. Copying local state onto another commit requires explicit correction of
+Code or Git changes before creation can be accepted. Editing a carry preset
+allows keeping its exact categories even when currently empty.
+
+Each returned review refreshes Git/file evidence and its full-SHA expectation;
+no prior consent is reused. Recoverable pre-submission errors in the terminal
+offer Retry, Back or cancellation while retaining the draft. Initial inspection
+and preset-resolution failures still fail before the walkthrough. Navigation
+is restricted to read-only preparation: after submission the existing creation
+and recovery contract applies, without reopening or automatically resubmitting
+the wizard. Ordinary pickers, y/N destructive consent, structured decisions,
+direct flags and noninteractive commands retain their existing semantics.
 
 Guided code selection displays the selected checkout's actual branch and
 short commit, or an explicit detached commit, rather than a bare `HEAD`.
@@ -832,6 +870,11 @@ applies the safe Don't copy default. Explicit carry presets keep their intent,
 including for currently empty categories. Backend snapshot/binding checks
 remain authoritative for changes after review; late untracked files still
 block tracked-only carry.
+
+If a newly clean source resets guided copying to Don't copy, that value also
+replaces the current remembered selection. Reopening Git changes and pressing
+Enter keeps the reviewed policy. This automatic update leaves the accepted
+Back checkpoint and deliberate empty-category carry presets intact.
 
 1. **Code base.** `--base <revision>` resolves a commit and defaults to the
    invoking checkout's `HEAD`. `--base-workspace <workspace>` instead uses

@@ -162,25 +162,25 @@ def check_creation_defaults(terminal: Terminal) -> None:
         terminal.start_test("cli::create::tests::defaults::interactive_defaults_walkthrough_probe")
         for title in ("Worktree", "Code", "Git changes"):
             terminal.wait(f"{title} (1/")
-            terminal.wait("Tab: remaining defaults")
+            terminal.wait("Tab defaults")
             terminal.keys("Enter")
         terminal.wait("Context (1/")
         terminal.keys("3")
-        terminal.wait("Codex thread ID:")
+        terminal.wait("Codex thread ID")
         terminal.keys("probe-context", "Enter")
-        terminal.wait("Context size (1/2)")
+        terminal.wait("Context > Size (1/2)")
         terminal.tmux("resize-window", "-t", "probe", "-x", "24", "-y", "5")
-        terminal.wait("Tab: remaining defaults")
+        terminal.wait("Tab defaults")
         terminal.keys("Down")
-        terminal.wait("Context size (2/2)")
+        terminal.wait("Context > Size (2/2)")
         terminal.tmux("resize-window", "-t", "probe", "-x", "80", "-y", "14")
         terminal.wait("Full context")
         terminal.keys("Tab")
-        screen = terminal.wait("Create workspace (1/2)")
+        screen = terminal.wait("Create workspace (1/3)")
         assert "thread probe-context" in screen, screen
-        assert "Tab: remaining defaults" not in screen, screen
-        terminal.keys("Tab", "Down")
-        terminal.wait("Create workspace (2/2)")
+        assert "Tab defaults" not in screen, screen
+        terminal.keys("Tab", "End")
+        terminal.wait("Create workspace (3/3)")
         if not cancel:
             terminal.keys("Home")
         terminal.keys("Enter")
@@ -188,6 +188,234 @@ def check_creation_defaults(terminal: Terminal) -> None:
         terminal.wait("test result: ok.")
         assert terminal.flags() == "1:1", "creation did not restore the terminal"
     print("create: Tab applies remaining defaults, keeps context, and requires final approval")
+
+
+def check_creation_navigation(terminal: Terminal) -> None:
+    probe = "cli::create::tests::navigation::interactive_navigation_walkthrough_probe"
+    terminal.tmux("resize-window", "-t", "probe", "-x", "80", "-y", "20")
+    terminal.start_test(probe)
+    terminal.wait("Workspace name")
+    terminal.keys("probe/first", "Enter")
+    terminal.wait("Worktree (1/4)")
+    terminal.keys("2")
+    terminal.wait("Branch name")
+    assert terminal.flags() == "1:0", "text must show its caret without wrapping"
+    terminal.tmux("set-buffer", "-b", "coco-input-test", "bad\nq\x1b[31m")
+    terminal.tmux("paste-buffer", "-p", "-b", "coco-input-test", "-t", "probe")
+    screen = terminal.wait("> bad q")
+    assert "[31m" in screen, "pasted escape must remain harmless visible data"
+    assert "\x1b[31m" not in terminal.screen(colored=True), "pasted escape set a terminal color"
+    assert "Branch name" in terminal.screen(), "pasted newline submitted a field"
+    terminal.keys("Escape")
+    terminal.wait("Worktree (2/4)")
+    terminal.keys("BTab")
+    terminal.wait("> probe/first")
+    terminal.keys("BTab")  # Root Shift-Tab is a no-op, not cancellation.
+    terminal.wait("> probe/first")
+    terminal.keys("C-u", "probe/ü界", "Left", "BSpace")
+    terminal.wait("> probe/界")
+    terminal.tmux("resize-window", "-t", "probe", "-x", "12", "-y", "4")
+    terminal.wait("Enter cont")
+    terminal.tmux("resize-window", "-t", "probe", "-x", "80", "-y", "20")
+    terminal.keys("C-a", "C-k", "probe/second", "Enter")
+    terminal.wait("Worktree (2/4)")
+    terminal.keys("Home", "Enter")
+    terminal.wait("Code (1/4)")
+    terminal.keys("2")
+    terminal.wait("Code > Branch")
+    terminal.keys("Escape")
+    terminal.wait("Code (2/4)")
+    terminal.keys("4")
+    terminal.wait("Git revision")
+    terminal.keys("main", "Home", "DC")
+    terminal.wait("> ain")
+    terminal.keys("Escape")
+    terminal.wait("Code (4/4)")
+    terminal.keys("Home", "Enter")
+    terminal.wait("Git changes")
+    terminal.keys("Tab")
+    terminal.wait("Create workspace (1/3)")
+    terminal.tmux("set-buffer", "-b", "coco-input-test", "1\n")
+    terminal.tmux("paste-buffer", "-p", "-b", "coco-input-test", "-t", "probe")
+    terminal.keys("Down")
+    terminal.wait("Create workspace (2/3)")
+    terminal.keys("2")
+    terminal.wait("Edit settings")
+    terminal.keys("1")
+    terminal.wait("> probe/second")
+    terminal.keys("C-u", "probe/final", "Enter")
+    screen = terminal.wait("Create workspace (1/3)")
+    assert "branch probe/final" in screen, screen
+    terminal.keys("BTab")
+    terminal.wait("> probe/final")
+    terminal.keys("Enter")
+    terminal.wait("Create workspace (1/3)")
+    terminal.keys("Enter")
+    terminal.wait("navigation-result=Ok(")
+    terminal.wait("test result: ok.")
+    assert terminal.flags() == "1:1", "navigation did not restore terminal modes"
+    for in_text in (False, True):
+        terminal.start_test(probe, plain=True)
+        terminal.wait("Workspace name")
+        if not in_text:
+            terminal.keys("draft", "Enter")
+            terminal.wait("Worktree")
+        terminal.keys("C-c")
+        terminal.wait("navigation-result=Err(")
+        terminal.wait("test result: ok.")
+        assert terminal.flags() == "1:1", "Ctrl-C left a terminal mode active"
+    print("create: Back, Shift-Tab, prefill, Unicode, safe paste, edit/review and Ctrl-C pass")
+
+
+def check_creation_recovery(terminal: Terminal) -> None:
+    terminal.start_test("cli::create::tests::navigation::safety::interactive_recovery_walkthrough_probe")
+    terminal.wait("Worktree")
+    terminal.keys("Tab")
+    terminal.wait("read-only discovery temporarily unavailable")
+    terminal.wait("Retry")
+    terminal.keys("Escape")
+    terminal.wait("Worktree")
+    terminal.keys("Tab")
+    terminal.wait("Create workspace (1/3)")
+    terminal.keys("3")
+    terminal.wait("recovery-result=Err(")
+    terminal.wait("test result: ok.")
+    assert terminal.flags() == "1:1", "recovery left terminal modes active"
+
+    print("create: failed discovery supports Back/Retry")
+
+
+def check_creation_layout_failure(binary: str) -> None:
+    # Keep a deliberately unusable PTY isolated from subsequent input probes.
+    # Fresh history also prevents matching an earlier cancellation's result.
+    with tempfile.TemporaryDirectory(prefix="coco-terminal-layout-") as directory:
+        terminal = Terminal(directory, binary)
+        terminal.tmux(
+            "-f", "/dev/null", "new-session", "-d", "-s", "probe",
+            "-x", "80", "-y", "20",
+            "env TERM=xterm-256color INPUTRC=/dev/null HISTFILE=/dev/null "
+            "'PS1=probe-ready> ' bash --noprofile --norc -i",
+        )
+        try:
+            terminal.start_test("cli::create::tests::navigation::interactive_navigation_walkthrough_probe")
+            terminal.wait("Workspace name")
+            terminal.tmux("resize-window", "-t", "probe", "-x", "80", "-y", "3")
+            terminal.wait_until(
+                lambda _: "test result: ok." in terminal.tmux("capture-pane", "-S", "-100", "-pt", "probe"),
+                "the completed layout-error probe",
+            )
+            history = terminal.tmux("capture-pane", "-S", "-100", "-pt", "probe")
+            assert "navigation-result=Err(" in history and "terminal is too small" in history, history
+            assert terminal.flags() == "1:1", "input/layout failure left terminal modes active"
+        finally:
+            terminal.tmux("kill-server")
+    print("create: isolated layout failure restores terminal modes")
+
+
+def check_abandoned_creation_edit(terminal: Terminal) -> None:
+    for back in ("Escape", "BTab"):
+        terminal.start_test("cli::create::tests::navigation::interactive_navigation_walkthrough_probe")
+        terminal.wait("Workspace name")
+        terminal.keys("probe/final", "Enter")
+        for title in ("Worktree", "Code", "Git changes"):
+            terminal.wait(title + " (1/")
+            terminal.keys("Enter")
+        terminal.wait("Context (1/3)")
+        terminal.keys("3")
+        terminal.wait("Codex thread ID")
+        terminal.keys("thread-old", "Enter")
+        terminal.wait("Context > Size (1/2)")
+        terminal.keys("1")
+        terminal.wait("Profile (1/2)")
+        terminal.keys("Tab")
+        terminal.wait("Create workspace (1/3)")
+        terminal.keys("2")
+        terminal.wait("Edit settings")
+        terminal.keys("5")
+        terminal.wait("Context (4/4)")
+        terminal.keys("4")
+        terminal.wait("> thread-old")
+        terminal.keys("C-u", "thread-abandoned", "Enter")
+        terminal.wait("Context > Size")
+        terminal.keys(back)
+        terminal.wait("Context (4/4)")
+        terminal.keys(back)
+        terminal.wait("Edit settings")
+        terminal.keys(back)
+        screen = terminal.wait("Create workspace (1/3)")
+        assert "thread thread-old" in screen and "thread-abandoned" not in screen, screen
+        terminal.keys(back)
+        terminal.wait("Profile (1/2)")  # Must leave the edit return mode.
+        terminal.keys("Tab")
+        terminal.wait("Create workspace (1/3)")
+        terminal.keys("2")
+        terminal.wait("Edit settings")
+        terminal.keys("5")
+        terminal.wait("Context (4/4)")
+        terminal.keys("4")
+        screen = terminal.wait("> thread-old")
+        assert "thread-abandoned" not in screen, "abandoned input survived rollback"
+        terminal.keys("C-c")
+        terminal.wait("navigation-result=Err(")
+        terminal.wait("test result: ok.")
+        assert terminal.flags() == "1:1"
+    print("create: abandoned edits restore accepted input and normal Back for Esc and Shift-Tab")
+
+
+def check_creation_history(terminal: Terminal) -> None:
+    terminal.start_test("cli::create::tests::navigation::interactive_navigation_walkthrough_probe")
+    terminal.wait("Workspace name")
+    terminal.keys("probe/final", "Enter")
+    for title in ("Worktree", "Code"):
+        terminal.wait(title + " (1/")
+        terminal.keys("Enter")
+    terminal.wait("Git changes (1/2)")
+    terminal.keys("Tab")
+    terminal.wait("Create workspace (1/3)")
+    terminal.keys("2")
+    terminal.wait("Edit settings")
+    terminal.keys("2")
+    terminal.wait("Worktree (1/4)")
+    terminal.keys("3")
+    terminal.wait("Worktree > Branch (1/1)")
+    terminal.keys("Enter")
+    terminal.wait("Create workspace (1/3)")
+    terminal.keys("Escape")
+    terminal.wait("Worktree (3/4)")
+    terminal.keys("Escape")
+    terminal.wait("Git changes (1/2)")
+    terminal.keys("Escape")
+    terminal.wait("Worktree (3/4)")  # Historical Code no longer applies.
+    terminal.keys("C-c")
+    terminal.wait("navigation-result=Err(")
+    terminal.wait("test result: ok.")
+    assert terminal.flags() == "1:1"
+    print("create: Back skips inapplicable code history after existing-branch adoption")
+
+
+def check_clean_creation_policy(terminal: Terminal) -> None:
+    terminal.start_test("cli::create::tests::navigation::carry::interactive_clean_checkout_walkthrough_probe")
+    for title in ("Worktree", "Code"):
+        terminal.wait(title + " (1/")
+        terminal.keys("Enter")
+    terminal.wait("Git changes (1/2)")
+    terminal.keys("2")
+    terminal.wait("Context (1/3)")
+    terminal.keys("Tab")
+    screen = terminal.wait("Create workspace (1/3)")
+    assert re.search(r"Git changes\s+don't copy", screen), screen
+    terminal.keys("2")
+    terminal.wait("Edit settings")
+    terminal.keys("4")
+    terminal.wait("Git changes (1/2)")
+    terminal.keys("Enter")
+    screen = terminal.wait("Create workspace (1/3)")
+    assert re.search(r"Git changes\s+don't copy", screen), screen
+    terminal.keys("Enter")
+    terminal.wait("clean-policy-result=ok")
+    terminal.wait("test result: ok.")
+    assert terminal.flags() == "1:1"
+    print("create: clean checkout reset remains Don't copy when editing and pressing Enter")
 
 
 def check_follow(terminal: Terminal) -> None:
@@ -216,10 +444,16 @@ def main() -> None:
         try:
             check_picker(terminal)
             check_creation_defaults(terminal)
+            check_creation_navigation(terminal)
+            check_creation_recovery(terminal)
+            check_abandoned_creation_edit(terminal)
+            check_creation_history(terminal)
+            check_clean_creation_policy(terminal)
             check_confirmations(terminal)
             check_follow(terminal)
         finally:
             terminal.tmux("kill-server")
+    check_creation_layout_failure(sys.argv[1])
 
 
 if __name__ == "__main__":

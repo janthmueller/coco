@@ -43,6 +43,10 @@ it concise, factual, and useful to the next maintainer.
 
 ## Current records
 
+- [`feature/interactive-navigation`](feature/interactive-navigation.md) -
+  Back navigation, prefilled input and editable creation review, with in-memory
+  drafts, stable identities and unchanged post-submission safety.
+
 - [`feature/navigation-recency`](feature/navigation-recency.md) - Recent-first
   directory selection, compact ages, bounded optional native metadata and
   opt-in recent activity ordering for status; subsequently approved checked

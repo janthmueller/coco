@@ -8,6 +8,17 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-11-16
+
+- **Editable creation walkthrough**: Add typed opt-in Back/Cancel outcomes,
+  in-memory per-step drafts and stable selection/text restoration. Esc/Shift-Tab
+  navigate without replaying mutation; review supports Edit settings and
+  refreshes source evidence before explicit creation. Preserve independent code
+  and context, editable presets and safe copy categories. Keep direct calls,
+  destructive consent and other command flows unchanged. Synchronize automatic
+  clean-source policy changes with editor defaults without replacing accepted
+  rollback checkpoints or explicit carry presets.
+
 ## 2026-11-13
 
 - **Guided Git source selection**: Show branch/commit identity in code choices

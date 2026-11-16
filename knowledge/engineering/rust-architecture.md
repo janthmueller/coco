@@ -81,6 +81,25 @@ leaks above remain as the historical pre-refactor baseline.
 
 ## Target dependency direction
 
+Interactive creation keeps its private question methods and read-only RPC
+boundary. `cli/create/navigation` owns its finite step/history controller;
+its `draft` child owns per-step rollback, preset reopening and dependent-value
+handling. This supersedes the earlier one-way defaults-only wrapper: private
+`create/defaults` now also remembers accepted stable selections/text and resets
+automatic advancement on Back. Draft rollback includes that answer memory;
+its accepted-setting checkpoint survives read-only retries while the pending
+view remains editable. First-time Back/retry retain pending input rather than
+committing it. One current-applicability predicate governs Back history, edit
+choices and the Back hint. It is not a general workflow engine or stored
+draft/session model. `prompt/navigation` provides opt-in typed Value/Back/Cancel
+outcomes; a private typed error bridge keeps existing Result-based question
+methods composable without confusing control flow with real transport errors.
+`prompt/text` owns a small raw-mode single-line editor, reusing the inline
+terminal owner for cursor, wrapping and bracketed-paste restoration. The existing
+Crossterm dependency enables its bracketed-paste feature; no crate, daemon/MCP
+API, database schema or CLI-to-coordinator/Git import is added. Other commands
+keep their prior interaction contracts until separately migrated/tested.
+
 Guided creation Git discovery follows the same staged boundary: neutral
 source/branch/change values in `domain/git_source`, typed read-only requests
 in `protocol/git_source`, policy in `coordinator/git_source`, and native parsing

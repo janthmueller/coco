@@ -603,7 +603,7 @@ pub(super) enum ModelCommand {
     },
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 pub(super) struct CreateArgs {
     /// Workspace name, such as fix/login. Omit it to start guided creation.
     pub(super) name: Option<String>,

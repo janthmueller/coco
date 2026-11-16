@@ -311,14 +311,18 @@ fn model_choices_do_not_repeat_identical_names_and_selectors() {
     let matching = model("gpt-default", true);
     assert_eq!(
         model_choice(&matching),
-        Choice::new("gpt-default", None).with_default_marker()
+        Choice::new("gpt-default", None)
+            .with_key("gpt-default")
+            .with_default_marker()
     );
 
     let mut distinct = model("gpt-default", true);
     distinct.display_name = "GPT Default".to_owned();
     assert_eq!(
         model_choice(&distinct),
-        Choice::new("GPT Default", Some("gpt-default".to_owned())).with_default_marker()
+        Choice::new("GPT Default", Some("gpt-default".to_owned()))
+            .with_key("gpt-default")
+            .with_default_marker()
     );
 }
 

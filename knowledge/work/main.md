@@ -5,7 +5,7 @@ description: Tracks integrated product work, verified release handoffs and the r
 tags: [work, branch, bootstrap, rust, mcp, architecture]
 status: active
 branch: main
-updated: 2026-11-13
+updated: 2026-11-16
 ---
 
 # main — repository foundation
@@ -16,6 +16,93 @@ Establish the repository, documentation workflow, and first executable and
 architectural baseline for CoCo.
 
 ## Active work
+
+### Interactive back-navigation UX audit and proposal — 2026-11-16
+
+- User reports that entering a nested picker prevents returning to the parent
+  choice without cancelling the whole command, and requests a practical audit
+  and coherent proposal, not implementation. Baseline is clean main at released
+  0.11.0. Inspect creation, shared picker/text input and other interactive flows.
+  Only this internal work record may change; no product fix, staging, commit,
+  push, release, installed-service action or real model call.
+- [x] Trace cancellation, nesting, input editing, review/default handling and
+  mutation boundaries; identify reusable behavior and concrete UX gaps.
+- [x] Propose consistent keys, draft/step semantics, dependent-value handling,
+  confirmation safeguards, scope and isolated/terminal verification.
+- [x] Record recommendations and open choices clearly as proposed behavior,
+  then discuss the design with the user before implementation.
+- Findings on implemented 0.11.0: `prompt.rs` exposes selected index/defaults
+  or a generic cancellation error, with no typed Back outcome. Esc/q cancel
+  every picker, Shift-Tab is ignored, and text/confirmation use line reads.
+  `create.rs` runs a one-way sequence and uses populated args to skip prompts;
+  restarting that sequence is not a valid edit/back implementation. Review
+  offers only Create/Cancel. The same composition issue affects repository to
+  workspace selection, send target to message, and structured question/Other
+  sub-inputs. Ordinary terminal cleanup/inline rendering can be reused.
+- Proposed keys, not shipped: Esc returns to the immediate parent in a nested
+  picker; from a main wizard step it returns to the last visited applicable
+  step, and at the root it cancels. Ctrl-C always abandons the interactive
+  command before submission. Shift-Tab may offer the same Back navigation
+  without turning into cancellation at the root. Preserve numeric/arrows/j/k,
+  q-as-cancel in pickers, and Tab's remaining-defaults convenience. Do not use
+  Backspace/Left/b for navigation: ordinary text editing must keep those keys.
+  Show a short dim contextual hint and a title such as Code > Branch.
+- Proposed draft behavior: separate answered values, value origin, current
+  view/history and pending sub-selection. Back from an unaccepted sub-picker
+  leaves the previous confirmed value intact. Restore confirmed selections by
+  stable ref/UUID/model ID rather than a list index, and prefill editable text.
+  Enter retains an existing value. Inputs/drafts stay in process memory only;
+  no automatic disk/history persistence or logging of messages/secrets.
+- Proposed review: Create / Edit settings / Cancel. Edit opens a field list,
+  revisits the selected setting and its necessary sub-inputs, then returns
+  directly to the review. In `-i`, flag values are initial presets; deliberately
+  editing them must be possible, while ordinary direct/no-input calls retain
+  their current behavior. Explicit repository scope must not widen silently.
+- Dependency rules for implementation: name-derived branch names track a name
+  edit, explicit branch names do not; code and conversation stay independent;
+  existing-branch adoption supplies its code and cannot retain an incompatible
+  separate base; fresh context has no compaction; persistent cleanup has no
+  temporary keep-thread policy. Preserve explicit model overrides when changing
+  profile, with inherited settings still resolved natively. Treat legacy
+  fork-from as initial code/context intent, not a permanent coupling after an
+  explicit edit. Mark incompatible inputs for re-answer with a concise reason,
+  rather than silently broadening carry, dropping intent or emitting bad flags.
+- Back stops remaining-defaults auto-advance. A later Tab keeps confirmed valid
+  answers and fills only unresolved defaults; required sources still require
+  a choice. Reopening a step must not skip itself just because its value is
+  already present, nor immediately jump forward due to the prior Tab mode.
+- On returning to review, refresh relevant Git/file evidence and build a new
+  full-SHA expectation; do not reuse an old approval or row index after an edit.
+  Discovery failures should allow Back/Retry where safe without losing draft
+  values. Typed Back/Cancel must remain distinct from transport/validation
+  errors. No mutating request until explicit final acceptance, and no automatic
+  backward edit/resubmit after an operation may have started.
+- Suggested delivery sequence: shared navigable interaction primitives and a
+  complete create flow (all nested pickers plus text inputs and editable review)
+  first. Then apply the same semantics to repository/workspace navigation and
+  send target/message. For close/delete retain y/N, treat No as cancellation,
+  and discard any prior preview/consent on Back or target change; require a new
+  pinned plan. Structured decide forms need separate per-question and secret
+  handling, never cached approval/secret reuse across decisions. No new daemon,
+  MCP, SQLite, registry or general-purpose workflow framework is needed.
+- Required verification for implementation: parent/previous-step navigation,
+  preserved defaults/flags/text/focus, dependency invalidation, missing or
+  re-sorted entity IDs, Back after Tab and edit-to-review, changed Git sources,
+  no create/send/delete/respond on Back/Cancel, and unambiguous post-submit
+  handling. PTY tests must cover Esc/Shift-Tab/Ctrl-C, text editing/paste/Unicode,
+  small/scrolling terminals, repeated back/forward and restoration on failure.
+- Verification performed for this audit: source/contract/test inspection and
+  `cargo test --offline --lib -j 2 cli::prompt::tests -- --test-threads=2`
+  passes 26 unit cases; two interactive PTY probes remain ignored. Existing
+  tests explicitly confirm current global Esc cancellation and ignored
+  Shift-Tab, not support for the proposed behavior. No model, daemon, new PTY
+  session or full-suite run. Only this record changed; proposal awaits user
+  discussion/approval before implementation or public documentation changes.
+- The user subsequently approved implementation. The detailed plan, delivered
+  first slice and final verification now live in
+  [feature/interactive-navigation](feature/interactive-navigation.md). Its local
+  branch starts from released main 0.11.0 and preserves this audit record;
+  no commit, push or release is part of that delivery.
 
 ### Authorized guided-creation delivery — 2026-11-13
 

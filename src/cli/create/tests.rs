@@ -28,6 +28,7 @@ use crate::cli::prompt::StepSelection;
 static RPC_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 mod git_source;
+mod navigation;
 
 // Inject only read-only Git inspection. Workspace/model discovery still uses
 // the existing fake RPC fixtures; git_source tests additionally prove RPC wiring.
@@ -390,7 +391,7 @@ async fn unregistered_repository_choices_are_treated_as_empty_inventory() {
 #[tokio::test]
 async fn cancellation_returns_before_creation_parameters_are_produced() {
     let args = create_args(&["coco", "create", "review/api", "-i"]);
-    let mut interaction = ScriptedInteraction::new([0, 0, 0, 0, 0, 0, 0, 1], [] as [&str; 0]);
+    let mut interaction = ScriptedInteraction::new([0, 0, 0, 0, 0, 0, 0, 2], [] as [&str; 0]);
 
     let error = walkthrough(
         &test_paths(),

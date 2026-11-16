@@ -6,7 +6,7 @@ use crate::protocol::{
 };
 use crate::rpc::{RpcClient, RpcClientError};
 
-use super::super::prompt::{Choice, Interaction};
+use super::super::prompt::{Choice, Interaction, parent_choice};
 use super::super::status::natural_cmp;
 use super::{CreateWalkthrough, WorktreeChoice, has_explicit_code_base, select_workspace};
 
@@ -52,15 +52,17 @@ impl CreateWalkthrough<'_> {
             match actions[self.interaction.select("Worktree", &choices)?] {
                 WorktreeChoice::DefaultBranch => return Ok(()),
                 WorktreeChoice::NamedBranch => {
-                    self.args.branch = Some(self.interaction.text("Branch name")?);
-                    return Ok(());
+                    if let Some(name) = parent_choice(self.interaction.text("Branch name"))? {
+                        self.args.branch = Some(name);
+                        return Ok(());
+                    }
                 }
                 WorktreeChoice::Detached => {
                     self.args.detached = true;
                     return Ok(());
                 }
                 WorktreeChoice::ExistingBranch => {
-                    if let Some(branch) = self.select_branch(true).await? {
+                    if let Some(Some(branch)) = parent_choice(self.select_branch(true).await)? {
                         self.args.checkout = Some(branch.name);
                         return Ok(());
                     }
@@ -93,7 +95,7 @@ impl CreateWalkthrough<'_> {
             }
             match selected - usize::from(has_head) {
                 0 => {
-                    if let Some(branch) = self.select_branch(false).await? {
+                    if let Some(Some(branch)) = parent_choice(self.select_branch(false).await)? {
                         self.args.base = Some(branch.reference);
                         return Ok(());
                     }
@@ -106,19 +108,23 @@ impl CreateWalkthrough<'_> {
                             .notice("No workspace with reusable code found.")?;
                         continue;
                     }
-                    let selected = select_workspace(
+                    let selected = parent_choice(select_workspace(
                         &mut self.interaction,
                         "Code from workspace",
                         &mut workspaces,
                         self.args.sort,
-                    )?;
-                    self.args.base_workspace = Some(selected.id);
-                    self.selected_code_workspace = Some(selected.name);
-                    return Ok(());
+                    ))?;
+                    if let Some(selected) = selected {
+                        self.args.base_workspace = Some(selected.id);
+                        self.selected_code_workspace = Some(selected.name);
+                        return Ok(());
+                    }
                 }
                 2 => {
-                    self.args.base = Some(self.interaction.text("Git revision")?);
-                    return Ok(());
+                    if let Some(revision) = parent_choice(self.interaction.text("Git revision"))? {
+                        self.args.base = Some(revision);
+                        return Ok(());
+                    }
                 }
                 _ => unreachable!("validated selection"),
             }
@@ -165,7 +171,7 @@ impl CreateWalkthrough<'_> {
                 } else if Some(&branch.name) == state.branch.as_ref() {
                     detail.push("current".into());
                 }
-                Choice::new(&branch.name, Some(detail.join(" · ")))
+                Choice::new(&branch.name, Some(detail.join(" · "))).with_key(&branch.reference)
             })
             .collect();
         let selected = self.interaction.select(
@@ -183,41 +189,57 @@ impl CreateWalkthrough<'_> {
         if self.changes_preset || !self.uses_current_checkout() {
             return Ok(());
         }
+        self.prompt_copy_policy(false)
+    }
+
+    pub(super) fn prompt_copy_policy(&mut self, editing: bool) -> Result<()> {
         self.changes_prompted = Some(self.source.changes.clone());
+        let was_untracked = self.args.dirty || self.args.carry_untracked;
         self.args.carry_changes = false;
         self.args.carry_untracked = false;
         self.args.dirty = false;
         let changes = &self.source.changes;
-        if changes.tracked_files == 0 && changes.untracked_files == 0 {
+        if !editing && changes.tracked_files == 0 && changes.untracked_files == 0 {
+            self.interaction
+                .remember_choice("Git changes", "Don't copy");
             return Ok(());
         }
         let mut choices = vec![Choice::new("Don't copy", None).with_default_marker()];
-        let carries_untracked = changes.untracked_files > 0;
-        choices.push(if carries_untracked {
-            Choice::new(
-                "Copy tracked + untracked",
-                Some(format!(
-                    "{} tracked · {} untracked",
-                    changes.tracked_files, changes.untracked_files
-                )),
-            )
-        } else {
-            Choice::new(
-                "Copy tracked",
-                Some(format!(
-                    "{} {}",
-                    changes.tracked_files,
-                    if changes.tracked_files == 1 {
-                        "file"
-                    } else {
-                        "files"
-                    }
-                )),
-            )
-        });
-        if self.interaction.select("Git changes", &choices)? == 1 {
+        if changes.untracked_files == 0 {
+            choices.push(
+                Choice::new(
+                    "Copy tracked",
+                    Some(format!(
+                        "{} {}",
+                        changes.tracked_files,
+                        if changes.tracked_files == 1 {
+                            "file"
+                        } else {
+                            "files"
+                        }
+                    )),
+                )
+                .with_key("tracked"),
+            );
+        }
+        if changes.untracked_files > 0 || (editing && was_untracked) {
+            choices.push(
+                Choice::new(
+                    "Copy tracked + untracked",
+                    Some(format!(
+                        "{} tracked · {} untracked",
+                        changes.tracked_files, changes.untracked_files
+                    )),
+                )
+                .with_key("tracked+untracked"),
+            );
+        }
+        // Remember the exact policy: tracked-only may not silently become
+        // tracked+untracked if files appear while navigating.
+        let selected = self.interaction.select("Git changes", &choices)?;
+        if selected != 0 {
             self.args.carry_changes = true;
-            self.args.carry_untracked = carries_untracked;
+            self.args.carry_untracked = choices[selected].identity() == "tracked+untracked";
         }
         Ok(())
     }
