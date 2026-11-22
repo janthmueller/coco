@@ -17,7 +17,7 @@ architectural baseline for CoCo.
 
 ## Active work
 
-### Approved integration and release preparation — 2026-11-22
+### Verified 0.13.0 integration and release — 2026-11-22
 
 - User authorized commit/merge/push/publication, then explicitly approved the
   narrowly bounded `chrono` maintenance acceptance after fresh dependency
@@ -31,10 +31,28 @@ architectural baseline for CoCo.
   1,022 regular Rust tests, 32 Python tests, native 0.171.0 scenarios and an
   additional 0.169.0 MCP proof, Clippy, fresh policy, Nix tooling/evaluation and
   actual package dry-run. No real model calls or installed-service changes.
-- Pending: push the integrated current tip, require complete exact-SHA hosted
-  Rust/binary/docs success, inspect the nonpublishing stable rehearsal, then
-  publish and verify artifacts/registry. Reassess upstream chrono before its
-  exception expires at 2026-12-22 00:00 UTC; never extend it automatically.
+- Delivered source tip `a507cec`; the complete exact-SHA
+  [Rust CI and native binary smoke](https://github.com/janthmueller/coco/actions/runs/45039453460)
+  and [documentation deployment](https://github.com/janthmueller/coco/actions/runs/45039453387)
+  both passed. The [nonpublishing stable rehearsal](https://github.com/janthmueller/coco/actions/runs/45040685754)
+  passed and calculated `v0.13.0` with synchronized metadata.
+- The [publishing workflow](https://github.com/janthmueller/coco/actions/runs/45040954853)
+  completed successfully, including crates.io and both native archive jobs.
+  [Release v0.13.0](https://github.com/janthmueller/coco/releases/tag/v0.13.0)
+  is public, normal/non-prerelease and not a draft. Generated commit/tag
+  `69c44ad` changes only Cargo manifest/lock root versions and changelog; verified
+  and fast-forwarded locally without modifying the published tag.
+- Independently retrieved `codex-coordinator@0.13.0` through Cargo from `/tmp`
+  (not this workspace); the published manifest contains RMCP 3.11.0. The direct
+  crates.io HTTP API returned 403, so no claim is based on that failed API probe.
+  Downloaded both published Linux x86_64/macOS arm64 archives and verified their
+  accompanying SHA-256 files; both pass. The uploaded Cargo.lock digest also
+  matches the local tagged lockfile. Nothing was installed or executed from
+  those downloaded archives.
+- Delivery is complete. Reassess upstream chrono before its exception expires
+  at 2026-12-22 00:00 UTC; never extend it automatically. Automatic alpha remains
+  disabled. This follow-up documentation checkpoint does not change release
+  code, artifacts, package version or publication settings.
 
 ### Approved Git tracking implementation — 2026-11-22
 

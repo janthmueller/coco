@@ -506,3 +506,10 @@ publishing dispatch. Keep `COCO_RELEASE_ENABLED=false` and never force-push.
 Local completion is not a claim that hosted CI or publication has already run.
 Follow up on upstream `chrono` removal before the checked deadline; do not
 automatically extend it or switch SDK implementations.
+
+Delivery completed as normal release `v0.13.0` after successful exact-SHA CI,
+nonpublishing stable rehearsal, publication, registry retrieval and archive
+checksum verification. Source integration is `a507cec`; the generated release
+commit/tag is `69c44ad`. See the current [main delivery record](../main.md) for
+workflow links and verified artifact/registry evidence. No real model calls,
+SDK fork, automatic-alpha enablement or installed-service changes occurred.
