@@ -43,6 +43,10 @@ it concise, factual, and useful to the next maintainer.
 
 ## Current records
 
+- [`feature/codex-compatibility`](feature/codex-compatibility.md) - Current
+  Codex contract verification and AI control version-gate compatibility, based
+  on the locally integrated Git tracking slice.
+
 - [`feature/git-tracking`](feature/git-tracking.md) - Compact optional native
   upstream evidence in creation, status and human workspace navigation, with
   unchanged base-relative counts and bounded read-only enrichment.

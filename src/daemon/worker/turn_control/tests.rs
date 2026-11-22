@@ -64,7 +64,9 @@ async fn empty_native_ids_cannot_become_a_startup_or_current_turn_interrupt() {
         assert!(result.is_err());
         assert!(!called);
     }
-    assert!(supports_native_interrupt(Some("0.166.0")));
+    for version in crate::codex_compat::VERIFIED_VERSIONS {
+        assert!(supports_native_interrupt(Some(version)));
+    }
     for version in [None, Some("0.166.1"), Some("0.167.0"), Some("custom")] {
         assert!(!supports_native_interrupt(version));
     }
@@ -137,7 +139,9 @@ async fn paginated_preflight_is_followed_only_by_item_free_turn_pages() {
 
 #[test]
 fn indexed_lookup_fails_closed_for_missing_old_new_or_custom_versions() {
-    assert!(supports_indexed_lookup(Some("0.166.0")));
+    for version in crate::codex_compat::VERIFIED_VERSIONS {
+        assert!(supports_indexed_lookup(Some(version)));
+    }
     for version in [
         None,
         Some("0.160.1"),

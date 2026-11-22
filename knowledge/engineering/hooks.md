@@ -30,7 +30,8 @@ MCP-tool targets, model wakeup, workspace chaining, ticket semantics, and a
 complete copy of App Server notifications remain outside this contract.
 
 The native hook contract was initially checked against a matching 0.160.1
-source clone and is reconfirmed against selected `codex-cli 0.166.0` through
+source clone and is reconfirmed against verified `codex-cli` 0.166.0, 0.169.0
+and 0.171.0 through
 the opt-in real-process compatibility test. Codex reads native hooks
 from its own `hooks.json`; an App Server thread executes a pending
 `SessionStart` hook when its first ordinary turn starts. Merely calling

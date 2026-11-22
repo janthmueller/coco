@@ -10,7 +10,7 @@ impl CodexWorker {
         cwd: &Path,
         slots: &[String],
     ) -> Result<(), WorkerError> {
-        if self.client.server_version() != Some("0.166.0") {
+        if !crate::codex_compat::is_verified(self.client.server_version()) {
             return Err(WorkerError::InvalidResponse(
                 "verified worker MCP configuration version",
             ));

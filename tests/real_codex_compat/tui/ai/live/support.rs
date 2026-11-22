@@ -125,13 +125,6 @@ impl Fixture {
         Ok(serde_json::from_slice(&output.stdout)?)
     }
 
-    fn dialog(&self, model: &str, mode: &str, prompt: &str) -> Result<String> {
-        terminal_script(
-            &self.paths.data_dir.join("ai-dialog.sh"),
-            &self.dialog_command(model, mode, prompt),
-        )
-    }
-
     fn dialog_command(&self, model: &str, mode: &str, prompt: &str) -> String {
         let environment = self.command(Path::new("/unused-live-environment"));
         let (unset, values): (Vec<_>, Vec<_>) = environment
@@ -162,17 +155,6 @@ impl Fixture {
             shell_word(Path::new(prompt))
         )
     }
-}
-
-/// Send only a short path through the initial terminal's bounded line input.
-/// The environment/script contains synthetic paths, never credential contents.
-fn terminal_script(path: &Path, command: &str) -> Result<String> {
-    fs::write(path, command)?;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-    Ok(format!(
-        "env -u BASH_ENV -u ENV bash --noprofile --norc {}",
-        shell_word(path)
-    ))
 }
 
 pub(super) async fn inventory(fixture: &Fixture) -> Result<Vec<(String, String, String)>> {
@@ -220,7 +202,7 @@ pub(super) async fn run_dialog(
             .join(format!("live-ai-{label}.tmux.sock")),
     );
     let progress = Progress::snapshot(&fixture.paths, &fixture.first)?;
-    start_jump(&server, &fixture.dialog(model, mode, prompt)?).await?;
+    start_jump(&server, &fixture.dialog_command(model, mode, prompt)).await?;
     if let Some(approve) = confirmation {
         let screen = wait(&server, label, true, &progress).await?;
         let workspace = if approve {
@@ -363,7 +345,6 @@ async fn isolated_terminal_launch_preserves_long_commands() -> Result<()> {
     let command = fixture
         .dialog_command("unused", "", &"x".repeat(6 * 1024))
         .replace(&shell_word(Path::new(env!("CARGO_BIN_EXE_coco"))), "true");
-    let command = terminal_script(&fixture.paths.data_dir.join("transport.sh"), &command)?;
     let server = TmuxServer::new(fixture.paths.data_dir.join("long-command.sock"));
     start_jump(&server, &command).await?;
     let deadline = Instant::now() + Duration::from_secs(5);

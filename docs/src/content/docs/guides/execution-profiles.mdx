@@ -89,13 +89,15 @@ configuration layer. If you change the base configuration, inherited settings
 can therefore change the next time a workspace is loaded. Put settings that
 must stay fixed explicitly in the named profile.
 
-## Keep the model provider consistent
+## Keep provider settings available
 
-A model provider is the service supplying the model, such as OpenAI. All
-workspaces managed by one running `cocod` use the provider selected by
-`model_provider` in your main Codex configuration. A workspace profile must
-use that same provider; `--model` selects a model within it.
+A model provider is the service supplying the model, such as OpenAI. With
+tested Codex 0.169.0 and 0.171.0, an existing conversation keeps its saved
+provider when resumed, even if your main configuration selects another one.
+Keep that provider's configuration and credentials available. `--model`
+selects a model, not a different provider.
 
-If Codex reports a provider mismatch, stop active work, set the conversation's
-provider in the main Codex configuration, and restart `cocod`. Leave the
-workspace's saved profile unchanged.
+Codex 0.166.0 requires the conversation's provider to match the main
+configuration. If it reports a mismatch, stop active work, set that provider
+in your main Codex configuration, and restart `cocod`. Leave the workspace's
+saved profile unchanged.

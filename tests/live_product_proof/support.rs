@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use tokio::process::{Child, Command};
 use tokio::time::{sleep, timeout};
 
-use crate::codex_compat::SELECTED_CODEX_VERSION;
+use crate::codex_compat::expected_version;
 use crate::mcp_client::McpClient;
 
 const PROOF_TIMEOUT: Duration = Duration::from_secs(240);
@@ -108,9 +108,10 @@ pub(super) async fn verify_codex_version(paths: &TestPaths, codex_binary: &Path)
     paths.apply(&mut command, codex_binary);
     let output = timeout(PROOF_TIMEOUT, command.arg("--version").output()).await??;
     let actual = String::from_utf8(output.stdout)?.trim().to_owned();
+    let expected = expected_version();
     ensure!(
-        actual == SELECTED_CODEX_VERSION,
-        "unsupported Codex executable: expected {SELECTED_CODEX_VERSION:?}, received {actual:?}"
+        actual == expected,
+        "unsupported Codex executable: expected {expected:?}, received {actual:?}"
     );
     Ok(())
 }

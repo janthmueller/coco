@@ -9,9 +9,7 @@ use tokio::process::Command;
 use super::args::AiArgs;
 use crate::diagnostics::{capture_command, parse_version};
 use crate::paths::{CocoPaths, resolve_executable};
-use crate::protocol::{
-    CONTROL_CODEX_VERSION, ControlSessionPreparation, ControlSessionPrepareParams,
-};
+use crate::protocol::{ControlSessionPreparation, ControlSessionPrepareParams};
 use crate::rpc::RpcClient;
 
 mod config;
@@ -37,9 +35,12 @@ async fn run_verified(
     let version = capture_command(probe)
         .await
         .map_err(|_| anyhow::anyhow!("could not check the Codex version"))?;
+    let version = parse_version(&version, "codex-cli ");
     ensure!(
-        parse_version(&version, "codex-cli ").as_deref() == Some(CONTROL_CODEX_VERSION),
-        "coco ai requires the verified Codex {CONTROL_CODEX_VERSION} configuration contract"
+        crate::codex_compat::is_verified(version.as_deref()),
+        "coco ai requires a verified Codex configuration contract (tested: {}); found {}",
+        crate::codex_compat::VERIFIED_VERSIONS.join(", "),
+        version.as_deref().unwrap_or("an unrecognized version")
     );
     let client = RpcClient::new(paths.socket_path.clone());
     let prepared = tokio::time::timeout(

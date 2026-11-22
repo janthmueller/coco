@@ -11,15 +11,15 @@ use crate::domain::turns::TurnTerminalStatus;
 const PAGE_SIZE: usize = 50;
 const MAX_PAGES: usize = 4;
 
-// This verifies only indexed, item-free history lookup. Codex 0.166.0 does NOT
-// provide atomic exact-turn interruption; the worker keeps that capability off.
+// This verifies indexed, item-free history lookup, not exact interruption.
+// Even newer servers still submit untargeted Op::Interrupt after validation.
 fn supports_indexed_lookup(version: Option<&str>) -> bool {
-    version == Some("0.166.0")
+    crate::codex_compat::is_verified(version)
 }
 
 pub(super) fn supports_native_interrupt(version: Option<&str>) -> bool {
     // Verified request/rejection shape only, NOT an atomicity guarantee.
-    version == Some("0.166.0")
+    crate::codex_compat::is_verified(version)
 }
 
 #[derive(Deserialize)]
@@ -92,7 +92,7 @@ where
             || (message.starts_with("expected active turn id ")
                 && message.contains(" but found ")) =>
         {
-            // Exact 0.166.0 validation failures occur BEFORE queuing Op::Interrupt.
+            // Verified validation failures occur BEFORE queuing Op::Interrupt.
             Err(WorkerError::TurnInterruptRejected)
         }
         Err(error) => Err(WorkerError::runtime(error)),

@@ -95,7 +95,8 @@ response leaves `uncertain` / `acceptanceUnconfirmed`; proximity to a native
 completion cannot repair that ambiguity and retry must not redispatch it.
 
 For an accepted operation without a receipt, native recovery is enabled only
-for the verified indexed lookup contract (currently exact Codex `0.166.0`).
+for the verified indexed lookup contract (exact Codex `0.166.0`, `0.169.0`,
+and `0.171.0` in the shared explicit release allowlist).
 Preflight `thread/read` with `includeTurns: false`, require the snapshotted
 thread ID and an explicit `historyMode: paginated`. Missing, legacy or unknown
 modes and unverified versions return `HistoryUnavailable` without turn-history
@@ -158,13 +159,21 @@ Both use the existing grant, stored operation binding and ordinary native
 current-turn/startup cancellation. Empty IDs are not valid targets.
 
 The port keeps `supports_exact_turn_interrupt()` false for native Codex.
-0.166.0 checks the ID under a thread-state lock, releases it, awaits bookkeeping
-and submits untargeted `Op::Interrupt`; the core handler receives no expected
-turn ID. A newer TUI/native turn can be interrupted instead. CoCo admission
+All verified versions check the ID under a thread-state lock, release it,
+await bookkeeping and submit untargeted `Op::Interrupt`; the core handler
+receives no expected turn ID. A newer TUI/native turn can be interrupted instead. CoCo admission
 serialization cannot eliminate that native race. An independent best-effort
-capability verifies the ordinary request/rejection contract for exact 0.166.0,
-not atomicity. Other/unverified builds fail closed. Upstream patches and local
-installation changes are outside this slice.
+capability verifies the ordinary request/rejection contract for the same
+explicit release set, not atomicity. Other/unverified builds fail closed. Upstream patches and local
+installation changes are outside this contract.
+
+Upstream 0.171.0 delays a successful interrupt response until the target's
+terminal outcome is processed. This improves ordering, not targeting: its
+[`turn_interrupt_inner`](https://github.com/openai/codex/blob/rust-v0.171.0/codex-rs/app-server/src/request_processors/turn_processor.rs)
+still queues untargeted `Op::Interrupt` after validation/bookkeeping. Keep the
+two-second application deadline and honest uncertainty; delayed acknowledgement
+is neither atomic safety nor permission to issue a second interrupt. A native
+terminal notification may precede the reply and must retain its true outcome.
 
 After scoped lookup, terminal operations are no-ops (`confirmed` for interrupted,
 `alreadyFinished` for completed/failed). No confirmed binding and no prior
@@ -190,7 +199,7 @@ Workspace/data deletion removes both the receipt and deduplication boundary.
 
 A received native acknowledgement records `requested`; a proven pre-queue
 stale/no-active validation rejection records `rejected`, with no fallback.
-Only exact 0.166.0 error forms establish that rejection; unclassified RPC,
+Only the verified releases' exact error forms establish that rejection; unclassified RPC,
 transport and malformed-reply failures stay uncertain. Rejection invalidates
 only that operation's local in-flight hint, not a newer guard or the original
 turn's unknown outcome. An exact native outcome can still repair its receipt.
@@ -218,8 +227,8 @@ all spawned background processes.
 
 ## Evidence and verification
 
-The installed `codex-cli 0.166.0` is selected by the existing exact-version
-compatibility gate. Its generated `TurnInterruptParams` includes both IDs;
+The original `codex-cli 0.166.0` proof is retained alongside the 0.169.0 and
+0.171.0 compatibility work. Generated `TurnInterruptParams` includes both IDs;
 its turn pagination supports `itemsView: notLoaded`. The official
 [App Server guide](https://learn.chatgpt.com/docs/app-server) distinguishes
 interrupt acknowledgement from terminal `turn/completed`; wire shape alone

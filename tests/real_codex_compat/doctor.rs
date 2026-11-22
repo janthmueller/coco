@@ -14,7 +14,7 @@ pub(super) async fn verify(
     );
     ensure!(
         report["daemon"]["codexVersion"].as_str()
-            == codex_compat::SELECTED_CODEX_VERSION.strip_prefix("codex-cli "),
+            == codex_compat::expected_version().strip_prefix("codex-cli "),
         "native initialize did not supply the selected running version: {report}"
     );
     ensure!(report["daemon"]["executionMode"] == "exec-server");

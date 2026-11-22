@@ -50,9 +50,15 @@ keys/results and are not an atomic transaction or automatic rollback saga.
 
 ## Native launch and capabilities
 
-Use Codex 0.166.0's `--no-daemon`, native interactive input and model selection,
+Use native `--no-daemon`, interactive input and model selection,
 with invocation-only configuration. Require matching CoCo versions and
 canonical Codex home; probe the selected native executable's exact version.
+The neutral private `codex_compat` module names the verified releases: 0.166.0,
+0.169.0 and 0.171.0. AI launch, layer inventory, fixed worker MCP setup and
+bounded turn metadata/native-interrupt adapters share that explicit evidence
+set. Unknown, patched, prerelease and future versions fail closed at these
+boundaries; no semver minimum or prefix grants unverified authority. Add a
+release only after checking all consumed contracts, not merely startup.
 CoCo does not persist its control/tool overrides or modify user services.
 The native TUI still owns its usual UI preferences, trust choices and history;
 for example, startup records screen-reader discovery and model introduction
@@ -67,6 +73,10 @@ search in this invocation. Read-only native sandboxing and granular approval
 policy deny shell/file/permission escalation while allowing MCP prompts.
 Disable native legacy `connectors` and `memory_tool` spellings alongside
 `apps` and `memories`: 0.166.0 can apply these aliases after canonical flags.
+Also disable host JavaScript, local image viewing, peer message-board tools
+and experimental per-environment MCP. These inherited flags must not restore
+alternate capabilities around the administrative MCP allowlist. Native
+`code_mode_host` remains the isolated dispatcher, not a host execution tool.
 Check effective native feature resolution, not only the generated TOML. These
 compatibility overrides are invocation-only; native deprecation notices may
 still mention the legacy spellings, including when their values are false.
@@ -162,6 +172,12 @@ MCP coverage can be evaluated independently.
 
 The native source was inspected at 0.166.0 commit
 `6ff1e1ca3b30fc8b914720681fcf5fe62e95f856` in an isolated temporary clone.
+Compatibility inspection on 2026-11-22 additionally covers official 0.169.0
+(`d32063f96c2dff1dc96af839b3952abb6acfeda4`) and 0.171.0
+(`ccf9be8cc458bd6b8336fe84d68d8893f2691a5e`). Newer native workspace UI text
+and layout belong to Codex; CoCo does not force its older layout. Model-free
+native feature-resolution and scripted TUI proofs remain distinct from the
+historical authenticated real-model evidence below.
 Unit/process fixtures and opted-in scripted-loopback native TUI checks cover
 configuration, target scope, actual approval and model-free tool dispatch.
 The scripted AI-TUI proof starts in an untrusted project, checks discovery of

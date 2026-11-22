@@ -55,7 +55,12 @@ pub(super) fn overrides(
     // Disable both spellings so inherited settings cannot restore authority.
     for feature in [
         "shell_tool",
+        "js_repl",
+        "view_image",
         "code_mode",
+        "agent_message_board",
+        "agent_message_board_mcp",
+        "multi_environment_mcp",
         "multi_agent",
         "multi_agent_v2",
         "hooks",

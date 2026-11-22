@@ -16,7 +16,7 @@ mod live;
 mod progress;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires COCO_RUN_REAL_CODEX_COMPAT=1, Codex 0.166.0 and tmux; scripted loopback, no real model"]
+#[ignore = "requires COCO_RUN_REAL_CODEX_COMPAT=1, selected Codex and tmux; scripted loopback, no real model"]
 async fn native_ai_creation_requires_human_approval_and_auto_handles_two_repositories() -> Result<()>
 {
     require_explicit_opt_in()?;
@@ -266,18 +266,24 @@ async fn trust_folder(server: &TmuxServer) -> Result<()> {
     wait_for(server, "Trust and continue").await?;
     // Native startup deliberately drains pending input after rendering this
     // screen. Acknowledge fresh, idempotent navigation before confirming once.
-    for (key, selected) in [("Down", "› 2. Quit"), ("Up", "› 1. Trust and continue")] {
+    // Newer native workspace UIs return to the Agent Command Center instead
+    // of quitting. Assert the selected option, not its version-specific label.
+    for (key, selected) in [("Down", "› 2."), ("Up", "› 1. Trust and continue")] {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             server.send_keys(&[key]).await?;
             sleep(POLL_INTERVAL).await;
             let pane = server.run(["capture-pane", "-p", "-t", SESSION]).await?;
-            if String::from_utf8(pane.stdout)?.contains(selected) {
+            let screen = String::from_utf8(pane.stdout)?;
+            if screen
+                .lines()
+                .any(|line| line.trim_start().starts_with(selected))
+            {
                 break;
             }
             ensure!(
                 Instant::now() < deadline,
-                "folder trust input was not acknowledged"
+                "folder trust input was not acknowledged:\n{screen}"
             );
         }
     }

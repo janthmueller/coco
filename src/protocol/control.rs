@@ -5,8 +5,6 @@ use serde::{Deserialize, Serialize};
 use super::{DaemonMethod, DaemonRequest};
 pub(crate) use crate::domain::control::{InheritedMcpServer, McpTransportKind};
 
-pub(crate) const CONTROL_CODEX_VERSION: &str = "0.166.0";
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ControlSessionPrepareParams {

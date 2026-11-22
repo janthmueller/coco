@@ -119,7 +119,7 @@ coco-mcp --repository /absolute/path/to/project --allow-interrupt
 
 The arguments are `workspace`, `operationId`, and optional `mode`. Extra
 arguments are rejected. Omit `mode` or set it to `"strict"` to require safe,
-exact-target cancellation. Current Codex `0.166.0` cannot provide that guarantee.
+exact-target cancellation. The tested Codex releases cannot provide that guarantee.
 An unfinished turn with no previous attempt returns this error without sending
 an interrupt or recording an attempt:
 
@@ -144,7 +144,8 @@ To request Codex's native interrupt despite its targeting limitation, choose:
 }
 ```
 
-Best-effort interruption is verified for Codex `0.166.0`. CoCo sends only the
+Best-effort interruption requires a [tested Codex release](../../installation/).
+CoCo sends only the
 saved native thread and turn IDs. **If another client starts a new turn during
 the request, Codex may interrupt that newer turn instead.** Choose this mode
 only when you accept that risk. Do not start more work in that thread while
@@ -232,7 +233,8 @@ returned even when Codex is unavailable. Closing a workspace retains them;
 deleting its CoCo workspace record removes them.
 
 If completion was missed, CoCo checks whether verified indexed turn metadata
-is available, currently for Codex `0.166.0` with paginated history. It never
+is available on a [tested Codex release](../../installation/) with paginated
+history. It never
 replays legacy conversation history to recover an outcome. Missing, legacy or
 unverified metadata can leave the outcome `unavailable`. Native inspection has
 a two-second response budget; a timeout remains unknown, not failed.

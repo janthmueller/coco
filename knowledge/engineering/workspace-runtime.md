@@ -522,7 +522,8 @@ remain separate internally.
 
 ## Compatibility evidence
 
-The selected baseline is exactly `codex-cli 0.166.0`. The opt-in real-process
+The selected baseline is exactly `codex-cli 0.171.0`; the prior 0.166.0 proof
+and installed 0.169.0 contracts are retained. The opt-in real-process
 suite proves environment registration and readiness, fresh thread selection,
 distinct executor PIDs for two simultaneously active workspaces, on-demand
 resource reporting, close-time cleanup, daemon-shutdown cleanup, and the

@@ -15,7 +15,7 @@ use support::{Fixture, inventory, run_dialog};
 const SEED: &str = "COCO_LIVE_CONTEXT_SEED";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "requires COCO_RUN_LIVE_AI_PROOF=1, COCO_LIVE_CODEX_HOME and Codex 0.166.0; uses real model tokens"]
+#[ignore = "requires COCO_RUN_LIVE_AI_PROOF=1, COCO_LIVE_CODEX_HOME and selected Codex; uses real model tokens"]
 async fn authenticated_ai_handles_consent_context_multiple_repositories_and_readonly() -> Result<()>
 {
     privacy::proof(authenticated_proof()).await

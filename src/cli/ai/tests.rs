@@ -114,6 +114,15 @@ fn native_config_uses_scoped_mcp_confirmations_and_removes_execution_escape_hatc
     .unwrap();
     let config = settings(&values);
     assert_eq!(config["features"]["shell_tool"], false);
+    for feature in [
+        "js_repl",
+        "view_image",
+        "agent_message_board",
+        "agent_message_board_mcp",
+        "multi_environment_mcp",
+    ] {
+        assert_eq!(config["features"][feature], false);
+    }
     assert_eq!(config["features"]["code_mode"], false);
     assert_eq!(config["features"]["code_mode_host"], true);
     assert_eq!(config["features"]["plugins"], false);

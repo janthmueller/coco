@@ -56,8 +56,17 @@ pub(super) async fn verify_inherited_context_resume(
 }
 
 async fn start_jump(server: &TmuxServer, command: &str) -> Result<()> {
+    // A long environment/prompt can exceed the terminal's canonical input
+    // buffer before Bash sees it. Send only a short private script path.
+    let script = server.socket.with_extension("launch.sh");
+    fs::write(&script, command)?;
+    fs::set_permissions(&script, fs::Permissions::from_mode(0o600))?;
+    let launch = format!(
+        "env -u BASH_ENV -u ENV bash --noprofile --norc {}",
+        shell_word(&script)
+    );
     server.start().await?;
-    server.send_literal(command).await?;
+    server.send_literal(&launch).await?;
     server.send_keys(&["Enter"]).await
 }
 

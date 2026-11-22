@@ -15,8 +15,9 @@ status: draft
 - The repository now has an early Rust implementation for domain state, Git,
   SQLite, local RPC, the Codex App Server client, profiles, CLI parsing, the
   daemon coordinator, executable binaries, and CoCo's control MCP adapter.
-- The official `codex-cli 0.166.0` release binary is the
-  selected compatibility baseline. A model-free real-process test exercises
+- The official `codex-cli 0.171.0` release binary is the
+  selected compatibility baseline; 0.169.0 and the prior 0.166.0 proof are
+  retained in an explicit verified-release set. A model-free real-process test exercises
   the exact stable App Server methods and fields CoCo consumes.
 - The same compatibility suite now exercises the experimental environment
   boundary used by CoCo: one shared App Server registers a lazy
@@ -53,7 +54,7 @@ status: draft
   that an empty remote TUI launch remains unbound, a native action creates a
   non-empty rollout, the exact resulting thread can then be adopted, and the
   same binding survives both daemon and App Server restart. No synthetic turn
-  or native Codex worktree allocation is used. The selected 0.166.0 gate
+  or native Codex worktree allocation is used. The current behavioral gate
   reconfirms the same contract.
 - The same real-process boundary proves exact native archive, unarchive, and
   delete behavior used by workspace retirement. Exact lookup uses
@@ -1353,14 +1354,22 @@ additive upstream definitions must not block the real-process test. Concrete
 request/response behavior is authoritative; removed methods, rejected params,
 or missing/changed consumed fields fail the compatibility test.
 
-The selected released build is Codex 0.166.0. Its real process behavior proves
+The selected released build is Codex 0.171.0, with 0.169.0 and prior 0.166.0
+contracts retained. The private `codex_compat` allowlist is exact, not a semver
+range. `COCO_REAL_CODEX_VERSION` selects an explicit alternative expected
+version for the opt-in test runner only; it cannot bypass production guards.
+The real process behavior proves
 native non-subscribing thread reads, history hydration, exact resume after an
 App Server restart, and the remote attachment path CoCo consumes. A
 documentation page, an upstream merge, or byte-for-byte equality of an
 additive generated schema is not release evidence. A broader compatibility
 range remains optional; every claimed version needs the same behavioral gate.
+The 0.169.0/0.171.0 suites cover native TUI clients, temporary cleanup, execution
+environments, worker MCP setup, hooks, indexed lookup and best-effort interrupt.
+See [AI control](ai-control.md), [MCP runtime](mcp-runtime.md) and
+[turn control](turn-control.md) for the version-sensitive safety boundaries.
 
-The 0.166.0 gate also proves the native `modelProviderMismatch` rejection:
+The historical 0.166.0 gate also proves the native `modelProviderMismatch` rejection:
 resume and input require the conversation provider to match the shared App
 Server's current provider. Per-workspace configuration overlays do not make
 that process setting independent. Preserve named-profile provenance, surface
@@ -1369,6 +1378,13 @@ matching base configuration rather than rewriting the user's config or adding
 a provider pool. A proven first-turn provider rejection also restores its
 intent and releases its guard as specified above; genuinely unknown-dispatch
 and duplicate-send protection remain unchanged.
+
+This process-wide provider limitation no longer describes verified 0.169.0
+and 0.171.0: native resume now preserves the saved provider. Loopback tests
+verify both the newer routing and exact operation replay across restart;
+definitions/credentials and native managed requirements still apply. Keep
+the structured rejection classification for older/managed rejection paths;
+do not infer safe rejection from unclassified errors.
 
 The generated bundle includes experimental fields so CoCo can audit the
 remote-attachment surface it depends on without retaining an upstream schema
@@ -2093,8 +2109,9 @@ status, or waive the separate migration and supervision work below.
 The following still need confirmation; decision-response closure no longer
 blocks a safe complete v0:
 
-1. Whether a compatibility range broader than the proven Codex 0.166.0
-   baseline is worth maintaining; it is optional follow-up evidence.
+1. Whether to extend compatibility beyond the exact verified 0.166.0,
+   0.169.0 and 0.171.0 releases, or replace release guards with equally strong
+   capability proofs. The current decision is an evidence-based allowlist.
 2. When the selected Windows named-pipe local-IPC backend and Windows CI become
    release requirements; the cross-platform transport shape itself is settled.
 3. How an explicit atomic promotion operation anchors detached work on a new

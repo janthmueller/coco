@@ -5,7 +5,6 @@ use serde_json::{Value, json};
 
 use super::{CodexWorker, WorkerError};
 use crate::domain::control::{InheritedMcpServer, McpTransportKind};
-use crate::protocol::CONTROL_CODEX_VERSION;
 
 const MAX_CONTROL_MCP_SERVERS: usize = 256;
 const MAX_CONTROL_CONFIG_LAYERS: usize = 256;
@@ -15,7 +14,7 @@ impl CodexWorker {
         &self,
         cwd: &Path,
     ) -> Result<Vec<InheritedMcpServer>, WorkerError> {
-        if self.client.server_version() != Some(CONTROL_CODEX_VERSION) {
+        if !crate::codex_compat::is_verified(self.client.server_version()) {
             return Err(WorkerError::InvalidResponse(
                 "verified control session Codex version",
             ));

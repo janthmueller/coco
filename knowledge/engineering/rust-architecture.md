@@ -81,6 +81,13 @@ leaks above remain as the historical pre-refactor baseline.
 
 ## Target dependency direction
 
+The private root `codex_compat` module contains only an explicit reviewed
+release-identity allowlist, shared by CLI and native worker guards. It has no
+transport, domain, protocol, filesystem or process dependencies and is not a
+public SDK. Adapter-specific capability and response validation stay with their
+owners; a listed release cannot enable exact-target interruption. This avoids
+duplicating conflicting version pins without adding a CLI-to-Codex import.
+
 Upstream tracking follows the same staged direction: neutral optional values in
 `domain/git_tracking`, response extensions in existing protocol DTOs, bounded
 native metadata/binding parsers in private `git/tracking` children, and short-lived

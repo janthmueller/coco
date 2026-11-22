@@ -1,6 +1,7 @@
 mod capability;
 mod cli;
 mod codex;
+mod codex_compat;
 mod coordinator;
 mod daemon;
 mod diagnostics;

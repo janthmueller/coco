@@ -80,7 +80,7 @@ machine.
 
 ## Project status
 
-CoCo runs on Linux and macOS and is tested with Codex 0.166.0.
+CoCo runs on Linux and macOS and is tested with Codex 0.171.0, 0.169.0, and 0.166.0.
 The 0.x series is under active development.
 Resource measurements and limits are Linux features; limits require a
 compatible systemd user session.

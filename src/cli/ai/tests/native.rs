@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-#[ignore = "requires COCO_RUN_REAL_CODEX_COMPAT=1 and Codex 0.166.0; feature inspection only, no model"]
+#[ignore = "requires COCO_RUN_REAL_CODEX_COMPAT=1 and a verified Codex; feature inspection only, no model"]
 async fn installed_codex_cannot_reenable_apps_or_memories_through_legacy_aliases() -> Result<()> {
     ensure!(
         std::env::var("COCO_RUN_REAL_CODEX_COMPAT").as_deref() == Ok("1"),
@@ -16,10 +16,10 @@ async fn installed_codex_cannot_reenable_apps_or_memories_through_legacy_aliases
     version.arg("--version");
     let version = probe(version, temp.path(), &prepared.codex_home).await?;
     ensure!(
-        parse_version(&version, "codex-cli ").as_deref() == Some(CONTROL_CODEX_VERSION),
-        "this proof requires Codex {CONTROL_CODEX_VERSION}"
+        crate::codex_compat::is_verified(parse_version(&version, "codex-cli ").as_deref()),
+        "this proof requires a verified Codex release"
     );
-    let original = "check_for_update_on_startup=false\n[features]\napps=false\nconnectors=true\nmemories=false\nmemory_tool=true\n";
+    let original = "check_for_update_on_startup=false\n[features]\napps=false\nconnectors=true\nmemories=false\nmemory_tool=true\njs_repl=true\nview_image=true\nagent_message_board=true\nagent_message_board_mcp=true\nmulti_environment_mcp=true\n";
     let config_file = prepared.codex_home.join("config.toml");
     std::fs::write(&config_file, original)?;
     let mut inherited = Command::new(&program);
@@ -44,13 +44,35 @@ async fn installed_codex_cannot_reenable_apps_or_memories_through_legacy_aliases
         )?;
         command.args(["features", "list"]);
         let output = probe(command, temp.path(), &prepared.codex_home).await?;
-        for feature in ["apps", "memories", "shell_tool", "hooks", "plugins"] {
+        for feature in [
+            "apps",
+            "memories",
+            "shell_tool",
+            "hooks",
+            "plugins",
+            "js_repl",
+            "view_image",
+        ] {
             let actual = resolved_feature(&output, feature);
             ensure!(
                 actual == Some(false),
                 "{feature} was not disabled in {extra:?}: {actual:?}"
             );
         }
+        for feature in [
+            "agent_message_board",
+            "agent_message_board_mcp",
+            "multi_environment_mcp",
+        ] {
+            ensure!(
+                resolved_feature(&output, feature) != Some(true),
+                "inherited {feature} was enabled"
+            );
+        }
+        ensure!(
+            resolved_feature(&output, "code_mode_host") == Some(true),
+            "native MCP dispatcher was disabled"
+        );
     }
     ensure!(
         std::fs::read_to_string(config_file)? == original,

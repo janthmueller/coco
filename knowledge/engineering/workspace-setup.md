@@ -171,7 +171,8 @@ base verification and loading are not atomic against an external writer.
 
 ## Native evidence and approvals
 
-Opted-in `tests/real_codex_compat/setup*` fixtures use installed Codex 0.166.0,
+Opted-in `tests/real_codex_compat/setup*` fixtures cover verified Codex 0.166.0,
+0.169.0 and 0.171.0 with
 temporary repos/HOME/CODEX_HOME, a generic run-bound stdio server and scripted
 Responses events from loopback. They exercise public create/send, actual native
 model-directed tool dispatch without a real model, disjoint grants, filtered
@@ -184,7 +185,8 @@ MCP approval/elicitation or interpret `auto` as unconditional preapproval.
 Native TUI interaction handles prompts not projected by CoCo's decide surface.
 Changing the mode changes the file hash and requires new creation, not rebind.
 
-These tests establish this native version only. Official settings references:
+These tests establish the listed native releases, not forward compatibility.
+Official settings references:
 [MCP configuration](https://learn.chatgpt.com/docs/extend/mcp) and
 [App Server](https://learn.chatgpt.com/docs/app-server). Published docs alone
 do not establish exact merge/approval behavior for another installed release.

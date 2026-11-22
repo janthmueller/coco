@@ -486,10 +486,10 @@ async fn verify_codex_version(codex_binary: &Path, paths: &TestPaths) -> Result<
         .env("CODEX_HOME", &paths.codex_home);
     let output = run_codex_command(command, "read the Codex version").await?;
     let actual = String::from_utf8(output.stdout)?.trim().to_owned();
+    let expected = codex_compat::expected_version();
     ensure!(
-        actual == codex_compat::SELECTED_CODEX_VERSION,
-        "unsupported Codex executable: expected {:?}, received {actual:?}",
-        codex_compat::SELECTED_CODEX_VERSION
+        actual == expected,
+        "unsupported Codex executable: expected {expected:?}, received {actual:?}"
     );
     Ok(())
 }

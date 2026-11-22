@@ -1,9 +1,15 @@
 use super::*;
 
+#[path = "providers/saved.rs"]
+mod saved;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires COCO_RUN_REAL_CODEX_COMPAT=1 and selected Codex; no model calls"]
-async fn installed_codex_checks_saved_provider_before_resume_or_input() -> Result<()> {
+async fn installed_codex_uses_the_verified_saved_provider_contract() -> Result<()> {
     require_explicit_opt_in()?;
+    if codex_compat::expected_version() != "codex-cli 0.166.0" {
+        return saved::native_saved_provider_survives_resume().await;
+    }
     let binary = env::var_os(CODEX_BINARY_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| "codex".into());
@@ -78,8 +84,11 @@ async fn installed_codex_checks_saved_provider_before_resume_or_input() -> Resul
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "requires COCO_RUN_REAL_CODEX_COMPAT=1 and selected Codex; no external model calls"]
-async fn coco_reports_provider_rejection_and_can_retry_after_configuration_repair() -> Result<()> {
+async fn coco_preserves_saved_provider_or_reports_legacy_rejection() -> Result<()> {
     require_explicit_opt_in()?;
+    if codex_compat::expected_version() != "codex-cli 0.166.0" {
+        return saved::coco_saved_provider_survives_restart().await;
+    }
     let binary = env::var_os(CODEX_BINARY_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(|| "codex".into());
