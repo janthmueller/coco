@@ -245,7 +245,8 @@ async fn assert_scope(remote: &mut RemoteAppServer, thread: &str, workspace: &st
         result["isError"] != true,
         "native MCP call failed: {result}"
     );
-    let workspaces = result["structuredContent"]
+    let data = crate::mcp_client::tool_data(&result)?;
+    let workspaces = data
         .as_array()
         .context("native MCP list was not an array")?;
     let expected = workspaces

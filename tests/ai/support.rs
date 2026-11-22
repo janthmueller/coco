@@ -33,9 +33,13 @@ impl Fixture {
                 }
                 let request: Value = serde_json::from_str(&line).unwrap();
                 recorded.lock().unwrap().push(request.clone());
-                let result = lifecycle
-                    .then(|| super::lifecycle::preview_response(&request))
-                    .flatten();
+                let result = if request["method"] == "workspace.list" {
+                    Some(json!([]))
+                } else {
+                    lifecycle
+                        .then(|| super::lifecycle::preview_response(&request))
+                        .flatten()
+                };
                 let response = match result {
                     Some(result) => json!({"id":request["id"],"result":result}),
                     None => {

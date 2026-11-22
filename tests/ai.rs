@@ -3,10 +3,14 @@
 use anyhow::{Result, ensure};
 use serde_json::json;
 
+#[path = "ai/compatibility.rs"]
+mod compatibility;
 #[path = "ai/host.rs"]
 mod host;
 #[path = "ai/lifecycle.rs"]
 mod lifecycle;
+#[path = "support/mcp_client.rs"]
+mod mcp_client;
 #[path = "ai/support.rs"]
 mod support;
 use host::Host;

@@ -41,6 +41,21 @@ deployment state and must not become a second control plane.
 
 ## Two different MCP directions
 
+The control adapter uses official `rmcp 3.11.0` with default features disabled
+and only `macros`, `server`, `transport-io` and `elicitation` enabled. It does not
+enable the SDK's HTTP, OAuth or filesystem-skills server. Its temporary `chrono`
+maintenance acceptance is bounded by the [release policy](release.md#bounded-maintenance-exception),
+not a switch to another MCP implementation or a worker capability grant.
+
+RMCP 3.11 also enforces legacy object-only `structuredContent`: list results
+remain unchanged JSON in a text content block for 2025 protocol peers. Objects
+retain structured output. The 2026 stateless discovery/request-metadata path
+can also carry lists in `structuredContent`. Independent raw stdio fixtures
+check both lifecycles, unchanged values, read-only grants and rejection of
+unadvertised prompt methods; do not rewrap public payloads or patch the SDK
+to restore an invalid legacy array assumption. Integration clients read
+structured output when present and otherwise the exact JSON text block.
+
 CoCo uses MCP in two independent directions:
 
 1. **CoCo control MCP:** `coco mcp serve` exposes selected orchestration

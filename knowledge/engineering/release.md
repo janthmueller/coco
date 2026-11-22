@@ -110,6 +110,42 @@ manually or substitute the parent's successful CI. Existing tags or partially
 published registry/assets require their own state-aware recovery; this narrow
 case does not authorize overwriting a published artifact.
 
+## Bounded maintenance exception
+
+The approved exception for
+[`RUSTSEC-2026-0543`](https://rustsec.org/advisories/RUSTSEC-2026-0543.html)
+accepts the maintenance risk of exactly registry `chrono 0.4.45` temporarily.
+This is an informational unmaintained notice, not a demonstrated vulnerability.
+The official RMCP SDK still requires the crate, including in 3.11.0. Retaining
+the tested official SDK is preferred to introducing a private fork or a new MCP
+implementation merely to remove this notice. All other advisories still apply,
+including any separate vulnerability advisory affecting `chrono`.
+
+The exception expires at **2026-12-22 00:00 UTC**; it is valid only before that
+instant. Pinned cargo-deny 0.20.2 does not support native expiry fields.
+`.github/scripts/check_advisory_exceptions.py` therefore checks the explicit
+approval record against `deny.toml`, the exact package version/source in
+`Cargo.lock` and the UTC date. It rejects expired, duplicate, unjustified,
+unapproved or out-of-scope ignores. It has no command-line/environment clock
+override. Unit fixtures inject dates only through its private Python API.
+
+Use `nix run .#policy` for release clearance: it runs the preflight before the
+fresh Cargo Deny check. The flake's tooling check tests the guard and checked-in
+policy/lock inputs using fixed dates, so its derivation remains reproducible.
+It is not a live expiry check: a cached Nix output cannot prove today's date.
+The policy app executes the real-date guard uncached on every invocation.
+The release workflow checks it again at dispatch, immediately before publishing, and before the
+registry upload; an older green Rust run cannot waive a later expiry.
+A raw `cargo deny check` alone does **not** prove the exception has not expired. All-scope unmaintained
+checking remains explicitly enabled; this is not a blanket transitive exception.
+
+Reassess upstream before expiry. When the package leaves the resolved graph,
+remove the ignore and its approval record together and update the corresponding
+fixtures. A package-version change or deadline extension requires a new explicit
+review; do not automatically renew the exception. The separate URL vulnerability
+[`RUSTSEC-2026-0592`](https://rustsec.org/advisories/RUSTSEC-2026-0592.html)
+is patched by locking `url >=2.5.9`, not exempted.
+
 ## Version and changelog policy
 
 `releaserc.toml` is the release authority. The Cargo package is named

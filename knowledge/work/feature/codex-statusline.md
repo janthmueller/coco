@@ -303,3 +303,206 @@ earlier no-commit/no-publication scope; it does not waive those checks.
   reviewed maintenance exception before resuming delivery. The feature review
   and model-free test results above remain valid; publication readiness is
   blocked by this newly refreshed dependency gate.
+
+## Authorized dependency remediation — 2026-11-22
+
+User approved a separate dependency-fix slice after local feature checkpoint
+`17e948e`. Resume this branch's record; the checkpoint and feature remain intact.
+No advisory waiver is authorized, and existing delivery guards remain required.
+
+- [x] Update only the vulnerable `url` package to the patched registry release.
+- [x] Check the latest published RMCP and its feature/dependency boundaries for
+  a maintained alternative to mandatory `chrono`; avoid a private SDK fork or
+  pretending a direct-use migration removes the transitive dependency.
+- [x] Re-run fresh dependency policy and appropriate model-free tests.
+- [x] Record any remaining upstream/policy decision before merge/publication.
+
+Initial source inspection confirms RMCP 3.9.0 unconditionally requires `chrono`
+and enables schemars' `chrono04` support. Disabling an unrelated transport or
+CoCo's own direct use cannot remove that dependency. Upstream `main` retains
+the same requirement. Do not add a wildcard advisory ignore or downgrade to an
+older vulnerable SDK to make the policy green.
+
+- Targeted registry update changed only `url 2.5.8 -> 2.5.9` and its required
+  `form_urlencoded 1.2.2 -> 1.2.3`, with registry checksums. No direct dependency,
+  Rust source, MCP transport, schema, profile or worker-selection change.
+  `cargo fetch --locked` downloaded just these two packages.
+- Confirmed the same mandatory dependency in the published
+  [RMCP 3.10.0 manifest](https://github.com/modelcontextprotocol/rust-sdk/blob/rmcp-v3.10.0/crates/rmcp/Cargo.toml):
+  `chrono` is not optional and the server enables schemars' `chrono04` feature.
+  Updating to it would add unrelated changes without removing the blocker;
+  retain reviewed RMCP 3.9.0 rather than carrying a private SDK fork.
+- The maintenance advisory is distinguished from a vulnerability by the
+  [RustSec entry](https://rustsec.org/advisories/RUSTSEC-2026-0543.html) and
+  [upstream deprecation notice](https://github.com/chronotope/chrono/issues/1768).
+  No claim of a demonstrated CoCo exploit is made for either dependency.
+- Requested an explicit choice on a single justified maintenance exception
+  until 2026-12-22 versus keeping publication blocked pending upstream. No
+  exception is implemented while that decision is pending.
+- Verified pinned cargo-deny 0.20.2 source defaults `unmaintained` to `all`,
+  so a direct-use-only migration cannot clear its gate. Its ignore record also
+  supports only `id` and `reason`, not newer `expiry` syntax. Any approved
+  deadline needs an actual enforced check, not an unrecognized config field
+  or a comment that silently expires without effect.
+- Rustfmt and Machete pass with the patched lockfile. Full model-free Rust
+  verification is in progress; no real model request, merge, push or release.
+- Full `cargo test --offline --locked --all-targets -j 2 --
+  --test-threads=2 --quiet` passes with the patched lockfile: 967 library and
+  50 integration tests, no failures or model requests. Library tests took
+  63.65 s. The initial sandboxed attempt hit `EPERM` while binding the fixtures'
+  Unix sockets (922 passed, 45 failed); the authorized local-IPC rerun above
+  confirms this was sandbox permissions rather than a URL regression.
+- User requested explanation and assessment of a possible `chrono` exception.
+  Recommendation: accepting this informational maintenance risk temporarily
+  is proportionate compared with an SDK fork, provided the exception names
+  only this advisory, expires through a real checked gate and keeps all other
+  vulnerability/maintenance checks intact. This is not a claim that `chrono`
+  is risk-free, and no policy change has been applied yet.
+- Fresh `cargo deny check advisories` now reports only
+  `RUSTSEC-2026-0543` (`chrono`); the URL vulnerability is no longer present.
+  Publication remains blocked until the maintenance-risk decision is explicit.
+  Pending source is only the two-package lockfile patch and this work record;
+  no additional commit, merge, push or release was performed.
+
+## SDK alternatives review — 2026-11-22
+
+User asked which SDK is affected and whether switching implementations is
+preferable. This is an assessment, not authorization for a migration or waiver.
+
+- CoCo's own control-MCP adapter uses official `rmcp 3.9.0` for stdio serving,
+  tools/schemas, confirmation elicitation, request metadata/cancellation and
+  resources. Native Codex execution remains the independent App Server adapter.
+- Corrected the earlier latest-version claim: upstream's latest release is
+  [RMCP 3.11.0, published 2026-11-17](https://github.com/modelcontextprotocol/rust-sdk/releases/tag/rmcp-v3.11.0),
+  not 3.10.0. Its [exact tagged manifest](https://github.com/modelcontextprotocol/rust-sdk/blob/rmcp-v3.11.0/crates/rmcp/Cargo.toml)
+  still requires `chrono` and schemars' `chrono04`. RMCP itself remains actively
+  released; the advisory concerns a dependency, not abandoned MCP SDK maintenance.
+- [rust-mcp-sdk](https://github.com/rust-mcp-stack/rust-mcp-sdk) is a plausible
+  independent implementation, with tools, resources, elicitation and stdio.
+  Its current SDK manifest uses `time`. This source inspection is not proof
+  that every selected transitive dependency is chrono-free or that migrating
+  CoCo would be safer; it was not installed, executed or audited here.
+- [TurboMCP](https://github.com/Epistates/turbomcp) is another implementation;
+  upstream currently distinguishes stable 3.x from a rewritten 4.0 alpha.
+  It is not a drop-in replacement or an established security improvement for
+  CoCo on the basis of this bounded review.
+- Recommendation: retain the official SDK, evaluate the focused 3.11 upgrade
+  separately, and use an explicitly approved, checked-deadline maintenance
+  exception if publication should proceed before upstream migration. An SDK
+  switch would require re-proving tool grants, exact request attribution,
+  confirmations, cancellation and native UI resource/metadata contracts.
+  CoCo's own direct `chrono` use would also need an independent migration.
+- No dependency SDK, policy, production code, public docs, installed config,
+  Git history or external state was changed in this review.
+
+## Approved bounded exception and official SDK update — 2026-11-22
+
+User approved retaining the official SDK, implementing the specific temporary
+maintenance exception and evaluating the focused 3.11 update. This supersedes
+the pending-waiver notes above; no other advisory or policy exception is approved.
+
+- [x] Add only `RUSTSEC-2026-0543` with a documented reason; leave all other
+  advisory checks enabled and retain all-scope unmaintained checking.
+- [x] Enforce expiry at 2026-12-22 00:00 UTC and exact `chrono 0.4.45` through
+  the supported policy gate. Pinned cargo-deny lacks native expiry support;
+  use a small standard-library Python preflight, not an SDK fork, new runtime
+  dependency or a merely commented deadline.
+- [x] Cover expiry boundary, malformed/unapproved/duplicate ignores, missing
+  reasons, version/source changes and real policy integration deterministically.
+- [x] Inspect and update official RMCP/macros to 3.11.0 with the same stdio-only
+  features; review the actual resolved delta and preserve MCP permissions,
+  confirmations, cancellation, metadata and optional native UI behavior.
+- [x] Run sequential bounded policy, Python, Rust, native model-free and flake
+  checks; promote the exception/removal procedure to release knowledge.
+
+Keep the expiry's approval record in the small policy checker alongside its
+tests. A raw `cargo deny check` does not enforce a date with version 0.20.2;
+the supported `nix run .#policy` and hosted workflow must run the preflight
+before Cargo Deny, and tooling-check must independently enforce/test it.
+No user-facing documentation or published version needs changing for this fix.
+
+- Implemented one justified ignore and an explicit all-scope unmaintained
+  setting. The standard-library Python guard checks the exact registry package,
+  approval ID/reason and exclusive UTC deadline before Cargo Deny. Twelve
+  deterministic regressions pass, including CLI parsing and UTC clock usage.
+- The supported Nix policy app and tooling derivation both run the guard;
+  tooling also runs its fixtures. Release dispatch, prepublication recheck and
+  registry upload additionally recheck the deadline so stale successful CI
+  cannot authorize a later expired publication. Native cargo-deny cannot do
+  this on its own; canonical release knowledge states the distinction.
+- Updated official RMCP/macros from 3.9.0 to 3.11.0 with unchanged features.
+  The resolution adds Unicode normalization/tinyvec and reuses existing
+  percent-encoding/category crates; Cargo also rebinds tempfile's allowed
+  getrandom dependency from the already locked 0.4 to already locked 0.3 line.
+  No new version outside the reviewed dependency update is introduced.
+- Fresh full Cargo Deny passes (existing duplicate warnings only), with no
+  URL exemption. Initial SDK run passed all 967 library and ten confirmation
+  tests, then found a real wire-fixture incompatibility: the shared raw client
+  requested 2025-03-26 but demanded `structuredContent` even for array results.
+  RMCP 3.11 intentionally removes that invalid legacy field while retaining
+  the exact JSON in the first text block; this is not lost application data.
+- Corrected the private test client to prefer structured data and decode that
+  JSON text fallback without scanning arbitrary later content. A focused
+  real-stdio fixture verifies requested/negotiated 2025-03-26, 2025-11-25 and
+  2026-07-28 (modern requests use actual stateless discovery plus required
+  per-request metadata, not an incorrectly labeled initialize handshake).
+  It asserts exact array wire/data shapes, unchanged read-only grants and
+  native rejection of unadvertised prompt methods. Ordinary AI tests pass.
+  No production payload wrapper, workaround or SDK patch was added.
+- Python release/lockfile fixtures also pass (16 and 3); Nixfmt, Rustfmt,
+  Machete, actionlint and diff whitespace checks pass. Full rerun, native
+  compatibility and real flake checks remain pending below.
+- Review refinement: do not use a potentially cached Nix derivation as a live
+  clock/expiry gate. Tooling now runs deterministic boundary/config/lockfile
+  fixtures (13 tests); the actual policy app and dispatch/prepublish/upload
+  steps run the real UTC check uncached. Canonical release/tooling descriptions
+  distinguish that execution-time guarantee from cached fixture evidence.
+- Full ordinary Rust suite passes after the wire-fixture correction: 1,022
+  model-free tests, including all 967 library tests and the new compatibility/
+  decoder fixtures. Warning-denied all-target/all-feature Clippy also passes.
+- Actual Codex 0.171.0 matrix executed all 17 model-free native scenarios in
+  173.12 s. Sixteen pass, including approvals, immutable worker-MCP setup,
+  native AI confirmations, footer/offline fallback, temporary cleanup,
+  context capture and turn control. One analogous pre-existing assertion in
+  native `mcp::assert_scope` demanded array-valued `structuredContent` for a
+  legacy-native client. It now uses the independently checked JSON decoder;
+  repository membership and exact native signal-attribution assertions are
+  unchanged. Its focused rerun is pending, not counted as passing yet.
+- The corrected native MCP scenario passes against actual Codex 0.171.0
+  (2.03 s) and the supported installed 0.169.0 (2.39 s). Together with the
+  unchanged sixteen native successes above, every selected 0.171.0 native
+  scenario has now passed; the initial aggregate run itself remains recorded
+  as sixteen passes and one subsequently fixed fixture failure.
+- Actual `nix build .#checks.x86_64-linux.tooling --no-link` passes, including
+  all 32 Python policy/release/lockfile fixtures and workflow/toolchain checks.
+  Actual `nix run .#policy` also passes with refreshed advisory data: the
+  runtime expiry preflight runs before the unchanged advisory/license/source/
+  ban checks. Only the previously reviewed duplicate-version warnings remain.
+- `nix flake check . --no-build` evaluates all host-compatible outputs
+  successfully (not a claim that every package/cross-platform build ran).
+  Final warning-denied Clippy after the native fixture change also passes.
+  The registry dry-run needs Cargo's network metadata probe even with cached
+  dependencies; the offline attempt stopped before packaging and is not
+  recorded as a product failure or a successful package proof.
+- Actual online-metadata `cargo publish --locked --dry-run --allow-dirty -j 2`
+  passes: the package contains 360 files and verifies its published-source
+  build successfully. The current 0.12.0 version already exists, as expected;
+  Cargo explicitly aborts the upload because this is a dry-run. No registry
+  mutation or manual version stamping occurred.
+- Final diff review found no remaining implementation blocker. All product
+  changes remain the reviewed footer plus the exact official SDK/URL dependency
+  update; the additional source edits are isolated protocol/test and delivery
+  checks. User services, Codex installation and global configurations remain
+  untouched. Existing duplicate warnings are documented, not silently waived.
+
+## Delivery continuation
+
+The dependency blocker is resolved through the explicitly approved bounded
+maintenance acceptance and tested URL/SDK updates. Resume the user's original
+commit/merge/push/release authorization: checkpoint this fix separately from
+`17e948e`, reconcile remote main, merge safely, then require exact-SHA hosted
+Rust/binary/docs checks and a nonpublishing stable rehearsal before the
+publishing dispatch. Keep `COCO_RELEASE_ENABLED=false` and never force-push.
+Local completion is not a claim that hosted CI or publication has already run.
+Follow up on upstream `chrono` removal before the checked deadline; do not
+automatically extend it or switch SDK implementations.

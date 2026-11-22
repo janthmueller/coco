@@ -92,6 +92,7 @@
           pkgs.fish
           pkgs.zsh
           pkgs.procps
+          pkgs.python3
           pkgs.stdenv.cc
           pkgs.pkg-config
         ];
@@ -152,6 +153,7 @@
         '';
 
         policy = cargoCommand "policy" ''
+          python3 .github/scripts/check_advisory_exceptions.py
           exec cargo deny check "$@"
         '';
 
@@ -241,6 +243,9 @@
               releaseVersionTests = ./.github/scripts/test_sync_cargo_lock.py;
               releaseChecks = ./.github/scripts/release_checks.py;
               releaseCheckTests = ./.github/scripts/test_release_checks.py;
+              dependencyPolicy = ./deny.toml;
+              advisoryChecks = ./.github/scripts/check_advisory_exceptions.py;
+              advisoryCheckTests = ./.github/scripts/test_advisory_exceptions.py;
             }
             ''
               metadata_project="$TMPDIR/coco-metadata"
@@ -295,6 +300,10 @@
               actionlint "$workflowDirectory"/*.yml
               COCO_RELEASE_SCRIPT="$releaseVersionSync" python3 "$releaseVersionTests"
               COCO_RELEASE_CHECKS="$releaseChecks" python3 "$releaseCheckTests"
+              COCO_ADVISORY_CHECKS="$advisoryChecks" \
+                COCO_ADVISORY_POLICY="$dependencyPolicy" \
+                COCO_ADVISORY_LOCK="$cargoLock" \
+                python3 "$advisoryCheckTests"
               grep -F 'version_toml = ["Cargo.toml:package.version"]' "$releaseConfig" >/dev/null
               grep -F 'assets = ["Cargo.lock"]' "$releaseConfig" >/dev/null
               rust-analyzer --version >/dev/null

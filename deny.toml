@@ -2,7 +2,13 @@
 all-features = true
 
 [advisories]
-ignore = []
+unmaintained = "all"
+# Approved maintenance-risk acceptance, not a vulnerability exemption.
+# cargo-deny 0.20.2 has no native expiry; nix run .#policy checks the deadline
+# and exact package version with .github/scripts/check_advisory_exceptions.py.
+ignore = [
+  { id = "RUSTSEC-2026-0543", reason = "Until 2026-12-22: chrono is unmaintained, but the official MCP SDK still requires it. Reassess upstream before expiry; all other advisories remain blocking." },
+]
 
 [licenses]
 confidence-threshold = 0.93

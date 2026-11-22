@@ -15,10 +15,15 @@ pub(crate) struct McpClient {
     input: ChildStdin,
     output: Lines<BufReader<ChildStdout>>,
     next_id: u64,
+    request_meta: Option<Value>,
 }
 
 impl McpClient {
     pub(crate) async fn spawn(command: &mut Command) -> Result<Self> {
+        Self::spawn_with_protocol(command, "2025-03-26").await
+    }
+
+    pub(crate) async fn spawn_with_protocol(command: &mut Command, protocol: &str) -> Result<Self> {
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -33,20 +38,41 @@ impl McpClient {
             input,
             output,
             next_id: 0,
-        };
-        client
-            .request(
-                "initialize",
+            request_meta: (protocol == "2026-07-28").then(|| {
                 json!({
-                    "protocolVersion": "2025-03-26",
-                    "capabilities": {},
-                    "clientInfo": {"name": "coco-process-test", "version": "0"}
-                }),
-            )
-            .await?;
-        client
-            .send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))
-            .await?;
+                    "io.modelcontextprotocol/protocolVersion":protocol,
+                    "io.modelcontextprotocol/clientInfo":{"name":"coco-process-test","version":"0"},
+                    "io.modelcontextprotocol/clientCapabilities":{},
+                })
+            }),
+        };
+        if client.request_meta.is_some() {
+            let discovery = client.request("server/discover", json!({})).await?;
+            ensure!(
+                discovery["supportedVersions"]
+                    .as_array()
+                    .is_some_and(|versions| versions.iter().any(|version| version == protocol)),
+                "missing MCP discovery version: {discovery}"
+            );
+        } else {
+            let initialized = client
+                .request(
+                    "initialize",
+                    json!({
+                        "protocolVersion":protocol, "capabilities":{},
+                        "clientInfo":{"name":"coco-process-test","version":"0"},
+                    }),
+                )
+                .await?;
+            ensure!(
+                initialized["protocolVersion"] == protocol,
+                "unexpected MCP negotiation: {}",
+                initialized["protocolVersion"]
+            );
+            client
+                .send(json!({"jsonrpc":"2.0","method":"notifications/initialized"}))
+                .await?;
+        }
         Ok(client)
     }
 
@@ -55,7 +81,16 @@ impl McpClient {
         self.receive_response(id, method).await
     }
 
-    pub(crate) async fn send_request(&mut self, method: &str, params: Value) -> Result<u64> {
+    pub(crate) async fn send_request(&mut self, method: &str, mut params: Value) -> Result<u64> {
+        if let Some(meta) = self.request_meta.as_ref().and_then(Value::as_object) {
+            if params["_meta"].is_null() {
+                params["_meta"] = json!({});
+            }
+            params["_meta"]
+                .as_object_mut()
+                .context("invalid MCP metadata")?
+                .extend(meta.clone());
+        }
         self.next_id += 1;
         let id = self.next_id;
         self.send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))
@@ -93,10 +128,7 @@ impl McpClient {
             result.get("isError") != Some(&json!(true)),
             "MCP {tool} failed: {result}"
         );
-        result
-            .get("structuredContent")
-            .cloned()
-            .context("MCP tool had no structured result")
+        tool_data(&result)
     }
 
     async fn send(&mut self, frame: Value) -> Result<()> {
@@ -114,5 +146,52 @@ impl McpClient {
             .context("MCP did not exit")??;
         ensure!(status.success(), "MCP exited unsuccessfully: {status}");
         Ok(())
+    }
+}
+
+pub(crate) fn tool_data(result: &Value) -> Result<Value> {
+    if let Some(value) = result.get("structuredContent") {
+        return Ok(value.clone());
+    }
+    // Legacy MCP revisions allow only object-valued structuredContent.
+    // The server retains list/scalar data as the first JSON text block.
+    let first = result["content"]
+        .as_array()
+        .and_then(|content| content.first())
+        .context("MCP tool had no data content")?;
+    ensure!(first["type"] == "text", "MCP tool data was not text");
+    serde_json::from_str(
+        first["text"]
+            .as_str()
+            .context("MCP tool text was missing")?,
+    )
+    .context("MCP tool data text was not JSON")
+}
+
+#[test]
+fn tool_data_preserves_structured_values_and_decodes_legacy_json_without_guessing() {
+    for value in [
+        json!([]),
+        json!([{"name":"review"}]),
+        json!({"state":"finished"}),
+        json!(null),
+    ] {
+        assert_eq!(
+            tool_data(&json!({"structuredContent":value})).unwrap(),
+            value
+        );
+        assert_eq!(
+            tool_data(&json!({"content":[{"type":"text","text":value.to_string()}]})).unwrap(),
+            value,
+        );
+    }
+    for missing in [
+        json!({}),
+        json!({"content":[]}),
+        json!({"content":[{"type":"image","text":"[]"}]}),
+        json!({"content":[{"type":"text","text":"not JSON"}]}),
+        json!({"content":[{"type":"text","text":"description"},{"type":"text","text":"[]"}]}),
+    ] {
+        assert!(tool_data(&missing).is_err(), "unexpected data: {missing}");
     }
 }

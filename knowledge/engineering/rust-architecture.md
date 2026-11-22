@@ -661,6 +661,12 @@ For dependency policy, `cargo deny` covers
 [licenses, bans, advisories, and sources](https://github.com/EmbarkStudios/cargo-deny),
 while `cargo machete` is explicitly fast but approximate and documents its
 [false-positive mechanism](https://github.com/bnjbvr/cargo-machete).
+The narrow approved `chrono` maintenance exception and its exact-version/UTC
+expiry guard are defined in [release knowledge](release.md#bounded-maintenance-exception).
+The standard-library Python preflight belongs to development/release tooling,
+not the Rust runtime or public API. `nix run .#policy` and publishing guards
+enforce it at runtime without weakening checks for other unmaintained crates;
+the reproducible tooling derivation tests it with fixed-date fixtures.
 Coverage and mutation answer different questions: coverage shows executed
 regions, while [cargo-mutants](https://mutants.rs/) checks whether tests notice
 behavioral changes. Neither replaces contract-focused tests.
