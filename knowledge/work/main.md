@@ -17,6 +17,25 @@ architectural baseline for CoCo.
 
 ## Active work
 
+### Approved integration and release preparation — 2026-11-22
+
+- User authorized commit/merge/push/publication, then explicitly approved the
+  narrowly bounded `chrono` maintenance acceptance after fresh dependency
+  findings paused delivery. Automatic alpha remains disabled; publication must
+  use exact-SHA hosted checks and the existing manual stable rehearsal/dispatch.
+- Fast-forwarded local main to `55a07b3`, preserving Git tracking (`94bc27f`),
+  verified Codex versions (`8de595e`), optional native footer (`17e948e`) and the
+  separate tested SDK/URL/expiry fix (`55a07b3`). No history rewrite or force push.
+- Complete scope, findings, fixed legacy MCP fixtures and verification live in
+  [feature/codex-statusline](feature/codex-statusline.md). Local gates include
+  1,022 regular Rust tests, 32 Python tests, native 0.171.0 scenarios and an
+  additional 0.169.0 MCP proof, Clippy, fresh policy, Nix tooling/evaluation and
+  actual package dry-run. No real model calls or installed-service changes.
+- Pending: push the integrated current tip, require complete exact-SHA hosted
+  Rust/binary/docs success, inspect the nonpublishing stable rehearsal, then
+  publish and verify artifacts/registry. Reassess upstream chrono before its
+  exception expires at 2026-12-22 00:00 UTC; never extend it automatically.
+
 ### Approved Git tracking implementation — 2026-11-22
 
 - User approves the reviewed compact cross-surface branch/upstream display.
