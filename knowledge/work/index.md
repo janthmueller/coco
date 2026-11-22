@@ -43,6 +43,10 @@ it concise, factual, and useful to the next maintainer.
 
 ## Current records
 
+- [`feature/git-tracking`](feature/git-tracking.md) - Compact optional native
+  upstream evidence in creation, status and human workspace navigation, with
+  unchanged base-relative counts and bounded read-only enrichment.
+
 - [`feature/interactive-navigation`](feature/interactive-navigation.md) -
   Back navigation, prefilled input and editable creation review, with in-memory
   drafts, stable identities and unchanged post-submission safety.

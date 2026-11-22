@@ -616,7 +616,14 @@ fn render_status(
     }
     if let Some(detail) = workspace_location(workspace) {
         output.push_str("  ");
-        output.push_str(&palette.paint(Tone::Dim, detail));
+        let mut detail = super::style::StyledText::new(detail, Tone::Dim);
+        super::git_tracking::append_badge(
+            &mut detail,
+            result.git_tracking.as_ref(),
+            workspace.branch_name.as_deref(),
+            true,
+        );
+        output.push_str(&detail.render(usize::MAX, palette));
         output.push('\n');
     }
     if include_resources && let Some(resources) = &result.runtime_resources {
@@ -923,6 +930,7 @@ mod tests {
     fn targeted_status_shows_activity_as_secondary_state_detail() {
         let result = WorkspaceStatusResult {
             clients: None,
+            git_tracking: None,
             workspace: Workspace {
                 id: "workspace-1".to_owned(),
                 create_operation_id: None,

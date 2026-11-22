@@ -9,6 +9,7 @@ mod create;
 mod decision;
 mod doctor;
 mod follow;
+mod git_tracking;
 mod hooks;
 mod jump;
 mod output;

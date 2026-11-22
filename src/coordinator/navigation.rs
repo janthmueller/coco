@@ -48,6 +48,7 @@ impl Coordinator {
                 branch_name: workspace.branch_name.clone(),
                 worktree_mode: workspace.worktree_mode,
                 recency_at_ms: None,
+                git_tracking: None,
             });
             if params.include_recency && workspace.codex_thread_id.is_some() {
                 let index = entries.len() - 1;
@@ -74,6 +75,7 @@ impl Coordinator {
             }
         })
         .await;
+        self.enrich_path_tracking(&mut entries).await;
         Ok(entries)
     }
 }

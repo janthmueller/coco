@@ -45,6 +45,38 @@ async fn clean_checkout_skips_carry_and_final_review_shows_actual_branch_and_com
 }
 
 #[tokio::test]
+async fn current_source_and_final_review_include_upstream_without_changing_base_or_consent() {
+    let mut state = git_state();
+    state.changes = GitChangeSummary::default();
+    state.tracking = Some(crate::protocol::GitTracking {
+        state: crate::protocol::GitTrackingState::Diverged,
+        upstream: Some("refs/remotes/upstream/release".into()),
+        remote: Some("upstream".into()),
+        ahead_by: Some(2),
+        behind_by: Some(3),
+        observed_at_ms: Some(42),
+    });
+    let mut interaction = ScriptedInteraction::new([0, 0, 0], [] as [&str; 0]);
+    interaction.defaults_at = Some("Context".into());
+    let args = run(vec![state.clone(), state], &mut interaction).await;
+    let source = &choices_for_title(&interaction, "Code")[0];
+    assert!(
+        source
+            .detail
+            .as_ref()
+            .unwrap()
+            .contains("↑2 ↓3 · upstream/release")
+    );
+    assert!(
+        final_review_value(&interaction, "Code")
+            .contains("main · aaaaaaaa · ↑2 ↓3 · upstream/release")
+    );
+    assert_eq!(args.expected_base_sha, Some("a".repeat(40)));
+    assert_eq!(final_create_choice(&interaction).label, "Create");
+    interaction.assert_consumed();
+}
+
+#[tokio::test]
 async fn carry_choices_match_the_observed_categories_without_useless_or_blocked_options() {
     for (tracked, untracked, label) in [
         (1, 0, "Copy tracked"),

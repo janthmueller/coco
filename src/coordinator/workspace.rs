@@ -1087,6 +1087,7 @@ impl Coordinator {
             item.clients = clients;
             listed.push(item);
         }
+        self.enrich_workspace_tracking(&mut listed).await;
         Ok(listed)
     }
 
@@ -1128,6 +1129,17 @@ impl Coordinator {
                 }),
             }
         };
+        let git_tracking = match &git {
+            WorkspaceGitStatus::Observed(observation) => match observation.head_sha.as_deref() {
+                Some(head) => Some(
+                    self.tracking_for_workspace(&workspace, &git_repository.root_path, head)
+                        .await,
+                ),
+                None => Some(crate::protocol::GitTracking::unknown()),
+            },
+            WorkspaceGitStatus::Unavailable(_) => Some(crate::protocol::GitTracking::unknown()),
+            WorkspaceGitStatus::Incomplete(_) => None,
+        };
         let events = self.store.events_after(Some(&workspace.id), 0)?;
         let next_sequence = events.last().map_or(0, |event| event.sequence);
         let open_decisions = self.open_decisions_for_workspace(&workspace.id);
@@ -1143,6 +1155,7 @@ impl Coordinator {
         Ok(WorkspaceStatusResult {
             workspace,
             git,
+            git_tracking,
             runtime_resources,
             activity,
             clients,

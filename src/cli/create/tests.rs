@@ -67,6 +67,7 @@ fn git_state() -> crate::protocol::RepositoryGitState {
                 commit: commit.clone(),
                 remote: false,
                 checkout_path: Some("/repo".into()),
+                tracking: None,
             },
             GitBranch {
                 name: "review/existing-branch".into(),
@@ -74,6 +75,7 @@ fn git_state() -> crate::protocol::RepositoryGitState {
                 commit: commit.clone(),
                 remote: false,
                 checkout_path: None,
+                tracking: None,
             },
             GitBranch {
                 name: "origin/main".into(),
@@ -81,9 +83,12 @@ fn git_state() -> crate::protocol::RepositoryGitState {
                 commit,
                 remote: true,
                 checkout_path: None,
+                tracking: None,
             },
         ],
         base_sha: None,
+        tracking: None,
+        base_tracking: None,
     }
 }
 
@@ -600,6 +605,7 @@ fn workspace_item() -> WorkspaceListItem {
 fn workspace_item_at(id: &str, name: &str, worktree_path: &Path) -> WorkspaceListItem {
     WorkspaceListItem {
         clients: None,
+        git_tracking: None,
         workspace: Workspace {
             id: id.to_owned(),
             create_operation_id: None,

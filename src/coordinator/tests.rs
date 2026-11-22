@@ -44,6 +44,7 @@ mod decisions;
 mod doctor;
 mod events;
 mod git_source;
+mod git_tracking;
 mod guards;
 mod jump;
 mod navigation;

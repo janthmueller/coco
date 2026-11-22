@@ -19,6 +19,7 @@ impl Git {
                 "status",
                 "--porcelain=v2",
                 "--branch",
+                "--no-ahead-behind",
                 "-z",
                 "--untracked-files=all",
             ],
@@ -36,6 +37,8 @@ impl Git {
                 Vec::new()
             },
             base_sha: None,
+            tracking: None,
+            base_tracking: None,
         })
     }
 
@@ -140,6 +143,7 @@ fn parse_branches(mut text: &str) -> Result<Vec<GitBranch>, GitError> {
             commit: commit.to_owned(),
             remote,
             checkout_path: (!path.is_empty()).then(|| PathBuf::from(path)),
+            tracking: None,
         });
     }
     Ok(branches)

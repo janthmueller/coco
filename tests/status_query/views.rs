@@ -1,6 +1,51 @@
 use super::*;
 
 #[tokio::test]
+async fn unicode_truncation_preserves_state_model_and_branch_column_positions() -> Result<()> {
+    use unicode_width::UnicodeWidthStr;
+
+    let mut wide = row("repo", &format!("x{}", "界".repeat(40)), "active");
+    wide["activity"] = json!({
+        "label": "界".repeat(80), "source":"reasoningSummary", "threadId":"thread",
+        "turnId":"turn", "itemId":"item", "truncated":false,
+        "runtimeGeneration":"test", "observedAtMs":1,
+    });
+    wide["branchName"] = json!("main");
+    let mut short = row("repo", "short", "active");
+    short["branchName"] = json!("main");
+    let fixture = Fixture::new(vec![vec![wide, short]], vec![]).await?;
+    for args in [["status", "-a"], ["status", "-at"]] {
+        let output = fixture.run(&args).await?;
+        assert!(output.status.success());
+        let text = String::from_utf8(output.stdout)?;
+        let header = text
+            .lines()
+            .find(|line| line.contains("WORKSPACE"))
+            .unwrap();
+        let column = |line: &str, token: &str| line[..line.find(token).unwrap()].width();
+        let mut checked = 0;
+        for line in text.lines().filter(|line| line.contains("Working")) {
+            assert_eq!(
+                column(line, "Working") - 2,
+                column(header, "STATE"),
+                "{text}"
+            );
+            assert_eq!(column(line, "—"), column(header, "MODEL"), "{text}");
+            assert_eq!(column(line, "main"), column(header, "BRANCH"), "{text}");
+            checked += 1;
+        }
+        assert_eq!(checked, 2);
+    }
+    assert!(
+        fixture
+            .calls()
+            .iter()
+            .all(|call| call["method"] == "workspace.list")
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn recency_is_available_in_json_without_changing_status_or_list_order_and_columns()
 -> Result<()> {
     let mut old = row("alpha", "old", "idle");

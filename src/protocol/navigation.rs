@@ -26,6 +26,8 @@ pub(crate) struct WorkspacePathEntry {
     pub worktree_mode: crate::domain::WorktreeMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recency_at_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_tracking: Option<GitTracking>,
 }
 
 impl DaemonRequest for WorkspacePathGetParams {

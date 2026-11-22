@@ -1241,6 +1241,41 @@ Bound captured output and return a structured truncation marker for extreme
 diffs rather than exhausting daemon memory. `coco diff` is read-only and never
 stages untracked files to make them appear in a patch.
 
+### Optional upstream tracking
+
+The private Git tracking adapter supplies a separate neutral GitTracking value;
+base-relative GitObservation counts keep their original meaning. Existing
+list/status/source/path responses add optional metadata without another RPC
+method, persistence schema, worker call or MCP permission. Ordinary path lookup
+remains a direct metadata-only destination and writes only that path to stdout.
+
+An asynchronous bounded probe checks the native common-directory identity,
+reads one NUL-framed for-each-ref inventory of configured upstreams/counts and
+one worktree listing, and checks small Git administrative links/backlinks.
+Missing or replaced working directories are not verified by a stale Git
+registration alone. Only the native main record may use the common Git
+directory directly; linked records require their own matching backlink and
+a canonical `commondir` target matching the expected shared Git directory.
+No index/working-file scan, fetch, hooks or lazy fetch is introduced; replacement
+objects are disabled for the comparison. Shallow or
+unavailable graphs never produce confident exact counts. Captured output uses
+the existing 32-KiB probe bound; invalid/truncated data remains unknown.
+
+Coordinator owns a bounded generation-local five-second cache, including
+failed reads, with a per-repository/path async mutex for single-flight. One view
+has a 750-ms total budget, at most two concurrent repository reads, 500 ms per
+repository and at most 64 repository keys. Native children retain the existing
+kill/reap ownership on timeout/cancellation. Cached observation timestamps stay
+unchanged; they do not fabricate remote-fetch times. Optional metadata cannot
+hold repository lifecycle locks or replace validated binding/base errors.
+
+Creation retains its mandatory blocking inspection and exact reviewed base SHA;
+the daemon then applies optional asynchronous enrichment. Native branch inventory
+commit IDs must match the inspected branch/base commit. The mandatory source
+status skips its unused ahead/behind calculation rather than duplicating the
+bounded optional graph walk. CLI shares only semantic text and Git presentation;
+it does not import the Git adapter or parse ANSI as data.
+
 ### Checked retirement and restoration
 
 Under the same repository mutex used for creation and activation, close first

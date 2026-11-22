@@ -19,6 +19,10 @@ pub(super) async fn verify(
     assert_eq!(child["branch"], WORKSPACE_NAME);
     for state in [&source, &child] {
         assert_eq!(state["headSha"], state["baseSha"]);
+        assert_eq!(state["tracking"]["state"], "noUpstream");
+        assert_eq!(state["baseTracking"], state["tracking"]);
+        assert!(state["tracking"]["aheadBy"].is_null());
+        assert!(state["tracking"]["observedAtMs"].is_i64());
         assert!(state["headSha"].as_str().is_some_and(|sha| sha.len() == 40));
         assert!(state["branches"].as_array().is_some_and(|branches| {
             branches.iter().any(|branch| {

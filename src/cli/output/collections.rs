@@ -8,7 +8,7 @@ use crate::protocol::{
     AccountQuotaResult, RepositorySummary, WorkspaceListItem, WorkspaceUsageItem,
 };
 
-use super::super::style::{Palette, Tone};
+use super::super::style::{Palette, StyledText, Tone};
 use super::quota::render_account_quota;
 use super::usage::usage_cells;
 use super::{phase_presentation, safe_line, workspace_model_label};
@@ -289,13 +289,11 @@ fn workspace_row(
         cells.push(Cell::new(context, Tone::Dim));
         cells.push(Cell::new(cost, Tone::Dim));
     }
-    cells.push(Cell::new(
-        item.workspace
-            .branch_name
-            .clone()
-            .unwrap_or_else(|| "detached".to_owned()),
-        Tone::Dim,
-    ));
+    cells.push(Cell::styled(super::super::git_tracking::branch_text(
+        item.workspace.branch_name.as_deref().unwrap_or("detached"),
+        item.git_tracking.as_ref(),
+        false,
+    )));
     cells
 }
 
@@ -602,19 +600,33 @@ impl Cell {
         }
     }
 
+    fn styled(text: StyledText) -> Self {
+        let segments = text
+            .fragments()
+            .map(|(text, tone)| CellSegment {
+                text: text.to_owned(),
+                tone,
+            })
+            .collect();
+        Self {
+            text: text.as_str().to_owned(),
+            tone: Tone::Primary,
+            segments: Some(segments),
+        }
+    }
+
     fn render(&self, width: usize, last: bool, palette: Palette) -> String {
         let Some(segments) = &self.segments else {
             return palette.paint(self.tone, padded(&self.text, width, last));
         };
-        if display_width(&self.text) > width {
-            return palette.paint(self.tone, padded(&self.text, width, last));
+        let mut styled = StyledText::default();
+        for segment in segments {
+            styled.push(&segment.text, segment.tone);
         }
-        let mut rendered = segments
-            .iter()
-            .map(|segment| palette.paint(segment.tone, &segment.text))
-            .collect::<String>();
+        let styled = styled.truncated(width);
+        let mut rendered = styled.render(width, palette);
         if !last {
-            rendered.push_str(&" ".repeat(width.saturating_sub(display_width(&self.text))));
+            rendered.push_str(&" ".repeat(width.saturating_sub(display_width(&styled))));
         }
         rendered
     }
@@ -689,27 +701,21 @@ fn padded(value: &str, width: usize, last: bool) -> String {
     if last {
         value
     } else {
-        format!("{value:<width$}")
+        format!(
+            "{value}{}",
+            " ".repeat(width.saturating_sub(display_width(&value)))
+        )
     }
 }
 
 fn truncate(value: &str, width: usize) -> String {
-    if display_width(value) <= width {
-        return value.to_owned();
-    }
-    if width == 0 {
-        return String::new();
-    }
-    let mut truncated = value
-        .chars()
-        .take(width.saturating_sub(1))
-        .collect::<String>();
-    truncated.push('…');
-    truncated
+    StyledText::new(value, Tone::Primary)
+        .truncated(width)
+        .to_string()
 }
 
 fn display_width(value: &str) -> usize {
-    value.chars().count()
+    unicode_width::UnicodeWidthStr::width(value)
 }
 
 pub(super) fn stdout_width() -> usize {
@@ -739,6 +745,7 @@ mod tests {
     use serde_json::json;
 
     mod clients;
+    mod tracking;
 
     fn workspace_item(
         repository: &str,
@@ -748,6 +755,7 @@ mod tests {
     ) -> WorkspaceListItem {
         WorkspaceListItem {
             clients: None,
+            git_tracking: None,
             workspace: Workspace {
                 id: format!("{repository}-{name}"),
                 create_operation_id: None,

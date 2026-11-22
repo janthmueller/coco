@@ -81,6 +81,17 @@ leaks above remain as the historical pre-refactor baseline.
 
 ## Target dependency direction
 
+Upstream tracking follows the same staged direction: neutral optional values in
+`domain/git_tracking`, response extensions in existing protocol DTOs, bounded
+native metadata/binding parsers in private `git/tracking` children, and short-lived
+cache/projection policy in `coordinator/git_tracking`. Mandatory source inspection
+keeps its existing blocking boundary; optional enrichment is asynchronous and
+does not introduce another RPC, worker contract or stored field. Private
+`cli/git_tracking` renders shared `style/text` semantic fragments through existing
+picker/review/table owners, preserving plain values until ANSI presentation.
+Native/parser, application/cache, CLI/terminal and process tests remain focused
+children. No crate, dependency, public SDK or CLI-to-Git import is introduced.
+
 Interactive creation keeps its private question methods and read-only RPC
 boundary. `cli/create/navigation` owns its finite step/history controller;
 its `draft` child owns per-step rollback, preset reopening and dependent-value

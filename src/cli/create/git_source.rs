@@ -6,8 +6,10 @@ use crate::protocol::{
 };
 use crate::rpc::{RpcClient, RpcClientError};
 
+use super::super::git_tracking::append_badge;
 use super::super::prompt::{Choice, Interaction, parent_choice};
 use super::super::status::natural_cmp;
+use super::super::style::{StyledText, Tone};
 use super::{CreateWalkthrough, WorktreeChoice, has_explicit_code_base, select_workspace};
 
 #[async_trait]
@@ -85,7 +87,8 @@ impl CreateWalkthrough<'_> {
             if has_head {
                 choices.insert(
                     0,
-                    Choice::new("Current checkout", Some(checkout_label(&self.source)))
+                    Choice::new("Current checkout", None)
+                        .with_styled_detail(checkout_label(&self.source))
                         .with_default_marker(),
                 );
             }
@@ -165,13 +168,23 @@ impl CreateWalkthrough<'_> {
         let choices: Vec<_> = branches
             .iter()
             .map(|branch| {
-                let mut detail = vec![short_sha(&branch.commit).to_owned()];
+                let mut detail = StyledText::new(short_sha(&branch.commit), Tone::Dim);
                 if branch.remote {
-                    detail.push("remote".into());
-                } else if Some(&branch.name) == state.branch.as_ref() {
-                    detail.push("current".into());
+                    detail.push(" · remote", Tone::Dim);
+                } else {
+                    append_badge(
+                        &mut detail,
+                        branch.tracking.as_ref(),
+                        Some(&branch.name),
+                        false,
+                    );
+                    if Some(&branch.name) == state.branch.as_ref() {
+                        detail.push(" · current", Tone::Dim);
+                    }
                 }
-                Choice::new(&branch.name, Some(detail.join(" · "))).with_key(&branch.reference)
+                Choice::new(&branch.name, None)
+                    .with_styled_detail(detail)
+                    .with_key(&branch.reference)
             })
             .collect();
         let selected = self.interaction.select(
@@ -296,7 +309,10 @@ impl CreateWalkthrough<'_> {
                     .unwrap_or(revision)
                     .to_owned(),
             };
-            format!("{name} · {}", short_sha(&commit))
+            let mut label =
+                StyledText::new(format!("{name} · {}", short_sha(&commit)), Tone::Primary);
+            append_badge(&mut label, state.base_tracking.as_ref(), None, true);
+            label
         };
         if self.uses_current_checkout() && self.source.head_sha != state.head_sha {
             self.interaction
@@ -322,14 +338,24 @@ fn short_sha(sha: &str) -> &str {
     sha.get(..8).unwrap_or(sha)
 }
 
-fn checkout_label(state: &RepositoryGitState) -> String {
-    format!(
-        "{} · {}",
-        state.branch.as_deref().unwrap_or("Detached HEAD"),
-        state
-            .head_sha
-            .as_deref()
-            .map(short_sha)
-            .unwrap_or("no commits")
-    )
+fn checkout_label(state: &RepositoryGitState) -> StyledText {
+    let mut label = StyledText::new(
+        format!(
+            "{} · {}",
+            state.branch.as_deref().unwrap_or("Detached HEAD"),
+            state
+                .head_sha
+                .as_deref()
+                .map(short_sha)
+                .unwrap_or("no commits")
+        ),
+        Tone::Dim,
+    );
+    append_badge(
+        &mut label,
+        state.tracking.as_ref(),
+        state.branch.as_deref(),
+        true,
+    );
+    label
 }

@@ -5,7 +5,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 use crossterm::terminal::size;
 use unicode_width::UnicodeWidthStr;
 
-use super::style::{Palette, Tone};
+use super::style::{Palette, StyledText, Tone};
 use terminal::PickerTerminal;
 
 mod navigation;
@@ -24,7 +24,7 @@ const MIN_LABEL_WITH_DEFAULT: usize = 4;
 pub(super) struct Choice {
     pub(super) key: Option<String>,
     pub(super) label: String,
-    pub(super) detail: Option<String>,
+    pub(super) detail: Option<StyledText>,
     pub(super) trailing_detail: Option<String>,
     pub(super) is_default: bool,
 }
@@ -34,7 +34,7 @@ impl Choice {
         Self {
             key: None,
             label: label.into(),
-            detail,
+            detail: detail.map(|text| StyledText::new(text, Tone::Dim)),
             trailing_detail: None,
             is_default: false,
         }
@@ -42,6 +42,11 @@ impl Choice {
 
     pub(super) fn with_key(mut self, key: impl Into<String>) -> Self {
         self.key = Some(key.into());
+        self
+    }
+
+    pub(super) fn with_styled_detail(mut self, detail: StyledText) -> Self {
+        self.detail = (!detail.is_empty()).then_some(detail);
         self
     }
 
@@ -63,7 +68,7 @@ impl Choice {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ReviewField {
     pub(super) label: String,
-    pub(super) value: String,
+    pub(super) value: StyledText,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,7 +81,7 @@ impl ReviewField {
     pub(super) fn new(label: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
             label: label.into(),
-            value: value.into(),
+            value: value.into().into(),
         }
     }
 }
@@ -525,11 +530,10 @@ fn picker_lines_with_review(
 
 fn review_row(field: &ReviewField, label_width: usize, width: usize, palette: Palette) -> String {
     let label = single_line(&field.label);
-    let value = single_line(&field.value);
     let padding = " ".repeat(label_width.saturating_sub(label.width()));
     let prefix = truncate_line(&format!("  {label}{padding}  "), width);
     let available = width.saturating_sub(prefix.width());
-    let value = truncate_line(&value, available);
+    let value = field.value.render(available, palette);
     format!("{}{}", palette.paint(Tone::Dim, prefix), value)
 }
 
@@ -570,7 +574,7 @@ fn picker_row(
     } else {
         format!("{}{}", palette.paint(Tone::Dim, &prefix), label,)
     };
-    let secondary = palette.paint(Tone::Dim, &detail);
+    let secondary = detail.render(remaining, palette);
     match trailing {
         Some(trailing) => {
             let padding = width
@@ -584,35 +588,32 @@ fn picker_row(
     }
 }
 
-fn picker_detail(choice: &Choice, width: usize) -> String {
-    let detail = choice
-        .detail
-        .as_deref()
-        .map(single_line)
-        .filter(|detail| !detail.is_empty());
+fn picker_detail(choice: &Choice, width: usize) -> StyledText {
+    let detail = choice.detail.as_ref().filter(|detail| !detail.is_empty());
 
     if choice.is_default {
         if width < DEFAULT_DETAIL.width() {
-            return String::new();
+            return StyledText::default();
         }
         if let Some(detail) = detail {
             let structural_width = DETAIL_PREFIX.width() + DEFAULT_SUFFIX.width();
             if width > structural_width {
-                return format!(
-                    "{DETAIL_PREFIX}{}{DEFAULT_SUFFIX}",
-                    truncate_line(&detail, width - structural_width)
-                );
+                let mut result = StyledText::new(DETAIL_PREFIX, Tone::Dim);
+                result.append(&detail.truncated(width - structural_width));
+                result.push(DEFAULT_SUFFIX, Tone::Dim);
+                return result;
             }
         }
-        return DEFAULT_DETAIL.to_owned();
+        return StyledText::new(DEFAULT_DETAIL, Tone::Dim);
     }
 
     match detail {
-        Some(detail) if width > DETAIL_PREFIX.width() => format!(
-            "{DETAIL_PREFIX}{}",
-            truncate_line(&detail, width - DETAIL_PREFIX.width())
-        ),
-        _ => String::new(),
+        Some(detail) if width > DETAIL_PREFIX.width() => {
+            let mut result = StyledText::new(DETAIL_PREFIX, Tone::Dim);
+            result.append(&detail.truncated(width - DETAIL_PREFIX.width()));
+            result
+        }
+        _ => StyledText::default(),
     }
 }
 

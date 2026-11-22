@@ -159,11 +159,17 @@ impl DaemonHandler {
             DaemonMethod::RepositoryGitInspect => {
                 let params = decode::<RepositoryGitInspectParams>(params)?;
                 let coordinator = Arc::clone(&self.coordinator);
-                let result =
-                    tokio::task::spawn_blocking(move || coordinator.inspect_repository_git(params))
-                        .await
-                        .map_err(|_| RpcErrorPayload::new("INTERNAL", "Git inspection failed"))?;
-                execute(result)
+                let inspection = params.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    coordinator.inspect_repository_git(inspection)
+                })
+                .await
+                .map_err(|_| RpcErrorPayload::new("INTERNAL", "Git inspection failed"))?;
+                let mut state = result.map_err(map_coordinator_error)?;
+                self.coordinator
+                    .enrich_git_inspection(&mut state, &params)
+                    .await;
+                encode(state)
             }
             _ => unreachable!("non-repository read method"),
         }

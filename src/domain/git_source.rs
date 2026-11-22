@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use super::git_tracking::GitTracking;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct GitChangeSummary {
@@ -17,6 +19,8 @@ pub(crate) struct GitBranch {
     pub commit: String,
     pub remote: bool,
     pub checkout_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracking: Option<GitTracking>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,4 +33,8 @@ pub(crate) struct RepositoryGitState {
     pub changes: GitChangeSummary,
     pub branches: Vec<GitBranch>,
     pub base_sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracking: Option<GitTracking>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_tracking: Option<GitTracking>,
 }

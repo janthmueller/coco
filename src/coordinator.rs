@@ -29,6 +29,7 @@ mod decision;
 mod doctor;
 mod error;
 mod git_source;
+mod git_tracking;
 mod hooks;
 mod jump;
 mod navigation;
@@ -70,6 +71,7 @@ pub(crate) struct Coordinator {
     usage_costs: StdMutex<HashMap<String, (Instant, WorkspaceCostEstimate)>>,
     account_quota: StdMutex<Option<(Instant, AccountQuotaResult)>>,
     activities: StdMutex<activity::ActivityRegistry>,
+    git_tracking: git_tracking::TrackingCache,
 }
 
 impl Coordinator {
@@ -102,6 +104,7 @@ impl Coordinator {
             usage_costs: StdMutex::new(HashMap::new()),
             account_quota: StdMutex::new(None),
             activities: StdMutex::new(activity::ActivityRegistry::default()),
+            git_tracking: git_tracking::TrackingCache::default(),
         }
     }
 
@@ -226,6 +229,7 @@ impl Coordinator {
             runtime_resources,
             activity,
             clients: None,
+            git_tracking: None,
         })
     }
 

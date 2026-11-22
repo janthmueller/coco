@@ -52,4 +52,15 @@ mod tests {
             .is_err()
         );
     }
+
+    #[test]
+    fn old_git_inspection_results_remain_readable_without_tracking_fields() {
+        let value = json!({
+            "repositoryId":"repo", "rootPath":"/repo", "branch":"main", "headSha":"a".repeat(40),
+            "changes":{"trackedFiles":0,"untrackedFiles":0}, "branches":[], "baseSha":null,
+        });
+        let state: RepositoryGitState = serde_json::from_value(value.clone()).unwrap();
+        assert!(state.tracking.is_none() && state.base_tracking.is_none());
+        assert_eq!(serde_json::to_value(state).unwrap(), value);
+    }
 }

@@ -8,6 +8,7 @@ use super::args::WorkspaceSort;
 use super::output::phase_label;
 use super::prompt::Choice;
 use super::status::natural_cmp;
+use super::style::{StyledText, Tone};
 
 pub(super) fn choices(
     rows: &mut [WorkspaceListItem],
@@ -66,10 +67,21 @@ fn choice(row: &WorkspaceListItem, global: bool, now_ms: i64) -> Choice {
         }
         _ => {}
     }
+    let mut detail = StyledText::new(detail.join(" · "), Tone::Dim);
+    super::git_tracking::append_badge(
+        &mut detail,
+        row.git_tracking.as_ref(),
+        row.workspace.branch_name.as_deref(),
+        false,
+    );
     if global {
-        detail.push(row.repository.root_path.display().to_string());
+        detail.push(
+            format!(" · {}", row.repository.root_path.display()),
+            Tone::Dim,
+        );
     }
-    Choice::new(row.workspace.name.clone(), Some(detail.join(" · ")))
+    Choice::new(row.workspace.name.clone(), None)
+        .with_styled_detail(detail)
         .with_trailing_detail(recency_label(recency(row), now_ms))
 }
 

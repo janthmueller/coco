@@ -418,6 +418,25 @@ def check_clean_creation_policy(terminal: Terminal) -> None:
     print("create: clean checkout reset remains Don't copy when editing and pressing Enter")
 
 
+def check_git_tracking(terminal: Terminal) -> None:
+    probe = "cli::prompt::tests::trailing::interactive_tracking_probe"
+    for plain in (False, True):
+        terminal.start_test(probe, plain)
+        screen = terminal.wait("Git tracking (1/2)")
+        assert screen.count("feat/login") == 1, screen
+        assert "Working · ↑2 ↓1" in screen and "5m ago" in screen, screen
+        colored = terminal.screen(colored=True)
+        yellow_badge = re.search(
+            r"\x1b\[(?:[0-9;]*33|38;5;11)m(?:\x1b\[[0-9;]*m)*↑2 ↓1", colored
+        )
+        assert bool(yellow_badge) != plain, colored
+        terminal.keys("Enter")
+        terminal.wait("tracking-result=0")
+        terminal.wait("test result: ok.")
+        assert terminal.flags() == "1:1", "Git picker did not restore terminal state"
+    print("git tracking: semantic badge colors, NO_COLOR, recency and terminal cleanup")
+
+
 def check_follow(terminal: Terminal) -> None:
     terminal.start_test("cli::follow::tests::interactive_follow_terminal_probe")
     terminal.wait("follow-result=ok")
@@ -450,6 +469,7 @@ def main() -> None:
             check_creation_history(terminal)
             check_clean_creation_policy(terminal)
             check_confirmations(terminal)
+            check_git_tracking(terminal)
             check_follow(terminal)
         finally:
             terminal.tmux("kill-server")

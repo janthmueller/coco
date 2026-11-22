@@ -1612,6 +1612,31 @@ At minimum `status` and `list`/`ls` expose:
 - `aheadBy` and `behindBy` relative to the immutable base;
 - `baseRelation`: `at_base`, `descendant`, `diverged`, or `unknown`.
 
+Upstream comparison is a separate optional `gitTracking` projection for open
+workspace lists/status and human navigation, plus `tracking`/`baseTracking` in
+creation discovery. It never changes the base-relative fields above. Native
+configured upstream refs determine `inSync`, `ahead`, `behind`, `diverged`,
+`noUpstream`, `upstreamMissing`, `detached` or `unknown`; known exact comparisons
+carry aheadBy/behindBy while unavailable comparisons carry null counts.
+`observedAtMs` identifies a local metadata snapshot, not a remote fetch or
+server freshness guarantee. No tracking/config mutation, fetch, state transition
+or cleanup assurance is inferred from this display.
+
+Human branch locations use compact `=`, `↑N`, `↓N`, `↑N ↓M`, `no upstream`,
+`upstream missing` and `?` markers. Keep branch names neutral, apply color only
+to semantic markers and dim secondary targets/hashes. Detailed views identify
+the configured target; compact views retain exceptional targets instead of
+guessing origin. Keep equal workspace/branch names deduplicated in pickers,
+preserve relative recency and ordinary sort semantics, and add no public flag
+or mandatory column. Plain/JSON/path contracts and explicit creation consent
+remain unchanged. Closed workspaces have no live worktree tracking projection.
+
+Supplementary reads are repository-batched, bounded and cached briefly,
+including negative results. Missing/changed Git administrative bindings,
+incomplete graphs, timeouts and truncated metadata yield unknown evidence,
+not a navigation/status failure or a successful zero comparison. Mandatory
+creation/base/binding checks retain their existing error behavior.
+
 `ahead_of_base` and `dirty` may be rendered as badges. `merge_ready` must not be
 claimed in v0: real readiness requires an integration target and policy that
 the handoff does not define.
@@ -2042,6 +2067,18 @@ Remaining creation follow-ups are deliberately narrower: design an atomic
 detached-to-branch promotion before considering detached as the default,
 decide whether cross-repository Git-base transfer has a safe use case, and
 design handoff artifacts independently from native conversation forking.
+
+### Next after Git tracking: current Codex compatibility
+
+Recorded on 2026-11-22. Finish the approved branch/upstream display slice first,
+then check the latest released Codex against CoCo's actual consumed contracts.
+The user reports `coco ai requires the verified Codex 0.166.0 configuration
+contract` after updating. Investigate the exact-version launcher gate together
+with native configuration/feature isolation, not by simply deleting its guard.
+Verify the locally installed/released version, review relevant upstream changes,
+run isolated model-free compatibility/TUI tests and widen or revise the supported
+contract only when proved. Real model calls and publication need separate
+approval. This is queued work, not compatibility evidence or part of Git tracking.
 
 ### Agreed follow-up order
 

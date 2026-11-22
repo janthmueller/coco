@@ -15,7 +15,10 @@ mod local_state;
 mod repository;
 mod retirement;
 mod source;
+mod tracking;
 mod worktree;
+
+pub(crate) use tracking::TrackingSnapshot;
 
 #[cfg(test)]
 mod tests;

@@ -218,7 +218,7 @@ impl CreateWalkthrough<'_> {
                 let detail = fields
                     .iter()
                     .find(|field| field.label == label)
-                    .map(|field| field.value.clone())
+                    .map(|field| field.value.to_string())
                     .or_else(|| (*step == Step::Cleanup).then(|| "keep workspace".into()));
                 Choice::new(label, detail)
             })

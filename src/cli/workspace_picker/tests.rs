@@ -23,6 +23,35 @@ fn names(choices: &[Choice]) -> Vec<&str> {
 }
 
 #[test]
+fn tracking_adds_only_a_badge_when_workspace_and_branch_names_match() {
+    let mut item = row("repo", "feat/login", Some(NOW));
+    item.git_tracking = Some(crate::protocol::GitTracking {
+        state: crate::protocol::GitTrackingState::Ahead,
+        upstream: Some("refs/remotes/origin/feat/login".into()),
+        remote: Some("origin".into()),
+        ahead_by: Some(2),
+        behind_by: Some(0),
+        observed_at_ms: Some(NOW),
+    });
+    let selected = choice(&item, false, NOW);
+    assert_eq!(selected.label, "feat/login");
+    assert_eq!(selected.detail.as_deref(), Some("Ready · ↑2"));
+    assert_eq!(selected.trailing_detail.as_deref(), Some("just now"));
+    assert!(
+        selected
+            .detail
+            .as_ref()
+            .unwrap()
+            .render(80, crate::cli::style::Palette::colored())
+            .contains('\x1b')
+    );
+    assert_eq!(
+        choice(&item, true, NOW).detail.as_deref(),
+        Some("Ready · ↑2 · /repos/repo")
+    );
+}
+
+#[test]
 fn recent_use_is_primary_across_repositories_not_workspace_mutation_or_name() {
     let mut rows = vec![
         row("alpha", "a-old", Some(NOW - 7_200_000)),
@@ -87,8 +116,8 @@ fn branches_are_exception_details_and_detached_stays_explicit() {
     for branch in ["main", "coco/feat/login", "Feat/login"] {
         item.workspace.branch_name = Some(branch.into());
         assert_eq!(
-            choice(&item, false, NOW).detail,
-            Some(format!("Ready · {branch}"))
+            choice(&item, false, NOW).detail.as_deref(),
+            Some(format!("Ready · {branch}").as_str())
         );
     }
     item.workspace.branch_name = None;

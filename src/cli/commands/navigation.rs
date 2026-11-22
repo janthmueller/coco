@@ -149,14 +149,26 @@ fn choice(entry: &WorkspacePathEntry, global: bool, now_ms: i64) -> Choice {
     } else if entry.worktree_mode == WorktreeMode::Detached {
         detail.push("detached".to_owned());
     }
+    let mut detail =
+        super::super::style::StyledText::new(detail.join(" · "), super::super::style::Tone::Dim);
+    super::super::git_tracking::append_badge(
+        &mut detail,
+        entry.git_tracking.as_ref(),
+        entry.branch_name.as_deref(),
+        false,
+    );
     if global {
-        detail.push(entry.repository.root_path.display().to_string());
+        if !detail.is_empty() {
+            detail.push(" · ", super::super::style::Tone::Dim);
+        }
+        detail.push(
+            entry.repository.root_path.display().to_string(),
+            super::super::style::Tone::Dim,
+        );
     }
-    Choice::new(
-        entry.name.clone(),
-        (!detail.is_empty()).then(|| detail.join(" · ")),
-    )
-    .with_trailing_detail(workspace_picker::recency_label(entry.recency_at_ms, now_ms))
+    Choice::new(entry.name.clone(), None)
+        .with_styled_detail(detail)
+        .with_trailing_detail(workspace_picker::recency_label(entry.recency_at_ms, now_ms))
 }
 
 fn printable_path(path: &Path) -> Result<&str> {

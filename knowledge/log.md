@@ -8,6 +8,18 @@ status: stable
 
 # Project knowledge update log
 
+## 2026-11-22
+
+- **Compact upstream information**: Add separately typed optional Git tracking
+  to creation and workspace observations, with native configured upstreams,
+  bounded repository-wide reads, short-lived negative/positive caching and
+  validated Git administrative bindings. Reuse compact semantic markers across
+  creation, status/tree/follow and workspace/directory selectors without changing
+  base-relative counts, mutation authority, path stdout or JSON decorations.
+- **Queued Codex compatibility**: After Git tracking, review the current released
+  Codex and the reported exact-0.166.0 `coco ai` contract rejection; expand the
+  verified native contract through tests, not incidental removal of its guard.
+
 ## 2026-11-16
 
 - **Editable creation walkthrough**: Add typed opt-in Back/Cancel outcomes,

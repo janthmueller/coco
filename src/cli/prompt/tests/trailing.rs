@@ -67,3 +67,47 @@ fn empty_or_missing_trailing_metadata_keeps_existing_picker_output_exact() {
         );
     }
 }
+
+#[test]
+fn styled_git_details_preserve_colors_defaults_and_recency_without_width_overflow() {
+    let mut detail = StyledText::new("Ready · ", Tone::Dim);
+    detail.push("↑2 ↓3", Tone::YellowBold);
+    let choice = Choice::new("feat/login", None)
+        .with_styled_detail(detail)
+        .with_default_marker()
+        .with_trailing_detail(Some("5m ago".into()));
+    for width in 0..100 {
+        let row = picker_row(0, &choice, true, width, Palette::plain());
+        assert!(row.width() <= width);
+        assert!(!row.contains('\x1b'));
+    }
+    let row = picker_row(0, &choice, true, 90, Palette::colored());
+    assert!(row.contains(&Palette::colored().paint(Tone::YellowBold, "↑2 ↓3")));
+    let plain = picker_row(0, &choice, true, 90, Palette::plain());
+    assert!(plain.contains("Ready · ↑2 ↓3 · default"));
+    assert!(plain.ends_with("5m ago"));
+}
+
+#[test]
+#[ignore = "manual Git badge picker probe; requires an interactive PTY, no daemon or model"]
+fn interactive_tracking_probe() {
+    let tracking = crate::protocol::GitTracking {
+        state: crate::protocol::GitTrackingState::Diverged,
+        upstream: Some("refs/remotes/origin/feat/login".into()),
+        remote: Some("origin".into()),
+        ahead_by: Some(2),
+        behind_by: Some(1),
+        observed_at_ms: Some(42),
+    };
+    let mut detail = StyledText::new("Working", Tone::Dim);
+    crate::cli::git_tracking::append_badge(&mut detail, Some(&tracking), Some("feat/login"), false);
+    let choices = [
+        Choice::new("feat/login", None)
+            .with_styled_detail(detail)
+            .with_trailing_detail(Some("5m ago".into())),
+        Choice::new("main", Some("Ready · no upstream".into())),
+    ];
+    let mut interaction = TerminalInteraction::detect(false);
+    let selected = interaction.select("Git tracking", &choices).unwrap();
+    println!("tracking-result={selected}");
+}

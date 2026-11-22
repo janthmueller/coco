@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::domain::activity::WorkspaceActivity;
 use crate::domain::clients::{ClientMetadata, WorkspaceClient};
+pub(crate) use crate::domain::git_tracking::{GitTracking, GitTrackingState};
 use crate::domain::runtime::{
     WorkspaceResourceControllerStatus, WorkspaceResourcePolicySnapshot, WorkspaceRuntimeResources,
 };
@@ -883,6 +884,8 @@ pub struct WorkspaceListItem {
     pub activity: Option<WorkspaceActivity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clients: Option<Vec<WorkspaceClient>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_tracking: Option<GitTracking>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -962,6 +965,8 @@ pub struct GitIncomplete {
 pub struct WorkspaceStatusResult {
     pub workspace: Workspace,
     pub git: WorkspaceGitStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_tracking: Option<GitTracking>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_resources: Option<WorkspaceRuntimeResources>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

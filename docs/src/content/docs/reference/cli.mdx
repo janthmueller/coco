@@ -402,6 +402,34 @@ wait or an unconfirmed request, retry the same workspace and exact message with
 `--operation-id <ID>`; add `--wait` to keep waiting for its result. Do not reuse
 the ID for a different message.
 
+### Branch markers
+
+Creation choices, workspace selectors and the branch shown by `list` and
+`status` use the same markers:
+
+| Marker | Meaning |
+| --- | --- |
+| `=` | Equal to the configured upstream |
+| `↑2` | Two commits ahead |
+| `↓3` | Three commits behind |
+| `↑2 ↓3` | Both branches have commits the other lacks |
+| `no upstream` | No upstream is configured |
+| `upstream missing` | The configured upstream ref is missing locally |
+| `?` | The comparison is currently unavailable |
+
+The upstream is the branch Git is configured to compare with. Its name is shown
+in the creation review and workspace details, and in compact views when it differs
+from `origin/<branch>`. Detached worktrees keep their `detached` label. Colors
+are optional; the markers mean the same thing with `NO_COLOR` or redirected output.
+
+The comparison uses locally known refs and never fetches automatically. Run
+`git fetch` to refresh remote-tracking refs; follow views refresh their comparison
+within a few seconds. `=` does not confirm the live server is unchanged, and
+`no upstream` does not mean a branch has never been pushed. If Git is slow to
+respond, history is incomplete or a workspace's checkout has changed, you may
+see `?` while the rest of the view remains usable. Closed workspaces have no
+live worktree comparison.
+
 ### Order and filter the overview
 
 Give `--sort` comma-separated keys, in priority order. The first key wins
@@ -654,6 +682,13 @@ include `activity` with the displayed label, source, thread, turn, item,
 truncation flag, runtime generation, and observation time. Activity is live
 status information and is not retained after the turn or a coordinator
 restart.
+
+Open-workspace list/status JSON can include `gitTracking` with `state`, the
+configured `upstream` ref and `remote`, optional `aheadBy`/`behindBy`, and
+`observedAtMs`. Counts are null when no comparison can be made. The observation
+time describes the local read, not a fetch. These upstream counts are separate
+from targeted status's `git.aheadBy`/`git.behindBy`, which compare with the
+workspace's starting commit.
 
 When Codex reports them, `workspace.threadRuntime` includes the current
 configured `model` and `reasoningEffort`. They are omitted when no native

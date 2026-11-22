@@ -127,6 +127,16 @@ status may add a short live detail such as `Working · Checking tests` or
 Ready means the agent can accept another instruction. Review its changes
 before treating the work as complete.
 
+Small markers beside branches help you compare them with their configured
+upstream: `=` means equal, `↑2` means two commits ahead, `↓3` means three behind,
+and `↑2 ↓3` means both sides have changes. `no upstream` means no comparison
+target is configured. The same markers appear when choosing code or a workspace.
+
+These comparisons use your locally known Git refs. Run `git fetch` in the
+repository to refresh them; `status -f` picks up the updated information within
+a few seconds. See [branch markers](../../reference/cli/#branch-markers) for
+missing or unavailable information.
+
 ### Focus the overview
 
 Bring agents needing attention to the top across repositories and hide

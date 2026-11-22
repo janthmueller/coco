@@ -3,6 +3,9 @@ use std::io::{self, IsTerminal};
 
 use crossterm::style::Stylize;
 
+mod text;
+pub(super) use text::StyledText;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Tone {
     Primary,

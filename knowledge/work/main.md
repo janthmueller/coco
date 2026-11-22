@@ -5,7 +5,7 @@ description: Tracks integrated product work, verified release handoffs and the r
 tags: [work, branch, bootstrap, rust, mcp, architecture]
 status: active
 branch: main
-updated: 2026-11-16
+updated: 2026-11-22
 ---
 
 # main — repository foundation
@@ -16,6 +16,92 @@ Establish the repository, documentation workflow, and first executable and
 architectural baseline for CoCo.
 
 ## Active work
+
+### Approved Git tracking implementation — 2026-11-22
+
+- User approves the reviewed compact cross-surface branch/upstream display.
+  Implementation continues on `feature/git-tracking`, forked from current main
+  `f3596fd`, with this uncommitted prior review preserved. No commit, merge,
+  push, release, installed-service change or real model invocation is authorized.
+- Next task after this slice: current released Codex compatibility, including
+  the reported `coco ai` exact-0.166.0 contract rejection. Queued in the product
+  specification; do not remove the version guard or run that investigation now.
+- Detailed implementation/verification handoff lives in
+  [feature/git-tracking](feature/git-tracking.md).
+
+### Branch/upstream display review — 2026-11-19
+
+- User requests review of Git information throughout the CLI: show how local
+  branches relate to remotes, including the suggested current source, with
+  concise symbols/color comparable to terminal prompts. Review/proposal only;
+  no product changes, fetch, commit, push, release or service/model operations.
+- [x] Trace available Git evidence and every relevant source/picker/overview
+  surface; distinguish recorded workspace bindings from actual worktree state.
+- [x] Check native Git tracking/ahead/behind semantics and practical edge cases;
+  propose consistent compact rendering, freshness and failure/performance rules.
+- [x] Record findings and a scoped implementation/testing proposal for user
+  discussion, without presenting proposed behavior as shipped.
+- Findings: creation currently shows actual branch/short SHA, current/remote
+  source labels and a re-resolved exact-SHA review. `git/source.rs` already
+  invokes porcelain v2 with branch headers, but discards branch.upstream and
+  branch.ab; branch discovery does not request upstream atoms. Status/list
+  tables use the stored workspace branch name. Targeted status has a validated
+  live Git observation but its human renderer does not use it. Shared workspace
+  pickers and the separate path/cd picker hide matching branch names and retain
+  exceptional/detached bindings; the path endpoint must stay lightweight.
+- Existing GitObservation aheadBy/behindBy compare HEAD with immutable baseSha,
+  not the remote. Preserve their meaning. Add separately typed optional tracking
+  evidence if implementation is approved; do not reinterpret persisted bindings
+  or turn/native state, infer an upstream from branch spelling, configure tracking
+  automatically or silently switch code selection to a remote ref.
+- Proposal, not implemented: one shared compact branch/upstream presentation
+  across current-checkout/code branch choices, creation review, status/list/tree/
+  follow and human workspace/navigation pickers. `=` means equal, `↑N` ahead,
+  `↓N` behind and `↑N ↓M` both. Use neutral branch names, dim hashes/targets,
+  green ahead/sync and yellow behind/divergence; symbols retain meaning without
+  color. Distinguish no upstream, missing upstream, unknown observation and
+  detached rather than treating them as zero. Cached remote-source rows remain
+  explicitly remote, not incorrectly marked as local branches without upstream.
+- In compact views append the badge to the existing branch location, without a
+  new mandatory column/flag or reintroducing a redundant branch name in workspace
+  pickers. Show the configured target where space allows and always when its
+  branch name/remote differs from the normal matching target. In detailed review
+  identify the comparison target clearly. Dirty/staged/untracked evidence remains
+  separate from commit divergence; no need to build a full Git dashboard here.
+- Compare configured upstream, including non-origin remotes and local upstream
+  refs. Upstream and push targets can differ; do not label upstream counts as a
+  guarantee about what a push would do or whether commits are published. A
+  missing cached target does not prove a server-side deletion, and no configured
+  upstream does not prove the branch has never been pushed. Read-only display
+  never fetches; describe remote refs as last known local information, not live
+  server proof or a fabricated last-fetch timestamp. Fetch remains the user's
+  ordinary Git action, not a background display side effect.
+- Implementation shape: reuse native porcelain headers for current checkout and
+  batched for-each-ref upstream metadata for branch inventories, through existing
+  Git adapter/Coordinator projections. No new Git library/history mirror or
+  SQLite schema is needed. Avoid full git status per workspace or extra Git
+  subprocesses on every spinner tick; group refs per repository and use bounded,
+  short-lived optional enrichment for repeated/follow/picker reads. Slow/missing
+  metadata degrades to unknown without breaking jump/cd/status; actual base or
+  binding validation errors retain their existing safety meaning. Closed/missing
+  worktrees and binding drift must not appear as a newly verified live checkout.
+- Rendering needs semantic fragments, not injected ANSI in Choice strings or
+  raw JSON: existing picker detail and table cells currently have one tone.
+  Respect terminal width, Unicode widths, NO_COLOR, dumb terminals and redirected
+  output; preserve the pure-path stdout contract and structured machine output.
+- Verification: source/contract/test inspection, read-only actual Git 2.55.0
+  status/for-each-ref probes, official git-status and git-for-each-ref docs, plus
+  seven asserted native-Git cases in an isolated automatically cleaned temporary
+  repository: equal, ahead, diverged, behind, upstream gone, no upstream, detached.
+  No network Git actions, CoCo command/model/service changes or Rust rebuild.
+  Proposed permanent coverage also needs non-origin/local/renamed upstreams,
+  unavailable/incomplete graphs and malformed metadata, changed refs during
+  review, multiple worktrees/repositories, closed/drifted bindings, bounded
+  refreshes and failure isolation, ANSI/plain/width/recency rendering, and
+  unchanged creation consent/base and path-output contracts.
+- Handoff: review complete; await approval of the compact cross-surface design
+  before implementing or changing public documentation. Only this work record
+  changed on main; no repository commit, push or publication.
 
 ### Authorized interactive-navigation delivery — 2026-11-16
 

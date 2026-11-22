@@ -17,7 +17,28 @@ fn entry(name: &str, repo: &str) -> WorkspacePathEntry {
         branch_name: Some(name.to_owned()),
         worktree_mode: WorktreeMode::NewBranch,
         recency_at_ms: None,
+        git_tracking: None,
     }
+}
+
+#[test]
+fn directory_picker_uses_the_same_badges_without_changing_the_plain_destination() {
+    let mut row = entry("feat/login", "repo");
+    row.git_tracking = Some(crate::protocol::GitTracking {
+        state: crate::protocol::GitTrackingState::Behind,
+        upstream: Some("refs/remotes/origin/feat/login".into()),
+        remote: Some("origin".into()),
+        ahead_by: Some(0),
+        behind_by: Some(3),
+        observed_at_ms: Some(NOW),
+    });
+    let choice = choice(&row, false, NOW);
+    assert_eq!(choice.label, "feat/login");
+    assert_eq!(choice.detail.as_deref(), Some("↓3"));
+    assert_eq!(
+        printable_path(&row.path).unwrap(),
+        "/worktrees/repo/feat/login"
+    );
 }
 
 #[test]

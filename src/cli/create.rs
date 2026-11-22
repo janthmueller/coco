@@ -9,6 +9,7 @@ use crate::rpc::{RpcClient, RpcClientError};
 
 use super::args::{CreateArgs, WorkspaceSort};
 use super::prompt::{Choice, Interaction, ReviewField, parent_choice};
+use super::style::StyledText;
 use super::workspace_picker;
 
 mod context;
@@ -116,7 +117,7 @@ struct CreateWalkthrough<'a> {
     previous_context: Option<(String, String)>,
     inspector: &'a dyn git_source::GitInspector,
     source: crate::protocol::RepositoryGitState,
-    reviewed_code: Option<String>,
+    reviewed_code: Option<StyledText>,
     changes_prompted: Option<crate::protocol::GitChangeSummary>,
     changes_preset: bool,
 }

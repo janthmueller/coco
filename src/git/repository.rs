@@ -34,8 +34,7 @@ impl Git {
             ["rev-parse", "--path-format=absolute", "--git-dir"],
         )?;
 
-        let digest = hex::encode(Sha256::digest(common_dir.as_os_str().as_encoded_bytes()));
-        let id = format!("repo-{}", &digest[..24]);
+        let id = repository_id(&common_dir);
         let display_name = root
             .file_name()
             .unwrap_or_else(|| OsStr::new("repository"))
@@ -101,6 +100,11 @@ impl Git {
         }
         canonicalize(Path::new(&value))
     }
+}
+
+pub(super) fn repository_id(common_dir: &Path) -> String {
+    let digest = hex::encode(Sha256::digest(common_dir.as_os_str().as_encoded_bytes()));
+    format!("repo-{}", &digest[..24])
 }
 
 fn is_missing_worktree(stderr: &str) -> bool {
