@@ -27,6 +27,7 @@ mod navigation;
 mod retirement;
 mod setup;
 mod signals;
+mod statusline;
 mod temporary;
 mod turns;
 pub(crate) use crate::domain::turns::{
@@ -40,6 +41,7 @@ pub(crate) use navigation::*;
 pub(crate) use retirement::*;
 pub(crate) use setup::*;
 pub(crate) use signals::*;
+pub(crate) use statusline::*;
 pub(crate) use temporary::*;
 pub(crate) use turns::*;
 
@@ -65,6 +67,7 @@ pub enum DaemonMethod {
     WorkspaceDeletionGet,
     WorkspaceList,
     WorkspaceGet,
+    WorkspaceStatusline,
     WorkspacePathGet,
     WorkspacePathList,
     WorkspaceUsageList,
@@ -98,7 +101,7 @@ pub enum DaemonMethod {
 
 impl DaemonMethod {
     #[cfg(test)]
-    pub const ALL: [Self; 49] = [
+    pub const ALL: [Self; 50] = [
         Self::Health,
         Self::Doctor,
         Self::ControlSessionPrepare,
@@ -119,6 +122,7 @@ impl DaemonMethod {
         Self::WorkspaceDeletionGet,
         Self::WorkspaceList,
         Self::WorkspaceGet,
+        Self::WorkspaceStatusline,
         Self::WorkspacePathGet,
         Self::WorkspacePathList,
         Self::WorkspaceUsageList,
@@ -172,6 +176,7 @@ impl DaemonMethod {
             Self::WorkspaceDeletionGet => "workspaceDeletion.get",
             Self::WorkspaceList => "workspace.list",
             Self::WorkspaceGet => "workspace.get",
+            Self::WorkspaceStatusline => "workspace.statusline",
             Self::WorkspacePathGet => "workspace.path.get",
             Self::WorkspacePathList => "workspace.path.list",
             Self::WorkspaceUsageList => "workspace.usage.list",
@@ -226,6 +231,7 @@ impl DaemonMethod {
             "workspaceDeletion.get" => Some(Self::WorkspaceDeletionGet),
             "workspace.list" => Some(Self::WorkspaceList),
             "workspace.get" => Some(Self::WorkspaceGet),
+            "workspace.statusline" => Some(Self::WorkspaceStatusline),
             "workspace.path.get" => Some(Self::WorkspacePathGet),
             "workspace.path.list" => Some(Self::WorkspacePathList),
             "workspace.usage.list" => Some(Self::WorkspaceUsageList),
@@ -1129,6 +1135,7 @@ mod tests {
                 "workspaceDeletion.get",
                 "workspace.list",
                 "workspace.get",
+                "workspace.statusline",
                 "workspace.path.get",
                 "workspace.path.list",
                 "workspace.usage.list",

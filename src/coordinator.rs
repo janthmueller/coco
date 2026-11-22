@@ -39,6 +39,7 @@ mod resources;
 mod retirement;
 mod setup;
 mod signals;
+mod statusline;
 mod turn;
 mod usage;
 mod worker;

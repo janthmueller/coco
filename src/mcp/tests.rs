@@ -8,9 +8,13 @@ use crate::protocol::DaemonMethod;
 pub(super) struct RecordingDaemon {
     calls: Arc<Mutex<Vec<(String, Value)>>>,
     failures: Arc<Mutex<HashMap<String, DaemonFailure>>>,
+    responses: Arc<Mutex<HashMap<String, Value>>>,
 }
 
 impl RecordingDaemon {
+    pub(super) fn respond(&self, method: &str, value: Value) {
+        self.responses.lock().unwrap().insert(method.into(), value);
+    }
     pub(super) fn fail(&self, method: &str, error: DaemonFailure) {
         self.failures
             .lock()
@@ -36,7 +40,14 @@ impl DaemonRpc for RecordingDaemon {
         if let Some(error) = self.failures.lock().unwrap().get(method).cloned() {
             Err(error)
         } else {
-            serde_json::from_value(fake_response(R::METHOD)).map_err(|error| {
+            let value = self
+                .responses
+                .lock()
+                .unwrap()
+                .get(method)
+                .cloned()
+                .unwrap_or_else(|| fake_response(R::METHOD));
+            serde_json::from_value(value).map_err(|error| {
                 DaemonFailure::new("TEST_RESPONSE", format!("invalid fake response: {error}"))
             })
         }
@@ -99,6 +110,7 @@ fn fake_response(method: DaemonMethod) -> Value {
             fake_deletion()
         }
         DaemonMethod::WorkspaceList => json!([]),
+        DaemonMethod::WorkspaceStatusline => json!({"workspace":null}),
         DaemonMethod::WorkspaceAttach => json!({
             "workspace": fake_workspace(),
             "launch": {

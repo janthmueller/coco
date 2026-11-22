@@ -319,11 +319,36 @@ impl WorkspaceExecutors {
         &self,
         workspace_id: &str,
     ) -> Result<WorkspaceRuntimeResources, WorkspaceExecutionError> {
-        let _lifecycle = self.begin_operation().await?;
+        self.sample_resources(workspace_id, ManagedExecServer::resources)
+            .await
+    }
+
+    async fn sample_resources<F>(
+        &self,
+        workspace_id: &str,
+        sample: F,
+    ) -> Result<WorkspaceRuntimeResources, WorkspaceExecutionError>
+    where
+        F: FnOnce(
+                &mut ManagedExecServer,
+            ) -> Result<WorkspaceRuntimeResources, WorkspaceExecutionError>
+            + Send
+            + 'static,
+    {
+        let lifecycle = self.begin_operation().await?;
         if let Some(entry) = self.existing_entry(workspace_id).await {
-            let mut entry = entry.lock().await;
-            if let Some(runtime) = entry.runtime.as_mut() {
-                return runtime.resources();
+            let mut entry = entry.lock_owned().await;
+            if entry.runtime.is_some() {
+                // Synchronous /proc/cgroup reads must not occupy a Tokio worker.
+                // Acquire before spawning: cancelled lock waiters cannot queue
+                // blocking jobs behind an already running sample. The job owns
+                // both guards until it finishes, even after a caller times out.
+                return tokio::task::spawn_blocking(move || {
+                    let _lifecycle = lifecycle;
+                    sample(entry.runtime.as_mut().expect("runtime held under lock"))
+                })
+                .await
+                .map_err(WorkspaceExecutionError::OperationTask)?;
             }
         }
         Ok(WorkspaceRuntimeResources {
@@ -1024,6 +1049,8 @@ mod tests {
     mod concurrency;
     #[cfg(unix)]
     mod lifecycle;
+    #[cfg(unix)]
+    mod sampling;
     #[cfg(unix)]
     mod support;
 

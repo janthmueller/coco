@@ -120,6 +120,7 @@ fn native_config_uses_scoped_mcp_confirmations_and_removes_execution_escape_hatc
         "agent_message_board",
         "agent_message_board_mcp",
         "multi_environment_mcp",
+        "tui_extensions_statusline",
     ] {
         assert_eq!(config["features"][feature], false);
     }

@@ -61,6 +61,7 @@ mod retirement_dependencies;
 mod retirement_public;
 mod retirement_safety;
 mod setup;
+mod statusline;
 mod temporary;
 mod turn_control;
 mod usage;
@@ -174,6 +175,7 @@ struct FakeWorker {
     descendants: StdMutex<BTreeMap<String, Vec<String>>>,
     background_terminals: StdMutex<BTreeMap<String, usize>>,
     runtime_resources: StdMutex<Option<WorkspaceRuntimeResources>>,
+    resource_delay: Option<std::time::Duration>,
     thread_costs: StdMutex<BTreeMap<String, NativeThreadCostEstimate>>,
     account_quota: StdMutex<Option<NativeAccountQuotaRead>>,
     resource_policies: StdMutex<BTreeMap<String, WorkspaceResourcePolicySnapshot>>,
@@ -698,6 +700,9 @@ impl WorkerRuntime for FakeWorker {
         self.calls.lock().unwrap().push(WorkerCall::Resources {
             workspace_id: workspace_id.to_owned(),
         });
+        if let Some(delay) = self.resource_delay {
+            tokio::time::sleep(delay).await;
+        }
         Ok(self.runtime_resources.lock().unwrap().clone())
     }
 

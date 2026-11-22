@@ -59,6 +59,40 @@ The equivalent standalone command is:
 coco mcp serve --repository /absolute/path/to/project
 ```
 
+### Show workspace information in Codex
+
+With Codex 0.171.0, you can show the workspace name and current resource use
+in the native terminal UI. After adding the `coco` server above, enable the
+optional statusline feature in the same user configuration:
+
+```toml title="~/.codex/config.toml"
+[features]
+tui_extensions_statusline = true
+```
+
+If you already have a `[features]` section, add the setting there. Reopen your
+workspace with `coco jump`, run `/statusline`, and select **CoCo workspace**
+from the `coco` server. No `--allow-*` permission is needed.
+If that entry is missing, check `/mcp` to confirm that the `coco` server is
+connected in this conversation.
+
+The CoCo line replaces the built-in statusline. It shows the workspace,
+model and reasoning level, remaining context, and available memory and CPU
+measurements. Unavailable values are omitted until reported. Memory uses
+`RAM` for Linux group accounting and `RSS` for the
+process fallback; see [Resource accounting](../../reference/resources/).
+Previously selected five-hour and weekly quota items appear when Codex
+supplies those windows. Other built-in statusline items are not included.
+
+The server only recognizes workspaces in its configured repository. A new
+conversation may initially show `CoCo unavailable` until CoCo has associated
+it with the workspace. That message also appears when CoCo cannot be reached;
+the native model and context information remains available. It describes the
+extra display, not whether your agent stopped.
+
+To switch back, select the built-in line through `/statusline`. `coco ai`
+continues to use the built-in line for its separate control conversation.
+
 ## Available tools
 
 The repository is fixed when the server starts. By default it offers only

@@ -74,8 +74,11 @@ policy deny shell/file/permission escalation while allowing MCP prompts.
 Disable native legacy `connectors` and `memory_tool` spellings alongside
 `apps` and `memories`: 0.166.0 can apply these aliases after canonical flags.
 Also disable host JavaScript, local image viewing, peer message-board tools
-and experimental per-environment MCP. These inherited flags must not restore
-alternate capabilities around the administrative MCP allowlist. Native
+and experimental per-environment MCP. The optional MCP statusline extension is
+also disabled: this separate administrative conversation retains the built-in
+footer rather than resolving an excluded inherited workspace endpoint. These
+inherited flags must not restore alternate capabilities around the
+administrative MCP allowlist. Native
 `code_mode_host` remains the isolated dispatcher, not a host execution tool.
 Check effective native feature resolution, not only the generated TOML. These
 compatibility overrides are invocation-only; native deprecation notices may

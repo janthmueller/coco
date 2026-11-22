@@ -22,6 +22,9 @@ mod temporary;
 #[path = "tui/ai.rs"]
 mod ai;
 
+#[path = "tui/statusline.rs"]
+mod statusline;
+
 pub(super) async fn verify_inherited_context_resume(
     paths: &TestPaths,
     codex_binary: &Path,

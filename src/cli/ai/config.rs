@@ -61,6 +61,7 @@ pub(super) fn overrides(
         "agent_message_board",
         "agent_message_board_mcp",
         "multi_environment_mcp",
+        "tui_extensions_statusline",
         "multi_agent",
         "multi_agent_v2",
         "hooks",

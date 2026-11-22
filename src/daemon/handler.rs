@@ -20,7 +20,7 @@ use crate::protocol::{
     WorkspaceCreateParams, WorkspaceDeleteParams, WorkspaceDiffParams, WorkspaceGetParams,
     WorkspaceLimitsGetParams, WorkspaceLimitsResetParams, WorkspaceLimitsSetParams,
     WorkspaceListParams, WorkspacePathGetParams, WorkspacePathListParams, WorkspaceReopenParams,
-    WorkspaceUsageGetParams, WorkspaceUsageListParams,
+    WorkspaceStatuslineParams, WorkspaceUsageGetParams, WorkspaceUsageListParams,
 };
 use crate::rpc::{RpcErrorPayload, RpcHandler};
 
@@ -104,6 +104,7 @@ impl RpcHandler for DaemonHandler {
             | DaemonMethod::WorkspaceAttachDisarmCleanup
             | DaemonMethod::WorkspaceList
             | DaemonMethod::WorkspaceGet
+            | DaemonMethod::WorkspaceStatusline
             | DaemonMethod::WorkspaceUsageList
             | DaemonMethod::WorkspaceUsageGet
             | DaemonMethod::WorkspaceLimitsGet
@@ -321,6 +322,11 @@ impl DaemonHandler {
             DaemonMethod::WorkspaceGet => execute(
                 self.coordinator
                     .get_workspace(decode::<WorkspaceGetParams>(params)?)
+                    .await,
+            ),
+            DaemonMethod::WorkspaceStatusline => execute(
+                self.coordinator
+                    .workspace_statusline(decode::<WorkspaceStatuslineParams>(params)?)
                     .await,
             ),
             DaemonMethod::WorkspaceUsageList => execute(

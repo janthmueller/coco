@@ -28,6 +28,9 @@ agents.
 - [Account-wide Codex quota projection](account-quota.md) - Defines the native
   rate-limit source, account-global ownership, cache invalidation, and optional
   status projection for remaining usage windows.
+- [Optional native Codex UI integration](native-codex-ui.md) - Records the
+  passive workspace statusline, measured jump startup and environment-MCP
+  evaluation against the verified native release.
 - [Release process](release.md) - Defines semantic versioning, the tested-main
   release guard, explicit alpha/stable selection, Cargo version synchronization,
   native binary archives, and the publication checklist.

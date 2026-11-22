@@ -19,7 +19,7 @@ async fn installed_codex_cannot_reenable_apps_or_memories_through_legacy_aliases
         crate::codex_compat::is_verified(parse_version(&version, "codex-cli ").as_deref()),
         "this proof requires a verified Codex release"
     );
-    let original = "check_for_update_on_startup=false\n[features]\napps=false\nconnectors=true\nmemories=false\nmemory_tool=true\njs_repl=true\nview_image=true\nagent_message_board=true\nagent_message_board_mcp=true\nmulti_environment_mcp=true\n";
+    let original = "check_for_update_on_startup=false\n[features]\napps=false\nconnectors=true\nmemories=false\nmemory_tool=true\njs_repl=true\nview_image=true\nagent_message_board=true\nagent_message_board_mcp=true\nmulti_environment_mcp=true\ntui_extensions_statusline=true\n";
     let config_file = prepared.codex_home.join("config.toml");
     std::fs::write(&config_file, original)?;
     let mut inherited = Command::new(&program);
@@ -63,6 +63,7 @@ async fn installed_codex_cannot_reenable_apps_or_memories_through_legacy_aliases
             "agent_message_board",
             "agent_message_board_mcp",
             "multi_environment_mcp",
+            "tui_extensions_statusline",
         ] {
             ensure!(
                 resolved_feature(&output, feature) != Some(true),

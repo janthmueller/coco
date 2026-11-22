@@ -55,6 +55,12 @@ CoCo uses MCP in two independent directions:
 No protocol payload is blindly proxied between these directions, and their
 authorization models must remain separate in code and documentation.
 
+The optional [native statusline](native-codex-ui.md) is a passive UI resource
+on the first, control-MCP direction. It does not select worker tools or inject
+a new binding. The same document evaluates 0.171.0's experimental
+environment-scoped MCP; adopting that worker mechanism is deferred until its
+distinct multi-environment use case and isolation proofs are present.
+
 ## Domain model and authority
 
 The future control-plane model has four distinct records:

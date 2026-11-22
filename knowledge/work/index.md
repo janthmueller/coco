@@ -43,6 +43,9 @@ it concise, factual, and useful to the next maintainer.
 
 ## Current records
 
+- [`feature/codex-statusline`](feature/codex-statusline.md) - Optional passive
+  CoCo workspace information in the native Codex MCP statusline.
+
 - [`feature/codex-compatibility`](feature/codex-compatibility.md) - Current
   Codex contract verification and AI control version-gate compatibility, based
   on the locally integrated Git tracking slice.

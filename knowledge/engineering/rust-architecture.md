@@ -88,6 +88,23 @@ public SDK. Adapter-specific capability and response validation stay with their
 owners; a listed release cannot enable exact-target interruption. This avoids
 duplicating conflicting version pins without adding a CLI-to-Codex import.
 
+The optional native footer keeps its bounded UI/cache/resource adapter in
+private `mcp/statusline` children and its passive exact-binding application
+query in `coordinator/statusline`, connected by `protocol/statusline`. The MCP
+edge never imports Store, coordinator or the native worker. It uses existing
+domain runtime observations without changing worker/storage contracts; the
+daemon handler remains the RPC translation boundary. Focused unit children and
+one native TUI fixture prove delivery without a new crate, dependency or SDK
+surface. See [native Codex UI integration](native-codex-ui.md).
+
+Executor resource sampling stays behind the existing private adapter. A narrow
+synchronous callback seam in `WorkspaceExecutors::sample_resources` allows
+genuinely blocking tests while production uses `ManagedExecServer::resources`.
+Owned operation/lifecycle guards cross into `spawn_blocking`; no new worker
+trait, public API or resource background loop is introduced. Focused tests in
+`execution/tests/sampling` cover scheduling, cancellation and cleanup rather
+than regrowing the shared fixture.
+
 Upstream tracking follows the same staged direction: neutral optional values in
 `domain/git_tracking`, response extensions in existing protocol DTOs, bounded
 native metadata/binding parsers in private `git/tracking` children, and short-lived

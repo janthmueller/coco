@@ -271,6 +271,21 @@ or re-parent during a fallback scan, so that result is explicitly best effort.
 Other operating systems currently report runtime state and root PID without
 claiming measurements they cannot attribute.
 
+Physical sampling runs in Tokio's blocking pool, after asynchronously acquiring
+the existing workspace operation lock. The job owns that lock and the shared
+lifecycle lease until it finishes, even if a caller times out or disconnects.
+Repeated reads waiting for that workspace do not spawn or queue additional
+blocking jobs. Other workspaces and the async runtime remain responsive;
+stop, replacement, policy changes and daemon close remain ordered against the
+in-flight sample. Inactive/unknown runtimes perform no physical sampling.
+
+A caller deadline bounds waiting for the observation, not the underlying
+kernel I/O. A running blocking sample cannot be forcibly cancelled, so a stuck
+read can still delay retirement of its own workspace or orderly daemon close.
+Do not release its ownership guards early or claim a hard I/O termination
+guarantee. Focused executor tests use a genuinely blocking, finitely gated
+sampler to verify timeout, repeated-read admission, cancellation and cleanup.
+
 Resource observations are not themselves configured-policy state, billing
 data, durable history, or a complete account of Codex. `workspace.limits.get`
 is the authoritative desired-policy and applied-policy snapshot view. Observations

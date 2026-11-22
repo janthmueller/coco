@@ -68,11 +68,11 @@ peer-response routing remain separate, unimplemented capabilities.
 - At the specification baseline on 2026-09-05, the repository had no commit
   and no implementation files; it contained the handoff and documentation
   foundation only.
-- The official `codex-cli 0.166.0` release binary is the selected compatibility
-  baseline. Its model-free real-process test passes preparation, exact native
+- Official Codex 0.166.0, 0.169.0 and 0.171.0 are the explicitly verified
+  release set. Their model-free real-process tests pass preparation, exact native
   materialization/adoption, inherited-context fork, history reads, daemon
   restart, and exact resume.
-- That baseline also passes the experimental environment contract CoCo now
+- That verified set also passes the experimental environment contract CoCo now
   consumes: lazy per-workspace exec-server registration, fresh-thread and
   ordinary-turn selection, distinct process roots for concurrent workspaces,
   rootless Linux cgroup-v2 scope placement with process-tree fallback,
@@ -2042,8 +2042,8 @@ approval model. CoCo neither supplies a separate Git database nor adds a
 custom commit proxy. A later app-side commit action may be useful UI
 convenience, but it is not part of the isolation contract.
 
-Codex 0.166.0 is now the selected and proven compatibility baseline;
-maintaining a broader range is optional rather than an alpha blocker. The
+Codex 0.166.0, 0.169.0 and 0.171.0 are the explicitly verified compatibility
+set; future releases require fresh evidence rather than a semver assumption. The
 two-repository, multi-client product proof now passes locally, so it no longer
 blocks continued public-alpha development. Publishing a particular revision,
 removing legacy schema, or declaring a stable release remain separate actions.
@@ -2068,17 +2068,23 @@ detached-to-branch promotion before considering detached as the default,
 decide whether cross-repository Git-base transfer has a safe use case, and
 design handoff artifacts independently from native conversation forking.
 
-### Next after Git tracking: current Codex compatibility
+### Current Codex compatibility and native follow-ups
 
-Recorded on 2026-11-22. Finish the approved branch/upstream display slice first,
-then check the latest released Codex against CoCo's actual consumed contracts.
-The user reports `coco ai requires the verified Codex 0.166.0 configuration
-contract` after updating. Investigate the exact-version launcher gate together
-with native configuration/feature isolation, not by simply deleting its guard.
-Verify the locally installed/released version, review relevant upstream changes,
-run isolated model-free compatibility/TUI tests and widen or revise the supported
-contract only when proved. Real model calls and publication need separate
-approval. This is queued work, not compatibility evidence or part of Git tracking.
+Recorded on 2026-11-22. Git tracking and the subsequent compatibility review
+are complete locally (`94bc27f`, `8de595e`). Exact native contracts are now
+verified on 0.166.0, 0.169.0 and 0.171.0, including model-free TUI, provider,
+worker/source, feature-isolation and turn-control proofs. The AI gate remains
+explicit rather than being removed. Real model calls and publication still
+need separate approval.
+
+The approved next sequence is an optional native workspace statusline, measured
+jump latency, then evaluation of native environment-scoped MCP. The first is
+implemented through existing read-only control MCP and proved on 0.171.0; its
+footer is opt-in and bounded. Initial small-history timing observations do not
+justify removing readiness/profile/subscription safety checks. Environment-MCP
+remains experimental and is not silently enabled or substituted for immutable
+worker bindings. See [native Codex UI integration](../engineering/native-codex-ui.md)
+for the exact boundaries, measurements and adoption criteria.
 
 ### Agreed follow-up order
 

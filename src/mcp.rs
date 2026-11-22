@@ -35,6 +35,7 @@ mod confirmation;
 mod lifecycle;
 mod setup;
 mod signals;
+mod statusline;
 mod turns;
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
@@ -78,6 +79,7 @@ struct McpServer {
     allowed_signals: Vec<String>,
     signal_catalog: Option<Arc<Vec<SignalType>>>,
     confirm_changes: bool,
+    statusline: Arc<statusline::Provider>,
 }
 
 impl McpServer {
@@ -128,12 +130,14 @@ impl McpServer {
                 route.attr.title = Some(format!("{action} ({})", repository.display()));
             }
         }
+        statusline::advertise(&mut tool_router);
         Self {
             tool_router,
             dispatcher: Dispatcher::new(RpcClient::new(socket_path), repository),
             allowed_signals,
             signal_catalog: None,
             confirm_changes: permissions.confirm_changes,
+            statusline: Arc::new(statusline::Provider::default()),
         }
     }
 }
@@ -220,12 +224,31 @@ impl McpServer {
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for McpServer {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().enable_resources().build())
             .with_server_info(Implementation::new("coco", env!("CARGO_PKG_VERSION")))
             .with_instructions(format!(
                 "Repository-scoped CoCo inspection. Mutating tools require operator opt-in. signals.emit uses Codex thread metadata and records a claim without starting work or changing workspace state. Allowed signal grants (a bare name means version 1): {}.",
                 if self.allowed_signals.is_empty() { "none".to_owned() } else { self.allowed_signals.join(", ") },
             ))
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::ListResourcesResult, rmcp::ErrorData> {
+        Ok(statusline::resources())
+    }
+
+    async fn read_resource(
+        &self,
+        request: rmcp::model::ReadResourceRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::ReadResourceResponse, rmcp::ErrorData> {
+        self.statusline
+            .read(&self.dispatcher, &request.uri, &context.meta)
+            .await
+            .map(Into::into)
     }
 }
 
