@@ -2,6 +2,33 @@
 
 <!-- version list -->
 
+## v0.13.0 (2026-11-22)
+
+### Bug Fixes
+
+- **codex**: Support verified 0.169.0 and 0.171.0 releases
+  ([`8de595e`](https://github.com/janthmueller/coco/commit/8de595e88ef8a4edd45d874e28fae05e3a84f420))
+
+- **deps**: Refresh MCP SDK and bound chrono exception
+  ([`55a07b3`](https://github.com/janthmueller/coco/commit/55a07b35749f659f582a8b15e96c59a2a1fa19e4))
+
+### Documentation
+
+- Record verified 0.12.0 release
+  ([`f3596fd`](https://github.com/janthmueller/coco/commit/f3596fdc6cce6e5a0410594a58b2a73b834b975c))
+
+- Record verified integration for release
+  ([`a507cec`](https://github.com/janthmueller/coco/commit/a507cec220b53dcabebc7523aed8c055a489ddc3))
+
+### Features
+
+- **cli**: Show Git upstream tracking across workspace views
+  ([`94bc27f`](https://github.com/janthmueller/coco/commit/94bc27f4905cfa6e91d5f1c55007c4c79bcdde2d))
+
+- **codex**: Add optional workspace statusline
+  ([`17e948e`](https://github.com/janthmueller/coco/commit/17e948eb5c63be9529ddae188f60652ea0f070f0))
+
+
 ## v0.12.0 (2026-11-16)
 
 ### Documentation
